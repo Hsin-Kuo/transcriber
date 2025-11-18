@@ -1,0 +1,22 @@
+# Whisper 相關
+faster-whisper
+torch
+torchaudio
+
+# Speaker Diarization
+pyannote.audio
+
+# 音檔處理
+pydub
+
+# API 相關
+fastapi
+uvicorn[standard]
+python-multipart
+
+# HTTP 客戶端
+requests
+
+# LLM API
+openai
+google-generativeai

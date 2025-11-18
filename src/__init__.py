@@ -1,0 +1,6 @@
+"""
+Whisper Transcriber - AI-powered Chinese audio transcription system
+"""
+
+__version__ = "1.0.0"
+__author__ = "Your Name"

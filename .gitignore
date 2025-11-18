@@ -1,1 +1,31 @@
-data_file/
+# Data directories
+data/
+output/
+
+# Environment and secrets
+.env
+api_keys.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Whisper model cache (optional - if you want to cache locally)
+# .cache/

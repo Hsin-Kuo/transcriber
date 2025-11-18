@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # 後端 API 服務
+  whisper-server:
+    build: .
+    container_name: whisper-server
+    ports:
+      - "8000:8000"
+    environment:
+      # 設定 API Keys（從 .env 檔案讀取）
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GOOGLE_API_KEY_1=${GOOGLE_API_KEY_1}
+      - GOOGLE_API_KEY_2=${GOOGLE_API_KEY_2}
+      - GOOGLE_API_KEY_3=${GOOGLE_API_KEY_3}
+      - GOOGLE_API_KEY_4=${GOOGLE_API_KEY_4}
+      - GOOGLE_API_KEY_5=${GOOGLE_API_KEY_5}
+      - GOOGLE_API_KEY_6=${GOOGLE_API_KEY_6}
+      - GOOGLE_API_KEY_7=${GOOGLE_API_KEY_7}
+      - GOOGLE_API_KEY_8=${GOOGLE_API_KEY_8}
+      - GOOGLE_API_KEY_9=${GOOGLE_API_KEY_9}
+      - GOOGLE_API_KEY_10=${GOOGLE_API_KEY_10}
+      - GOOGLE_API_KEY_11=${GOOGLE_API_KEY_11}
+      - GOOGLE_API_KEY_12=${GOOGLE_API_KEY_12}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    volumes:
+      # 掛載模型快取目錄，避免每次重啟都重新下載模型
+      - whisper-models:/root/.cache/whisper
+      # 掛載輸出目錄（轉錄結果）
+      - ./output:/app/output
+    networks:
+      - transcriber-network
+    restart: unless-stopped
+    # 資源限制（可依需求調整）
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
+
+  # 前端 Web 介面
+  frontend:
+    build: ./frontend
+    container_name: whisper-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - whisper-server
+    networks:
+      - transcriber-network
+    restart: unless-stopped
+
+networks:
+  transcriber-network:
+    driver: bridge
+
+volumes:
+  whisper-models:
+    driver: local

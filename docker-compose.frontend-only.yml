@@ -1,0 +1,16 @@
+version: '3.8'
+
+# Plan B: 僅運行前端容器，後端在本地原生運行
+# 用法：docker-compose -f docker-compose.frontend-only.yml up
+
+services:
+  # 前端 Web 介面
+  frontend:
+    build: ./frontend
+    container_name: whisper-frontend
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    environment:
+      # 前端連接到主機上的後端（macOS Docker 使用 host.docker.internal）
+      - VITE_API_URL=http://host.docker.internal:8000
