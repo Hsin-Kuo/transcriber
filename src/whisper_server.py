@@ -14,8 +14,9 @@ import json
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 from threading import Lock
+import multiprocessing
 from faster_whisper import WhisperModel
 from pydub import AudioSegment
 from pydub.silence import detect_nonsilent
@@ -156,6 +157,7 @@ current_model_name = None
 transcription_tasks: Dict[str, Dict[str, Any]] = {}  # 儲存任務狀態
 task_temp_dirs: Dict[str, Path] = {}  # 儲存任務的暫存目錄路徑
 task_cancelled: Dict[str, bool] = {}  # 標記已取消的任務
+task_diarization_processes: Dict[str, Any] = {}  # 儲存任務的 diarization 進程
 tasks_lock = Lock()  # 線程安全鎖
 executor = ThreadPoolExecutor(max_workers=1)  # 線程池，最多 1 個並發轉錄
 
@@ -322,8 +324,67 @@ def transcribe_with_timestamps(model, audio_path: Path, language: Optional[str] 
     return segments_list
 
 
+def perform_diarization_in_process(audio_path_str: str, max_speakers: Optional[int], hf_token: str) -> Optional[List[Dict]]:
+    """在獨立進程中執行 speaker diarization（可被強制終止）
+
+    此函數設計為在單獨的進程中運行，因此不依賴全局變量
+
+    Args:
+        audio_path_str: 音檔路徑（字串格式）
+        max_speakers: 最大講者人數（可選，2-10）
+        hf_token: Hugging Face Token
+
+    Returns:
+        List of diarization segments with format:
+        [{"start": 0.0, "end": 5.2, "speaker": "SPEAKER_00"}, ...]
+    """
+    try:
+        # 在進程中重新載入 pipeline（因為無法跨進程傳遞）
+        from pyannote.audio import Pipeline
+        from huggingface_hub import login
+
+        if hf_token:
+            login(token=hf_token, add_to_git_credential=False)
+
+        print(f"🔊 [進程] 正在載入 diarization pipeline...")
+        import torch
+        pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1")
+
+        # M1 Mac MPS 加速
+        if torch.backends.mps.is_available():
+            pipeline.to(torch.device("mps"))
+            print(f"🔊 [進程] 使用 MPS 加速")
+
+        print(f"🔊 [進程] 正在分析說話者...")
+
+        # 準備 diarization 參數
+        diarization_kwargs = {}
+        if max_speakers is not None and 2 <= max_speakers <= 10:
+            diarization_kwargs["min_speakers"] = 1
+            diarization_kwargs["max_speakers"] = max_speakers
+            print(f"   [進程] 設定講者人數範圍：1-{max_speakers} 人")
+
+        print(f"   [進程] Diarization 參數：{diarization_kwargs}")
+        diarization = pipeline(audio_path_str, **diarization_kwargs)
+
+        segments = []
+        for turn, _, speaker in diarization.itertracks(yield_label=True):
+            segments.append({
+                "start": turn.start,
+                "end": turn.end,
+                "speaker": speaker
+            })
+
+        print(f"✅ [進程] 說話者分析完成，識別到 {len(set(s['speaker'] for s in segments))} 位說話者")
+        return segments
+
+    except Exception as e:
+        print(f"⚠️  [進程] Speaker diarization 失敗：{e}")
+        return None
+
+
 def perform_diarization(audio_path: Path, max_speakers: Optional[int] = None) -> Optional[List[Dict]]:
-    """執行 speaker diarization
+    """執行 speaker diarization（線程版本，用於非分段模式）
 
     Args:
         audio_path: 音檔路徑
@@ -436,7 +497,8 @@ def transcribe_audio_in_chunks(
     chunk_duration_ms: int = CHUNK_DURATION_MS,
     task_id: str = None,
     diarize: bool = False,
-    max_speakers: Optional[int] = None
+    max_speakers: Optional[int] = None,
+    language: Optional[str] = None
 ) -> str:
     """將音檔分段後並行轉錄，提高速度和準確度
 
@@ -458,7 +520,7 @@ def transcribe_audio_in_chunks(
     # 如果音檔不長，直接轉錄
     if total_duration_ms <= chunk_duration_ms:
         print(f"📝 音檔長度在 {chunk_duration_ms/1000/60:.0f} 分鐘內，直接轉錄...")
-        return transcribe_single_chunk(model, audio_path)
+        return transcribe_single_chunk(model, audio_path, language=language)
 
     # 步驟 1：如果啟用 diarization，在背景並行執行說話者辨識
     diarization_future = None
@@ -469,15 +531,25 @@ def transcribe_audio_in_chunks(
         diarization_start_time = datetime.now(TZ_UTC8)
         print(f"🔊 在背景啟動說話者辨識（與轉錄並行執行）...")
         if task_id:
-            update_task_status(task_id, {"progress": "正在分析說話者（背景執行）..."})
+            update_task_status(task_id, {
+                "progress": "正在分析說話者（背景執行）...",
+                "diarization_status": "running"
+            })
 
-        # 在背景線程執行 diarization，不阻塞主流程
-        diarization_executor = ThreadPoolExecutor(max_workers=1)
+        # 使用進程池執行 diarization，可以被強制終止
+        diarization_executor = ProcessPoolExecutor(max_workers=1)
+        hf_token = os.getenv("HF_TOKEN", "")
         diarization_future = diarization_executor.submit(
-            perform_diarization,
-            audio_path,
-            max_speakers
+            perform_diarization_in_process,
+            str(audio_path),
+            max_speakers,
+            hf_token
         )
+
+        # 記錄 diarization 進程供取消時使用
+        if task_id:
+            with tasks_lock:
+                task_diarization_processes[task_id] = diarization_executor
 
     # 長音檔：分段處理
     num_chunks = (total_duration_ms + chunk_duration_ms - 1) // chunk_duration_ms
@@ -564,7 +636,8 @@ def transcribe_audio_in_chunks(
     # 標記切分完成並計算預估完成時間
     if task_id:
         import math
-        num_workers = 4
+        # 如果啟用 diarization，使用較低的並行度
+        num_workers = 2 if diarize else 4
         rounds = math.ceil(num_chunks / num_workers)
         estimated_minutes = rounds * 14 * 1.1
 
@@ -586,12 +659,14 @@ def transcribe_audio_in_chunks(
         })
 
     # 第二步：並行轉錄所有 chunks（與 diarization 同時進行）
-    print(f"🚀 開始並行轉錄（並行數：4）{'，同時進行說話者辨識' if diarization_future else ''}...")
+    # 如果同時執行 diarization，降低轉錄並行度以減少資源競爭
+    transcribe_workers = 2 if diarization_future else 4
+    print(f"🚀 開始並行轉錄（並行數：{transcribe_workers}）{'，同時進行說話者辨識' if diarization_future else ''}...")
     chunks_text = [None] * num_chunks  # 預先分配陣列保持順序
     all_segments = [] if diarization_future else None  # 如果啟用 diarization，收集所有 segments
 
     try:
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        with ThreadPoolExecutor(max_workers=transcribe_workers) as executor:
             # 提交所有轉錄任務到線程池
             future_to_chunk = {}
             for chunk_idx, start_ms, end_ms, temp_path in chunk_info_list:
@@ -603,7 +678,7 @@ def transcribe_audio_in_chunks(
                     transcribe_single_chunk,
                     model,
                     temp_path,
-                    None,  # language=None 自動偵測
+                    language,  # 使用指定的語言
                     task_id,
                     chunk_idx,
                     time_offset_seconds,
@@ -618,8 +693,9 @@ def transcribe_audio_in_chunks(
                 # 檢查是否已被取消
                 if task_id and task_cancelled.get(task_id, False):
                     executor.shutdown(wait=False, cancel_futures=True)
-                    # 同時取消 diarization 線程
-                    if diarization_future:
+                    # 強制終止 diarization 進程
+                    if diarization_future and diarization_executor:
+                        print(f"🛑 正在強制終止說話者辨識進程...")
                         diarization_executor.shutdown(wait=False, cancel_futures=True)
                     raise RuntimeError("任務已被使用者取消")
 
@@ -682,11 +758,17 @@ def transcribe_audio_in_chunks(
                 print(f"⚠️ 清理臨時檔案失敗：{e}")
 
         # 確保 diarization executor 被正確關閉
-        if diarization_future:
+        if diarization_executor:
             try:
                 diarization_executor.shutdown(wait=False, cancel_futures=True)
+                print(f"✅ Diarization 進程已關閉")
             except Exception as e:
                 print(f"⚠️ 關閉 diarization executor 失敗：{e}")
+
+        # 清理 diarization 進程記錄
+        if task_id:
+            with tasks_lock:
+                task_diarization_processes.pop(task_id, None)
 
     print("✅ 所有音檔片段轉錄完成")
 
@@ -714,6 +796,8 @@ def transcribe_audio_in_chunks(
                 if task_id:
                     update_task_status(task_id, {
                         "progress": f"說話者辨識完成 ({num_speakers} 位說話者，耗時 {format_duration(diarization_duration)})",
+                        "diarization_status": "completed",
+                        "diarization_num_speakers": num_speakers,
                         "diarization_duration_seconds": round(diarization_duration, 1)
                     })
 
@@ -730,32 +814,158 @@ def transcribe_audio_in_chunks(
                 return final_text
             else:
                 print(f"⚠️  說話者辨識失敗，返回純文字轉錄")
+                if task_id:
+                    update_task_status(task_id, {
+                        "diarization_status": "failed"
+                    })
                 return " ".join(chunks_text)
 
         except Exception as e:
             print(f"⚠️  等待說話者辨識時發生錯誤：{e}")
             print(f"   將返回純文字轉錄")
+            if task_id:
+                update_task_status(task_id, {
+                    "diarization_status": "failed"
+                })
             return " ".join(chunks_text)
     else:
         # 沒有 diarization，返回純文字
         return " ".join(chunks_text)
 
 
-def punctuate_with_openai(text: str) -> str:
-    """用 OpenAI 幫逐字稿加標點與分段"""
+def detect_language_with_llm(text: str, provider: str = "gemini") -> str:
+    """使用 LLM 自動辨識文字語言
+
+    Args:
+        text: 要辨識的文字（建議使用前幾百字即可）
+        provider: 使用的 LLM 提供者 (gemini/openai)
+
+    Returns:
+        語言代碼 (zh/en/ja/ko 等)
+    """
+    # 只取前 100 字進行辨識以節省成本
+    sample_text = text[:100]
+
+    prompt = f"""Please identify the primary language of the following text and respond with ONLY the language code (zh/en/ja/ko/es/fr/de/etc.).
+
+Text:
+{sample_text}
+
+Language code:"""
+
+    try:
+        if provider == "gemini":
+            result = call_gemini_with_retry(prompt).strip().lower()
+        else:  # openai
+            from openai import OpenAI
+            client = OpenAI()
+            resp = client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a language detection assistant. Respond only with language codes."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1,
+            )
+            result = resp.choices[0].message.content.strip().lower()
+
+        # 驗證結果是否為有效的語言代碼
+        valid_codes = ["zh", "en", "ja", "ko", "es", "fr", "de", "it", "pt", "ru", "ar", "hi", "th", "vi"]
+        if result in valid_codes:
+            return result
+
+        # 如果不是標準代碼，嘗試映射常見回應
+        if "chinese" in result or "中文" in result:
+            return "zh"
+        elif "english" in result:
+            return "en"
+        elif "japanese" in result or "日本" in result:
+            return "ja"
+        elif "korean" in result or "韓" in result:
+            return "ko"
+
+        # 預設返回中文
+        print(f"⚠️ 語言辨識結果不明確: {result}，預設使用中文")
+        return "zh"
+
+    except Exception as e:
+        print(f"⚠️ 語言辨識失敗: {e}，預設使用中文")
+        return "zh"
+
+
+def get_punctuation_prompt(language: str, text: str) -> tuple[str, str]:
+    """根據語言生成適當的標點提示語
+
+    Args:
+        language: 語言代碼 (zh/en/ja/ko/auto)
+        text: 要處理的文字
+
+    Returns:
+        (system_message, user_message) 元組
+    """
+    # 如果是自動偵測，先辨識語言
+    if language == "auto":
+        language = detect_language_with_llm(text, provider="gemini")
+        print(f"🔍 自動辨識語言: {language}")
+
+    if language == "zh":
+        system_msg = "你是嚴謹的逐字稿潤飾助手，只做標點與分段。"
+        user_msg = (
+            "請將以下『中文逐字稿』加上適當標點符號並合理分段。"
+            "不要省略或添加內容，不要意譯，保留固有名詞與數字。"
+            f"輸出純文字即可：\n\n{text}"
+        )
+    elif language == "en":
+        system_msg = "You are a precise transcript editor. Only add punctuation and paragraphing."
+        user_msg = (
+            "Please add appropriate punctuation and paragraphing to the following English transcript. "
+            "Do not omit or add content, do not paraphrase, preserve proper nouns and numbers. "
+            f"Output plain text only:\n\n{text}"
+        )
+    elif language == "ja":
+        system_msg = "あなたは正確な文字起こし編集者です。句読点と段落分けのみを行います。"
+        user_msg = (
+            "以下の日本語文字起こしに適切な句読点と段落を追加してください。"
+            "内容の省略や追加はせず、意訳せず、固有名詞と数字はそのまま保持してください。"
+            f"プレーンテキストのみ出力してください：\n\n{text}"
+        )
+    elif language == "ko":
+        system_msg = "당신은 정확한 전사 편집자입니다. 구두점과 단락 나누기만 수행합니다."
+        user_msg = (
+            "다음 한국어 전사에 적절한 구두점과 단락을 추가해주세요. "
+            "내용을 생략하거나 추가하지 말고, 의역하지 말고, 고유명사와 숫자는 그대로 유지하세요. "
+            f"일반 텍스트만 출력하세요:\n\n{text}"
+        )
+    else:
+        # 其他語言使用英文提示
+        system_msg = "You are a precise transcript editor. Only add punctuation and paragraphing."
+        user_msg = (
+            f"Please add appropriate punctuation and paragraphing to the following transcript. "
+            "Do not omit or add content, do not paraphrase, preserve proper nouns and numbers. "
+            f"Output plain text only:\n\n{text}"
+        )
+
+    return system_msg, user_msg
+
+
+def punctuate_with_openai(text: str, language: str = "zh") -> str:
+    """用 OpenAI 幫逐字稿加標點與分段（支援多語言）
+
+    Args:
+        text: 要加標點的文字
+        language: 語言代碼 (zh/en/ja/ko/auto)，auto 會自動辨識
+    """
     from openai import OpenAI
     client = OpenAI()
-    prompt = (
-        "請將以下『中文逐字稿』加上適當標點符號並合理分段。"
-        "不要省略或添加內容，不要意譯，保留固有名詞與數字。"
-        "輸出純文字即可：\n\n"
-        f"{text}"
-    )
+
+    # 獲取對應語言的提示語
+    system_msg, user_msg = get_punctuation_prompt(language, text)
+
     resp = client.chat.completions.create(
         model=OPENAI_MODEL,
         messages=[
-            {"role": "system", "content": "你是嚴謹的逐字稿潤飾助手，只做標點與分段。"},
-            {"role": "user", "content": prompt},
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": user_msg},
         ],
         temperature=0.2,
     )
@@ -802,20 +1012,94 @@ def call_gemini_with_retry(prompt: str, max_retries: int = None) -> str:
     raise RuntimeError("無法調用 Gemini API") from last_error
 
 
-def punctuate_with_gemini(text: str, chunk_size: int = 3000, task_id: str = None) -> str:
-    """用 Google Gemini 幫逐字稿加標點與分段（支援長文本分段處理）"""
+def get_chunked_punctuation_prompt(language: str, chunk_text: str, chunk_idx: int, total_chunks: int) -> tuple[str, str]:
+    """為長文本分段生成提示語
+
+    Args:
+        language: 語言代碼
+        chunk_text: 當前分段文字
+        chunk_idx: 當前分段索引（從1開始）
+        total_chunks: 總分段數
+
+    Returns:
+        (system_message, user_message) 元組
+    """
+    if language == "zh":
+        system_msg = "你是嚴謹的逐字稿潤飾助手。只做『中文標點補全與合理分段』，不要省略或添加內容，不要意譯，非必要不要用刪節號，保留固有名詞與數字。"
+        if chunk_idx == 1:
+            user_msg = f"請為以下中文逐字稿加上適當標點並分段（這是第 1 段）：\n\n{chunk_text}"
+        elif chunk_idx == total_chunks:
+            user_msg = f"請為以下中文逐字稿加上適當標點並分段（這是最後一段，接續前文）：\n\n{chunk_text}"
+        else:
+            user_msg = f"請為以下中文逐字稿加上適當標點並分段（這是第 {chunk_idx} 段，接續前文）：\n\n{chunk_text}"
+    elif language == "en":
+        system_msg = "You are a precise transcript editor. Only add punctuation and paragraphing. Do not omit or add content, do not paraphrase, preserve proper nouns and numbers."
+        if chunk_idx == 1:
+            user_msg = f"Add punctuation and paragraphing to this English transcript (part 1):\n\n{chunk_text}"
+        elif chunk_idx == total_chunks:
+            user_msg = f"Add punctuation and paragraphing to this English transcript (final part, continuing from previous):\n\n{chunk_text}"
+        else:
+            user_msg = f"Add punctuation and paragraphing to this English transcript (part {chunk_idx}, continuing from previous):\n\n{chunk_text}"
+    elif language == "ja":
+        system_msg = "あなたは正確な文字起こし編集者です。句読点と段落分けのみを行います。内容の省略や追加はせず、意訳せず、固有名詞と数字はそのまま保持してください。"
+        if chunk_idx == 1:
+            user_msg = f"以下の日本語文字起こしに句読点と段落を追加してください（第1部分）：\n\n{chunk_text}"
+        elif chunk_idx == total_chunks:
+            user_msg = f"以下の日本語文字起こしに句読点と段落を追加してください（最後の部分、前の続き）：\n\n{chunk_text}"
+        else:
+            user_msg = f"以下の日本語文字起こしに句読点と段落を追加してください（第{chunk_idx}部分、前の続き）：\n\n{chunk_text}"
+    elif language == "ko":
+        system_msg = "당신은 정확한 전사 편집자입니다. 구두점과 단락 나누기만 수행합니다. 내용을 생략하거나 추가하지 말고, 의역하지 말고, 고유명사와 숫자는 그대로 유지하세요."
+        if chunk_idx == 1:
+            user_msg = f"다음 한국어 전사에 구두점과 단락을 추가해주세요 (1부):\n\n{chunk_text}"
+        elif chunk_idx == total_chunks:
+            user_msg = f"다음 한국어 전사에 구두점과 단락을 추가해주세요 (마지막 부분, 이전 계속):\n\n{chunk_text}"
+        else:
+            user_msg = f"다음 한국어 전사에 구두점과 단락을 추가해주세요 ({chunk_idx}부, 이전 계속):\n\n{chunk_text}"
+    else:
+        # 其他語言使用英文提示
+        system_msg = "You are a precise transcript editor. Only add punctuation and paragraphing. Do not omit or add content, do not paraphrase, preserve proper nouns and numbers."
+        if chunk_idx == 1:
+            user_msg = f"Add punctuation and paragraphing to this transcript (part 1):\n\n{chunk_text}"
+        elif chunk_idx == total_chunks:
+            user_msg = f"Add punctuation and paragraphing to this transcript (final part, continuing from previous):\n\n{chunk_text}"
+        else:
+            user_msg = f"Add punctuation and paragraphing to this transcript (part {chunk_idx}, continuing from previous):\n\n{chunk_text}"
+
+    return system_msg, user_msg
+
+
+def punctuate_with_gemini(text: str, chunk_size: int = None, task_id: str = None, language: str = "zh") -> str:
+    """用 Google Gemini 幫逐字稿加標點與分段（支援長文本分段處理、多語言）
+
+    Args:
+        text: 要加標點的文字
+        chunk_size: 分段大小（字元數），None 則根據語言自動決定
+        task_id: 任務 ID（用於更新進度）
+        language: 語言代碼 (zh/en/ja/ko/auto)，auto 會自動辨識
+    """
     if not GOOGLE_API_KEYS:
         raise RuntimeError("未設定任何 GOOGLE_API_KEY")
 
+    # 如果是自動偵測，先辨識語言
+    actual_language = language
+    if language == "auto":
+        actual_language = detect_language_with_llm(text, provider="gemini")
+        print(f"🔍 自動辨識語言: {actual_language}")
+
+    # 根據語言決定合適的分段大小
+    if chunk_size is None:
+        if actual_language in ['en', 'es', 'fr', 'de', 'it', 'pt']:
+            # 英文等字母語言：使用較大的字元數（因為單詞包含空格，字元數較多）
+            chunk_size = 8000  # 約 1300-1600 個英文單詞
+        else:
+            # 中文、日文、韓文等：使用標準字元數
+            chunk_size = 3000  # 約 3000 個字符
+        print(f"📏 根據語言 '{actual_language}' 設定分段大小：{chunk_size} 字元")
+
     # 如果文本不長，直接處理
     if len(text) <= chunk_size:
-        system_msg = (
-            "你是嚴謹的逐字稿潤飾助手。只做『中文標點補全與合理分段』，"
-            "不要省略或添加內容，不要意譯，非必要不要用刪節號，保留固有名詞與數字： "
-        )
-        user_msg = (
-            "請為以下中文逐字稿加上適當標點並分段：\n\n" + text
-        )
+        system_msg, user_msg = get_punctuation_prompt(actual_language, text)
         prompt = system_msg + "\n\n" + user_msg
         return call_gemini_with_retry(prompt)
 
@@ -824,11 +1108,14 @@ def punctuate_with_gemini(text: str, chunk_size: int = 3000, task_id: str = None
     chunks = []
     start = 0
 
+    # 根據語言選擇分段標記
+    split_markers = '。？！\n' if actual_language in ['zh', 'ja'] else '.?!\n'
+
     while start < len(text):
         end = start + chunk_size
         if end < len(text):
             for i in range(end, max(start + chunk_size // 2, end - 200), -1):
-                if text[i] in '。？！\n':
+                if text[i] in split_markers:
                     end = i + 1
                     break
         chunks.append(text[start:end])
@@ -859,16 +1146,8 @@ def punctuate_with_gemini(text: str, chunk_size: int = 3000, task_id: str = None
                 "progress": f"正在添加標點符號... (第 {idx}/{len(chunks)} 段)"
             })
 
-        system_msg = (
-            "你是嚴謹的逐字稿潤飾助手。只做『中文標點補全與合理分段』，"
-            "不要省略或添加內容，不要意譯，非必要不要用刪節號，保留固有名詞與數字。"
-        )
-        if idx == 1:
-            user_msg = f"請為以下中文逐字稿加上適當標點並分段（這是第 1 段）：\n\n{chunk}"
-        elif idx == len(chunks):
-            user_msg = f"請為以下中文逐字稿加上適當標點並分段（這是最後一段，接續前文）：\n\n{chunk}"
-        else:
-            user_msg = f"請為以下中文逐字稿加上適當標點並分段（這是第 {idx} 段，接續前文）：\n\n{chunk}"
+        # 使用語言感知的提示語
+        system_msg, user_msg = get_chunked_punctuation_prompt(actual_language, chunk, idx, len(chunks))
 
         prompt = system_msg + "\n\n" + user_msg
         result = call_gemini_with_retry(prompt)
@@ -886,7 +1165,8 @@ def process_transcription_task(
     chunk_audio: bool,
     chunk_minutes: int,
     diarize: bool = False,
-    max_speakers: Optional[int] = None
+    max_speakers: Optional[int] = None,
+    language: str = "zh"
 ):
     """
     在背景線程中執行轉錄任務
@@ -943,7 +1223,8 @@ def process_transcription_task(
                 chunk_duration_ms,
                 task_id=task_id,
                 diarize=diarize,
-                max_speakers=max_speakers
+                max_speakers=max_speakers,
+                language=language
             )
         else:
             # 非分段模式：可以使用 diarization
@@ -951,26 +1232,40 @@ def process_transcription_task(
                 print(f"🔊 [{task_id}] 啟用 speaker diarization...")
 
                 # 執行 speaker diarization
-                update_task_status(task_id, {"progress": "正在分析說話者..."})
+                diarization_start = datetime.now(TZ_UTC8)
+                update_task_status(task_id, {
+                    "progress": "正在分析說話者...",
+                    "diarization_status": "running"
+                })
                 diarization_segments = perform_diarization(wav_path, max_speakers=max_speakers)
+                diarization_duration = (datetime.now(TZ_UTC8) - diarization_start).total_seconds()
 
                 # 執行轉錄（帶時間戳）
                 update_task_status(task_id, {"progress": "正在轉錄音訊（帶時間戳）..."})
-                transcription_segments = transcribe_with_timestamps(whisper_model, wav_path)
+                transcription_segments = transcribe_with_timestamps(whisper_model, wav_path, language=language)
 
                 # 合併結果
                 if diarization_segments:
-                    update_task_status(task_id, {"progress": "正在合併說話者資訊..."})
+                    num_speakers = len(set(s['speaker'] for s in diarization_segments))
+                    update_task_status(task_id, {
+                        "progress": "正在合併說話者資訊...",
+                        "diarization_status": "completed",
+                        "diarization_num_speakers": num_speakers,
+                        "diarization_duration_seconds": round(diarization_duration, 1)
+                    })
                     raw_text = merge_transcription_with_diarization(
                         transcription_segments,
                         diarization_segments
                     )
                 else:
                     # diarization 失敗，回退到純文字
+                    update_task_status(task_id, {
+                        "diarization_status": "failed"
+                    })
                     raw_text = " ".join(seg["text"] for seg in transcription_segments)
             else:
                 print(f"📝 [{task_id}] 開始轉逐字稿...")
-                raw_text = transcribe_single_chunk(whisper_model, wav_path)
+                raw_text = transcribe_single_chunk(whisper_model, wav_path, language=language)
 
         # 檢查是否已被取消
         if task_cancelled.get(task_id, False):
@@ -986,7 +1281,7 @@ def process_transcription_task(
                 "progress": "正在添加標點符號（Gemini）..."
             })
             print(f"✨ [{task_id}] 使用 Gemini 加標點與分段...")
-            final_text = punctuate_with_gemini(raw_text, task_id=task_id)
+            final_text = punctuate_with_gemini(raw_text, task_id=task_id, language=language)
             update_task_status(task_id, {"punctuation_completed": True})
         elif punct_provider == "openai":
             update_task_status(task_id, {
@@ -996,7 +1291,7 @@ def process_transcription_task(
             if not os.getenv("OPENAI_API_KEY"):
                 raise ValueError("未設定 OPENAI_API_KEY")
             print(f"✨ [{task_id}] 使用 OpenAI 加標點與分段...")
-            final_text = punctuate_with_openai(raw_text)
+            final_text = punctuate_with_openai(raw_text, language=language)
             update_task_status(task_id, {"punctuation_completed": True})
 
         print(f"🎉 [{task_id}] 處理完成！")
@@ -1055,6 +1350,7 @@ def process_transcription_task(
         with tasks_lock:
             task_temp_dirs.pop(task_id, None)
             task_cancelled.pop(task_id, None)
+            task_diarization_processes.pop(task_id, None)
 
 
 # ---------- API Endpoints ----------
@@ -1076,7 +1372,8 @@ async def startup_event():
         current_model_name,
         device="auto",  # 自動選擇 CPU
         compute_type="int8",  # 使用 INT8 量化，節省記憶體並提升速度
-        num_workers=2  # 並行處理線程數
+        cpu_threads=1,  # 每個推理任務用 1 線程（避免與 diarization 競爭）
+        num_workers=4  # 允許 4 個任務同時推理
     )
     print(f"✅ 模型載入完成，服務已就緒！")
 
@@ -1093,10 +1390,17 @@ async def startup_event():
                 login(token=hf_token, add_to_git_credential=False)
 
                 print("🔊 正在載入 Speaker Diarization 模型...")
+                import torch
                 diarization_pipeline = Pipeline.from_pretrained(
                     "pyannote/speaker-diarization-3.1"
                 )
-                print("✅ Speaker Diarization 模型載入完成！")
+
+                # M1 Mac MPS 加速
+                if torch.backends.mps.is_available():
+                    diarization_pipeline.to(torch.device("mps"))
+                    print("✅ Speaker Diarization 模型載入完成（使用 MPS 加速）！")
+                else:
+                    print("✅ Speaker Diarization 模型載入完成！")
             except Exception as e:
                 print(f"⚠️  Speaker Diarization 模型載入失敗：{e}")
                 print("   請確認已在 Hugging Face 同意使用條款：https://huggingface.co/pyannote/speaker-diarization-3.1")
@@ -1141,7 +1445,8 @@ async def transcribe(
     chunk_audio: bool = Form(True, description="是否使用分段模式"),
     chunk_minutes: int = Form(10, description="分段長度（分鐘）"),
     diarize: bool = Form(False, description="是否啟用說話者辨識"),
-    max_speakers: Optional[int] = Form(None, description="最大講者人數（可選，2-10）")
+    max_speakers: Optional[int] = Form(None, description="最大講者人數（可選，2-10）"),
+    language: str = Form("zh", description="轉錄語言 (zh/en/ja/ko/auto)")
 ):
     """
     上傳音檔進行轉錄（異步模式）
@@ -1197,6 +1502,9 @@ async def transcribe(
                 "chunk_minutes": chunk_minutes,
                 "diarize": diarize,
                 "max_speakers": max_speakers,
+                "language": language,
+                "diarization_status": None,  # "running" | "completed" | "failed" | None
+                "diarization_num_speakers": None,  # 識別到的講者人數
                 "created_at": get_current_time(),
                 "updated_at": get_current_time()
             }
@@ -1216,7 +1524,8 @@ async def transcribe(
             chunk_audio,
             chunk_minutes,
             diarize,
-            max_speakers
+            max_speakers,
+            language
         )
 
         # 立即返回任務資訊
@@ -1294,6 +1603,17 @@ async def cancel_task(task_id: str):
 
         # 標記任務為已取消
         task_cancelled[task_id] = True
+
+        # 立即終止 diarization 進程（如果正在運行）
+        diarization_executor = task_diarization_processes.get(task_id)
+        if diarization_executor:
+            print(f"🛑 正在強制終止說話者辨識進程...")
+            try:
+                diarization_executor.shutdown(wait=False, cancel_futures=True)
+                print(f"✅ 說話者辨識進程已終止")
+            except Exception as e:
+                print(f"⚠️ 終止 diarization 進程失敗：{e}")
+            task_diarization_processes.pop(task_id, None)
 
         # 立即清理暫存目錄（如果存在）
         temp_dir = task_temp_dirs.get(task_id)

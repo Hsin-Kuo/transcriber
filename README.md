@@ -68,10 +68,38 @@ python src/transcribe.py -i data/audio.m4a -m medium --punct-provider gemini
 
 #### 方式 B：伺服器模式（遠端呼叫）
 
-```bash
-# 啟動伺服器
-python src/whisper_server.py --host 0.0.0.0 --port 8000 --model medium
+**使用管理腳本（推薦）：**
 
+```bash
+# 初次設定（安裝依賴、設定環境）
+./setup_native_backend.sh
+
+# 啟動後端（背景執行）
+./start_backend_daemon.sh
+
+# 查看後端狀態
+./status_backend.sh
+
+# 查看即時日誌
+tail -f backend.log
+
+# 停止後端
+./stop_backend.sh
+
+# 重新部署後端（應用程式碼更新）
+./restart_backend.sh
+```
+
+**手動啟動（開發測試）：**
+
+```bash
+# 前景執行（按 Ctrl+C 停止）
+python src/whisper_server.py --host 0.0.0.0 --port 8000 --model medium
+```
+
+**使用客戶端：**
+
+```bash
 # 使用客戶端上傳音檔
 python src/transcribe_client.py -i data/audio.m4a --server http://localhost:8000
 ```
@@ -388,7 +416,7 @@ A: **可以！** v2.0 採用異步架構，轉錄在背景線程執行，不會�
 A: 目前並發數限制為 1，超過的請求會自動排隊。可修改 `executor = ThreadPoolExecutor(max_workers=1)` 增加並發數（需注意記憶體）。
 
 ### Q: 任務記錄會永久保存嗎？
-A: 任務狀態儲存在記憶體中，重啟伺服器會清空。文字檔會永久保存在 `output/` 目錄。
+A: 任務狀態儲存在記憶體中，重啟伺服器會清空。文字檔會永久保存在 `output/` 目錄。\
 
 ## 開發指南
 
@@ -428,6 +456,30 @@ curl -X POST http://localhost:8000/transcribe -F "file=@data/test.m4a"
 [請在此添加作者資訊]
 
 ## 更新日誌
+
+### v2.1.0 (2025-01-19)
+- 🔧 **效能優化**：調整 Whisper 模型並行配置
+  - `cpu_threads=1, num_workers=4`：優化核心使用效率
+  - 避免與 Speaker Diarization 的資源競爭
+  - 在 8 核 M1 Mac 上達到最佳平衡
+- 🎤 **Speaker Diarization 增強**：
+  - 使用獨立進程執行，可被立即終止
+  - 支援取消正在執行的說話者辨識
+  - 新增 `diarization_status` 即時狀態追蹤
+  - 顯示識別到的講者人數和耗時
+- 📊 **前端改進**：
+  - 在任務卡片中顯示 Diarization 狀態
+  - 支援取消時立即停止所有進程
+  - 更詳細的進度資訊
+- ⚡ **資源管理**：
+  - 模型權重共享，不會隨並行數倍增
+  - 優化內存使用（~2.7 GB 總內存）
+  - 更好的背景執行管理腳本
+
+**重新部署後端以應用優化：**
+```bash
+./restart_backend.sh
+```
 
 ### v1.0.0 (2024-11-11)
 - 初始版本發布

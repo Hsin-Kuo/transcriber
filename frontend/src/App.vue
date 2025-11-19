@@ -11,43 +11,75 @@
     <!-- 上傳區域 -->
     <UploadZone @file-selected="handleFileUpload" :uploading="uploading" />
 
-    <!-- 上傳選項 -->
-    <div class="upload-options electric-card">
-      <div class="electric-inner">
-        <div class="electric-border-outer">
-          <div class="electric-main options-content">
-            <h3>轉錄選項</h3>
-            <div class="option-item">
-              <div class="option-left">
-                <input type="checkbox" id="diarize" v-model="enableDiarization" />
-                <label for="diarize">
-                  啟用說話者辨識 (Speaker Diarization)
-                  <span class="option-hint">自動區分不同說話者，標記為 [SPEAKER_00]、[SPEAKER_01] 等</span>
-                </label>
+    <!-- 確認對話框 -->
+    <div v-if="showConfirmDialog" class="modal-overlay" @click.self="cancelUpload">
+      <div class="modal-content electric-card">
+        <div class="electric-inner">
+          <div class="electric-border-outer">
+            <div class="electric-main modal-body">
+              <!-- 檔案資訊 -->
+              <div class="modal-section">
+                <div class="file-info">
+                  <span class="label">檔案名稱</span>
+                  <span class="value">{{ pendingFile?.name }}</span>
+                </div>
+                <div class="file-info" v-if="pendingFile">
+                  <span class="label">檔案大小</span>
+                  <span class="value">{{ (pendingFile.size / 1024 / 1024).toFixed(2) }} MB</span>
+                </div>
               </div>
-              <div class="option-right" v-if="enableDiarization">
-                <label for="maxSpeakers" class="input-label-inline">
-                  最大講者人數
-                  <span class="option-hint-inline">限制辨識的講者數量（2-10，留空則自動偵測）</span>
-                </label>
-                <input
-                  type="number"
-                  id="maxSpeakers"
-                  v-model.number="maxSpeakers"
-                  min="2"
-                  max="10"
-                  placeholder="自動"
-                  class="number-input-inline"
-                />
+
+              <!-- 轉錄語言 -->
+              <div class="modal-section">
+                <label class="section-label">轉錄語言</label>
+                <select id="language" v-model="selectedLanguage" class="select-input">
+                  <option value="auto">自動偵測</option>
+                  <option value="zh">中文</option>
+                  <option value="en">English</option>
+                  <option value="ja">日本語</option>
+                  <option value="ko">한국어</option>
+                </select>
+              </div>
+
+              <!-- 說話者辨識 -->
+              <div class="modal-section">
+                <label class="section-label">說話者辨識</label>
+
+                <div class="checkbox-item">
+                  <input type="checkbox" id="modal-diarize" v-model="enableDiarization" />
+                  <label for="modal-diarize">啟用</label>
+                </div>
+
+                <div class="sub-setting" v-if="enableDiarization">
+                  <label for="modal-maxSpeakers" class="sub-label">
+                    最大講者人數
+                    <span class="hint">可提高精確度，避免過度分析。留空則自動偵測，</span>
+                  </label>
+                  <input
+                    type="number"
+                    id="modal-maxSpeakers"
+                    v-model.number="maxSpeakers"
+                    min="2"
+                    max="10"
+                    placeholder="自動偵測"
+                    class="number-input"
+                  />
+                </div>
+              </div>
+
+              <!-- 動作按鈕 -->
+              <div class="modal-actions">
+                <button class="btn btn-secondary" @click="cancelUpload">取消</button>
+                <button class="btn btn-primary" @click="confirmAndUpload">開始轉錄</button>
               </div>
             </div>
           </div>
+          <div class="electric-glow-1"></div>
+          <div class="electric-glow-2"></div>
         </div>
-        <div class="electric-glow-1"></div>
-        <div class="electric-glow-2"></div>
+        <div class="electric-overlay"></div>
+        <div class="electric-bg-glow"></div>
       </div>
-      <div class="electric-overlay"></div>
-      <div class="electric-bg-glow"></div>
     </div>
 
     <!-- 統計面板 -->
@@ -95,6 +127,9 @@ const tasks = ref([])
 const uploading = ref(false)
 const enableDiarization = ref(true)
 const maxSpeakers = ref(null)
+const showConfirmDialog = ref(false)
+const pendingFile = ref(null)
+const selectedLanguage = ref('zh')
 let pollInterval = null
 
 // 統計數據
@@ -108,13 +143,24 @@ const failedTasks = computed(() =>
   tasks.value.filter(t => t.status === 'failed').length
 )
 
-// 上傳檔案
-async function handleFileUpload(file) {
+// 選擇檔案後顯示確認對話框
+function handleFileUpload(file) {
+  pendingFile.value = file
+  showConfirmDialog.value = true
+}
+
+// 確認後開始上傳
+async function confirmAndUpload() {
+  if (!pendingFile.value) return
+
+  showConfirmDialog.value = false
   uploading.value = true
+
   const formData = new FormData()
-  formData.append('file', file)
+  formData.append('file', pendingFile.value)
   formData.append('punct_provider', 'gemini')
   formData.append('chunk_audio', 'true')
+  formData.append('language', selectedLanguage.value)
   formData.append('diarize', enableDiarization.value ? 'true' : 'false')
   if (enableDiarization.value && maxSpeakers.value) {
     formData.append('max_speakers', maxSpeakers.value.toString())
@@ -127,7 +173,7 @@ async function handleFileUpload(file) {
 
     const newTask = {
       ...response.data,
-      file: file.name,
+      file: pendingFile.value.name,
       uploadedAt: new Date().toLocaleString('zh-TW')
     }
 
@@ -138,7 +184,14 @@ async function handleFileUpload(file) {
     alert('上傳失敗：' + (error.response?.data?.detail || error.message))
   } finally {
     uploading.value = false
+    pendingFile.value = null
   }
+}
+
+// 取消上傳
+function cancelUpload() {
+  showConfirmDialog.value = false
+  pendingFile.value = null
 }
 
 // 輪詢更新任務狀態
@@ -334,137 +387,6 @@ onUnmounted(() => {
   opacity: 0.8;
 }
 
-.upload-options {
-  margin-bottom: 24px;
-}
-
-.options-content {
-  padding: 20px 24px;
-}
-
-.options-content h3 {
-  font-size: 18px;
-  color: #2d2d2d;
-  margin-bottom: 16px;
-  font-weight: 600;
-}
-
-.option-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-}
-
-.option-item:last-child {
-  margin-bottom: 0;
-}
-
-.option-left {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  flex: 1;
-  min-width: 300px;
-}
-
-.option-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-shrink: 0;
-}
-
-.option-item input[type="checkbox"] {
-  margin-top: 4px;
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  accent-color: var(--electric-primary);
-}
-
-.option-item label {
-  cursor: pointer;
-  color: rgba(45, 45, 45, 0.9);
-  font-size: 15px;
-  line-height: 1.6;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.option-hint {
-  font-size: 13px;
-  color: rgba(45, 45, 45, 0.6);
-  font-weight: 400;
-}
-
-.input-label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 15px;
-  color: rgba(45, 45, 45, 0.9);
-  font-weight: 500;
-}
-
-.input-label-inline {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 14px;
-  color: rgba(45, 45, 45, 0.8);
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.option-hint-inline {
-  font-size: 12px;
-  color: rgba(45, 45, 45, 0.6);
-  font-weight: 400;
-  white-space: normal;
-  max-width: 200px;
-  line-height: 1.4;
-}
-
-.number-input {
-  width: 100%;
-  max-width: 200px;
-  padding: 8px 12px;
-  font-size: 14px;
-  border: 2px solid rgba(221, 132, 72, 0.3);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.8);
-  color: #2d2d2d;
-  transition: all 0.3s;
-}
-
-.number-input-inline {
-  width: 100px;
-  padding: 6px 10px;
-  font-size: 14px;
-  border: 2px solid rgba(221, 132, 72, 0.3);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.8);
-  color: #2d2d2d;
-  transition: all 0.3s;
-  text-align: center;
-}
-
-.number-input:focus,
-.number-input-inline:focus {
-  outline: none;
-  border-color: var(--electric-primary);
-  box-shadow: 0 0 0 3px rgba(221, 132, 72, 0.1);
-}
-
-.number-input::placeholder,
-.number-input-inline::placeholder {
-  color: rgba(45, 45, 45, 0.4);
-}
-
 .stats-panel {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -505,5 +427,219 @@ onUnmounted(() => {
   font-weight: bold;
   color: var(--electric-primary);
   text-shadow: 0 2px 4px rgba(139, 69, 19, 0.2);
+}
+
+/* 確認對話框 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.3s ease;
+}
+
+.modal-content {
+  width: 90%;
+  max-width: 500px;
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.modal-body {
+  padding: 28px;
+}
+
+.modal-section {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(221, 132, 72, 0.15);
+}
+
+.modal-section:last-of-type {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.section-label {
+  display: block;
+  font-size: 13px;
+  color: rgba(45, 45, 45, 0.6);
+  font-weight: 600;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.file-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.file-info:last-child {
+  margin-bottom: 0;
+}
+
+.file-info .label {
+  color: rgba(45, 45, 45, 0.6);
+  font-weight: 500;
+}
+
+.file-info .value {
+  color: rgba(45, 45, 45, 0.95);
+  font-weight: 600;
+}
+
+.checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.checkbox-item input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: var(--electric-primary);
+  flex-shrink: 0;
+}
+
+.checkbox-item label {
+  cursor: pointer;
+  font-size: 14px;
+  color: rgba(45, 45, 45, 0.9);
+  font-weight: 500;
+}
+
+.sub-setting {
+  margin-top: 14px;
+  padding-left: 28px;
+  animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sub-label {
+  display: block;
+  font-size: 13px;
+  color: rgba(45, 45, 45, 0.8);
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.sub-label .hint {
+  display: block;
+  font-size: 12px;
+  color: rgba(45, 45, 45, 0.6);
+  font-weight: 400;
+  margin-top: 4px;
+}
+
+.select-input {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  border: 2px solid rgba(221, 132, 72, 0.3);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #2d2d2d;
+  transition: all 0.3s;
+  cursor: pointer;
+}
+
+.select-input:focus {
+  outline: none;
+  border-color: var(--electric-primary);
+  box-shadow: 0 0 0 3px rgba(221, 132, 72, 0.1);
+}
+
+.number-input {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  border: 2px solid rgba(221, 132, 72, 0.3);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #2d2d2d;
+  transition: all 0.3s;
+}
+
+.number-input:focus {
+  outline: none;
+  border-color: var(--electric-primary);
+  box-shadow: 0 0 0 3px rgba(221, 132, 72, 0.1);
+}
+
+.number-input::placeholder {
+  color: rgba(45, 45, 45, 0.4);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.modal-actions .btn {
+  flex: 1;
+  padding: 12px 24px;
+  font-size: 15px;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.btn-primary {
+  background: var(--electric-primary);
+  color: white;
+  box-shadow: 0 4px 12px rgba(221, 132, 72, 0.3);
+}
+
+.btn-primary:hover {
+  background: #c97840;
+  box-shadow: 0 6px 16px rgba(221, 132, 72, 0.5);
+  transform: translateY(-2px);
+}
+
+.btn-secondary {
+  background: rgba(221, 132, 72, 0.1);
+  color: var(--electric-primary);
+  border: 2px solid rgba(221, 132, 72, 0.3);
+}
+
+.btn-secondary:hover {
+  background: rgba(221, 132, 72, 0.2);
+  border-color: var(--electric-primary);
+  transform: translateY(-2px);
 }
 </style>

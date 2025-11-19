@@ -42,6 +42,9 @@
                     <span v-if="task.punct_provider">
                       ✨ {{ task.punct_provider }}
                     </span>
+                    <span v-if="task.diarize" class="badge-diarize" :title="task.max_speakers ? `最多 ${task.max_speakers} 位講者` : '自動偵測講者人數'">
+                      說話者辨識{{ task.max_speakers ? ` (≤${task.max_speakers}人)` : '' }}
+                    </span>
                   </div>
 
                   <div v-if="task.progress" class="task-progress">
@@ -60,6 +63,10 @@
                       <span v-if="task.estimated_completion_text && ['pending', 'processing'].includes(task.status)" class="estimate-time">
                         · 預計完成時間：{{ task.estimated_completion_text }}
                       </span>
+                    </p>
+                    <!-- 顯示說話者辨識狀態 -->
+                    <p v-if="task.diarize && getDiarizationStatusText(task)" class="diarization-status" :class="`status-${task.diarization_status}`">
+                      {{ getDiarizationStatusText(task) }}
                     </p>
                     <!-- 顯示正在處理的 chunks -->
                     <p v-if="getProcessingChunksText(task)" class="processing-chunks">
@@ -170,6 +177,39 @@ function getProgressWidth(task) {
   // 預設進度
   if (task.status === 'processing') return '30%'
   return '10%'
+}
+
+function getDiarizationStatusText(task) {
+  if (!task.diarization_status) {
+    return null
+  }
+
+  const status = task.diarization_status
+  const numSpeakers = task.diarization_num_speakers
+  const duration = task.diarization_duration_seconds
+
+  if (status === 'running') {
+    return '說話者辨識進行中...'
+  } else if (status === 'completed') {
+    const parts = ['說話者辨識完成']
+    if (numSpeakers) {
+      parts.push(`識別到 ${numSpeakers} 位說話者`)
+    }
+    if (duration) {
+      const minutes = Math.floor(duration / 60)
+      const seconds = Math.floor(duration % 60)
+      if (minutes > 0) {
+        parts.push(`耗時 ${minutes}分${seconds}秒`)
+      } else {
+        parts.push(`耗時 ${seconds}秒`)
+      }
+    }
+    return parts.join(' · ')
+  } else if (status === 'failed') {
+    return '說話者辨識失敗'
+  }
+
+  return null
 }
 
 function getProcessingChunksText(task) {
@@ -308,6 +348,26 @@ function getProcessingChunksText(task) {
   font-size: 13px;
   color: rgba(45, 45, 45, 0.6);
   margin-bottom: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.badge-diarize {
+  padding: 2px 8px;
+  background: rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 4px;
+  color: rgba(109, 40, 217, 0.9);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: help;
+  transition: all 0.2s;
+}
+
+.badge-diarize:hover {
+  background: rgba(139, 92, 246, 0.15);
+  border-color: rgba(139, 92, 246, 0.5);
+  transform: translateY(-1px);
 }
 
 .task-progress {
@@ -346,6 +406,30 @@ function getProcessingChunksText(task) {
   color: var(--electric-primary);
   font-weight: 600;
   margin-left: 8px;
+}
+
+.diarization-status {
+  font-size: 12px;
+  margin-top: 6px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-weight: 500;
+  color: rgba(45, 45, 45, 0.7);
+}
+
+.diarization-status.status-running {
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.diarization-status.status-completed {
+  background: rgba(221, 132, 72, 0.12);
+  border: 1px solid rgba(221, 132, 72, 0.3);
+}
+
+.diarization-status.status-failed {
+  background: rgba(221, 132, 72, 0.08);
+  border: 1px solid rgba(221, 100, 50, 0.3);
 }
 
 .processing-chunks {
