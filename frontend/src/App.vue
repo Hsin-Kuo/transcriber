@@ -33,11 +33,11 @@
               <div class="modal-section">
                 <label class="section-label">轉錄語言</label>
                 <select id="language" v-model="selectedLanguage" class="select-input">
-                  <option value="auto">自動偵測</option>
                   <option value="zh">中文</option>
                   <option value="en">English</option>
                   <option value="ja">日本語</option>
                   <option value="ko">한국어</option>
+                  <option value="auto">自動偵測</option>
                 </select>
               </div>
 
@@ -53,7 +53,7 @@
                 <div class="sub-setting" v-if="enableDiarization">
                   <label for="modal-maxSpeakers" class="sub-label">
                     最大講者人數
-                    <span class="hint">可提高精確度，避免過度分析。留空則自動偵測，</span>
+                    <span class="hint">可提高精確度，避免過度分析；留空則自動偵測。</span>
                   </label>
                   <input
                     type="number"
@@ -109,7 +109,203 @@
       @refresh="refreshTasks"
       @delete="deleteTask"
       @cancel="cancelTask"
+      @view="viewTranscript"
     />
+
+    <!-- 瀏覽逐字稿對話框 -->
+    <div v-if="showTranscriptDialog" class="modal-overlay" @click.self="closeTranscriptDialog">
+      <div class="modal-content transcript-modal electric-card">
+        <div class="electric-inner">
+          <div class="electric-border-outer">
+            <div class="electric-main modal-body">
+              <!-- 對話框標題 -->
+              <div class="transcript-header">
+                <div class="transcript-title-section">
+                  <h2>{{ currentTranscript.filename || '逐字稿' }}</h2>
+                  <div class="transcript-meta">
+                    <span v-if="currentTranscript.created_at">
+                      📅 {{ currentTranscript.created_at }}
+                    </span>
+                    <span v-if="currentTranscript.text_length">
+                      📝 {{ currentTranscript.text_length }} 字
+                    </span>
+                    <span v-if="currentTranscript.duration_text">
+                      ⏱️ {{ currentTranscript.duration_text }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 音檔播放器（僅在有音檔時顯示） -->
+              <div v-if="currentTranscript.hasAudio" class="audio-player-container">
+                <audio
+                  ref="audioElement"
+                  controls
+                  controlsList=""
+                  preload="metadata"
+                  class="audio-player"
+                  :src="getAudioUrl(currentTranscript.task_id)"
+                  @error="handleAudioError"
+                  @loadedmetadata="handleAudioLoaded"
+                  @play="isPlaying = true"
+                  @pause="isPlaying = false"
+                  @ended="isPlaying = false"
+                >
+                  您的瀏覽器不支援音訊播放。
+                </audio>
+                <div v-if="audioError" class="audio-error">
+                  ⚠️ {{ audioError }}
+                </div>
+                <!-- 自定義音檔控制按鈕 -->
+                <div class="audio-controls">
+                  <button class="audio-control-btn audio-skip-btn" @click="skipBackward" title="快退10秒">
+                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                      <path d="M3 3v5h5"/>
+                    </svg>
+                    <span class="control-label control-label-left">10</span>
+                  </button>
+                  <button class="audio-control-btn audio-play-btn" @click="togglePlayPause" :title="isPlaying ? '暫停' : '播放'">
+                    <svg v-if="!isPlaying" width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M8 5v14l11-7z"/>
+                    </svg>
+                    <svg v-else width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+                    </svg>
+                  </button>
+                  <button class="audio-control-btn audio-skip-btn" @click="skipForward" title="快進10秒">
+                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
+                      <path d="M21 3v5h-5"/>
+                    </svg>
+                    <span class="control-label control-label-right">10</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- 逐字稿內容區域 -->
+              <div class="transcript-content-wrapper">
+                <!-- 固定顯示的當前 Timecode（左上角） -->
+                <div
+                  v-if="activeTimecodeIndex >= 0 && timecodeMarkers.length > 0 && currentTranscript.hasAudio"
+                  class="timecode-fixed-display"
+                  @click="seekToTime(timecodeMarkers[activeTimecodeIndex].time)"
+                  :title="`點擊跳轉到 ${timecodeMarkers[activeTimecodeIndex].label}`"
+                >
+                  <div class="timecode-label">{{ timecodeMarkers[activeTimecodeIndex].label }}</div>
+                </div>
+
+                <!-- 逐字稿內容 -->
+                <div
+                  class="transcript-content"
+                  :class="{ 'with-sidebar': timecodeMarkers.length > 0 && currentTranscript.hasAudio }"
+                  ref="transcriptContent"
+                >
+                  <div v-if="loadingTranscript" class="loading-state">
+                    <div class="spinner"></div>
+                    <p>載入逐字稿中...</p>
+                  </div>
+                  <div v-else-if="transcriptError" class="error-state">
+                    <p>❌ {{ transcriptError }}</p>
+                  </div>
+                  <div
+                    v-else
+                    class="textarea-wrapper"
+                    :class="{ 'show-reference-line': timecodeMarkers.length > 0 && currentTranscript.hasAudio }"
+                  >
+                    <textarea
+                      v-model="currentTranscript.content"
+                      class="transcript-textarea"
+                      :readonly="!isEditing"
+                      :class="{ 'editing': isEditing }"
+                      ref="textarea"
+                      @input="updateScrollHeight"
+                      @scroll="syncScroll"
+                    ></textarea>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 對話框操作區域 -->
+              <div class="transcript-actions">
+                <!-- 取代工具列（僅在編輯模式顯示） -->
+                <div v-if="isEditing && !loadingTranscript && !transcriptError" class="replace-toolbar-inline">
+                  <input
+                    v-model="findText"
+                    type="text"
+                    placeholder="尋找"
+                    class="replace-input-inline"
+                    @keyup.enter="replaceAll"
+                  />
+                  <input
+                    v-model="replaceText"
+                    type="text"
+                    placeholder="取代為"
+                    class="replace-input-inline"
+                    @keyup.enter="replaceAll"
+                  />
+                  <button
+                    class="btn btn-replace-inline"
+                    @click="replaceAll"
+                    :disabled="!findText"
+                    title="取代所有符合的文字"
+                  >
+                    取代全部
+                  </button>
+                </div>
+
+                <!-- 操作按鈕 - 三聯組合 -->
+                <div class="action-buttons">
+                  <!-- 非編輯模式的三聯按鈕 -->
+                  <div v-if="!isEditing" class="btn-group-modal">
+                    <button
+                      class="btn btn-modal-edit btn-group-left"
+                      @click="startEditing"
+                    >
+                      編輯
+                    </button>
+                    <button
+                      class="btn btn-modal-download btn-group-middle"
+                      @click="downloadCurrentTranscript"
+                    >
+                      下載
+                    </button>
+                    <button
+                      class="btn btn-modal-close btn-group-right"
+                      @click="closeTranscriptDialog"
+                    >
+                      關閉
+                    </button>
+                  </div>
+
+                  <!-- 編輯模式的雙聯按鈕 -->
+                  <div v-if="isEditing" class="btn-group-modal">
+                    <button
+                      class="btn btn-modal-save btn-group-left"
+                      @click="saveTranscript"
+                      :disabled="savingTranscript"
+                    >
+                      <span v-if="savingTranscript" class="spinner"></span>
+                      {{ savingTranscript ? '儲存中' : '儲存' }}
+                    </button>
+                    <button
+                      class="btn btn-modal-cancel btn-group-right"
+                      @click="cancelEditing"
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="electric-glow-1"></div>
+          <div class="electric-glow-2"></div>
+        </div>
+        <div class="electric-overlay"></div>
+        <div class="electric-bg-glow"></div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -129,7 +325,25 @@ const enableDiarization = ref(true)
 const maxSpeakers = ref(null)
 const showConfirmDialog = ref(false)
 const pendingFile = ref(null)
-const selectedLanguage = ref('zh')
+const selectedLanguage = ref('auto')
+const showTranscriptDialog = ref(false)
+const currentTranscript = ref({})
+const loadingTranscript = ref(false)
+const transcriptError = ref(null)
+const isEditing = ref(false)
+const savingTranscript = ref(false)
+const originalContent = ref('')
+const findText = ref('')
+const replaceText = ref('')
+const segments = ref([])
+const timecodeMarkers = ref([])
+const audioElement = ref(null)
+const textarea = ref(null)
+const transcriptContent = ref(null)
+const textareaScrollHeight = ref(0)
+const audioError = ref(null)
+const activeTimecodeIndex = ref(-1)  // 當前活躍的 timecode 索引
+const isPlaying = ref(false)  // 音檔播放狀態
 let pollInterval = null
 
 // 統計數據
@@ -342,6 +556,552 @@ async function refreshTasks() {
   }
 }
 
+// 格式化時間戳為 MM:SS 或 HH:MM:SS
+function formatTimecode(seconds) {
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const secs = Math.floor(seconds % 60)
+
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+  }
+  return `${minutes}:${secs.toString().padStart(2, '0')}`
+}
+
+// 從 segments 生成 timecode markers（約每30秒一個），使用實際 segment 位置
+function generateTimecodeMarkers(segmentList) {
+  if (!segmentList || segmentList.length === 0) return []
+
+  const markers = []
+  const INTERVAL = 15 // 約每15秒一個標記
+
+  // 確保 segments 按時間排序
+  const sortedSegments = [...segmentList].sort((a, b) => a.start - b.start)
+
+  // 使用實際的 transcript content 來查找每個 segment 的字符位置
+  const transcriptContent = currentTranscript.value.content
+  const segmentPositions = []
+  let cumulativeChars = 0 // 使用累積字符作為估算位置
+
+  for (const segment of sortedSegments) {
+    // 清理 segment 文字（移除多餘空格、換行）
+    const segmentText = segment.text.trim().replace(/\s+/g, ' ')
+
+    // 嘗試多種搜索策略
+    let charStart = -1
+
+    // 策略 1：直接搜索原始文字
+    charStart = transcriptContent.indexOf(segment.text.trim(), cumulativeChars)
+
+    // 策略 2：搜索清理後的文字
+    if (charStart === -1) {
+      charStart = transcriptContent.indexOf(segmentText, cumulativeChars)
+    }
+
+    // 策略 3：搜索前幾個字（至少 10 個字）
+    if (charStart === -1 && segmentText.length > 10) {
+      const prefix = segmentText.substring(0, Math.min(20, segmentText.length))
+      charStart = transcriptContent.indexOf(prefix, cumulativeChars)
+    }
+
+    // 策略 4：從頭開始搜索（可能順序有變化）
+    if (charStart === -1) {
+      charStart = transcriptContent.indexOf(segmentText, 0)
+    }
+
+    if (charStart !== -1) {
+      segmentPositions.push({
+        start: segment.start,
+        end: segment.end,
+        charStart: charStart,
+        charEnd: charStart + segmentText.length,
+        text: segmentText
+      })
+      // 更新累積位置
+      cumulativeChars = charStart + segmentText.length
+    } else {
+      // 如果還是找不到，使用累積字符位置作為估算
+      segmentPositions.push({
+        start: segment.start,
+        end: segment.end,
+        charStart: cumulativeChars,
+        charEnd: cumulativeChars + segmentText.length,
+        text: segmentText
+      })
+      cumulativeChars += segmentText.length
+    }
+  }
+
+  const totalChars = transcriptContent.length
+
+  // 使用實際 segment 起始點作為標記，選擇接近 60 秒間隔的
+  const maxTime = sortedSegments[sortedSegments.length - 1].end
+  const usedSegments = new Set() // 避免重複使用同一個 segment
+
+  // 生成所有目標時間點（每 60 秒一個）
+  const targetTimes = []
+  for (let t = 0; t <= maxTime; t += INTERVAL) {
+    targetTimes.push(t)
+  }
+
+  // 為每個目標時間找到最接近的 segment
+  for (const targetTime of targetTimes) {
+    let closestSegment = null
+    let minDistance = Infinity
+
+    for (const seg of segmentPositions) {
+      // 跳過已使用的 segment
+      if (usedSegments.has(seg)) continue
+
+      // 計算 segment 起始時間與目標時間的距離
+      const distance = Math.abs(seg.start - targetTime)
+
+      // 只選擇距離在合理範圍內的 segment（比如 120 秒內）
+      if (distance < minDistance && distance < INTERVAL * 2) {
+        minDistance = distance
+        closestSegment = seg
+      }
+    }
+
+    if (closestSegment) {
+      usedSegments.add(closestSegment)
+
+      markers.push({
+        time: closestSegment.start,
+        label: formatTimecode(closestSegment.start),
+        charPosition: closestSegment.charStart
+      })
+    }
+    // 如果找不到 closestSegment，繼續嘗試下一個目標時間，不要 break
+  }
+
+  // 確保 markers 按時間排序
+  markers.sort((a, b) => a.time - b.time)
+
+  // 計算每個 marker 的字符位置百分比（用於絕對定位）
+  for (let i = 0; i < markers.length; i++) {
+    markers[i].positionPercent = totalChars > 0
+      ? (markers[i].charPosition / totalChars) * 100
+      : 0
+  }
+
+  console.log(`📍 生成 ${markers.length} 個 timecode markers，音檔總長度: ${Math.floor(maxTime / 60)}:${Math.floor(maxTime % 60).toString().padStart(2, '0')}`)
+  if (markers.length > 0) {
+    console.log(`   第一個: ${markers[0].label}, 最後一個: ${markers[markers.length - 1].label}`)
+  }
+
+  return markers
+}
+
+// 點擊 timecode 跳轉到音檔位置
+function seekToTime(time) {
+  if (audioElement.value) {
+    audioElement.value.currentTime = time
+    audioElement.value.play().catch(err => {
+      console.log('播放失敗:', err)
+    })
+  }
+}
+
+// 快退10秒
+function skipBackward() {
+  if (audioElement.value) {
+    audioElement.value.currentTime = Math.max(0, audioElement.value.currentTime - 10)
+  }
+}
+
+// 快進10秒
+function skipForward() {
+  if (audioElement.value) {
+    audioElement.value.currentTime = Math.min(
+      audioElement.value.duration || 0,
+      audioElement.value.currentTime + 10
+    )
+  }
+}
+
+// 播放/暫停切換
+function togglePlayPause() {
+  if (!audioElement.value) return
+
+  if (audioElement.value.paused) {
+    audioElement.value.play().then(() => {
+      isPlaying.value = true
+    }).catch(err => {
+      console.error('播放失敗:', err)
+      audioError.value = '播放失敗'
+    })
+  } else {
+    audioElement.value.pause()
+    isPlaying.value = false
+  }
+}
+
+// 使用 binary search 找到最接近的 timecode marker
+function findActiveTimecode(charOffset) {
+  if (timecodeMarkers.value.length === 0) return -1
+
+  // Binary search 找到最接近的 marker
+  let left = 0
+  let right = timecodeMarkers.value.length - 1
+  let closest = 0
+
+  while (left <= right) {
+    const mid = Math.floor((left + right) / 2)
+    const marker = timecodeMarkers.value[mid]
+
+    if (marker.charPosition <= charOffset) {
+      closest = mid
+      left = mid + 1
+    } else {
+      right = mid - 1
+    }
+  }
+
+  return closest
+}
+
+// 計算字符的視覺寬度（區分中文、英文等）
+function getCharWidth(char) {
+  const code = char.charCodeAt(0)
+
+  // 中文字符（CJK 統一表意文字）
+  if ((code >= 0x4E00 && code <= 0x9FFF) ||   // 基本漢字
+      (code >= 0x3400 && code <= 0x4DBF) ||   // 擴展 A
+      (code >= 0x20000 && code <= 0x2A6DF) || // 擴展 B
+      (code >= 0xF900 && code <= 0xFAFF) ||   // 兼容漢字
+      (code >= 0x2E80 && code <= 0x2EFF) ||   // 部首補充
+      (code >= 0x3000 && code <= 0x303F)) {   // CJK 符號和標點
+    return 15 // 15px (等於 font-size)
+  }
+
+  // 全角符號
+  if (code >= 0xFF00 && code <= 0xFFEF) {
+    return 15
+  }
+
+  // 英文、數字、半角符號
+  if ((code >= 0x0020 && code <= 0x007E) ||   // 基本拉丁字母
+      (code >= 0x00A0 && code <= 0x00FF)) {   // 拉丁補充
+    return 8.5 // 約 0.57 倍的 font-size
+  }
+
+  // 其他字符（預設）
+  return 10
+}
+
+// 計算一行文字的視覺寬度（像素）
+function calculateLineWidth(line) {
+  let width = 0
+  for (let i = 0; i < line.length; i++) {
+    width += getCharWidth(line[i])
+  }
+  return width
+}
+
+// 基於換行符和實際行數精確計算字符偏移量
+function estimateCharOffsetFromScroll(targetScrollTop) {
+  if (!textarea.value) return 0
+
+  const content = currentTranscript.value.content
+  const lineHeight = parseFloat(getComputedStyle(textarea.value).lineHeight) || 27 // line-height: 1.8, font-size: 15px
+  const textareaWidth = textarea.value.clientWidth
+
+  // 計算目標滾動位置對應的行數
+  const targetLineNumber = Math.floor(targetScrollTop / lineHeight)
+
+  // 分割文字為行（根據換行符）
+  const lines = content.split('\n')
+
+  // 累計字符數，找到對應的行
+  let charOffset = 0
+  let currentLine = 0
+
+  for (let i = 0; i < lines.length && currentLine < targetLineNumber; i++) {
+    const line = lines[i]
+
+    // 計算這一行的實際視覺寬度
+    const lineWidth = calculateLineWidth(line)
+
+    // 計算這一行會佔用多少視覺行（考慮自動換行）
+    const visualLines = Math.max(1, Math.ceil(lineWidth / textareaWidth))
+
+    if (currentLine + visualLines <= targetLineNumber) {
+      // 整行都在目標行之前
+      charOffset += line.length + 1 // +1 for \n
+      currentLine += visualLines
+    } else {
+      // 目標位置在這一行的中間
+      const remainingLines = targetLineNumber - currentLine
+      const targetWidthInLine = remainingLines * textareaWidth
+
+      // 累積字符直到達到目標寬度
+      let accumulatedWidth = 0
+      let charsInLine = 0
+
+      for (let j = 0; j < line.length; j++) {
+        const charWidth = getCharWidth(line[j])
+        if (accumulatedWidth + charWidth > targetWidthInLine) {
+          break
+        }
+        accumulatedWidth += charWidth
+        charsInLine++
+      }
+
+      charOffset += charsInLine
+      break
+    }
+  }
+
+  return Math.min(charOffset, content.length)
+}
+
+// 滾動時更新活躍的 timecode
+function syncScroll() {
+  if (!textarea.value) return
+
+  // 1. 計算基準線位置（視窗頂部向下 25% 的位置）
+  const referenceLineOffset = textarea.value.clientHeight * 0.25
+  const referenceScrollTop = textarea.value.scrollTop + referenceLineOffset
+
+  // 2. 將基準線滾動位置轉換為字符偏移量（使用二分搜索 + 換行符計算）
+  const estimatedCharOffset = estimateCharOffsetFromScroll(referenceScrollTop)
+  const scrollPercent = referenceScrollTop / textarea.value.scrollHeight
+
+  // 3. 使用 binary search 找到對應的 timecode
+  const newActiveIndex = findActiveTimecode(estimatedCharOffset)
+
+  // 4. 調試信息：顯示當前位置的文字片段和對應的 segment
+  if (newActiveIndex !== activeTimecodeIndex.value) {
+    activeTimecodeIndex.value = newActiveIndex
+
+    // 顯示基準線位置附近的文字片段（幫助調試）
+    const textAtReference = currentTranscript.value.content.substring(
+      Math.max(0, estimatedCharOffset - 30),
+      Math.min(currentTranscript.value.content.length, estimatedCharOffset + 30)
+    )
+
+    const marker = timecodeMarkers.value[newActiveIndex]
+
+    // 找到對應的 segment
+    let correspondingSegment = null
+    if (marker && segments.value.length > 0) {
+      // 找到時間最接近 marker 的 segment
+      correspondingSegment = segments.value.reduce((closest, seg) => {
+        const currentDiff = Math.abs(seg.start - marker.time)
+        const closestDiff = Math.abs(closest.start - marker.time)
+        return currentDiff < closestDiff ? seg : closest
+      })
+    }
+
+    const lineHeight = parseFloat(getComputedStyle(textarea.value).lineHeight) || 27
+    const targetLine = Math.floor((textarea.value.scrollTop + textarea.value.clientHeight * 0.25) / lineHeight)
+
+    console.log(`🎯 滾動 ${(scrollPercent * 100).toFixed(1)}% (scrollTop: ${textarea.value.scrollTop.toFixed(0)}px)`)
+    console.log(`   目標行: ${targetLine} (行高: ${lineHeight.toFixed(1)}px) → 字符 ${estimatedCharOffset}/${currentTranscript.value.content.length}`)
+    console.log(`   顯示 Timecode: ${marker?.label || 'N/A'} (charPos: ${marker?.charPosition})`)
+    console.log(`   基準線文字: "...${textAtReference.replace(/\n/g, '↵')}..."`)
+    if (correspondingSegment) {
+      console.log(`   Segment文字: "${correspondingSegment.text.trim().substring(0, 60).replace(/\n/g, '↵')}..."`)
+    }
+  }
+}
+
+// 更新 textarea 的 scrollHeight
+function updateScrollHeight() {
+  if (textarea.value) {
+    // 使用 nextTick 確保 DOM 更新後再計算高度
+    setTimeout(() => {
+      textareaScrollHeight.value = textarea.value.scrollHeight
+    }, 0)
+  }
+}
+
+// 瀏覽逐字稿
+async function viewTranscript(taskId) {
+  const task = tasks.value.find(t => t.task_id === taskId)
+  if (!task) return
+
+  showTranscriptDialog.value = true
+  loadingTranscript.value = true
+  transcriptError.value = null
+  segments.value = []
+  timecodeMarkers.value = []
+  activeTimecodeIndex.value = -1  // 重置活躍索引
+
+  // 設置基本資訊
+  currentTranscript.value = {
+    task_id: task.task_id,
+    filename: task.filename,
+    created_at: task.completed_at || task.created_at,
+    text_length: task.text_length,
+    duration_text: task.duration_text,
+    result_filename: task.result_filename,
+    hasAudio: !!task.audio_file,  // 檢查是否有音檔
+    content: ''
+  }
+
+  try {
+    // 並行獲取逐字稿和 segments
+    const [transcriptResponse, segmentsResponse] = await Promise.all([
+      axios.get(`${API_BASE}/transcribe/${taskId}/download`, {
+        responseType: 'text'
+      }),
+      axios.get(`${API_BASE}/transcribe/${taskId}/segments`).catch(err => {
+        console.log('無法獲取 segments（可能是舊任務）:', err)
+        return null
+      })
+    ])
+
+    currentTranscript.value.content = transcriptResponse.data
+
+    // 如果有 segments 數據，生成 timecode markers
+    if (segmentsResponse && segmentsResponse.data.segments) {
+      segments.value = segmentsResponse.data.segments
+      timecodeMarkers.value = generateTimecodeMarkers(segments.value)
+    }
+
+    loadingTranscript.value = false
+
+    // 初始化 scrollHeight
+    setTimeout(() => {
+      updateScrollHeight()
+    }, 100)
+  } catch (error) {
+    console.error('載入逐字稿失敗:', error)
+    transcriptError.value = '載入逐字稿失敗：' + (error.response?.data?.detail || error.message)
+    loadingTranscript.value = false
+  }
+}
+
+// 獲取音檔 URL
+function getAudioUrl(taskId) {
+  return `${API_BASE}/transcribe/${taskId}/audio`
+}
+
+// 音檔載入成功
+function handleAudioLoaded() {
+  audioError.value = null
+  console.log('音檔載入成功')
+}
+
+// 音檔載入錯誤
+function handleAudioError(event) {
+  console.error('音檔載入失敗:', event)
+  const audio = event.target
+  if (audio.error) {
+    switch (audio.error.code) {
+      case audio.error.MEDIA_ERR_ABORTED:
+        audioError.value = '音檔載入被中止'
+        break
+      case audio.error.MEDIA_ERR_NETWORK:
+        audioError.value = '網路錯誤，無法載入音檔'
+        break
+      case audio.error.MEDIA_ERR_DECODE:
+        audioError.value = '音檔格式錯誤或損壞'
+        break
+      case audio.error.MEDIA_ERR_SRC_NOT_SUPPORTED:
+        audioError.value = '不支援的音檔格式或音檔不存在'
+        break
+      default:
+        audioError.value = '未知錯誤'
+    }
+  }
+}
+
+// 關閉逐字稿對話框
+function closeTranscriptDialog() {
+  showTranscriptDialog.value = false
+  currentTranscript.value = {}
+  transcriptError.value = null
+  audioError.value = null
+  isEditing.value = false
+  originalContent.value = ''
+  findText.value = ''
+  replaceText.value = ''
+  segments.value = []
+  timecodeMarkers.value = []
+}
+
+// 從對話框下載逐字稿
+function downloadCurrentTranscript() {
+  if (currentTranscript.value.task_id) {
+    downloadTask(currentTranscript.value.task_id)
+  }
+}
+
+// 開始編輯
+function startEditing() {
+  isEditing.value = true
+  originalContent.value = currentTranscript.value.content
+}
+
+// 取消編輯
+function cancelEditing() {
+  currentTranscript.value.content = originalContent.value
+  isEditing.value = false
+
+}
+
+// 儲存逐字稿
+async function saveTranscript() {
+  if (!currentTranscript.value.task_id) return
+
+  savingTranscript.value = true
+
+  try {
+    await axios.put(`${API_BASE}/transcribe/${currentTranscript.value.task_id}/content`, {
+      content: currentTranscript.value.content
+    }, {
+      headers: { 'Content-Type': 'application/json' }
+    })
+
+    // 更新原始內容
+    originalContent.value = currentTranscript.value.content
+    isEditing.value = false
+    findText.value = ''
+    replaceText.value = ''
+
+    alert('逐字稿已成功儲存！')
+  } catch (error) {
+    console.error('儲存逐字稿失敗:', error)
+    alert('儲存失敗：' + (error.response?.data?.detail || error.message))
+  } finally {
+    savingTranscript.value = false
+  }
+}
+
+// 全文取代
+function replaceAll() {
+  if (!findText.value) {
+    alert('請輸入要尋找的文字')
+    return
+  }
+
+  const content = currentTranscript.value.content
+  const searchText = findText.value
+  const replacementText = replaceText.value
+
+  // 計算會有多少個匹配
+  const regex = new RegExp(searchText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')
+  const matches = content.match(regex)
+  const count = matches ? matches.length : 0
+
+  if (count === 0) {
+    alert(`找不到「${searchText}」`)
+    return
+  }
+
+  if (confirm(`找到 ${count} 個「${searchText}」，確定要全部取代為「${replacementText}」嗎？`)) {
+    currentTranscript.value.content = content.replaceAll(searchText, replacementText)
+    alert(`已成功取代 ${count} 處`)
+
+    // 清空輸入框
+    findText.value = ''
+    replaceText.value = ''
+  }
+}
+
 // 生命週期
 onMounted(() => {
   refreshTasks()
@@ -436,7 +1196,7 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
@@ -641,5 +1401,521 @@ onUnmounted(() => {
   background: rgba(221, 132, 72, 0.2);
   border-color: var(--electric-primary);
   transform: translateY(-2px);
+}
+
+/* 逐字稿瀏覽對話框 */
+.transcript-modal {
+  width: 90%;
+  max-width: 900px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.transcript-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid rgba(221, 132, 72, 0.2);
+}
+
+/* 音檔播放器 */
+.audio-player-container {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: rgba(160, 82, 45, 0.05);
+  border-radius: 8px;
+  /* border: 1px solid rgba(160, 82, 45, 0.2); */
+}
+
+.audio-player-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(45, 45, 45, 0.7);
+  margin-bottom: 8px;
+}
+
+.audio-player {
+  width: 100%;
+  height: 40px;
+  outline: none;
+  margin-bottom: 8px;
+}
+
+.audio-player::-webkit-media-controls-play-button {
+  display: none;
+}
+
+.audio-player::-webkit-media-controls-panel {
+  background-color: rgba(255, 255, 255, 0.9);
+  /* background: transparent; */
+}
+
+/* 音檔控制按鈕 */
+.audio-controls {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  align-items: center;
+}
+
+.audio-control-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 40px;
+  padding: 8px;
+  background: rgba(160, 81, 45, 0);
+  border: 1px solid rgba(160, 81, 45, 0);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: #a0522d;
+  position: relative;
+}
+
+.audio-control-btn:hover {
+  background: rgba(160, 82, 45, 0.2);
+  /* border-color: #a0522d; */
+  transform: scale(1.05);
+  box-shadow: 0 2px 8px rgba(160, 82, 45, 0.3);
+}
+
+.audio-control-btn:active {
+  transform: scale(0.98);
+}
+
+.audio-control-btn svg {
+  display: block;
+}
+
+/* 播放按鈕特殊樣式（稍大一點） */
+.audio-control-btn.audio-play-btn {
+  min-width: 48px;
+  height: 48px;
+}
+
+/* 控制按鈕標籤 */
+.control-label {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: inherit;
+  pointer-events: none;
+}
+
+/* 音檔錯誤訊息 */
+.audio-error {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 6px;
+  color: #dc2626;
+  font-size: 13px;
+  text-align: center;
+}
+
+.transcript-title-section h2 {
+  font-size: 20px;
+  color: #2d2d2d;
+  margin: 0 0 8px 0;
+  font-weight: 700;
+}
+
+.transcript-meta {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  color: rgba(45, 45, 45, 0.6);
+  flex-wrap: wrap;
+}
+
+.btn-close {
+  background: rgba(239, 68, 68, 0.1);
+  border: 2px solid rgba(239, 68, 68, 0.2);
+  border-radius: 8px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s;
+  color: rgba(239, 68, 68, 0.8);
+  flex-shrink: 0;
+}
+
+.btn-close:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.4);
+  transform: translateY(-2px);
+}
+
+/* 內容區域包裝器（包含側邊欄和文字） */
+.transcript-content-wrapper {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  margin-bottom: 20px;
+  max-height: 70vh;
+  min-height: 500px;
+}
+
+/* 固定顯示的當前 Timecode（右上角，貼在基準線上方） - 玻璃態設計 */
+.timecode-fixed-display {
+  position: absolute;
+  top: calc(25% - 36px); /* 基準線上方，留出按鈕高度 */
+  right: 35px; /* 往左偏移，避開滾動條 */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(126, 86, 76, 0.15); /* 更低透明度，增強玻璃感 */
+  border-radius: 8px;
+  padding: 6px 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08),
+              0 0 0 1px rgba(255, 255, 255, 0.15) inset; /* 內陰影增加深度 */
+  cursor: pointer;
+  transition: all 0.3s ease;
+  z-index: 100;
+  backdrop-filter: blur(16px) saturate(200%); /* 更強的毛玻璃效果 */
+  -webkit-backdrop-filter: blur(16px) saturate(200%);
+}
+
+.timecode-fixed-display:hover {
+  background: rgba(255, 255, 255, 0.25);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12),
+              0 0 0 1px rgba(255, 255, 255, 0.25) inset;
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.timecode-icon {
+  font-size: 16px;
+  line-height: 1;
+  color: #6b5d52;
+}
+
+.timecode-label {
+  font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: #4a4a4a; /* 深灰色文字 */
+  white-space: nowrap;
+}
+
+/* 逐字稿內容區域 */
+.transcript-content {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 8px;
+  padding: 20px;
+  border: 1px solid rgba(221, 132, 72, 0.15);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  position: relative;
+}
+
+/* 當有側邊欄時，內容不需要 margin-bottom */
+.transcript-content.with-sidebar {
+  margin-bottom: 0;
+}
+
+/* 取代工具列 - 內聯版本 */
+.replace-toolbar-inline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: 1;
+}
+
+.replace-input-inline {
+  padding: 10px 12px;
+  font-size: 14px;
+  border: 2px solid rgba(130, 162, 140, 0.3);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #2d2d2d;
+  transition: all 0.3s;
+  min-width: 120px;
+}
+
+.replace-input-inline:focus {
+  outline: none;
+  border-color: rgba(130, 162, 140, 0.6);
+  box-shadow: 0 0 0 3px rgba(130, 162, 140, 0.1);
+}
+
+.replace-input-inline::placeholder {
+  color: rgba(45, 45, 45, 0.4);
+}
+
+.btn-replace-inline {
+  padding: 10px 16px;
+  background: #77969Ae6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
+  white-space: nowrap;
+}
+
+.btn-replace-inline:hover:not(:disabled) {
+  background: #336774e6;
+  transform: translateY(-1px);
+}
+
+.btn-replace-inline:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.loading-state,
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  text-align: center;
+  color: rgba(45, 45, 45, 0.6);
+}
+
+.loading-state .spinner {
+  width: 40px;
+  height: 40px;
+  margin-bottom: 16px;
+}
+
+.error-state p {
+  color: #f87171;
+  font-size: 14px;
+}
+
+.transcript-text {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-size: 15px;
+  line-height: 1.8;
+  color: #2d2d2d;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  margin: 0;
+  padding: 0;
+}
+
+/* Textarea 容器 - 用於放置基準線 */
+.textarea-wrapper {
+  width: 100%;
+  flex: 1;
+  position: relative;
+  min-height: 400px;
+}
+
+/* 基準線 - 使用偽元素固定在 25% 位置（更細的線） */
+.textarea-wrapper.show-reference-line::before {
+  content: '';
+  position: absolute;
+  top: 25%;
+  left: 0;
+  right: 0;
+  height: 1px; /* 從 3px 改為 1px */
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(139, 69, 19, 0.5) 5%,
+    rgba(139, 69, 19, 0.5) 95%,
+    transparent 100%
+  );
+  box-shadow: 0 0 3px rgba(139, 69, 19, 0.3);
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* 基準線端點標記 - 移除左側標記，保持視覺簡潔 */
+.textarea-wrapper.show-reference-line::after {
+  content: '';
+  position: absolute;
+  top: calc(25% - 1.5px);
+  right: 5px;
+  width: 4px;
+  height: 4px;
+  background: rgba(139, 69, 19, 0.7);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.transcript-textarea {
+  width: 100%;
+  height: 100%;
+  min-height: 400px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-size: 15px;
+  line-height: 1.8;
+  color: #2d2d2d;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  padding: 0;
+  overflow-y: auto;
+}
+
+.transcript-textarea:readonly {
+  cursor: default;
+}
+
+.transcript-textarea.editing {
+  background: rgba(255, 255, 255, 0.8);
+  padding: 12px;
+  border-radius: 6px;
+  border: 2px solid var(--electric-primary);
+  cursor: text;
+}
+
+.btn-edit {
+  background: rgba(82, 162, 140, 0.9);
+  color: white;
+  border: none;
+}
+
+.btn-edit:hover {
+  background: rgba(78, 108, 79, 0.9);
+  transform: translateY(-2px);
+}
+
+.btn-success {
+  background: rgba(16, 185, 129, 0.9);
+  color: white;
+  border: none;
+}
+
+.btn-success:hover:not(:disabled) {
+  background: rgba(5, 150, 105, 0.9);
+  transform: translateY(-2px);
+}
+
+.btn-success:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.transcript-actions {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 12px;
+  margin-left: auto;
+}
+
+/* 對話框中的三聯按鈕組 */
+.btn-group-modal {
+  display: inline-flex;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(139, 69, 19, 0.2);
+}
+
+.btn-group-modal .btn {
+  border-radius: 0;
+  margin: 0;
+  position: relative;
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
+  border: none;
+}
+
+.btn-group-modal .btn:not(:last-child) {
+  border-right: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.btn-group-modal .btn-group-left {
+  border-radius: 8px 0 0 8px !important;
+}
+
+.btn-group-modal .btn-group-middle {
+  border-radius: 0 !important;
+}
+
+.btn-group-modal .btn-group-right {
+  border-radius: 0 8px 8px 0 !important;
+}
+
+.btn-group-modal .btn:hover {
+  z-index: 1;
+}
+
+/* 編輯按鈕 - 實心棕色 */
+.btn-modal-edit {
+  background: #a0522d;
+  color: white;
+}
+
+.btn-modal-edit:hover {
+  background: #8b4513;
+  transform: translateY(-1px);
+}
+
+/* 儲存按鈕 - 實心綠棕色 */
+.btn-modal-save {
+  background: #77969A;
+  color: white;
+}
+
+.btn-modal-save:hover:not(:disabled) {
+  background: #336774;
+  transform: translateY(-1px);
+}
+
+.btn-modal-save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 下載按鈕 - 實心棕色 */
+.btn-modal-download {
+  background: #a0522d;
+  color: white;
+}
+
+.btn-modal-download:hover {
+  background: #8b4513;
+  transform: translateY(-1px);
+}
+
+/* 關閉/取消按鈕 - 空心棕色 */
+.btn-modal-close,
+.btn-modal-cancel {
+
+  background: rgba(139, 69, 19, 0.255);
+  border-color: #6b341000 !important;
+  color: #82461a;
+
+}
+
+.btn-modal-close:hover,
+.btn-modal-cancel:hover {
+  background: #783d16df;
+  color: rgb(255, 255, 255);
+
+  /* transform: translateY(-1px); */
 }
 </style>

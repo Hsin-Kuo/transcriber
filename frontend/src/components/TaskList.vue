@@ -87,13 +87,44 @@
                 </div>
 
                 <div class="task-actions">
-                  <button
-                    v-if="task.status === 'completed'"
-                    class="btn btn-primary"
-                    @click="emit('download', task.task_id)"
-                  >
-                    下載
-                  </button>
+                  <!-- 已完成任務的三聯按鈕組 -->
+                  <div v-if="task.status === 'completed'" class="btn-group">
+                    <button
+                      class="btn btn-view btn-group-left btn-icon"
+                      @click="emit('view', task.task_id)"
+                      title="瀏覽逐字稿"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                      </svg>
+                    </button>
+                    <button
+                      class="btn btn-download btn-group-middle btn-icon"
+                      @click="emit('download', task.task_id)"
+                      title="下載逐字稿"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                      </svg>
+                    </button>
+                    <button
+                      class="btn btn-danger btn-group-right btn-icon"
+                      @click="emit('delete', task.task_id)"
+                      title="刪除任務及檔案"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        <line x1="10" y1="11" x2="10" y2="17"></line>
+                        <line x1="14" y1="11" x2="14" y2="17"></line>
+                      </svg>
+                    </button>
+                  </div>
+
+                  <!-- 進行中任務的按鈕 -->
                   <button
                     v-if="['pending', 'processing'].includes(task.status)"
                     class="btn btn-warning"
@@ -104,8 +135,10 @@
                     <span v-if="task.cancelling" class="spinner"></span>
                     {{ task.cancelling ? '取消中...' : '取消' }}
                   </button>
+
+                  <!-- 失敗或取消任務的刪除按鈕 -->
                   <button
-                    v-if="['completed', 'failed', 'cancelled'].includes(task.status)"
+                    v-if="['failed', 'cancelled'].includes(task.status)"
                     class="btn btn-danger"
                     @click="emit('delete', task.task_id)"
                     title="刪除任務及檔案"
@@ -138,7 +171,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['download', 'refresh', 'delete', 'cancel'])
+const emit = defineEmits(['download', 'refresh', 'delete', 'cancel', 'view'])
 
 const sortedTasks = computed(() => {
   return [...props.tasks].sort((a, b) => {
@@ -354,19 +387,18 @@ function getProcessingChunksText(task) {
 
 .badge-diarize {
   padding: 2px 8px;
-  background: rgba(139, 92, 246, 0.1);
-  border: 1px solid rgba(139, 92, 246, 0.3);
+  background: rgba(246, 156, 92, 0.1);
+  border: 1px solid rgba(246, 141, 92, 0.3);
   border-radius: 4px;
-  color: rgba(109, 40, 217, 0.9);
+  color: rgba(217, 108, 40, 0.9);
   font-size: 12px;
   font-weight: 500;
-  cursor: help;
   transition: all 0.2s;
 }
 
 .badge-diarize:hover {
-  background: rgba(139, 92, 246, 0.15);
-  border-color: rgba(139, 92, 246, 0.5);
+  background: rgba(246, 138, 92, 0.15);
+  border-color: rgba(246, 146, 92, 0.5);
   transform: translateY(-1px);
 }
 
@@ -445,7 +477,7 @@ function getProcessingChunksText(task) {
 .task-result {
   margin-top: 8px;
   padding: 8px 12px;
-  background: rgba(16, 185, 129, 0.15);
+  background: rgba(91, 183, 48, 0.15);
   border: 1px solid rgba(16, 185, 129, 0.3);
   border-radius: 6px;
   font-size: 14px;
@@ -471,5 +503,98 @@ function getProcessingChunksText(task) {
 .task-actions {
   display: flex;
   gap: 8px;
+}
+
+/* 三聯按鈕組 */
+.btn-group {
+  display: inline-flex;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.btn-group .btn {
+  border-radius: 0;
+  margin: 0;
+  position: relative;
+}
+
+.btn-group .btn:not(:last-child) {
+  border-right: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.btn-group-left {
+  border-radius: 8px 0 0 8px !important;
+}
+
+.btn-group-middle {
+  border-radius: 0 !important;
+}
+
+.btn-group-right {
+  border-radius: 0 8px 8px 0 !important;
+}
+
+/* 確保三聯組中的按鈕 hover 效果不會被覆蓋 */
+.btn-group .btn:hover {
+  z-index: 1;
+}
+
+/* 圖標按鈕樣式 */
+.btn-icon {
+  min-width: 52px;
+  width: 52px;
+  height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-icon svg {
+  flex-shrink: 0;
+}
+
+/* 瀏覽按鈕 - 實心填滿咖啡棕色 */
+.btn-view {
+  background: #77969A;
+  color: white;
+  border: none;
+  font-weight: 500;
+}
+
+.btn-view:hover {
+  background: #336774;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(160, 82, 45, 0.4);
+}
+
+.btn-download {
+  background: #77969A;
+  color: white;
+  border: none;
+  font-weight: 500;
+}
+
+.btn-download:hover {
+  background: #336774;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(160, 82, 45, 0.4);
+}
+
+/* 刪除按鈕 - 空心邊框咖啡紅棕色 */
+.task-actions .btn-danger {
+  background: transparent;
+  color: #5e7b7f;
+  border: 1px solid #759977;
+  font-weight: 500;
+}
+
+.task-actions .btn-danger:hover {
+  background: #33677425;
+  border-color: #62592c00;
+  color: #4e6c4f;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(19, 139, 19, 0.25);
 }
 </style>

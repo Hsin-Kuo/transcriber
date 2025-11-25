@@ -20,10 +20,9 @@ Whisper Transcriber 是一個基於 OpenAI Whisper 的中文語音轉錄系統�
 ```
 transcriber/
 ├── src/                    # 原始碼
-│   ├── transcribe.py       # 獨立轉錄工具
 │   ├── whisper_server.py   # FastAPI 伺服器
-│   ├── transcribe_client.py # 客戶端腳本
 │   └── refine_transcript.py # 文稿精煉工具
+├── frontend/               # Vue 前端界面
 ├── docs/                   # 文檔
 │   └── DOCKER_README.md    # Docker 部署說明
 ├── data/                   # 音訊檔案（被 git 忽略）
@@ -53,20 +52,7 @@ cp .env.example .env
 
 ### 2. 使用方式
 
-#### 方式 A：獨立模式（本地轉錄）
-
-```bash
-python src/transcribe.py -i data/audio.m4a -m medium --punct-provider gemini
-```
-
-**參數說明：**
-- `-i, --input`：音訊檔案路徑
-- `-m, --model`：Whisper 模型（tiny/base/small/medium/large-v2）
-- `--punct-provider`：標點服務（gemini/openai/none）
-- `--chunk-audio`：啟用音檔切割
-- `--chunk-minutes`：切割長度（分鐘）
-
-#### 方式 B：伺服器模式（遠端呼叫）
+#### 後端服務啟動
 
 **使用管理腳本（推薦）：**
 
@@ -97,14 +83,17 @@ tail -f backend.log
 python src/whisper_server.py --host 0.0.0.0 --port 8000 --model medium
 ```
 
-**使用客戶端：**
+**使用前端界面：**
 
+服務啟動後，訪問前端界面上傳音檔：
 ```bash
-# 使用客戶端上傳音檔
-python src/transcribe_client.py -i data/audio.m4a --server http://localhost:8000
+# 前端開發服務器（如果尚未啟動）
+cd ㄑ
+npm run dev
+# 訪問 http://localhost:5173
 ```
 
-#### 方式 C：Docker 部署
+#### Docker 部署
 
 ```bash
 # 設定環境變數
@@ -117,8 +106,8 @@ docker-compose up -d
 # 查看日誌
 docker-compose logs -f
 
-# 使用客戶端
-python src/transcribe_client.py -i data/audio.m4a
+# 訪問前端界面
+# http://localhost:5173
 ```
 
 詳細說明請參考 [Docker 部署文檔](docs/DOCKER_README.md)
@@ -429,12 +418,13 @@ pip install -r requirements.txt
 ### 執行測試
 
 ```bash
-# 測試單檔轉錄
-python src/transcribe.py -i data/test.m4a -m small
-
 # 測試伺服器
 python src/whisper_server.py --model small
+
+# 測試 API（使用 curl）
 curl -X POST http://localhost:8000/transcribe -F "file=@data/test.m4a"
+
+# 或使用前端界面上傳測試檔案
 ```
 
 ### 程式碼風格

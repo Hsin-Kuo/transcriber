@@ -28,11 +28,11 @@ docker-compose logs -f
 ### 3. 測試服務
 
 ```bash
-# 方法 1：使用瀏覽器
-open http://localhost:8000/docs
+# 方法 1：使用前端界面
+open http://localhost:5173
 
-# 方法 2：使用客戶端腳本
-python3 transcribe_client.py -i your_audio_file.m4a
+# 方法 2：使用 API 文檔（Swagger UI）
+open http://localhost:8000/docs
 
 # 方法 3：使用 curl
 curl -X POST "http://localhost:8000/transcribe" \
@@ -137,10 +137,12 @@ volumes:
 # 查看 Tailscale IP
 tailscale ip -4
 
-# 從其他裝置訪問
-python3 transcribe_client.py \
-  -i audio.m4a \
-  --server http://100.64.1.1:8000
+# 從其他裝置訪問前端界面
+open http://100.64.1.1:5173
+
+# 或使用 curl 直接調用 API
+curl -X POST "http://100.64.1.1:8000/transcribe" \
+  -F "file=@audio.m4a"
 ```
 
 ### 修改綁定端口
@@ -240,5 +242,5 @@ docker-compose up -d
 - `docker-compose.yml` - 服務編排
 - `.dockerignore` - Docker 建立時忽略的檔案
 - `.env` - 環境變數（API Keys）
-- `whisper_server.py` - FastAPI 服務端
-- `transcribe_client.py` - 客戶端腳本
+- `src/whisper_server.py` - FastAPI 服務端
+- `frontend/` - Vue 前端界面

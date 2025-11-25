@@ -43,13 +43,12 @@ CHUNK_DURATION_MS = 10 * 60 * 1000
 OPENAI_MODEL = "gpt-4o-mini"
 GEMINI_MODEL = "gemini-2.0-flash"
 
-# 進度階段時間權重（用於計算進度百分比）
+# 進度階段權重（固定分配，總和 100%）
 PROGRESS_WEIGHTS = {
-    "audio_conversion": 2.2,      # 音訊轉檔：30s
-    "audio_chunking": 2.2,        # 音訊切分：30s
-    "chunk_start": 0.4,           # 每個 chunk 開始：30s / 6 = 0.4% per chunk
-    "chunk_complete": 14.5,       # 每個 chunk 完成：5min / 6 = 14.5% per chunk
-    "punctuation": 13.0,          # 加標點：3min
+    "audio_conversion": 5.0,      # 音訊轉檔：5%
+    "audio_chunking": 5.0,        # 音訊切分：5%（僅分段模式）
+    "transcription": 77.0,        # 轉錄：77%（分段模式）或 82%（非分段模式）
+    "punctuation": 13.0,          # 加標點：13%
 }
 
 # 時區設定 (UTC+8 台北時間)
@@ -73,27 +72,50 @@ def format_duration(seconds: float) -> str:
         return f"{hours} 小時 {minutes} 分"
 
 def calculate_progress_percentage(task_data: Dict[str, Any]) -> float:
-    """根據任務狀態計算進度百分比（基於時間權重）"""
-    progress = 0.0
+    """根據任務狀態動態計算進度百分比
 
-    # 1. 音訊轉檔完成
+    - 完成時強制返回 100%
+    - 過程中根據實際 chunks 數量動態分配權重
+    """
+    # 如果任務已完成，直接返回 100%
+    if task_data.get("status") == "completed":
+        return 100.0
+
+    progress = 0.0
+    chunks = task_data.get("chunks", [])
+    is_chunked = len(chunks) > 0  # 是否使用分段模式
+
+    # 1. 音訊轉檔完成：5%
     if task_data.get("audio_converted", False):
         progress += PROGRESS_WEIGHTS["audio_conversion"]
 
-    # 2. 音訊切分完成
-    if task_data.get("chunks_created", False):
-        progress += PROGRESS_WEIGHTS["audio_chunking"]
+    # 2. 轉錄階段
+    if is_chunked:
+        # 分段模式：audio_chunking(5%) + transcription(77%)
+        if task_data.get("chunks_created", False):
+            progress += PROGRESS_WEIGHTS["audio_chunking"]
 
-    # 3. Chunks 處理
-    chunks = task_data.get("chunks", [])
-    for chunk in chunks:
-        if chunk.get("status") == "processing":
-            progress += PROGRESS_WEIGHTS["chunk_start"]
-        elif chunk.get("status") == "completed":
-            progress += PROGRESS_WEIGHTS["chunk_start"]
-            progress += PROGRESS_WEIGHTS["chunk_complete"]
+        # 根據實際 chunks 數量分配轉錄進度
+        num_chunks = len(chunks)
+        if num_chunks > 0:
+            completed_chunks = sum(1 for c in chunks if c.get("status") == "completed")
+            processing_chunks = sum(1 for c in chunks if c.get("status") == "processing")
 
-    # 4. 標點處理
+            # 每個 chunk 完成貢獻：77% / num_chunks
+            # 每個 chunk 進行中貢獻：50% 的完成權重
+            chunk_weight = PROGRESS_WEIGHTS["transcription"] / num_chunks
+            progress += completed_chunks * chunk_weight
+            progress += processing_chunks * (chunk_weight * 0.5)
+    else:
+        # 非分段模式：transcription(82%) = audio_chunking(5%) + transcription(77%)
+        # 簡單判斷：如果已經開始標點，說明轉錄完成
+        if task_data.get("punctuation_started", False) or task_data.get("punctuation_completed", False):
+            progress += PROGRESS_WEIGHTS["audio_chunking"] + PROGRESS_WEIGHTS["transcription"]
+        elif task_data.get("audio_converted", False):
+            # 轉錄中，給予 50% 的轉錄進度
+            progress += (PROGRESS_WEIGHTS["audio_chunking"] + PROGRESS_WEIGHTS["transcription"]) * 0.5
+
+    # 3. 標點處理：13%
     if task_data.get("punctuation_completed", False):
         progress += PROGRESS_WEIGHTS["punctuation"]
     elif task_data.get("punctuation_started", False):
@@ -249,8 +271,8 @@ def transcribe_single_chunk(
     task_id: str = None,
     chunk_idx: int = None,
     time_offset: float = 0.0,
-    return_segments: bool = False
-) -> str:
+    return_segments: bool = True
+) -> tuple:
     """轉錄單一音檔片段（用於並行處理）
 
     Args:
@@ -260,11 +282,10 @@ def transcribe_single_chunk(
         task_id: 任務 ID
         chunk_idx: Chunk 索引
         time_offset: 時間偏移（秒），用於計算相對於完整音檔的時間戳
-        return_segments: 是否返回帶時間戳的 segments
+        return_segments: 是否返回帶時間戳的 segments（預設 True）
 
     Returns:
-        如果 return_segments=True，返回 (text, segments)
-        否則返回 text
+        始終返回 (text, segments) 元組
     """
     # 標記此 chunk 開始處理（實際開始執行時才標記）
     if task_id and chunk_idx:
@@ -278,24 +299,21 @@ def transcribe_single_chunk(
 
     segments, info = model.transcribe(str(chunk_path), language=language, beam_size=5)
 
-    # 收集 segments
+    # 始終收集 segments
     segments_list = []
     text_parts = []
 
     for segment in segments:
         text_parts.append(segment.text)
-        if return_segments:
-            segments_list.append({
-                "start": segment.start + time_offset,  # 加上時間偏移
-                "end": segment.end + time_offset,
-                "text": segment.text
-            })
+        segments_list.append({
+            "start": segment.start + time_offset,  # 加上時間偏移
+            "end": segment.end + time_offset,
+            "text": segment.text
+        })
 
     text = "".join(text_parts).strip()
 
-    if return_segments:
-        return text, segments_list
-    return text
+    return text, segments_list
 
 
 def transcribe_with_timestamps(model, audio_path: Path, language: Optional[str] = None) -> List[Dict]:
@@ -520,7 +538,8 @@ def transcribe_audio_in_chunks(
     # 如果音檔不長，直接轉錄
     if total_duration_ms <= chunk_duration_ms:
         print(f"📝 音檔長度在 {chunk_duration_ms/1000/60:.0f} 分鐘內，直接轉錄...")
-        return transcribe_single_chunk(model, audio_path, language=language)
+        text, segments = transcribe_single_chunk(model, audio_path, language=language)
+        return text, segments
 
     # 步驟 1：如果啟用 diarization，在背景並行執行說話者辨識
     diarization_future = None
@@ -635,11 +654,8 @@ def transcribe_audio_in_chunks(
 
     # 標記切分完成並計算預估完成時間
     if task_id:
-        import math
-        # 如果啟用 diarization，使用較低的並行度
-        num_workers = 2 if diarize else 4
-        rounds = math.ceil(num_chunks / num_workers)
-        estimated_minutes = rounds * 14 * 1.1
+        # 根據音檔時長計算預估處理時間：音檔時長的 3/5
+        estimated_minutes = total_minutes * 3 / 5
 
         # 取得任務開始時間並計算預估完成時間
         with tasks_lock:
@@ -663,7 +679,7 @@ def transcribe_audio_in_chunks(
     transcribe_workers = 2 if diarization_future else 4
     print(f"🚀 開始並行轉錄（並行數：{transcribe_workers}）{'，同時進行說話者辨識' if diarization_future else ''}...")
     chunks_text = [None] * num_chunks  # 預先分配陣列保持順序
-    all_segments = [] if diarization_future else None  # 如果啟用 diarization，收集所有 segments
+    all_segments = []  # 始終收集所有 segments
 
     try:
         with ThreadPoolExecutor(max_workers=transcribe_workers) as executor:
@@ -673,7 +689,7 @@ def transcribe_audio_in_chunks(
                 # 計算這個 chunk 的時間偏移（相對於完整音檔的秒數）
                 time_offset_seconds = start_ms / 1000.0
 
-                # 如果啟用 diarization，需要返回帶時間戳的 segments
+                # 始終返回帶時間戳的 segments
                 future = executor.submit(
                     transcribe_single_chunk,
                     model,
@@ -682,7 +698,7 @@ def transcribe_audio_in_chunks(
                     task_id,
                     chunk_idx,
                     time_offset_seconds,
-                    bool(diarization_future)  # return_segments
+                    True  # return_segments 始終為 True
                 )
                 future_to_chunk[future] = (chunk_idx, temp_path, time_offset_seconds)
 
@@ -712,12 +728,9 @@ def transcribe_audio_in_chunks(
 
                     result = future.result()
 
-                    # 處理返回結果（可能是純文字或(文字, segments)元組）
-                    if diarization_future and isinstance(result, tuple):
-                        chunk_text, chunk_segments = result
-                        all_segments.extend(chunk_segments)  # 收集所有 segments
-                    else:
-                        chunk_text = result
+                    # 處理返回結果（始終是 (文字, segments) 元組）
+                    chunk_text, chunk_segments = result
+                    all_segments.extend(chunk_segments)  # 收集所有 segments
 
                     chunks_text[chunk_idx - 1] = chunk_text
                     print(f"   ✅ 完成第 {chunk_idx}/{num_chunks} 段")
@@ -773,7 +786,7 @@ def transcribe_audio_in_chunks(
     print("✅ 所有音檔片段轉錄完成")
 
     # 第三步：如果啟用了 diarization，等待說話者辨識完成並合併資訊
-    if diarization_future and all_segments:
+    if diarization_future:
         print(f"⏳ 等待說話者辨識完成...")
         if task_id:
             update_task_status(task_id, {"progress": "等待說話者辨識完成..."})
@@ -811,14 +824,14 @@ def transcribe_audio_in_chunks(
 
                 final_text = merge_transcription_with_diarization(all_segments, diarization_segments)
                 print(f"✅ 說話者資訊合併完成")
-                return final_text
+                return final_text, all_segments
             else:
                 print(f"⚠️  說話者辨識失敗，返回純文字轉錄")
                 if task_id:
                     update_task_status(task_id, {
                         "diarization_status": "failed"
                     })
-                return " ".join(chunks_text)
+                return " ".join(chunks_text), all_segments
 
         except Exception as e:
             print(f"⚠️  等待說話者辨識時發生錯誤：{e}")
@@ -827,10 +840,10 @@ def transcribe_audio_in_chunks(
                 update_task_status(task_id, {
                     "diarization_status": "failed"
                 })
-            return " ".join(chunks_text)
+            return " ".join(chunks_text), all_segments
     else:
-        # 沒有 diarization，返回純文字
-        return " ".join(chunks_text)
+        # 沒有 diarization，返回純文字和 segments
+        return " ".join(chunks_text), all_segments
 
 
 def detect_language_with_llm(text: str, provider: str = "gemini") -> str:
@@ -1157,6 +1170,82 @@ def punctuate_with_gemini(text: str, chunk_size: int = None, task_id: str = None
     return "\n\n".join(results)
 
 
+def cleanup_old_audio_files(current_task_id: str):
+    """清理舊的音檔，只保留最新的一個
+
+    Args:
+        current_task_id: 當前任務的 ID（這個任務的音檔會被保留）
+    """
+    try:
+        print(f"🧹 開始清理舊音檔...")
+
+        # 收集所有已完成任務的音檔資訊（按完成時間排序）
+        tasks_with_audio = []
+
+        with tasks_lock:
+            for tid, task in transcription_tasks.items():
+                if task.get("status") == "completed" and task.get("audio_file"):
+                    audio_path = Path(task.get("audio_file"))
+                    completed_at = task.get("completed_at", "")
+
+                    tasks_with_audio.append({
+                        "task_id": tid,
+                        "audio_file": audio_path,
+                        "completed_at": completed_at,
+                        "is_current": tid == current_task_id
+                    })
+
+        if len(tasks_with_audio) <= 1:
+            print(f"   只有一個音檔，無需清理")
+            return
+
+        # 按完成時間排序（最新的在前面）
+        tasks_with_audio.sort(key=lambda x: x["completed_at"], reverse=True)
+
+        # 保留最新的一個，刪除其餘
+        files_to_delete = []
+        tasks_to_update = []
+
+        for idx, item in enumerate(tasks_with_audio):
+            if idx == 0:
+                # 保留最新的
+                print(f"   ✓ 保留最新音檔：{item['audio_file'].name}")
+                continue
+
+            # 標記要刪除的檔案
+            files_to_delete.append(item["audio_file"])
+            tasks_to_update.append(item["task_id"])
+
+        # 刪除舊音檔
+        deleted_count = 0
+        for audio_file in files_to_delete:
+            try:
+                if audio_file.exists():
+                    audio_file.unlink()
+                    print(f"   🗑️ 已刪除舊音檔：{audio_file.name}")
+                    deleted_count += 1
+            except Exception as e:
+                print(f"   ⚠️ 刪除音檔失敗 {audio_file.name}：{e}")
+
+        # 更新任務記錄，清除已刪除音檔的引用
+        if tasks_to_update:
+            with tasks_lock:
+                for tid in tasks_to_update:
+                    if tid in transcription_tasks:
+                        transcription_tasks[tid]["audio_file"] = None
+                        transcription_tasks[tid]["audio_filename"] = None
+                        transcription_tasks[tid]["updated_at"] = get_current_time()
+
+            # 保存更新到磁碟
+            save_tasks_to_disk()
+
+        print(f"✅ 清理完成：刪除了 {deleted_count} 個舊音檔")
+
+    except Exception as e:
+        print(f"⚠️ 清理舊音檔失敗：{e}")
+        # 清理失敗不應該影響主流程，所以不拋出異常
+
+
 def process_transcription_task(
     task_id: str,
     temp_audio_path: Path,
@@ -1175,7 +1264,14 @@ def process_transcription_task(
     注意：diarization 僅在非分段模式下可用，分段模式會忽略此參數
     max_speakers: 最大講者人數（可選，2-10）
     """
+    # 將 'auto' 轉換為 None，讓 Whisper 自動偵測語言
+    whisper_language = None if language == "auto" else language
+
     temp_dir = temp_audio_path.parent
+
+    # 保存音檔到 output 目錄（保留轉換後的 WAV 格式以確保瀏覽器相容性）
+    audio_filename = f"{Path(filename).stem}_{task_id}.wav"
+    permanent_audio_path = OUTPUT_DIR / audio_filename
 
     try:
         # 記錄暫存目錄
@@ -1214,17 +1310,19 @@ def process_transcription_task(
         # 執行轉錄
         update_task_status(task_id, {"progress": "正在轉錄音訊..."})
 
+        all_segments = []  # 用於儲存所有 segments
+
         if chunk_audio:
             # 分段模式：現在支援 diarization（先對完整音檔做說話者辨識，再分段轉錄）
             chunk_duration_ms = chunk_minutes * 60 * 1000
-            raw_text = transcribe_audio_in_chunks(
+            raw_text, all_segments = transcribe_audio_in_chunks(
                 wav_path,
                 whisper_model,
                 chunk_duration_ms,
                 task_id=task_id,
                 diarize=diarize,
                 max_speakers=max_speakers,
-                language=language
+                language=whisper_language
             )
         else:
             # 非分段模式：可以使用 diarization
@@ -1242,7 +1340,8 @@ def process_transcription_task(
 
                 # 執行轉錄（帶時間戳）
                 update_task_status(task_id, {"progress": "正在轉錄音訊（帶時間戳）..."})
-                transcription_segments = transcribe_with_timestamps(whisper_model, wav_path, language=language)
+                transcription_segments = transcribe_with_timestamps(whisper_model, wav_path, language=whisper_language)
+                all_segments = transcription_segments  # 保存 segments
 
                 # 合併結果
                 if diarization_segments:
@@ -1265,7 +1364,7 @@ def process_transcription_task(
                     raw_text = " ".join(seg["text"] for seg in transcription_segments)
             else:
                 print(f"📝 [{task_id}] 開始轉逐字稿...")
-                raw_text = transcribe_single_chunk(whisper_model, wav_path, language=language)
+                raw_text, all_segments = transcribe_single_chunk(whisper_model, wav_path, language=whisper_language)
 
         # 檢查是否已被取消
         if task_cancelled.get(task_id, False):
@@ -1305,6 +1404,20 @@ def process_transcription_task(
         permanent_output.write_text(final_text, encoding="utf-8")
         print(f"💾 [{task_id}] 文字檔已保存：{permanent_output.relative_to(OUTPUT_DIR.parent)}")
 
+        # 保存 segments 到 JSON 檔案
+        segments_filename = f"{safe_filename}_{timestamp}_segments.json"
+        segments_output = OUTPUT_DIR / segments_filename
+        segments_output.write_text(json.dumps(all_segments, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"📊 [{task_id}] Segments 已保存：{segments_output.relative_to(OUTPUT_DIR.parent)}")
+
+        # 複製 WAV 音檔到 output 目錄（保留以供播放，WAV 格式在瀏覽器中有最佳相容性）
+        import shutil
+        shutil.copy2(wav_path, permanent_audio_path)
+        print(f"🎵 [{task_id}] 音檔已保存（WAV 格式）：{permanent_audio_path.relative_to(OUTPUT_DIR.parent)}")
+
+        # 清理舊的音檔（只保留最新的）
+        cleanup_old_audio_files(task_id)
+
         # 計算總處理時間
         end_time = datetime.now(TZ_UTC8)
         duration_seconds = (end_time - start_time).total_seconds()
@@ -1315,6 +1428,10 @@ def process_transcription_task(
             "progress": "轉錄完成",
             "result_file": str(permanent_output),
             "result_filename": output_filename,
+            "segments_file": str(segments_output),
+            "segments_filename": segments_filename,
+            "audio_file": str(permanent_audio_path),
+            "audio_filename": audio_filename,
             "text_length": len(final_text),
             "completed_at": get_current_time(),
             "duration_seconds": round(duration_seconds, 1)
@@ -1585,6 +1702,129 @@ async def download_task_result(task_id: str):
     )
 
 
+@app.get("/transcribe/{task_id}/audio")
+async def get_task_audio(task_id: str):
+    """獲取任務的音檔"""
+    with tasks_lock:
+        task = transcription_tasks.get(task_id)
+
+    if not task:
+        raise HTTPException(status_code=404, detail="任務不存在")
+
+    if task["status"] != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"任務尚未完成（當前狀態：{task['status']}）"
+        )
+
+    # 檢查是否有音檔
+    audio_file_path = task.get("audio_file")
+    if not audio_file_path:
+        raise HTTPException(status_code=404, detail="此任務沒有保存音檔（可能是較舊的任務）")
+
+    audio_file = Path(audio_file_path)
+    if not audio_file.exists():
+        raise HTTPException(status_code=404, detail="音檔不存在")
+
+    # 根據檔案副檔名決定 media type
+    suffix = audio_file.suffix.lower()
+    media_types = {
+        ".mp3": "audio/mpeg",
+        ".m4a": "audio/mp4",
+        ".wav": "audio/wav",
+        ".ogg": "audio/ogg",
+        ".flac": "audio/flac"
+    }
+    media_type = media_types.get(suffix, "audio/mpeg")
+
+    return FileResponse(
+        audio_file,
+        media_type=media_type,
+        filename=task.get("audio_filename", "audio" + suffix)
+    )
+
+
+@app.get("/transcribe/{task_id}/segments")
+async def get_task_segments(task_id: str):
+    """獲取任務的 segments timing 數據"""
+    with tasks_lock:
+        task = transcription_tasks.get(task_id)
+
+    if not task:
+        raise HTTPException(status_code=404, detail="任務不存在")
+
+    if task["status"] != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"任務尚未完成（當前狀態：{task['status']}）"
+        )
+
+    # 檢查是否有 segments 檔案
+    segments_file_path = task.get("segments_file")
+    if not segments_file_path:
+        raise HTTPException(status_code=404, detail="此任務沒有 segments 數據（可能是較舊的任務）")
+
+    segments_file = Path(segments_file_path)
+    if not segments_file.exists():
+        raise HTTPException(status_code=404, detail="Segments 檔案不存在")
+
+    try:
+        segments_data = json.loads(segments_file.read_text(encoding="utf-8"))
+        return JSONResponse({"segments": segments_data})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"讀取 segments 失敗：{str(e)}")
+
+
+@app.put("/transcribe/{task_id}/content")
+async def update_transcript_content(task_id: str, request: dict):
+    """更新逐字稿內容"""
+    with tasks_lock:
+        task = transcription_tasks.get(task_id)
+
+    if not task:
+        raise HTTPException(status_code=404, detail="任務不存在")
+
+    if task["status"] != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"任務尚未完成，無法編輯（當前狀態：{task['status']}）"
+        )
+
+    result_file = Path(task["result_file"])
+    if not result_file.exists():
+        raise HTTPException(status_code=404, detail="結果檔案不存在")
+
+    # 獲取新內容
+    new_content = request.get("content", "")
+    if not new_content:
+        raise HTTPException(status_code=400, detail="內容不能為空")
+
+    try:
+        # 保存新內容到檔案
+        result_file.write_text(new_content, encoding="utf-8")
+
+        # 更新任務記錄中的字數
+        with tasks_lock:
+            if task_id in transcription_tasks:
+                transcription_tasks[task_id]["text_length"] = len(new_content)
+                transcription_tasks[task_id]["updated_at"] = get_current_time()
+
+        # 保存任務狀態到磁碟
+        save_tasks_to_disk()
+
+        print(f"✅ [{task_id}] 逐字稿已更新（新長度：{len(new_content)} 字）")
+
+        return {
+            "message": "逐字稿已成功更新",
+            "task_id": task_id,
+            "text_length": len(new_content)
+        }
+
+    except Exception as e:
+        print(f"❌ [{task_id}] 更新逐字稿失敗：{e}")
+        raise HTTPException(status_code=500, detail=f"更新失敗：{str(e)}")
+
+
 @app.post("/transcribe/{task_id}/cancel")
 async def cancel_task(task_id: str):
     """取消正在執行的任務"""
@@ -1646,15 +1886,40 @@ async def delete_task(task_id: str):
                 detail=f"無法刪除進行中的任務（當前狀態：{task['status']}），請先取消任務"
             )
 
+        deleted_files = []
+
         # 刪除結果檔案（如果存在）
         if task["status"] == "completed" and "result_file" in task:
             result_file = Path(task["result_file"])
             try:
                 if result_file.exists():
                     result_file.unlink()
-                    print(f"🗑️ 已刪除檔案：{result_file.name}")
+                    deleted_files.append(result_file.name)
+                    print(f"🗑️ 已刪除轉錄檔案：{result_file.name}")
             except Exception as e:
-                print(f"⚠️ 刪除檔案失敗：{e}")
+                print(f"⚠️ 刪除轉錄檔案失敗：{e}")
+
+        # 刪除 segments 檔案（如果存在）
+        if task["status"] == "completed" and "segments_file" in task:
+            segments_file = Path(task["segments_file"])
+            try:
+                if segments_file.exists():
+                    segments_file.unlink()
+                    deleted_files.append(segments_file.name)
+                    print(f"🗑️ 已刪除 segments 檔案：{segments_file.name}")
+            except Exception as e:
+                print(f"⚠️ 刪除 segments 檔案失敗：{e}")
+
+        # 刪除音檔（如果存在）
+        if task["status"] == "completed" and "audio_file" in task:
+            audio_file = Path(task["audio_file"])
+            try:
+                if audio_file.exists():
+                    audio_file.unlink()
+                    deleted_files.append(audio_file.name)
+                    print(f"🗑️ 已刪除音檔：{audio_file.name}")
+            except Exception as e:
+                print(f"⚠️ 刪除音檔失敗：{e}")
 
         # 從任務列表中移除
         del transcription_tasks[task_id]
@@ -1664,7 +1929,8 @@ async def delete_task(task_id: str):
 
     return {
         "message": "任務已刪除",
-        "task_id": task_id
+        "task_id": task_id,
+        "deleted_files": deleted_files
     }
 
 
