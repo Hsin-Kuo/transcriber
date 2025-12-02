@@ -26,7 +26,7 @@
               <div class="task-main">
                 <div class="task-info">
                   <div class="task-header">
-                    <h3>{{ task.filename || task.file }}</h3>
+                    <h3>{{ task.custom_name || task.filename || task.file }}</h3>
                     <span :class="['badge', `badge-${task.status}`]">
                       {{ getStatusText(task.status) }}
                     </span>
@@ -477,8 +477,8 @@ function getProcessingChunksText(task) {
 .task-result {
   margin-top: 8px;
   padding: 8px 12px;
-  background: rgba(91, 183, 48, 0.15);
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  background: #89916B26;
+  border: 1px solid #89916B4d;
   border-radius: 6px;
   font-size: 14px;
   color: rgba(45, 45, 45, 0.7);

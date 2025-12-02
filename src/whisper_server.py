@@ -23,6 +23,7 @@ from pydub.silence import detect_nonsilent
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import uvicorn
 
 # 載入環境變數
@@ -217,6 +218,13 @@ def load_tasks_from_disk():
     except Exception as e:
         print(f"❌ 載入任務狀態失敗：{e}")
         print(f"   將從空白狀態開始")
+
+# Pydantic models
+class TranscriptContentUpdate(BaseModel):
+    content: str
+
+class TaskMetadataUpdate(BaseModel):
+    custom_name: str = None
 
 app = FastAPI(
     title="Whisper 轉錄服務",
@@ -1171,10 +1179,14 @@ def punctuate_with_gemini(text: str, chunk_size: int = None, task_id: str = None
 
 
 def cleanup_old_audio_files(current_task_id: str):
-    """清理舊的音檔，只保留最新的一個
+    """清理舊的音檔，只保留最新的 3 個
 
     Args:
-        current_task_id: 當前任務的 ID（這個任務的音檔會被保留）
+        current_task_id: 當前任務的 ID（這個任務的音檔會被計入）
+
+    Note:
+        必須在任務狀態更新（設定 audio_file）之後調用，
+        這樣當前任務才會被計入音檔數量
     """
     try:
         print(f"🧹 開始清理舊音檔...")
@@ -1195,21 +1207,21 @@ def cleanup_old_audio_files(current_task_id: str):
                         "is_current": tid == current_task_id
                     })
 
-        if len(tasks_with_audio) <= 1:
-            print(f"   只有一個音檔，無需清理")
+        if len(tasks_with_audio) <= 3:
+            print(f"   音檔數量 <= 3，無需清理")
             return
 
         # 按完成時間排序（最新的在前面）
         tasks_with_audio.sort(key=lambda x: x["completed_at"], reverse=True)
 
-        # 保留最新的一個，刪除其餘
+        # 保留最新的 3 個，刪除其餘
         files_to_delete = []
         tasks_to_update = []
 
         for idx, item in enumerate(tasks_with_audio):
-            if idx == 0:
-                # 保留最新的
-                print(f"   ✓ 保留最新音檔：{item['audio_file'].name}")
+            if idx < 3:
+                # 保留最新的 3 個
+                print(f"   ✓ 保留音檔 #{idx+1}：{item['audio_file'].name}")
                 continue
 
             # 標記要刪除的檔案
@@ -1415,9 +1427,6 @@ def process_transcription_task(
         shutil.copy2(wav_path, permanent_audio_path)
         print(f"🎵 [{task_id}] 音檔已保存（WAV 格式）：{permanent_audio_path.relative_to(OUTPUT_DIR.parent)}")
 
-        # 清理舊的音檔（只保留最新的）
-        cleanup_old_audio_files(task_id)
-
         # 計算總處理時間
         end_time = datetime.now(TZ_UTC8)
         duration_seconds = (end_time - start_time).total_seconds()
@@ -1436,6 +1445,10 @@ def process_transcription_task(
             "completed_at": get_current_time(),
             "duration_seconds": round(duration_seconds, 1)
         })
+
+        # 清理舊的音檔（只保留最新的 3 個）
+        # 必須在 update_task_status 之後，這樣當前任務的音檔才會被計入
+        cleanup_old_audio_files(task_id)
 
         print(f"⏱️ [{task_id}] 總處理時間：{format_duration(duration_seconds)}")
 
@@ -1695,10 +1708,33 @@ async def download_task_result(task_id: str):
     if not result_file.exists():
         raise HTTPException(status_code=404, detail="結果檔案不存在")
 
+    # 使用自訂名稱作為下載檔名（如果有設定），否則使用原始檔名
+    if task.get("custom_name"):
+        download_filename = task["custom_name"]
+        # 移除常見的音訊副檔名
+        import os
+        name_without_ext = download_filename
+        for ext in ['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.wma']:
+            if download_filename.lower().endswith(ext):
+                name_without_ext = download_filename[:-len(ext)]
+                break
+        # 確保檔名有 .txt 副檔名
+        if not name_without_ext.endswith('.txt'):
+            download_filename = name_without_ext + '.txt'
+        else:
+            download_filename = name_without_ext
+    else:
+        download_filename = task["result_filename"]
+
     return FileResponse(
         result_file,
         media_type="text/plain",
-        filename=task["result_filename"]
+        filename=download_filename,
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
     )
 
 
@@ -1776,7 +1812,7 @@ async def get_task_segments(task_id: str):
 
 
 @app.put("/transcribe/{task_id}/content")
-async def update_transcript_content(task_id: str, request: dict):
+async def update_transcript_content(task_id: str, update_data: TranscriptContentUpdate):
     """更新逐字稿內容"""
     with tasks_lock:
         task = transcription_tasks.get(task_id)
@@ -1795,13 +1831,21 @@ async def update_transcript_content(task_id: str, request: dict):
         raise HTTPException(status_code=404, detail="結果檔案不存在")
 
     # 獲取新內容
-    new_content = request.get("content", "")
+    new_content = update_data.content
     if not new_content:
         raise HTTPException(status_code=400, detail="內容不能為空")
 
     try:
+        # 除錯：顯示檔案路徑和內容前100字
+        print(f"📝 [{task_id}] 準備更新檔案：{result_file}")
+        print(f"   新內容前100字：{new_content[:100]}")
+
         # 保存新內容到檔案
         result_file.write_text(new_content, encoding="utf-8")
+
+        # 除錯：驗證檔案是否真的被更新
+        saved_content = result_file.read_text(encoding="utf-8")
+        print(f"   檔案已更新，驗證前100字：{saved_content[:100]}")
 
         # 更新任務記錄中的字數
         with tasks_lock:
@@ -1822,6 +1866,41 @@ async def update_transcript_content(task_id: str, request: dict):
 
     except Exception as e:
         print(f"❌ [{task_id}] 更新逐字稿失敗：{e}")
+        raise HTTPException(status_code=500, detail=f"更新失敗：{str(e)}")
+
+
+@app.put("/transcribe/{task_id}/metadata")
+async def update_task_metadata(task_id: str, metadata: TaskMetadataUpdate):
+    """更新任務的自訂名稱（用於顯示和下載）"""
+    with tasks_lock:
+        task = transcription_tasks.get(task_id)
+
+    if not task:
+        raise HTTPException(status_code=404, detail="任務不存在")
+
+    try:
+        with tasks_lock:
+            if task_id in transcription_tasks:
+                if metadata.custom_name is not None:
+                    # 驗證檔名（移除非法字符）
+                    import re
+                    safe_name = re.sub(r'[<>:"/\\|?*]', '_', metadata.custom_name)
+                    transcription_tasks[task_id]["custom_name"] = safe_name
+                    print(f"📝 [{task_id}] 更新自訂名稱：{safe_name}")
+
+                transcription_tasks[task_id]["updated_at"] = get_current_time()
+
+        # 保存任務狀態到磁碟
+        save_tasks_to_disk()
+
+        return {
+            "message": "任務名稱已更新",
+            "task_id": task_id,
+            "custom_name": transcription_tasks[task_id].get("custom_name")
+        }
+
+    except Exception as e:
+        print(f"❌ [{task_id}] 更新任務名稱失敗：{e}")
         raise HTTPException(status_code=500, detail=f"更新失敗：{str(e)}")
 
 
@@ -1889,7 +1968,7 @@ async def delete_task(task_id: str):
         deleted_files = []
 
         # 刪除結果檔案（如果存在）
-        if task["status"] == "completed" and "result_file" in task:
+        if task["status"] == "completed" and task.get("result_file"):
             result_file = Path(task["result_file"])
             try:
                 if result_file.exists():
@@ -1900,7 +1979,7 @@ async def delete_task(task_id: str):
                 print(f"⚠️ 刪除轉錄檔案失敗：{e}")
 
         # 刪除 segments 檔案（如果存在）
-        if task["status"] == "completed" and "segments_file" in task:
+        if task["status"] == "completed" and task.get("segments_file"):
             segments_file = Path(task["segments_file"])
             try:
                 if segments_file.exists():
@@ -1911,7 +1990,7 @@ async def delete_task(task_id: str):
                 print(f"⚠️ 刪除 segments 檔案失敗：{e}")
 
         # 刪除音檔（如果存在）
-        if task["status"] == "completed" and "audio_file" in task:
+        if task["status"] == "completed" and task.get("audio_file"):
             audio_file = Path(task["audio_file"])
             try:
                 if audio_file.exists():

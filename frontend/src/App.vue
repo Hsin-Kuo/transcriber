@@ -113,7 +113,7 @@
     />
 
     <!-- 瀏覽逐字稿對話框 -->
-    <div v-if="showTranscriptDialog" class="modal-overlay" @click.self="closeTranscriptDialog">
+    <div v-if="showTranscriptDialog" class="modal-overlay">
       <div class="modal-content transcript-modal electric-card">
         <div class="electric-inner">
           <div class="electric-border-outer">
@@ -121,7 +121,21 @@
               <!-- 對話框標題 -->
               <div class="transcript-header">
                 <div class="transcript-title-section">
-                  <h2>{{ currentTranscript.filename || '逐字稿' }}</h2>
+                  <div class="title-with-edit">
+                    <input
+                      v-if="isEditingTitle"
+                      ref="titleInput"
+                      v-model="editingTaskName"
+                      type="text"
+                      class="title-input"
+                      @blur="saveTaskName"
+                      @keyup.enter="saveTaskName"
+                      @keyup.esc="cancelTitleEdit"
+                    />
+                    <h2 v-else @click="startTitleEdit" class="editable-title" title="點擊編輯名稱">
+                      {{ currentTranscript.custom_name || currentTranscript.filename || '逐字稿' }}
+                    </h2>
+                  </div>
                   <div class="transcript-meta">
                     <span v-if="currentTranscript.created_at">
                       📅 {{ currentTranscript.created_at }}
@@ -129,57 +143,119 @@
                     <span v-if="currentTranscript.text_length">
                       📝 {{ currentTranscript.text_length }} 字
                     </span>
-                    <span v-if="currentTranscript.duration_text">
-                      ⏱️ {{ currentTranscript.duration_text }}
-                    </span>
                   </div>
                 </div>
               </div>
 
               <!-- 音檔播放器（僅在有音檔時顯示） -->
               <div v-if="currentTranscript.hasAudio" class="audio-player-container">
+                <!-- 隱藏的原生音檔元素 -->
                 <audio
                   ref="audioElement"
-                  controls
-                  controlsList=""
                   preload="metadata"
-                  class="audio-player"
                   :src="getAudioUrl(currentTranscript.task_id)"
                   @error="handleAudioError"
                   @loadedmetadata="handleAudioLoaded"
                   @play="isPlaying = true"
                   @pause="isPlaying = false"
                   @ended="isPlaying = false"
+                  @timeupdate="updateProgress"
+                  @durationchange="updateDuration"
+                  @volumechange="updateVolume"
+                  @ratechange="updatePlaybackRate"
                 >
                   您的瀏覽器不支援音訊播放。
                 </audio>
+
                 <div v-if="audioError" class="audio-error">
                   ⚠️ {{ audioError }}
                 </div>
-                <!-- 自定義音檔控制按鈕 -->
-                <div class="audio-controls">
-                  <button class="audio-control-btn audio-skip-btn" @click="skipBackward" title="快退10秒">
-                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                      <path d="M3 3v5h5"/>
-                    </svg>
-                    <span class="control-label control-label-left">10</span>
-                  </button>
-                  <button class="audio-control-btn audio-play-btn" @click="togglePlayPause" :title="isPlaying ? '暫停' : '播放'">
-                    <svg v-if="!isPlaying" width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M8 5v14l11-7z"/>
-                    </svg>
-                    <svg v-else width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
-                    </svg>
-                  </button>
-                  <button class="audio-control-btn audio-skip-btn" @click="skipForward" title="快進10秒">
-                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
-                      <path d="M21 3v5h-5"/>
-                    </svg>
-                    <span class="control-label control-label-right">10</span>
-                  </button>
+
+                <!-- 自定義播放進度條 -->
+                <div class="custom-audio-player">
+                  <!-- 進度條 -->
+                  <div class="progress-bar-container" @click="seekTo" ref="progressBar">
+                    <div class="progress-bar-background">
+                      <div class="progress-bar-played" :style="{ width: progressPercent + '%' }"></div>
+                      <div class="progress-bar-thumb" :style="{ left: progressPercent + '%' }"></div>
+                    </div>
+                  </div>
+
+                  <!-- 控制列 -->
+                  <div class="audio-controls-row">
+                    <!-- 左側：播放控制 -->
+                    <div class="audio-controls-left">
+                      <button class="audio-control-btn audio-skip-btn" @click="skipBackward" title="快退10秒">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                          <path d="M3 3v5h5"/>
+                        </svg>
+                        <span class="control-label">10</span>
+                      </button>
+                      <button class="audio-control-btn audio-play-btn" @click="togglePlayPause" :title="isPlaying ? '暫停' : '播放'">
+                        <svg v-if="!isPlaying" width="26" height="26" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M8 5v14l11-7z"/>
+                        </svg>
+                        <svg v-else width="26" height="26" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+                        </svg>
+                      </button>
+                      <button class="audio-control-btn audio-skip-btn" @click="skipForward" title="快進10秒">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
+                          <path d="M21 3v5h-5"/>
+                        </svg>
+                        <span class="control-label">10</span>
+                      </button>
+                      <div class="time-display">
+                        {{ formatTime(currentTime) }} / {{ formatTime(duration) }}
+                      </div>
+                    </div>
+
+                    <!-- 右側：音量和速度 -->
+                    <div class="audio-controls-right">
+                      <!-- 播放速度 -->
+                      <div class="speed-control">
+                        <button class="audio-control-btn speed-btn" :title="`播放速度: ${playbackRate}x`">
+                          <span class="speed-label">{{ playbackRate }}x</span>
+                        </button>
+                        <div class="speed-dropdown">
+                          <button
+                            v-for="rate in [0.5, 0.75, 1, 1.25, 1.5, 2]"
+                            :key="rate"
+                            class="speed-option"
+                            :class="{ active: playbackRate === rate }"
+                            @click="setPlaybackRate(rate)"
+                          >
+                            {{ rate }}x
+                          </button>
+                        </div>
+                      </div>
+                      <!-- 音量控制 -->
+                      <div class="volume-control">
+                        <button class="audio-control-btn" @click="toggleMute" :title="isMuted ? '取消靜音' : '靜音'">
+                          <svg v-if="!isMuted && volume > 0.5" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+                          </svg>
+                          <svg v-else-if="!isMuted && volume > 0" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
+                          </svg>
+                          <svg v-else width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+                          </svg>
+                        </button>
+                        <input
+                          type="range"
+                          class="volume-slider"
+                          min="0"
+                          max="100"
+                          :value="volume * 100"
+                          @input="setVolume"
+                          title="調整音量"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -307,6 +383,7 @@
       </div>
     </div>
   </div>
+
 </template>
 
 <script setup>
@@ -344,6 +421,19 @@ const textareaScrollHeight = ref(0)
 const audioError = ref(null)
 const activeTimecodeIndex = ref(-1)  // 當前活躍的 timecode 索引
 const isPlaying = ref(false)  // 音檔播放狀態
+// 自定義音檔播放器狀態
+const progressBar = ref(null)
+const currentTime = ref(0)
+const duration = ref(0)
+const progressPercent = ref(0)
+const volume = ref(1)
+const isMuted = ref(false)
+const playbackRate = ref(1)
+// 任務名稱編輯
+const isEditingTitle = ref(false)
+const editingTaskName = ref('')
+const titleInput = ref(null)
+const savingName = ref(false)
 let pollInterval = null
 
 // 統計數據
@@ -463,8 +553,21 @@ async function downloadTask(taskId) {
       responseType: 'blob'
     })
 
-    const task = tasks.value.find(t => t.task_id === taskId)
-    const filename = task?.result_filename || 'transcript.txt'
+    // 從 Content-Disposition header 取得檔名
+    let filename = 'transcript.txt'
+    const contentDisposition = response.headers['content-disposition']
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i)
+      if (filenameMatch && filenameMatch[1]) {
+        filename = decodeURIComponent(filenameMatch[1])
+      }
+    }
+
+    // 如果無法從 header 取得，使用 task 資料作為備用
+    if (filename === 'transcript.txt') {
+      const task = tasks.value.find(t => t.task_id === taskId)
+      filename = task?.result_filename || 'transcript.txt'
+    }
 
     const url = window.URL.createObjectURL(new Blob([response.data]))
     const link = document.createElement('a')
@@ -737,11 +840,95 @@ function togglePlayPause() {
   }
 }
 
-// 使用 binary search 找到最接近的 timecode marker
+// 自定義播放器事件處理
+function updateProgress() {
+  if (!audioElement.value) return
+  currentTime.value = audioElement.value.currentTime
+  if (duration.value > 0) {
+    progressPercent.value = (currentTime.value / duration.value) * 100
+  }
+}
+
+function updateDuration() {
+  if (!audioElement.value) return
+  duration.value = audioElement.value.duration || 0
+}
+
+function updateVolume() {
+  if (!audioElement.value) return
+  volume.value = audioElement.value.volume
+  isMuted.value = audioElement.value.muted
+}
+
+function updatePlaybackRate() {
+  if (!audioElement.value) return
+  playbackRate.value = audioElement.value.playbackRate
+}
+
+function seekTo(event) {
+  if (!audioElement.value || !progressBar.value || duration.value === 0) return
+
+  const rect = progressBar.value.getBoundingClientRect()
+  const clickX = event.clientX - rect.left
+  const percent = Math.max(0, Math.min(100, (clickX / rect.width) * 100))
+  const newTime = (percent / 100) * duration.value
+
+  audioElement.value.currentTime = newTime
+  currentTime.value = newTime
+  progressPercent.value = percent
+}
+
+function setVolume(event) {
+  if (!audioElement.value) return
+  const newVolume = parseInt(event.target.value) / 100
+  audioElement.value.volume = newVolume
+  volume.value = newVolume
+  if (newVolume > 0 && isMuted.value) {
+    audioElement.value.muted = false
+    isMuted.value = false
+  }
+}
+
+function toggleMute() {
+  if (!audioElement.value) return
+  audioElement.value.muted = !audioElement.value.muted
+  isMuted.value = audioElement.value.muted
+}
+
+function setPlaybackRate(rate) {
+  if (!audioElement.value) return
+  audioElement.value.playbackRate = rate
+  playbackRate.value = rate
+}
+
+function formatTime(seconds) {
+  if (!seconds || isNaN(seconds)) return '0:00'
+
+  const hours = Math.floor(seconds / 3600)
+  const mins = Math.floor((seconds % 3600) / 60)
+  const secs = Math.floor(seconds % 60)
+
+  if (hours > 0) {
+    return `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+  } else {
+    return `${mins}:${secs.toString().padStart(2, '0')}`
+  }
+}
+
+// 改進的 timecode 匹配：結合位置和內容匹配
 function findActiveTimecode(charOffset) {
   if (timecodeMarkers.value.length === 0) return -1
 
-  // Binary search 找到最接近的 marker
+  const content = currentTranscript.value.content
+  const contextLength = 30 // 用於匹配的上下文長度
+
+  // 取得當前位置的文字片段
+  const currentText = content.substring(
+    Math.max(0, charOffset - contextLength),
+    Math.min(content.length, charOffset + contextLength)
+  ).trim()
+
+  // Binary search 找到位置最接近的 marker
   let left = 0
   let right = timecodeMarkers.value.length - 1
   let closest = 0
@@ -758,7 +945,45 @@ function findActiveTimecode(charOffset) {
     }
   }
 
-  return closest
+  // 在附近的 markers 中尋找內容最匹配的（考慮編輯造成的偏移）
+  const searchRange = 3 // 前後搜尋 3 個 markers
+  const startIdx = Math.max(0, closest - searchRange)
+  const endIdx = Math.min(timecodeMarkers.value.length - 1, closest + searchRange)
+
+  let bestMatch = closest
+  let bestScore = 0
+
+  for (let i = startIdx; i <= endIdx; i++) {
+    const marker = timecodeMarkers.value[i]
+
+    // 找到對應的 segment
+    const segment = segments.value.find(s => Math.abs(s.start - marker.time) < 0.1)
+    if (!segment) continue
+
+    // 計算文字相似度（簡單的子字串匹配）
+    const segmentText = segment.text.trim()
+    let score = 0
+
+    // 檢查當前文字片段是否包含 segment 的部分內容
+    const segmentWords = segmentText.split(/\s+/).filter(w => w.length > 2)
+    for (const word of segmentWords) {
+      if (currentText.includes(word)) {
+        score += word.length
+      }
+    }
+
+    // 距離懲罰：距離越遠，分數越低
+    const distancePenalty = Math.abs(i - closest) * 10
+    score -= distancePenalty
+
+    if (score > bestScore) {
+      bestScore = score
+      bestMatch = i
+    }
+  }
+
+  // 如果找到了明顯更好的匹配（分數 > 0），使用它；否則用位置最近的
+  return bestScore > 0 ? bestMatch : closest
 }
 
 // 計算字符的視覺寬度（區分中文、英文等）
@@ -805,7 +1030,12 @@ function estimateCharOffsetFromScroll(targetScrollTop) {
 
   const content = currentTranscript.value.content
   const lineHeight = parseFloat(getComputedStyle(textarea.value).lineHeight) || 27 // line-height: 1.8, font-size: 15px
-  const textareaWidth = textarea.value.clientWidth
+
+  // 取得實際可用寬度（扣除 padding）
+  const computedStyle = getComputedStyle(textarea.value)
+  const paddingLeft = parseFloat(computedStyle.paddingLeft) || 0
+  const paddingRight = parseFloat(computedStyle.paddingRight) || 0
+  const textareaWidth = textarea.value.clientWidth - paddingLeft - paddingRight
 
   // 計算目標滾動位置對應的行數
   const targetLineNumber = Math.floor(targetScrollTop / lineHeight)
@@ -933,6 +1163,7 @@ async function viewTranscript(taskId) {
   currentTranscript.value = {
     task_id: task.task_id,
     filename: task.filename,
+    custom_name: task.custom_name,
     created_at: task.completed_at || task.created_at,
     text_length: task.text_length,
     duration_text: task.duration_text,
@@ -1068,6 +1299,64 @@ async function saveTranscript() {
     alert('儲存失敗：' + (error.response?.data?.detail || error.message))
   } finally {
     savingTranscript.value = false
+  }
+}
+
+// 開始編輯標題
+function startTitleEdit() {
+  editingTaskName.value = currentTranscript.value.custom_name || currentTranscript.value.filename || ''
+  isEditingTitle.value = true
+  // 等待下一個 tick 讓 input 渲染後再聚焦
+  setTimeout(() => {
+    if (titleInput.value) {
+      titleInput.value.focus()
+      titleInput.value.select()
+    }
+  }, 0)
+}
+
+// 取消編輯標題
+function cancelTitleEdit() {
+  isEditingTitle.value = false
+  editingTaskName.value = ''
+}
+
+// 儲存任務名稱
+async function saveTaskName() {
+  if (!currentTranscript.value.task_id || savingName.value) return
+
+  // 如果名稱沒有改變，直接關閉編輯模式
+  const currentName = currentTranscript.value.custom_name || currentTranscript.value.filename || ''
+  if (editingTaskName.value === currentName) {
+    cancelTitleEdit()
+    return
+  }
+
+  savingName.value = true
+
+  try {
+    const response = await axios.put(
+      `${API_BASE}/transcribe/${currentTranscript.value.task_id}/metadata`,
+      {
+        custom_name: editingTaskName.value || null
+      },
+      {
+        headers: { 'Content-Type': 'application/json' }
+      }
+    )
+
+    // 更新當前逐字稿的資料
+    currentTranscript.value.custom_name = response.data.custom_name
+
+    // 重新載入任務列表
+    await refreshTasks()
+
+    isEditingTitle.value = false
+  } catch (error) {
+    console.error('更新任務名稱失敗:', error)
+    alert('更新失敗：' + (error.response?.data?.detail || error.message))
+  } finally {
+    savingName.value = false
   }
 }
 
@@ -1424,10 +1713,12 @@ onUnmounted(() => {
 /* 音檔播放器 */
 .audio-player-container {
   margin-bottom: 16px;
-  padding: 12px 16px;
-  background: rgba(160, 82, 45, 0.05);
+  /* padding: 12px 16px; */
+  /* background: rgba(160, 82, 45, 0.05); */
   border-radius: 8px;
   /* border: 1px solid rgba(160, 82, 45, 0.2); */
+  position: relative;
+  z-index: 10;
 }
 
 .audio-player-label {
@@ -1438,6 +1729,7 @@ onUnmounted(() => {
 }
 
 .audio-player {
+  background-color: #f0f0f000;
   width: 100%;
   height: 40px;
   outline: none;
@@ -1466,7 +1758,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   min-width: 40px;
-  height: 40px;
+  height: 30px;
   padding: 8px;
   background: rgba(160, 81, 45, 0);
   border: 1px solid rgba(160, 81, 45, 0);
@@ -1493,10 +1785,10 @@ onUnmounted(() => {
 }
 
 /* 播放按鈕特殊樣式（稍大一點） */
-.audio-control-btn.audio-play-btn {
+/* .audio-control-btn.audio-play-btn {
   min-width: 48px;
   height: 48px;
-}
+} */
 
 /* 控制按鈕標籤 */
 .control-label {
@@ -1509,6 +1801,220 @@ onUnmounted(() => {
   line-height: 1;
   color: inherit;
   pointer-events: none;
+}
+
+/* 自定義音檔播放器 */
+.custom-audio-player {
+  background: rgba(237, 213, 194, 0.044);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-radius: 12px;
+  padding: 16px;
+  border: 1px solid rgba(231, 208, 194, 0.5);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+/* 進度條容器 */
+.progress-bar-container {
+  margin-bottom: 16px;
+  cursor: pointer;
+  padding: 8px 0;
+}
+
+.progress-bar-background {
+  position: relative;
+  height: 6px;
+  background: rgba(160, 82, 45, 0.15);
+  border-radius: 3px;
+  overflow: visible;
+}
+
+.progress-bar-played {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: linear-gradient(90deg, #a0522d, #d2691e);
+  border-radius: 3px;
+  transition: width 0.1s linear;
+}
+
+.progress-bar-thumb {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 14px;
+  height: 14px;
+  background: white;
+  border: 2px solid #a0522d;
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  transition: left 0.1s linear;
+  cursor: grab;
+}
+
+.progress-bar-thumb:hover {
+  transform: translate(-50%, -50%) scale(1.2);
+}
+
+.progress-bar-thumb:active {
+  cursor: grabbing;
+  transform: translate(-50%, -50%) scale(1.1);
+}
+
+/* 控制列 */
+.audio-controls-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.audio-controls-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.audio-controls-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 時間顯示 */
+.time-display {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(45, 45, 45, 0.8);
+  min-width: 100px;
+  text-align: center;
+}
+
+/* 播放速度控制 */
+.speed-control {
+  position: relative;
+  display: flex;
+  align-items: center;
+  z-index: 10;
+}
+
+.speed-btn {
+  position: relative;
+  z-index: 2;
+}
+
+.speed-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #a0522d;
+  min-width: 40px;
+  text-align: center;
+}
+
+/* 速度下拉選單 */
+.speed-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  /* border: 1px solid rgba(255, 255, 255, 0.2); */
+  border-radius: 8px;
+  padding: 4px;
+  /* padding-top: 8px; */
+  /* margin-top: -4px; */
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 16px rgba(255, 255, 255, 0.3);
+  min-width: 60px;
+  z-index: 1000;
+}
+
+.speed-control:hover .speed-dropdown,
+.speed-dropdown:hover {
+  opacity: 1;
+  visibility: visible;
+}
+
+.speed-option {
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: #a0522d;
+  transition: all 0.2s;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.speed-option:hover {
+  background: rgba(160, 82, 45, 0.15);
+}
+
+.speed-option.active {
+  background: rgba(160, 82, 45, 0.1);
+  font-weight: 700;
+  color: #8b4513;
+}
+
+/* 音量控制 */
+.volume-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.volume-slider {
+  width: 80px;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(160, 82, 45, 0.2);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  background: #a0522d;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.volume-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 0 4px rgba(160, 82, 45, 0.2);
+}
+
+.volume-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  background: #a0522d;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.volume-slider::-moz-range-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 0 4px rgba(160, 82, 45, 0.2);
 }
 
 /* 音檔錯誤訊息 */
@@ -1573,7 +2079,7 @@ onUnmounted(() => {
 .timecode-fixed-display {
   position: absolute;
   top: calc(25% - 36px); /* 基準線上方，留出按鈕高度 */
-  right: 35px; /* 往左偏移，避開滾動條 */
+  right: 37px; /* 往左偏移，避開滾動條 */
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1622,6 +2128,7 @@ onUnmounted(() => {
   flex-direction: column;
   height: 100%;
   position: relative;
+  z-index: 1;
 }
 
 /* 當有側邊欄時，內容不需要 margin-bottom */
@@ -1917,5 +2424,180 @@ onUnmounted(() => {
   color: rgb(255, 255, 255);
 
   /* transform: translateY(-1px); */
+}
+
+/* RWD: 小螢幕調整 */
+@media (max-height: 800px) {
+  .transcript-modal {
+    max-height: 90vh;
+  }
+
+  .modal-body {
+    padding: 20px;
+  }
+
+  .transcript-content-wrapper {
+    max-height: 55vh;
+    min-height: 300px;
+  }
+
+  .transcript-header {
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+  }
+}
+
+@media (max-height: 700px) {
+  .transcript-modal {
+    max-height: 95vh;
+  }
+
+  .modal-body {
+    padding: 16px;
+  }
+
+  .transcript-content-wrapper {
+    max-height: 45vh;
+    min-height: 200px;
+  }
+
+  .audio-player-container {
+    margin-bottom: 10px;
+  }
+
+  .transcript-header {
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+  }
+
+  .transcript-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .replace-toolbar-inline {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-height: 600px) {
+  .transcript-modal {
+    max-height: 98vh;
+  }
+
+  .modal-body {
+    padding: 12px;
+  }
+
+  .transcript-content-wrapper {
+    max-height: 35vh;
+    min-height: 150px;
+  }
+
+  .audio-player-container {
+    margin-bottom: 8px;
+  }
+
+  .transcript-header {
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+  }
+
+  .transcript-meta {
+    font-size: 12px;
+    gap: 12px;
+  }
+
+  .transcript-actions {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .btn {
+    padding: 8px 12px;
+    font-size: 0.9em;
+  }
+}
+
+@media (max-width: 768px) {
+  .transcript-modal {
+    width: 95%;
+    max-height: 90vh;
+  }
+
+  .modal-body {
+    padding: 16px;
+  }
+
+  .transcript-header {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .transcript-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .action-buttons {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .replace-toolbar-inline {
+    flex-direction: column;
+  }
+
+  .replace-input-inline {
+    width: 100%;
+  }
+}
+
+/* 名稱編輯按鈕和 inline 編輯 */
+.transcript-title-section {
+  flex: 1;
+  min-width: 0;
+}
+
+.title-with-edit {
+  display: block;
+  width: 100%;
+}
+
+.editable-title {
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  margin: 0 0 8px 0;
+  font-size: 20px;
+  color: #2d2d2d;
+  font-weight: 700;
+  display: inline-block;
+}
+
+.editable-title:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.title-input {
+  width: 100%;
+  max-width: none;
+  font-size: 1.1em;
+  font-weight: 600;
+  padding: 8px 14px;
+  border: 2px solid #667eea;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.95);
+  color: #333;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+  transition: all 0.2s ease;
+  margin-bottom: 8px;
+  box-sizing: border-box;
+}
+
+.title-input:focus {
+  box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.3);
 }
 </style>
