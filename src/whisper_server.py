@@ -43,6 +43,7 @@ DEFAULT_MODEL = "medium"
 CHUNK_DURATION_MS = 10 * 60 * 1000
 OPENAI_MODEL = "gpt-4o-mini"
 GEMINI_MODEL = "gemini-2.0-flash"
+GEMINI_FALLBACK_MODEL = "gemini-flash-lite-latest"  # 配額耗盡時的備用模型
 
 # 進度階段權重（固定分配，總和 100%）
 PROGRESS_WEIGHTS = {
@@ -134,6 +135,8 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 
 # 任務狀態持久化檔案
 TASKS_DB_FILE = OUTPUT_DIR / "tasks.json"
+TAG_COLORS_FILE = OUTPUT_DIR / "tag_colors.json"
+TAG_ORDER_FILE = OUTPUT_DIR / "tag_order.json"
 
 # —— Google API Keys 管理 —— #
 def load_google_api_keys():
@@ -181,6 +184,8 @@ transcription_tasks: Dict[str, Dict[str, Any]] = {}  # 儲存任務狀態
 task_temp_dirs: Dict[str, Path] = {}  # 儲存任務的暫存目錄路徑
 task_cancelled: Dict[str, bool] = {}  # 標記已取消的任務
 task_diarization_processes: Dict[str, Any] = {}  # 儲存任務的 diarization 進程
+tag_colors: Dict[str, str] = {}  # 儲存標籤顏色 (標籤名稱 -> 顏色碼)
+tag_order: list[str] = []  # 儲存標籤順序
 tasks_lock = Lock()  # 線程安全鎖
 executor = ThreadPoolExecutor(max_workers=1)  # 線程池，最多 1 個並發轉錄
 
@@ -190,12 +195,18 @@ def save_tasks_to_disk():
         with tasks_lock:
             with open(TASKS_DB_FILE, 'w', encoding='utf-8') as f:
                 json.dump(transcription_tasks, f, ensure_ascii=False, indent=2)
+            # 也儲存標籤顏色
+            with open(TAG_COLORS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(tag_colors, f, ensure_ascii=False, indent=2)
+            # 儲存標籤順序
+            with open(TAG_ORDER_FILE, 'w', encoding='utf-8') as f:
+                json.dump(tag_order, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"❌ 保存任務狀態失敗：{e}")
 
 def load_tasks_from_disk():
     """從磁碟載入任務狀態"""
-    global transcription_tasks
+    global transcription_tasks, tag_colors, tag_order
     try:
         if TASKS_DB_FILE.exists():
             with open(TASKS_DB_FILE, 'r', encoding='utf-8') as f:
@@ -215,6 +226,18 @@ def load_tasks_from_disk():
                         transcription_tasks[task_id] = task
 
             print(f"✅ 已從磁碟載入 {len(transcription_tasks)} 個任務記錄")
+
+        # 載入標籤顏色
+        if TAG_COLORS_FILE.exists():
+            with open(TAG_COLORS_FILE, 'r', encoding='utf-8') as f:
+                tag_colors = json.load(f)
+            print(f"✅ 已載入 {len(tag_colors)} 個標籤顏色設定")
+
+        # 載入標籤順序
+        if TAG_ORDER_FILE.exists():
+            with open(TAG_ORDER_FILE, 'r', encoding='utf-8') as f:
+                tag_order = json.load(f)
+            print(f"✅ 已載入標籤順序（{len(tag_order)} 個標籤）")
     except Exception as e:
         print(f"❌ 載入任務狀態失敗：{e}")
         print(f"   將從空白狀態開始")
@@ -225,6 +248,25 @@ class TranscriptContentUpdate(BaseModel):
 
 class TaskMetadataUpdate(BaseModel):
     custom_name: str = None
+
+class TaskTagsUpdate(BaseModel):
+    tags: list[str] = []
+
+class TagColorUpdate(BaseModel):
+    color: str
+
+class TagOrderUpdate(BaseModel):
+    order: list[str] = []
+
+class KeepAudioUpdate(BaseModel):
+    keep_audio: bool
+
+class BatchDeleteRequest(BaseModel):
+    task_ids: List[str]
+
+class BatchTagsRequest(BaseModel):
+    task_ids: List[str]
+    tags: List[str]
 
 app = FastAPI(
     title="Whisper 轉錄服務",
@@ -239,6 +281,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],  # 允許前端訪問所有響應頭
+    max_age=3600,  # preflight 請求快取時間（秒）
 )
 
 
@@ -994,20 +1038,22 @@ def punctuate_with_openai(text: str, language: str = "zh") -> str:
 
 
 def call_gemini_with_retry(prompt: str, max_retries: int = None) -> str:
-    """調用 Gemini API，支援自動重試和 Key 切換"""
+    """調用 Gemini API，支援自動重試和 Key 切換，配額耗盡時自動切換到 fallback 模型"""
     import google.generativeai as genai
 
     if max_retries is None:
         max_retries = len(GOOGLE_API_KEYS)
 
     last_error = None
+    quota_exceeded_count = 0
+    current_model = GEMINI_MODEL
 
     for attempt in range(max_retries):
         try:
             # 獲取下一個 API Key
             api_key = get_next_google_api_key()
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel(GEMINI_MODEL)
+            model = genai.GenerativeModel(current_model)
 
             # 調用 API
             resp = model.generate_content(
@@ -1020,7 +1066,23 @@ def call_gemini_with_retry(prompt: str, max_retries: int = None) -> str:
         except Exception as e:
             last_error = e
             error_msg = str(e)
-            print(f"⚠️ Google API Key 調用失敗 (嘗試 {attempt + 1}/{max_retries}): {error_msg}")
+
+            # 檢查是否為 429 配額錯誤
+            is_quota_error = "429" in error_msg or "quota" in error_msg.lower() or "Quota exceeded" in error_msg
+
+            if is_quota_error:
+                quota_exceeded_count += 1
+                print(f"⚠️ Google API Key 配額已用完 (嘗試 {attempt + 1}/{max_retries})")
+
+                # 如果所有 keys 都配額耗盡，且還沒切換到 fallback 模型，則切換
+                if quota_exceeded_count >= len(GOOGLE_API_KEYS) and current_model == GEMINI_MODEL:
+                    print(f"💡 所有 {GEMINI_MODEL} 配額已用完，切換到備用模型 {GEMINI_FALLBACK_MODEL}")
+                    current_model = GEMINI_FALLBACK_MODEL
+                    quota_exceeded_count = 0  # 重置計數，用 fallback 模型再試一輪
+                    max_retries = attempt + len(GOOGLE_API_KEYS)  # 延長重試次數
+                    continue
+            else:
+                print(f"⚠️ Google API Key 調用失敗 (嘗試 {attempt + 1}/{max_retries}): {error_msg}")
 
             # 如果還有 key 可用，繼續嘗試
             if attempt < max_retries - 1:
@@ -1179,19 +1241,21 @@ def punctuate_with_gemini(text: str, chunk_size: int = None, task_id: str = None
 
 
 def cleanup_old_audio_files(current_task_id: str):
-    """清理舊的音檔，只保留最新的 3 個
+    """清理舊的音檔，保留規則：
+    1. 最新的任務（current_task_id）始終保留
+    2. 用戶勾選保留的任務（keep_audio=True），最多 3 個
+    3. 總共最多保留 3+1 = 4 個音檔
 
     Args:
-        current_task_id: 當前任務的 ID（這個任務的音檔會被計入）
+        current_task_id: 當前最新任務的 ID
 
     Note:
-        必須在任務狀態更新（設定 audio_file）之後調用，
-        這樣當前任務才會被計入音檔數量
+        必須在任務狀態更新（設定 audio_file）之後調用
     """
     try:
         print(f"🧹 開始清理舊音檔...")
 
-        # 收集所有已完成任務的音檔資訊（按完成時間排序）
+        # 收集所有已完成且有音檔的任務
         tasks_with_audio = []
 
         with tasks_lock:
@@ -1199,36 +1263,47 @@ def cleanup_old_audio_files(current_task_id: str):
                 if task.get("status") == "completed" and task.get("audio_file"):
                     audio_path = Path(task.get("audio_file"))
                     completed_at = task.get("completed_at", "")
+                    keep_audio = task.get("keep_audio", False)
 
                     tasks_with_audio.append({
                         "task_id": tid,
                         "audio_file": audio_path,
                         "completed_at": completed_at,
+                        "keep_audio": keep_audio,
                         "is_current": tid == current_task_id
                     })
 
-        if len(tasks_with_audio) <= 3:
-            print(f"   音檔數量 <= 3，無需清理")
-            return
+        # 決定哪些音檔要保留
+        files_to_keep = set()
 
-        # 按完成時間排序（最新的在前面）
-        tasks_with_audio.sort(key=lambda x: x["completed_at"], reverse=True)
+        # 1. 最新的任務始終保留
+        if current_task_id:
+            files_to_keep.add(current_task_id)
+            print(f"   ✓ 保留最新任務音檔：{current_task_id[:8]}...")
 
-        # 保留最新的 3 個，刪除其餘
+        # 2. 用戶勾選保留的任務（keep_audio=True）
+        keep_audio_tasks = [t for t in tasks_with_audio if t["keep_audio"] and t["task_id"] != current_task_id]
+        # 按完成時間排序，保留最近勾選的
+        keep_audio_tasks.sort(key=lambda x: x["completed_at"], reverse=True)
+
+        for idx, task in enumerate(keep_audio_tasks[:3]):  # 最多 3 個
+            files_to_keep.add(task["task_id"])
+            print(f"   ✓ 保留用戶勾選音檔 #{idx+1}：{task['audio_file'].name}")
+
+        # 3. 標記要刪除的音檔
         files_to_delete = []
         tasks_to_update = []
 
-        for idx, item in enumerate(tasks_with_audio):
-            if idx < 3:
-                # 保留最新的 3 個
-                print(f"   ✓ 保留音檔 #{idx+1}：{item['audio_file'].name}")
-                continue
+        for item in tasks_with_audio:
+            if item["task_id"] not in files_to_keep:
+                files_to_delete.append(item["audio_file"])
+                tasks_to_update.append(item["task_id"])
 
-            # 標記要刪除的檔案
-            files_to_delete.append(item["audio_file"])
-            tasks_to_update.append(item["task_id"])
+        if not files_to_delete:
+            print(f"   無需清理，當前保留 {len(files_to_keep)} 個音檔")
+            return
 
-        # 刪除舊音檔
+        # 4. 刪除舊音檔
         deleted_count = 0
         for audio_file in files_to_delete:
             try:
@@ -1239,19 +1314,20 @@ def cleanup_old_audio_files(current_task_id: str):
             except Exception as e:
                 print(f"   ⚠️ 刪除音檔失敗 {audio_file.name}：{e}")
 
-        # 更新任務記錄，清除已刪除音檔的引用
+        # 5. 更新任務記錄，清除已刪除音檔的引用
         if tasks_to_update:
             with tasks_lock:
                 for tid in tasks_to_update:
                     if tid in transcription_tasks:
                         transcription_tasks[tid]["audio_file"] = None
                         transcription_tasks[tid]["audio_filename"] = None
+                        transcription_tasks[tid]["keep_audio"] = False  # 清除保留標記
                         transcription_tasks[tid]["updated_at"] = get_current_time()
 
             # 保存更新到磁碟
             save_tasks_to_disk()
 
-        print(f"✅ 清理完成：刪除了 {deleted_count} 個舊音檔")
+        print(f"✅ 清理完成：刪除了 {deleted_count} 個舊音檔，保留 {len(files_to_keep)} 個")
 
     except Exception as e:
         print(f"⚠️ 清理舊音檔失敗：{e}")
@@ -1307,7 +1383,15 @@ def process_transcription_task(
         # 轉換為 WAV
         wav_path = temp_dir / "input.wav"
         print(f"🔄 [{task_id}] 轉檔為 WAV...")
-        AudioSegment.from_file(temp_audio_path).export(wav_path, format="wav")
+        try:
+            # 明確指定使用 ffmpeg 作為轉檔工具
+            audio = AudioSegment.from_file(str(temp_audio_path))
+            audio.export(str(wav_path), format="wav")
+        except Exception as e:
+            import traceback
+            print(f"❌ [{task_id}] 音訊轉檔失敗：{e}")
+            print(f"詳細錯誤：\n{traceback.format_exc()}")
+            raise
 
         # 標記音訊轉檔完成
         update_task_status(task_id, {
@@ -1576,7 +1660,8 @@ async def transcribe(
     chunk_minutes: int = Form(10, description="分段長度（分鐘）"),
     diarize: bool = Form(False, description="是否啟用說話者辨識"),
     max_speakers: Optional[int] = Form(None, description="最大講者人數（可選，2-10）"),
-    language: str = Form("zh", description="轉錄語言 (zh/en/ja/ko/auto)")
+    language: str = Form("zh", description="轉錄語言 (zh/en/ja/ko/auto)"),
+    tags: Optional[str] = Form(None, description="標籤（JSON 陣列字串，如 '[\"環宇專案\",\"2025\"]'）")
 ):
     """
     上傳音檔進行轉錄（異步模式）
@@ -1619,6 +1704,15 @@ async def transcribe(
                 detail="Speaker diarization 功能未啟用。請設定 HF_TOKEN 環境變數並重啟服務。"
             )
 
+        # 解析標籤（如果有提供）
+        task_tags = []
+        if tags:
+            try:
+                import json
+                task_tags = json.loads(tags)
+            except:
+                task_tags = []
+
         # 創建任務記錄
         with tasks_lock:
             transcription_tasks[task_id] = {
@@ -1635,6 +1729,8 @@ async def transcribe(
                 "language": language,
                 "diarization_status": None,  # "running" | "completed" | "failed" | None
                 "diarization_num_speakers": None,  # 識別到的講者人數
+                "tags": task_tags,  # 標籤陣列
+                "keep_audio": False,  # 是否保留音檔（用戶勾選）
                 "created_at": get_current_time(),
                 "updated_at": get_current_time()
             }
@@ -1904,6 +2000,160 @@ async def update_task_metadata(task_id: str, metadata: TaskMetadataUpdate):
         raise HTTPException(status_code=500, detail=f"更新失敗：{str(e)}")
 
 
+@app.put("/transcribe/{task_id}/tags")
+async def update_task_tags(task_id: str, tag_update: TaskTagsUpdate):
+    """更新任務的標籤"""
+    with tasks_lock:
+        task = transcription_tasks.get(task_id)
+
+    if not task:
+        raise HTTPException(status_code=404, detail="任務不存在")
+
+    try:
+        with tasks_lock:
+            if task_id in transcription_tasks:
+                transcription_tasks[task_id]["tags"] = tag_update.tags
+                transcription_tasks[task_id]["updated_at"] = get_current_time()
+                print(f"🏷️  [{task_id}] 更新標籤：{tag_update.tags}")
+
+        # 保存任務狀態到磁碟
+        save_tasks_to_disk()
+
+        return {
+            "message": "標籤已更新",
+            "task_id": task_id,
+            "tags": tag_update.tags
+        }
+
+    except Exception as e:
+        print(f"❌ [{task_id}] 更新標籤失敗：{e}")
+        raise HTTPException(status_code=500, detail=f"更新失敗：{str(e)}")
+
+
+@app.put("/transcribe/{task_id}/keep-audio")
+async def update_keep_audio(task_id: str, keep_audio_update: KeepAudioUpdate):
+    """更新任務的音檔保留狀態"""
+    with tasks_lock:
+        task = transcription_tasks.get(task_id)
+
+    if not task:
+        raise HTTPException(status_code=404, detail="任務不存在")
+
+    # 檢查任務是否有音檔
+    if task.get("status") != "completed" or not task.get("audio_file"):
+        raise HTTPException(status_code=400, detail="此任務沒有音檔可以保留")
+
+    try:
+        # 如果要設置為 True，檢查已勾選的數量
+        if keep_audio_update.keep_audio:
+            with tasks_lock:
+                # 計算當前有多少個任務被標記為保留音檔（不包括當前任務）
+                keep_count = sum(
+                    1 for tid, t in transcription_tasks.items()
+                    if tid != task_id and t.get("keep_audio", False) and t.get("status") == "completed" and t.get("audio_file")
+                )
+
+                if keep_count >= 3:
+                    raise HTTPException(status_code=400, detail="最多只能勾選 3 個音檔保留")
+
+        with tasks_lock:
+            if task_id in transcription_tasks:
+                transcription_tasks[task_id]["keep_audio"] = keep_audio_update.keep_audio
+                transcription_tasks[task_id]["updated_at"] = get_current_time()
+                print(f"📌 [{task_id}] 更新音檔保留狀態：{keep_audio_update.keep_audio}")
+
+        # 保存任務狀態到磁碟
+        save_tasks_to_disk()
+
+        return {
+            "message": "音檔保留狀態已更新",
+            "task_id": task_id,
+            "keep_audio": keep_audio_update.keep_audio
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ [{task_id}] 更新音檔保留狀態失敗：{e}")
+        raise HTTPException(status_code=500, detail=f"更新失敗：{str(e)}")
+
+
+@app.get("/tags")
+async def get_all_tags():
+    """獲取所有已使用的標籤及其顏色"""
+    with tasks_lock:
+        # 收集所有任務中的標籤
+        all_tags = set()
+        for task in transcription_tasks.values():
+            if "tags" in task and task["tags"]:
+                all_tags.update(task["tags"])
+
+    # 返回標籤及其顏色
+    tags_with_colors = []
+    for tag in sorted(all_tags):
+        tags_with_colors.append({
+            "name": tag,
+            "color": tag_colors.get(tag, None)  # 如果沒有設定顏色則為 None
+        })
+
+    return {
+        "tags": tags_with_colors,
+        "count": len(tags_with_colors)
+    }
+
+
+@app.put("/tags/{tag_name}/color")
+async def update_tag_color(tag_name: str, color_update: TagColorUpdate):
+    """更新標籤的顏色"""
+    try:
+        tag_colors[tag_name] = color_update.color
+        print(f"🎨 更新標籤顏色：{tag_name} -> {color_update.color}")
+
+        # 保存到磁碟
+        save_tasks_to_disk()
+
+        return {
+            "message": "標籤顏色已更新",
+            "tag": tag_name,
+            "color": color_update.color
+        }
+
+    except Exception as e:
+        print(f"❌ 更新標籤顏色失敗：{e}")
+        raise HTTPException(status_code=500, detail=f"更新失敗：{str(e)}")
+
+
+@app.get("/tags/order")
+async def get_tag_order():
+    """獲取標籤順序"""
+    return {
+        "order": tag_order,
+        "count": len(tag_order)
+    }
+
+
+@app.put("/tags/order")
+async def update_tag_order(order_update: TagOrderUpdate):
+    """更新標籤順序"""
+    try:
+        global tag_order
+        tag_order = order_update.order
+        print(f"📋 更新標籤順序：{len(tag_order)} 個標籤")
+
+        # 保存到磁碟
+        save_tasks_to_disk()
+
+        return {
+            "message": "標籤順序已更新",
+            "order": tag_order,
+            "count": len(tag_order)
+        }
+
+    except Exception as e:
+        print(f"❌ 更新標籤順序失敗：{e}")
+        raise HTTPException(status_code=500, detail=f"更新失敗：{str(e)}")
+
+
 @app.post("/transcribe/{task_id}/cancel")
 async def cancel_task(task_id: str):
     """取消正在執行的任務"""
@@ -2010,6 +2260,170 @@ async def delete_task(task_id: str):
         "message": "任務已刪除",
         "task_id": task_id,
         "deleted_files": deleted_files
+    }
+
+
+@app.post("/transcribe/batch/delete")
+async def batch_delete_tasks(request: BatchDeleteRequest):
+    """批次刪除任務"""
+    deleted_tasks = []
+    failed_tasks = []
+
+    for task_id in request.task_ids:
+        try:
+            with tasks_lock:
+                task = transcription_tasks.get(task_id)
+
+                if not task:
+                    failed_tasks.append({"task_id": task_id, "reason": "任務不存在"})
+                    continue
+
+                # 不允許刪除進行中的任務
+                if task["status"] in ["pending", "processing"]:
+                    failed_tasks.append({"task_id": task_id, "reason": "無法刪除進行中的任務"})
+                    continue
+
+                # 刪除相關檔案
+                deleted_files = []
+
+                # 刪除結果檔案
+                if task["status"] == "completed" and task.get("result_file"):
+                    result_file = Path(task["result_file"])
+                    try:
+                        if result_file.exists():
+                            result_file.unlink()
+                            deleted_files.append(result_file.name)
+                    except Exception as e:
+                        print(f"⚠️ 刪除轉錄檔案失敗：{e}")
+
+                # 刪除 segments 檔案
+                if task["status"] == "completed" and task.get("segments_file"):
+                    segments_file = Path(task["segments_file"])
+                    try:
+                        if segments_file.exists():
+                            segments_file.unlink()
+                            deleted_files.append(segments_file.name)
+                    except Exception as e:
+                        print(f"⚠️ 刪除 segments 檔案失敗：{e}")
+
+                # 刪除音檔
+                if task["status"] == "completed" and task.get("audio_file"):
+                    audio_file = Path(task["audio_file"])
+                    try:
+                        if audio_file.exists():
+                            audio_file.unlink()
+                            deleted_files.append(audio_file.name)
+                    except Exception as e:
+                        print(f"⚠️ 刪除音檔失敗：{e}")
+
+                # 從任務列表中移除
+                del transcription_tasks[task_id]
+                deleted_tasks.append({"task_id": task_id, "deleted_files": deleted_files})
+
+        except Exception as e:
+            failed_tasks.append({"task_id": task_id, "reason": str(e)})
+
+    # 保存到磁碟
+    save_tasks_to_disk()
+
+    return {
+        "message": f"成功刪除 {len(deleted_tasks)} 個任務",
+        "deleted_count": len(deleted_tasks),
+        "failed_count": len(failed_tasks),
+        "deleted_tasks": deleted_tasks,
+        "failed_tasks": failed_tasks
+    }
+
+
+@app.post("/transcribe/batch/tags/add")
+async def batch_add_tags(request: BatchTagsRequest):
+    """批次加入標籤"""
+    updated_tasks = []
+    failed_tasks = []
+
+    for task_id in request.task_ids:
+        try:
+            with tasks_lock:
+                task = transcription_tasks.get(task_id)
+
+                if not task:
+                    failed_tasks.append({"task_id": task_id, "reason": "任務不存在"})
+                    continue
+
+                # 獲取現有標籤
+                existing_tags = set(task.get("tags", []))
+
+                # 加入新標籤（避免重複）
+                for tag in request.tags:
+                    existing_tags.add(tag)
+
+                # 更新任務的標籤
+                transcription_tasks[task_id]["tags"] = list(existing_tags)
+                transcription_tasks[task_id]["updated_at"] = get_current_time()
+
+                updated_tasks.append({
+                    "task_id": task_id,
+                    "tags": list(existing_tags)
+                })
+
+        except Exception as e:
+            failed_tasks.append({"task_id": task_id, "reason": str(e)})
+
+    # 保存到磁碟
+    save_tasks_to_disk()
+
+    return {
+        "message": f"成功為 {len(updated_tasks)} 個任務加入標籤",
+        "updated_count": len(updated_tasks),
+        "failed_count": len(failed_tasks),
+        "updated_tasks": updated_tasks,
+        "failed_tasks": failed_tasks
+    }
+
+
+@app.post("/transcribe/batch/tags/remove")
+async def batch_remove_tags(request: BatchTagsRequest):
+    """批次移除標籤"""
+    updated_tasks = []
+    failed_tasks = []
+
+    for task_id in request.task_ids:
+        try:
+            with tasks_lock:
+                task = transcription_tasks.get(task_id)
+
+                if not task:
+                    failed_tasks.append({"task_id": task_id, "reason": "任務不存在"})
+                    continue
+
+                # 獲取現有標籤
+                existing_tags = set(task.get("tags", []))
+
+                # 移除指定標籤
+                for tag in request.tags:
+                    existing_tags.discard(tag)
+
+                # 更新任務的標籤
+                transcription_tasks[task_id]["tags"] = list(existing_tags)
+                transcription_tasks[task_id]["updated_at"] = get_current_time()
+
+                updated_tasks.append({
+                    "task_id": task_id,
+                    "tags": list(existing_tags)
+                })
+
+        except Exception as e:
+            failed_tasks.append({"task_id": task_id, "reason": str(e)})
+
+    # 保存到磁碟
+    save_tasks_to_disk()
+
+    return {
+        "message": f"成功從 {len(updated_tasks)} 個任務移除標籤",
+        "updated_count": len(updated_tasks),
+        "failed_count": len(failed_tasks),
+        "updated_tasks": updated_tasks,
+        "failed_tasks": failed_tasks
     }
 
 

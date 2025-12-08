@@ -1,17 +1,14 @@
 /Users/test/Documents/playground/transcriber/venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
   warnings.warn(
-/Users/test/Documents/playground/transcriber/venv/lib/python3.9/site-packages/pyannote/audio/core/io.py:212: UserWarning: torchaudio._backend.list_audio_backends has been deprecated. This deprecation is part of a large refactoring effort to transition TorchAudio into a maintenance phase. The decoding and encoding capabilities of PyTorch for both audio and video are being consolidated into TorchCodec. Please see https://github.com/pytorch/audio/issues/3902 for more information. It will be removed from the 2.9 release. 
-  torchaudio.list_audio_backends()
-INFO:     Started server process [60561]
+INFO:     Started server process [64676]
 INFO:     Waiting for application startup.
-/Users/test/Documents/playground/transcriber/venv/lib/python3.9/site-packages/speechbrain/utils/torch_audio_backend.py:57: UserWarning: torchaudio._backend.list_audio_backends has been deprecated. This deprecation is part of a large refactoring effort to transition TorchAudio into a maintenance phase. The decoding and encoding capabilities of PyTorch for both audio and video are being consolidated into TorchCodec. Please see https://github.com/pytorch/audio/issues/3902 for more information. It will be removed from the 2.9 release. 
-  available_backends = torchaudio.list_audio_backends()
-/Users/test/Documents/playground/transcriber/venv/lib/python3.9/site-packages/pyannote/audio/core/io.py:212: UserWarning: torchaudio._backend.list_audio_backends has been deprecated. This deprecation is part of a large refactoring effort to transition TorchAudio into a maintenance phase. The decoding and encoding capabilities of PyTorch for both audio and video are being consolidated into TorchCodec. Please see https://github.com/pytorch/audio/issues/3902 for more information. It will be removed from the 2.9 release. 
-  torchaudio.list_audio_backends()
+/Users/test/Documents/playground/transcriber/venv/lib/python3.9/site-packages/lightning_fabric/utilities/cloud_io.py:73: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
 📂 正在載入任務記錄...
-✅ 已從磁碟載入 12 個任務記錄
+✅ 已從磁碟載入 19 個任務記錄
+✅ 已載入 4 個標籤顏色設定
+✅ 已載入標籤順序（3 個標籤）
 🎙 正在載入 Faster-Whisper 模型：medium...
 🔧 配置：device=auto, compute_type=int8（針對 M1 優化）
 ✅ 模型載入完成，服務已就緒！
@@ -21,115 +18,542 @@ Your token has been saved to /Users/test/.cache/huggingface/token
 Login successful
 🔊 正在載入 Speaker Diarization 模型...
 ✅ Speaker Diarization 模型載入完成（使用 MPS 加速）！
-INFO:     127.0.0.1:59732 - "GET /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/download HTTP/1.1" 200 OK
-📝 [e9f070bd-391f-463e-8e32-b7e97ccb06f0] 準備更新檔案：/Users/test/Documents/playground/transcriber/output/1128咪聽_半導體1_20251201_143359_transcript.txt
-   新內容前100字：那我想說這個研究應該是要有三年嘛，原則上我希望以訪談為主，就是有一點口述歷史的那個意涵，然後再加上一些文件資料的收集為輔，然後共同來完成。
-
-所以這個研究應該會是從大概1980年代的校園，到2020年
-   檔案已更新，驗證前100字：那我想說這個研究應該是要有三年嘛，原則上我希望以訪談為主，就是有一點口述歷史的那個意涵，然後再加上一些文件資料的收集為輔，然後共同來完成。
-
-所以這個研究應該會是從大概1980年代的校園，到2020年
-✅ [e9f070bd-391f-463e-8e32-b7e97ccb06f0] 逐字稿已更新（新長度：2985 字）
-INFO:     155.102.30.4:0 - "PUT /transcribe/e9f070bd-391f-463e-8e32-b7e97ccb06f0/content HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59906 - "GET /transcribe/active/list HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59952 - "GET /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/segments HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59951 - "GET /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/download HTTP/1.1" 200 OK
-📝 [840f817a-e6d1-4262-8d73-f342509b424e] 更新自訂名稱：【成品】環宇002_遠／近距離領導12345.mp3
-INFO:     127.0.0.1:59996 - "PUT /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/metadata HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59999 - "GET /transcribe/active/list HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60002 - "GET /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/download HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60013 - "GET /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/download HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60065 - "GET /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/download HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60068 - "GET /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/segments HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60086 - "GET /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/download HTTP/1.1" 200 OK
-INFO:     155.102.30.4:0 - "GET /transcribe/e9f070bd-391f-463e-8e32-b7e97ccb06f0/download HTTP/1.1" 200 OK
-INFO:     155.102.30.4:0 - "GET /transcribe/ec7155c5-53cd-46a3-86e0-10bcbc625c22/download HTTP/1.1" 200 OK
-INFO:     155.102.30.4:0 - "GET /transcribe/ec7155c5-53cd-46a3-86e0-10bcbc625c22/segments HTTP/1.1" 200 OK
-INFO:     155.102.30.4:0 - "GET /transcribe/ec7155c5-53cd-46a3-86e0-10bcbc625c22/audio HTTP/1.1" 206 Partial Content
-INFO:     155.102.30.4:0 - "GET /transcribe/ec7155c5-53cd-46a3-86e0-10bcbc625c22/audio HTTP/1.1" 206 Partial Content
-📝 [ec7155c5-53cd-46a3-86e0-10bcbc625c22] 準備更新檔案：/Users/test/Documents/playground/transcriber/output/1128咪聽_半導體2_20251201_144225_transcript.txt
-   新內容前100字：因為我覺得這個就是因為這個模型讓我覺得應該可以去做。那我的文獻的部分其實就會cover這些剛才提到的時代、世代這兩個部分。可是原件模型我就暫時，我覺得它是一個比較新的想法，也就是很好的可以來貼合來談這
-   檔案已更新，驗證前100字：因為我覺得這個就是因為這個模型讓我覺得應該可以去做。那我的文獻的部分其實就會cover這些剛才提到的時代、世代這兩個部分。可是原件模型我就暫時，我覺得它是一個比較新的想法，也就是很好的可以來貼合來談這
-✅ [ec7155c5-53cd-46a3-86e0-10bcbc625c22] 逐字稿已更新（新長度：2872 字）
-INFO:     155.102.30.4:0 - "PUT /transcribe/ec7155c5-53cd-46a3-86e0-10bcbc625c22/content HTTP/1.1" 200 OK
-INFO:     155.102.30.4:0 - "GET /transcribe/e9f070bd-391f-463e-8e32-b7e97ccb06f0/download HTTP/1.1" 200 OK
-INFO:     155.102.30.4:0 - "GET /transcribe/e9f070bd-391f-463e-8e32-b7e97ccb06f0/segments HTTP/1.1" 200 OK
-INFO:     155.102.30.4:0 - "GET /transcribe/e9f070bd-391f-463e-8e32-b7e97ccb06f0/audio HTTP/1.1" 206 Partial Content
-INFO:     155.102.30.4:0 - "GET /transcribe/e9f070bd-391f-463e-8e32-b7e97ccb06f0/audio HTTP/1.1" 206 Partial Content
-INFO:     155.102.30.4:0 - "GET /transcribe/e9f070bd-391f-463e-8e32-b7e97ccb06f0/audio HTTP/1.1" 206 Partial Content
-INFO:     155.102.30.4:0 - "GET /transcribe/e9f070bd-391f-463e-8e32-b7e97ccb06f0/audio HTTP/1.1" 206 Partial Content
-INFO:     155.102.30.4:0 - "GET /transcribe/e9f070bd-391f-463e-8e32-b7e97ccb06f0/audio HTTP/1.1" 206 Partial Content
-INFO:     155.102.30.4:0 - "GET /transcribe/e9f070bd-391f-463e-8e32-b7e97ccb06f0/audio HTTP/1.1" 206 Partial Content
-📝 [e9f070bd-391f-463e-8e32-b7e97ccb06f0] 準備更新檔案：/Users/test/Documents/playground/transcriber/output/1128咪聽_半導體1_20251201_143359_transcript.txt
-   新內容前100字：那我想說這個研究應該是要有三年嘛，原則上我希望以訪談為主，就是有一點口述歷史的那個意涵，然後再加上一些文件資料的收集為輔，然後共同來完成。
-
-所以這個研究應該會是從大概1980年代的校園，到2020年
-   檔案已更新，驗證前100字：那我想說這個研究應該是要有三年嘛，原則上我希望以訪談為主，就是有一點口述歷史的那個意涵，然後再加上一些文件資料的收集為輔，然後共同來完成。
-
-所以這個研究應該會是從大概1980年代的校園，到2020年
-✅ [e9f070bd-391f-463e-8e32-b7e97ccb06f0] 逐字稿已更新（新長度：2983 字）
-INFO:     155.102.30.4:0 - "PUT /transcribe/e9f070bd-391f-463e-8e32-b7e97ccb06f0/content HTTP/1.1" 200 OK
-INFO:     155.102.30.4:0 - "GET /transcribe/e9f070bd-391f-463e-8e32-b7e97ccb06f0/download HTTP/1.1" 200 OK
-INFO:     155.102.30.4:0 - "GET /transcribe/ec7155c5-53cd-46a3-86e0-10bcbc625c22/segments HTTP/1.1" 200 OK
-INFO:     155.102.30.4:0 - "GET /transcribe/ec7155c5-53cd-46a3-86e0-10bcbc625c22/audio HTTP/1.1" 206 Partial Content
-INFO:     155.102.30.4:0 - "GET /transcribe/ec7155c5-53cd-46a3-86e0-10bcbc625c22/download HTTP/1.1" 200 OK
-INFO:     155.102.30.4:0 - "GET /transcribe/ec7155c5-53cd-46a3-86e0-10bcbc625c22/audio HTTP/1.1" 206 Partial Content
-INFO:     155.102.30.4:0 - "GET /transcribe/ec7155c5-53cd-46a3-86e0-10bcbc625c22/audio HTTP/1.1" 206 Partial Content
-INFO:     155.102.30.4:0 - "GET /transcribe/ec7155c5-53cd-46a3-86e0-10bcbc625c22/audio HTTP/1.1" 206 Partial Content
-INFO:     155.102.30.4:0 - "GET /transcribe/ec7155c5-53cd-46a3-86e0-10bcbc625c22/audio HTTP/1.1" 206 Partial Content
-📝 [ec7155c5-53cd-46a3-86e0-10bcbc625c22] 準備更新檔案：/Users/test/Documents/playground/transcriber/output/1128咪聽_半導體2_20251201_144225_transcript.txt
-   新內容前100字：因為我覺得這個就是因為這個模型讓我覺得應該可以去做。那我的文獻的部分其實就會cover這些剛才提到的時代、世代這兩個部分。可是原件模型我就暫時，我覺得它是一個比較新的想法，也就是很好的可以來貼合來談這
-   檔案已更新，驗證前100字：因為我覺得這個就是因為這個模型讓我覺得應該可以去做。那我的文獻的部分其實就會cover這些剛才提到的時代、世代這兩個部分。可是原件模型我就暫時，我覺得它是一個比較新的想法，也就是很好的可以來貼合來談這
-✅ [ec7155c5-53cd-46a3-86e0-10bcbc625c22] 逐字稿已更新（新長度：2618 字）
-INFO:     155.102.30.4:0 - "PUT /transcribe/ec7155c5-53cd-46a3-86e0-10bcbc625c22/content HTTP/1.1" 200 OK
-INFO:     155.102.30.4:0 - "GET /transcribe/ec7155c5-53cd-46a3-86e0-10bcbc625c22/audio HTTP/1.1" 206 Partial Content
-📝 [ec7155c5-53cd-46a3-86e0-10bcbc625c22] 準備更新檔案：/Users/test/Documents/playground/transcriber/output/1128咪聽_半導體2_20251201_144225_transcript.txt
-   新內容前100字：因為我覺得這個就是因為這個模型讓我覺得應該可以去做。那我的文獻的部分其實就會cover這些剛才提到的時代、世代這兩個部分。可是原件模型我就暫時，我覺得它是一個比較新的想法，也就是很好的可以來貼合來談這
-   檔案已更新，驗證前100字：因為我覺得這個就是因為這個模型讓我覺得應該可以去做。那我的文獻的部分其實就會cover這些剛才提到的時代、世代這兩個部分。可是原件模型我就暫時，我覺得它是一個比較新的想法，也就是很好的可以來貼合來談這
-✅ [ec7155c5-53cd-46a3-86e0-10bcbc625c22] 逐字稿已更新（新長度：2493 字）
-INFO:     155.102.30.4:0 - "PUT /transcribe/ec7155c5-53cd-46a3-86e0-10bcbc625c22/content HTTP/1.1" 200 OK
-📝 [ec7155c5-53cd-46a3-86e0-10bcbc625c22] 準備更新檔案：/Users/test/Documents/playground/transcriber/output/1128咪聽_半導體2_20251201_144225_transcript.txt
-   新內容前100字：因為我覺得這個就是因為這個模型讓我覺得應該可以去做。那我的文獻的部分其實就會cover這些剛才提到的時代、世代這兩個部分。可是原件模型我就暫時，我覺得它是一個比較新的想法，也就是很好的可以來貼合來談這
-   檔案已更新，驗證前100字：因為我覺得這個就是因為這個模型讓我覺得應該可以去做。那我的文獻的部分其實就會cover這些剛才提到的時代、世代這兩個部分。可是原件模型我就暫時，我覺得它是一個比較新的想法，也就是很好的可以來貼合來談這
-✅ [ec7155c5-53cd-46a3-86e0-10bcbc625c22] 逐字稿已更新（新長度：2492 字）
-INFO:     155.102.30.4:0 - "PUT /transcribe/ec7155c5-53cd-46a3-86e0-10bcbc625c22/content HTTP/1.1" 200 OK
-INFO:     155.102.30.4:0 - "GET /transcribe/828c08db-7ebd-4b98-a80d-a8a908377127/download HTTP/1.1" 200 OK
-INFO:     155.102.30.4:0 - "GET /transcribe/828c08db-7ebd-4b98-a80d-a8a908377127/segments HTTP/1.1" 200 OK
-INFO:     155.102.30.4:0 - "GET /transcribe/828c08db-7ebd-4b98-a80d-a8a908377127/audio HTTP/1.1" 206 Partial Content
-INFO:     155.102.30.4:0 - "GET /transcribe/828c08db-7ebd-4b98-a80d-a8a908377127/audio HTTP/1.1" 206 Partial Content
-INFO:     155.102.30.4:0 - "GET /transcribe/828c08db-7ebd-4b98-a80d-a8a908377127/audio HTTP/1.1" 206 Partial Content
-📝 [828c08db-7ebd-4b98-a80d-a8a908377127] 準備更新檔案：/Users/test/Documents/playground/transcriber/output/1128咪聽_分子_20251201_151001_transcript.txt
-   新內容前100字：[蓉] 那就是社會學裡面研究世代的走法，他們通常會怎麼描繪？
-
-[宗文] 研究世代的走法？
-
-[蓉] 就是我突然覺得好像比較社會學裡面的質性都是這樣子，一群人在當下這個場域裡面，因為他是進去做田野，所
-   檔案已更新，驗證前100字：[蓉] 那就是社會學裡面研究世代的走法，他們通常會怎麼描繪？
-
-[宗文] 研究世代的走法？
-
-[蓉] 就是我突然覺得好像比較社會學裡面的質性都是這樣子，一群人在當下這個場域裡面，因為他是進去做田野，所
-✅ [828c08db-7ebd-4b98-a80d-a8a908377127] 逐字稿已更新（新長度：10345 字）
-INFO:     155.102.30.4:0 - "PUT /transcribe/828c08db-7ebd-4b98-a80d-a8a908377127/content HTTP/1.1" 200 OK
-INFO:     155.102.30.4:0 - "GET /transcribe/ec7155c5-53cd-46a3-86e0-10bcbc625c22/download HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61179 - "GET /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/download HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61198 - "GET /transcribe/active/list HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61214 - "GET /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/download HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61248 - "GET /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/segments HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61245 - "GET /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/download HTTP/1.1" 200 OK
-📝 [840f817a-e6d1-4262-8d73-f342509b424e] 更新自訂名稱：【成品】環宇002_遠／近距離領導123
-INFO:     127.0.0.1:61292 - "PUT /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/metadata HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61295 - "GET /transcribe/active/list HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61305 - "GET /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/download HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61586 - "GET /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/download HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61969 - "GET /transcribe/active/list HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62076 - "GET /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/download HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62091 - "GET /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/download HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62094 - "GET /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/segments HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55649 - "GET /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/segments HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55651 - "GET /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/download HTTP/1.1" 200 OK
-📝 [840f817a-e6d1-4262-8d73-f342509b424e] 更新自訂名稱：環宇002_遠／近距離領導
-INFO:     127.0.0.1:55690 - "PUT /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/metadata HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55693 - "GET /transcribe/active/list HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55729 - "GET /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/segments HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55727 - "GET /transcribe/840f817a-e6d1-4262-8d73-f342509b424e/download HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55008 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55009 - "GET /tags/order HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55010 - "GET /transcribe/active/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55012 - "GET /tags HTTP/1.1" 200 OK
+📁 收到檔案：松江路332號 .m4a (0.30 MB)
+🔄 [5b68ed8a-3512-4d11-a4a5-923e3695d642] 轉檔為 WAV...
+INFO:     127.0.0.1:55062 - "POST /transcribe HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55069 - "GET /tags HTTP/1.1" 200 OK
+🔊 載入音檔：input.wav
+📊 音檔總長度：0.6 分鐘
+📝 音檔長度在 10 分鐘內，直接轉錄...
+INFO:     127.0.0.1:55080 - "GET /transcribe/5b68ed8a-3512-4d11-a4a5-923e3695d642 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55083 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55094 - "GET /transcribe/5b68ed8a-3512-4d11-a4a5-923e3695d642 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55097 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55108 - "GET /transcribe/5b68ed8a-3512-4d11-a4a5-923e3695d642 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55111 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55122 - "GET /transcribe/5b68ed8a-3512-4d11-a4a5-923e3695d642 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55125 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55136 - "GET /transcribe/5b68ed8a-3512-4d11-a4a5-923e3695d642 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55139 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55151 - "GET /transcribe/5b68ed8a-3512-4d11-a4a5-923e3695d642 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55154 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55165 - "GET /transcribe/5b68ed8a-3512-4d11-a4a5-923e3695d642 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55168 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55181 - "GET /transcribe/5b68ed8a-3512-4d11-a4a5-923e3695d642 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55184 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55197 - "GET /transcribe/5b68ed8a-3512-4d11-a4a5-923e3695d642 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55200 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55213 - "GET /transcribe/5b68ed8a-3512-4d11-a4a5-923e3695d642 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55216 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55227 - "GET /transcribe/5b68ed8a-3512-4d11-a4a5-923e3695d642 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55230 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55244 - "GET /transcribe/5b68ed8a-3512-4d11-a4a5-923e3695d642 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55247 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55263 - "GET /transcribe/5b68ed8a-3512-4d11-a4a5-923e3695d642 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55266 - "GET /tags HTTP/1.1" 200 OK
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/linecache.py:54: UserWarning: Module 'speechbrain.pretrained' was deprecated, redirecting to 'speechbrain.inference'. Please update your script. This is a change from SpeechBrain 1.0. See: https://github.com/speechbrain/speechbrain/releases/tag/v1.0.0
+  if getattr(mod, '__file__', None) == filename:
+/Users/test/Documents/playground/transcriber/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:252: FutureWarning: You are using a Python version (3.9.6) past its end of life. Google will update google.api_core with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.api_core.
+  warnings.warn(message, FutureWarning)
+✅ [5b68ed8a-3512-4d11-a4a5-923e3695d642] 轉錄完成（57 字）
+✨ [5b68ed8a-3512-4d11-a4a5-923e3695d642] 使用 Gemini 加標點與分段...
+An error occurred: module 'importlib.metadata' has no attribute 'packages_distributions'
+🔑 使用 Google API Key #2/12
+⚠️ Google API Key 配額已用完 (嘗試 1/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #3/12
+⚠️ Google API Key 配額已用完 (嘗試 2/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #4/12
+⚠️ Google API Key 配額已用完 (嘗試 3/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #5/12
+⚠️ Google API Key 配額已用完 (嘗試 4/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #6/12
+⚠️ Google API Key 配額已用完 (嘗試 5/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #7/12
+⚠️ Google API Key 配額已用完 (嘗試 6/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #8/12
+⚠️ Google API Key 配額已用完 (嘗試 7/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #9/12
+⚠️ Google API Key 配額已用完 (嘗試 8/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #10/12
+⚠️ Google API Key 配額已用完 (嘗試 9/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #11/12
+⚠️ Google API Key 配額已用完 (嘗試 10/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #12/12
+INFO:     127.0.0.1:55291 - "GET /transcribe/5b68ed8a-3512-4d11-a4a5-923e3695d642 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55294 - "GET /tags HTTP/1.1" 200 OK
+⚠️ Google API Key 配額已用完 (嘗試 11/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #1/12
+⚠️ Google API Key 配額已用完 (嘗試 12/12)
+💡 所有 gemini-2.0-flash 配額已用完，切換到備用模型 gemini-flash-lite-latest
+⚠️ 語言辨識失敗: 無法調用 Gemini API，預設使用中文
+🔍 自動辨識語言: zh
+📏 根據語言 'zh' 設定分段大小：3000 字元
+🔑 使用 Google API Key #2/12
+⚠️ Google API Key 配額已用完 (嘗試 1/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #3/12
+⚠️ Google API Key 配額已用完 (嘗試 2/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #4/12
+⚠️ Google API Key 配額已用完 (嘗試 3/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #5/12
+⚠️ Google API Key 配額已用完 (嘗試 4/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #6/12
+⚠️ Google API Key 配額已用完 (嘗試 5/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #7/12
+⚠️ Google API Key 配額已用完 (嘗試 6/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #8/12
+⚠️ Google API Key 配額已用完 (嘗試 7/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #9/12
+⚠️ Google API Key 配額已用完 (嘗試 8/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #10/12
+⚠️ Google API Key 配額已用完 (嘗試 9/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #11/12
+⚠️ Google API Key 配額已用完 (嘗試 10/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #12/12
+⚠️ Google API Key 配額已用完 (嘗試 11/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #1/12
+⚠️ Google API Key 配額已用完 (嘗試 12/12)
+💡 所有 gemini-2.0-flash 配額已用完，切換到備用模型 gemini-flash-lite-latest
+❌ [5b68ed8a-3512-4d11-a4a5-923e3695d642] 錯誤：無法調用 Gemini API
+🗑️ 已清理臨時目錄：tmpmcoftxul
+INFO:     127.0.0.1:55319 - "GET /transcribe/5b68ed8a-3512-4d11-a4a5-923e3695d642 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55322 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55457 - "GET /transcribe/9ec447ec-fea5-4a70-962a-8b707c65fcbc/segments HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55456 - "GET /transcribe/9ec447ec-fea5-4a70-962a-8b707c65fcbc/download HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55460 - "GET /transcribe/9ec447ec-fea5-4a70-962a-8b707c65fcbc/audio HTTP/1.1" 206 Partial Content
+INFO:     127.0.0.1:55596 - "POST /transcribe/batch/delete HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55607 - "GET /transcribe/active/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55610 - "GET /tags HTTP/1.1" 200 OK
+📁 收到檔案：松江路332號 .m4a (0.30 MB)
+INFO:     127.0.0.1:55778 - "POST /transcribe HTTP/1.1" 200 OK
+🔄 [01cc93bf-d8b0-4577-874b-7f4e810ce303] 轉檔為 WAV...
+INFO:     127.0.0.1:55781 - "GET /tags HTTP/1.1" 200 OK
+🔊 載入音檔：input.wav
+📊 音檔總長度：0.6 分鐘
+📝 音檔長度在 10 分鐘內，直接轉錄...
+INFO:     127.0.0.1:55796 - "GET /transcribe/01cc93bf-d8b0-4577-874b-7f4e810ce303 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55799 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55806 - "GET /transcribe/01cc93bf-d8b0-4577-874b-7f4e810ce303 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55809 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55820 - "GET /transcribe/01cc93bf-d8b0-4577-874b-7f4e810ce303 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55823 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55836 - "GET /transcribe/01cc93bf-d8b0-4577-874b-7f4e810ce303 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55839 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55852 - "GET /transcribe/01cc93bf-d8b0-4577-874b-7f4e810ce303 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55855 - "GET /tags HTTP/1.1" 200 OK
+📁 收到檔案：松江路332號 .m4a (0.30 MB)
+INFO:     127.0.0.1:55863 - "POST /transcribe HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55866 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55875 - "GET /transcribe/01cc93bf-d8b0-4577-874b-7f4e810ce303 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55876 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55880 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55882 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55897 - "GET /transcribe/01cc93bf-d8b0-4577-874b-7f4e810ce303 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55898 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55902 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55904 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55919 - "GET /transcribe/01cc93bf-d8b0-4577-874b-7f4e810ce303 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55920 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55924 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55926 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55943 - "GET /transcribe/01cc93bf-d8b0-4577-874b-7f4e810ce303 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55944 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55949 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55950 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55969 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55970 - "GET /transcribe/01cc93bf-d8b0-4577-874b-7f4e810ce303 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55975 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55976 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55989 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55990 - "GET /transcribe/01cc93bf-d8b0-4577-874b-7f4e810ce303 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55995 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55996 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56009 - "GET /transcribe/01cc93bf-d8b0-4577-874b-7f4e810ce303 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56010 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56014 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56016 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56029 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56030 - "GET /transcribe/01cc93bf-d8b0-4577-874b-7f4e810ce303 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56035 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56036 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56051 - "GET /transcribe/01cc93bf-d8b0-4577-874b-7f4e810ce303 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56052 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56057 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56058 - "GET /tags HTTP/1.1" 200 OK
+✅ [01cc93bf-d8b0-4577-874b-7f4e810ce303] 轉錄完成（57 字）
+✨ [01cc93bf-d8b0-4577-874b-7f4e810ce303] 使用 Gemini 加標點與分段...
+🔑 使用 Google API Key #2/12
+⚠️ Google API Key 配額已用完 (嘗試 1/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #3/12
+⚠️ Google API Key 配額已用完 (嘗試 2/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #4/12
+⚠️ Google API Key 配額已用完 (嘗試 3/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #5/12
+⚠️ Google API Key 配額已用完 (嘗試 4/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #6/12
+⚠️ Google API Key 配額已用完 (嘗試 5/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #7/12
+⚠️ Google API Key 配額已用完 (嘗試 6/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #8/12
+⚠️ Google API Key 配額已用完 (嘗試 7/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #9/12
+⚠️ Google API Key 配額已用完 (嘗試 8/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #10/12
+⚠️ Google API Key 配額已用完 (嘗試 9/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #11/12
+⚠️ Google API Key 配額已用完 (嘗試 10/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #12/12
+⚠️ Google API Key 配額已用完 (嘗試 11/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #1/12
+⚠️ Google API Key 配額已用完 (嘗試 12/12)
+💡 所有 gemini-2.0-flash 配額已用完，切換到備用模型 gemini-flash-lite-latest
+⚠️ 語言辨識失敗: 無法調用 Gemini API，預設使用中文
+🔍 自動辨識語言: zh
+📏 根據語言 'zh' 設定分段大小：3000 字元
+🔑 使用 Google API Key #2/12
+⚠️ Google API Key 配額已用完 (嘗試 1/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #3/12
+⚠️ Google API Key 配額已用完 (嘗試 2/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #4/12
+⚠️ Google API Key 配額已用完 (嘗試 3/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #5/12
+⚠️ Google API Key 配額已用完 (嘗試 4/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #6/12
+⚠️ Google API Key 配額已用完 (嘗試 5/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #7/12
+⚠️ Google API Key 配額已用完 (嘗試 6/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #8/12
+INFO:     127.0.0.1:56089 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56090 - "GET /transcribe/01cc93bf-d8b0-4577-874b-7f4e810ce303 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56096 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56097 - "GET /tags HTTP/1.1" 200 OK
+⚠️ Google API Key 配額已用完 (嘗試 7/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #9/12
+⚠️ Google API Key 配額已用完 (嘗試 8/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #10/12
+⚠️ Google API Key 配額已用完 (嘗試 9/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #11/12
+⚠️ Google API Key 配額已用完 (嘗試 10/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #12/12
+⚠️ Google API Key 配額已用完 (嘗試 11/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #1/12
+⚠️ Google API Key 配額已用完 (嘗試 12/12)
+💡 所有 gemini-2.0-flash 配額已用完，切換到備用模型 gemini-flash-lite-latest
+❌ [01cc93bf-d8b0-4577-874b-7f4e810ce303] 錯誤：無法調用 Gemini API
+🗑️ 已清理臨時目錄：tmpvefjs124
+🔄 [367d4ad7-cbbf-4b42-abc6-fc84c57b0e21] 轉檔為 WAV...
+🔊 載入音檔：input.wav
+📊 音檔總長度：0.6 分鐘
+📝 音檔長度在 10 分鐘內，直接轉錄...
+INFO:     127.0.0.1:56115 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56116 - "GET /transcribe/01cc93bf-d8b0-4577-874b-7f4e810ce303 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56120 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56122 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56135 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56138 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56149 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56152 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56163 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56166 - "GET /tags HTTP/1.1" 200 OK
+📁 收到檔案：松江路332號 .m4a (0.30 MB)
+INFO:     127.0.0.1:56174 - "POST /transcribe HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56177 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56185 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56187 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56191 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56193 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56206 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56207 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56211 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56213 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56233 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56234 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56238 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56240 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56260 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56261 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56265 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56267 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56291 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56293 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56298 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56299 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56312 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56314 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56318 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56320 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56339 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56340 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56345 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56346 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56363 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56364 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56368 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56370 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56384 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56385 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56389 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56391 - "GET /tags HTTP/1.1" 200 OK
+✅ [367d4ad7-cbbf-4b42-abc6-fc84c57b0e21] 轉錄完成（57 字）
+✨ [367d4ad7-cbbf-4b42-abc6-fc84c57b0e21] 使用 Gemini 加標點與分段...
+🔑 使用 Google API Key #2/12
+⚠️ Google API Key 配額已用完 (嘗試 1/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #3/12
+⚠️ Google API Key 配額已用完 (嘗試 2/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #4/12
+⚠️ Google API Key 配額已用完 (嘗試 3/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #5/12
+⚠️ Google API Key 配額已用完 (嘗試 4/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #6/12
+⚠️ Google API Key 配額已用完 (嘗試 5/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #7/12
+⚠️ Google API Key 配額已用完 (嘗試 6/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #8/12
+⚠️ Google API Key 配額已用完 (嘗試 7/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #9/12
+⚠️ Google API Key 配額已用完 (嘗試 8/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #10/12
+⚠️ Google API Key 配額已用完 (嘗試 9/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #11/12
+⚠️ Google API Key 配額已用完 (嘗試 10/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #12/12
+⚠️ Google API Key 配額已用完 (嘗試 11/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #1/12
+⚠️ Google API Key 配額已用完 (嘗試 12/12)
+💡 所有 gemini-2.0-flash 配額已用完，切換到備用模型 gemini-flash-lite-latest
+⚠️ 語言辨識失敗: 無法調用 Gemini API，預設使用中文
+🔍 自動辨識語言: zh
+📏 根據語言 'zh' 設定分段大小：3000 字元
+🔑 使用 Google API Key #2/12
+⚠️ Google API Key 配額已用完 (嘗試 1/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #3/12
+⚠️ Google API Key 配額已用完 (嘗試 2/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #4/12
+INFO:     127.0.0.1:56419 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56420 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56424 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56426 - "GET /tags HTTP/1.1" 200 OK
+⚠️ Google API Key 配額已用完 (嘗試 3/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #5/12
+⚠️ Google API Key 配額已用完 (嘗試 4/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #6/12
+⚠️ Google API Key 配額已用完 (嘗試 5/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #7/12
+⚠️ Google API Key 配額已用完 (嘗試 6/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #8/12
+⚠️ Google API Key 配額已用完 (嘗試 7/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #9/12
+⚠️ Google API Key 配額已用完 (嘗試 8/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #10/12
+⚠️ Google API Key 配額已用完 (嘗試 9/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #11/12
+⚠️ Google API Key 配額已用完 (嘗試 10/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #12/12
+⚠️ Google API Key 配額已用完 (嘗試 11/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #1/12
+⚠️ Google API Key 配額已用完 (嘗試 12/12)
+💡 所有 gemini-2.0-flash 配額已用完，切換到備用模型 gemini-flash-lite-latest
+❌ [367d4ad7-cbbf-4b42-abc6-fc84c57b0e21] 錯誤：無法調用 Gemini API
+🗑️ 已清理臨時目錄：tmp29up804n
+🔄 [d02fd7b2-e7bf-48f9-897e-fcdc2a46728a] 轉檔為 WAV...
+🔊 載入音檔：input.wav
+📊 音檔總長度：0.6 分鐘
+📝 音檔長度在 10 分鐘內，直接轉錄...
+INFO:     127.0.0.1:56448 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56449 - "GET /transcribe/367d4ad7-cbbf-4b42-abc6-fc84c57b0e21 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56452 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56455 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56466 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56469 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56480 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56483 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56494 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56497 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56508 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56511 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56523 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56526 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56537 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56540 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56548 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56551 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56562 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56565 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56581 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56584 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56595 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56598 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56609 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56612 - "GET /tags HTTP/1.1" 200 OK
+✅ [d02fd7b2-e7bf-48f9-897e-fcdc2a46728a] 轉錄完成（57 字）
+✨ [d02fd7b2-e7bf-48f9-897e-fcdc2a46728a] 使用 Gemini 加標點與分段...
+🔑 使用 Google API Key #2/12
+⚠️ Google API Key 配額已用完 (嘗試 1/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #3/12
+⚠️ Google API Key 配額已用完 (嘗試 2/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #4/12
+⚠️ Google API Key 配額已用完 (嘗試 3/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #5/12
+⚠️ Google API Key 配額已用完 (嘗試 4/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #6/12
+⚠️ Google API Key 配額已用完 (嘗試 5/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #7/12
+⚠️ Google API Key 配額已用完 (嘗試 6/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #8/12
+⚠️ Google API Key 配額已用完 (嘗試 7/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #9/12
+⚠️ Google API Key 配額已用完 (嘗試 8/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #10/12
+⚠️ Google API Key 配額已用完 (嘗試 9/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #11/12
+⚠️ Google API Key 配額已用完 (嘗試 10/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #12/12
+INFO:     127.0.0.1:56636 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56639 - "GET /tags HTTP/1.1" 200 OK
+⚠️ Google API Key 配額已用完 (嘗試 11/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #1/12
+⚠️ Google API Key 配額已用完 (嘗試 12/12)
+💡 所有 gemini-2.0-flash 配額已用完，切換到備用模型 gemini-flash-lite-latest
+⚠️ 語言辨識失敗: 無法調用 Gemini API，預設使用中文
+🔍 自動辨識語言: zh
+📏 根據語言 'zh' 設定分段大小：3000 字元
+🔑 使用 Google API Key #2/12
+⚠️ Google API Key 配額已用完 (嘗試 1/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #3/12
+⚠️ Google API Key 配額已用完 (嘗試 2/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #4/12
+⚠️ Google API Key 配額已用完 (嘗試 3/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #5/12
+⚠️ Google API Key 配額已用完 (嘗試 4/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #6/12
+⚠️ Google API Key 配額已用完 (嘗試 5/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #7/12
+⚠️ Google API Key 配額已用完 (嘗試 6/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #8/12
+⚠️ Google API Key 配額已用完 (嘗試 7/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #9/12
+⚠️ Google API Key 配額已用完 (嘗試 8/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #10/12
+⚠️ Google API Key 配額已用完 (嘗試 9/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #11/12
+⚠️ Google API Key 配額已用完 (嘗試 10/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #12/12
+⚠️ Google API Key 配額已用完 (嘗試 11/12)
+🔄 切換到下一個 API Key...
+🔑 使用 Google API Key #1/12
+⚠️ Google API Key 配額已用完 (嘗試 12/12)
+💡 所有 gemini-2.0-flash 配額已用完，切換到備用模型 gemini-flash-lite-latest
+❌ [d02fd7b2-e7bf-48f9-897e-fcdc2a46728a] 錯誤：無法調用 Gemini API
+🗑️ 已清理臨時目錄：tmp10lmx5cy
+INFO:     127.0.0.1:56663 - "GET /transcribe/d02fd7b2-e7bf-48f9-897e-fcdc2a46728a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56666 - "GET /tags HTTP/1.1" 200 OK
+INFO:     155.102.30.4:0 - "GET /tags HTTP/1.1" 200 OK
+INFO:     155.102.30.4:0 - "GET /tags/order HTTP/1.1" 200 OK
+INFO:     155.102.30.4:0 - "GET /transcribe/active/list HTTP/1.1" 200 OK
+INFO:     155.102.30.4:0 - "GET /tags HTTP/1.1" 200 OK
+INFO:     155.102.30.4:0 - "GET /tags HTTP/1.1" 200 OK
+INFO:     155.102.30.4:0 - "GET /transcribe/active/list HTTP/1.1" 200 OK
+INFO:     155.102.30.4:0 - "GET /tags/order HTTP/1.1" 200 OK
+INFO:     155.102.30.4:0 - "GET /tags HTTP/1.1" 200 OK
+INFO:     155.102.30.4:0 - "GET /tags HTTP/1.1" 200 OK
+INFO:     155.102.30.4:0 - "GET /tags/order HTTP/1.1" 200 OK
+INFO:     155.102.30.4:0 - "GET /transcribe/active/list HTTP/1.1" 200 OK
+INFO:     155.102.30.4:0 - "GET /tags HTTP/1.1" 200 OK
+INFO:     155.102.30.4:0 - "GET /tags HTTP/1.1" 200 OK
+INFO:     155.102.30.4:0 - "GET /tags/order HTTP/1.1" 200 OK
+INFO:     155.102.30.4:0 - "GET /transcribe/active/list HTTP/1.1" 200 OK
+INFO:     155.102.30.4:0 - "GET /tags HTTP/1.1" 200 OK
+INFO:     155.102.30.4:0 - "GET /tags HTTP/1.1" 200 OK
+INFO:     155.102.30.4:0 - "GET /transcribe/active/list HTTP/1.1" 200 OK
+INFO:     155.102.30.4:0 - "GET /tags/order HTTP/1.1" 200 OK
+INFO:     155.102.30.4:0 - "GET /tags HTTP/1.1" 200 OK

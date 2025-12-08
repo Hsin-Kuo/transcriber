@@ -67,6 +67,63 @@
                 </div>
               </div>
 
+              <!-- 標籤 -->
+              <div class="modal-section">
+                <label class="section-label">標籤</label>
+                <div class="tag-input-container">
+                  <div class="tag-input-wrapper">
+                    <input
+                      type="text"
+                      v-model="tagInput"
+                      @keydown.enter.prevent="addTag"
+                      @keydown.comma.prevent="addTag"
+                      placeholder="輸入標籤後按 Enter 或逗號"
+                      class="text-input"
+                    />
+                    <button
+                      type="button"
+                      class="btn-add-tag"
+                      @click="addTag"
+                      :disabled="!tagInput.trim()"
+                    >
+                      新增
+                    </button>
+                  </div>
+                  <div v-if="selectedTags.length > 0" class="selected-tags">
+                    <span
+                      v-for="(tag, index) in selectedTags"
+                      :key="index"
+                      class="selected-tag"
+                    >
+                      {{ tag }}
+                      <button
+                        type="button"
+                        class="remove-tag"
+                        @click="removeTag(index)"
+                        title="移除標籤"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 音檔保留說明 -->
+              <div class="modal-section info-section">
+                <div class="info-box">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="info-icon">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="16" x2="12" y2="12"></line>
+                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                  </svg>
+                  <div class="info-text">
+                    <strong>音檔保留規則：</strong>
+                    <span>最新的音檔會自動保留；列表中可另勾選保留3個音檔（總共最多保留4個）。</span>
+                  </div>
+                </div>
+              </div>
+
               <!-- 動作按鈕 -->
               <div class="modal-actions">
                 <button class="btn btn-secondary" @click="cancelUpload">取消</button>
@@ -254,6 +311,62 @@
                           title="調整音量"
                         />
                       </div>
+
+                      <!-- 快捷鍵說明 -->
+                      <div class="shortcuts-info">
+                        <button class="audio-control-btn shortcuts-btn" title="鍵盤快捷鍵">
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="12" y1="16" x2="12" y2="12"></line>
+                            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                          </svg>
+                        </button>
+                        <div class="shortcuts-tooltip">
+                          <div class="shortcuts-title">音檔控制快捷鍵</div>
+                          <div class="shortcuts-section">
+                            <div class="shortcuts-section-title">通用（編輯時可用）</div>
+                            <div class="shortcut-item">
+                              <kbd>Alt</kbd> + <kbd>K</kbd>
+                              <span>播放/暫停</span>
+                            </div>
+                            <div class="shortcut-item">
+                              <kbd>Alt</kbd> + <kbd>J</kbd> / <kbd>←</kbd>
+                              <span>快退 10 秒</span>
+                            </div>
+                            <div class="shortcut-item">
+                              <kbd>Alt</kbd> + <kbd>L</kbd> / <kbd>→</kbd>
+                              <span>快進 10 秒</span>
+                            </div>
+                            <div class="shortcut-item">
+                              <kbd>Alt</kbd> + <kbd>,</kbd>
+                              <span>快退 5 秒</span>
+                            </div>
+                            <div class="shortcut-item">
+                              <kbd>Alt</kbd> + <kbd>.</kbd>
+                              <span>快進 5 秒</span>
+                            </div>
+                            <div class="shortcut-item">
+                              <kbd>Alt</kbd> + <kbd>M</kbd>
+                              <span>靜音/取消靜音</span>
+                            </div>
+                          </div>
+                          <div class="shortcuts-section">
+                            <div class="shortcuts-section-title">非編輯模式</div>
+                            <div class="shortcut-item">
+                              <kbd>Space</kbd>
+                              <span>播放/暫停</span>
+                            </div>
+                            <div class="shortcut-item">
+                              <kbd>←</kbd>
+                              <span>快退 10 秒</span>
+                            </div>
+                            <div class="shortcut-item">
+                              <kbd>→</kbd>
+                              <span>快進 10 秒</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -387,7 +500,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import axios from 'axios'
 import ElectricBorder from './components/ElectricBorder.vue'
 import UploadZone from './components/UploadZone.vue'
@@ -403,6 +516,8 @@ const maxSpeakers = ref(null)
 const showConfirmDialog = ref(false)
 const pendingFile = ref(null)
 const selectedLanguage = ref('auto')
+const selectedTags = ref([])
+const tagInput = ref('')
 const showTranscriptDialog = ref(false)
 const currentTranscript = ref({})
 const loadingTranscript = ref(false)
@@ -436,6 +551,17 @@ const titleInput = ref(null)
 const savingName = ref(false)
 let pollInterval = null
 
+// 監聽對話框開關，控制背景滾動
+watch(showTranscriptDialog, (newValue) => {
+  if (newValue) {
+    // 對話框打開時，禁用背景滾動
+    document.body.style.overflow = 'hidden'
+  } else {
+    // 對話框關閉時，恢復背景滾動
+    document.body.style.overflow = ''
+  }
+})
+
 // 統計數據
 const activeTasks = computed(() =>
   tasks.value.filter(t => ['pending', 'processing'].includes(t.status)).length
@@ -453,6 +579,21 @@ function handleFileUpload(file) {
   showConfirmDialog.value = true
 }
 
+// 標籤管理
+function addTag() {
+  const tag = tagInput.value.trim()
+  if (tag && !selectedTags.value.includes(tag)) {
+    selectedTags.value.push(tag)
+    tagInput.value = ''
+  } else if (selectedTags.value.includes(tag)) {
+    tagInput.value = ''
+  }
+}
+
+function removeTag(index) {
+  selectedTags.value.splice(index, 1)
+}
+
 // 確認後開始上傳
 async function confirmAndUpload() {
   if (!pendingFile.value) return
@@ -468,6 +609,9 @@ async function confirmAndUpload() {
   formData.append('diarize', enableDiarization.value ? 'true' : 'false')
   if (enableDiarization.value && maxSpeakers.value) {
     formData.append('max_speakers', maxSpeakers.value.toString())
+  }
+  if (selectedTags.value.length > 0) {
+    formData.append('tags', JSON.stringify(selectedTags.value))
   }
 
   try {
@@ -489,6 +633,8 @@ async function confirmAndUpload() {
   } finally {
     uploading.value = false
     pendingFile.value = null
+    selectedTags.value = []
+    tagInput.value = ''
   }
 }
 
@@ -496,6 +642,8 @@ async function confirmAndUpload() {
 function cancelUpload() {
   showConfirmDialog.value = false
   pendingFile.value = null
+  selectedTags.value = []
+  tagInput.value = ''
 }
 
 // 輪詢更新任務狀態
@@ -640,19 +788,21 @@ async function refreshTasks() {
     const response = await axios.get(`${API_BASE}/transcribe/active/list`)
     const serverTasks = response.data.all_tasks || []
 
-    // 合併伺服器任務與本地任務
-    serverTasks.forEach(serverTask => {
-      const existingTask = tasks.value.find(t => t.task_id === serverTask.task_id)
-      if (existingTask) {
-        // 保存 cancelling 狀態，避免被伺服器回應覆蓋
-        const cancelling = existingTask.cancelling
-        Object.assign(existingTask, serverTask)
-        if (cancelling !== undefined) {
-          existingTask.cancelling = cancelling
-        }
-      } else {
-        tasks.value.push(serverTask)
+    // 保存本地任務的 cancelling 狀態
+    const cancellingStates = new Map()
+    tasks.value.forEach(task => {
+      if (task.cancelling !== undefined) {
+        cancellingStates.set(task.task_id, task.cancelling)
       }
+    })
+
+    // 用伺服器任務列表替換本地列表
+    tasks.value = serverTasks.map(serverTask => {
+      // 恢復 cancelling 狀態（如果有）
+      if (cancellingStates.has(serverTask.task_id)) {
+        return { ...serverTask, cancelling: cancellingStates.get(serverTask.task_id) }
+      }
+      return serverTask
     })
   } catch (error) {
     console.error('刷新任務列表失敗:', error)
@@ -914,6 +1064,105 @@ function formatTime(seconds) {
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 }
+
+// 鍵盤快捷鍵處理（使用 Alt 鍵避免系統快捷鍵衝突）
+function handleKeyboardShortcuts(event) {
+  // 如果沒有音檔，不處理快捷鍵
+  if (!currentTranscript.value.hasAudio || !audioElement.value) return
+
+  // 使用 Alt 鍵組合（編輯時也可用，較少衝突）
+  if (event.altKey && !event.ctrlKey && !event.metaKey) {
+    switch(event.key) {
+      case 'k':
+      case 'K':
+        // Alt + K：播放/暫停
+        event.preventDefault()
+        togglePlayPause()
+        break
+      case 'j':
+      case 'J':
+        // Alt + J：快退 10 秒
+        event.preventDefault()
+        skipBackward()
+        break
+      case 'l':
+      case 'L':
+        // Alt + L：快進 10 秒
+        event.preventDefault()
+        skipForward()
+        break
+      case 'ArrowLeft':
+        // Alt + Left：快退 10 秒
+        event.preventDefault()
+        skipBackward()
+        break
+      case 'ArrowRight':
+        // Alt + Right：快進 10 秒
+        event.preventDefault()
+        skipForward()
+        break
+      case ',':
+        // Alt + , ：快退 5 秒
+        event.preventDefault()
+        if (audioElement.value) {
+          audioElement.value.currentTime = Math.max(0, audioElement.value.currentTime - 5)
+        }
+        break
+      case '.':
+        // Alt + . ：快進 5 秒
+        event.preventDefault()
+        if (audioElement.value) {
+          audioElement.value.currentTime = Math.min(
+            audioElement.value.duration || 0,
+            audioElement.value.currentTime + 5
+          )
+        }
+        break
+      case 'm':
+      case 'M':
+        // Alt + M：靜音/取消靜音
+        event.preventDefault()
+        toggleMute()
+        break
+    }
+    return
+  }
+
+  // 非編輯模式下的額外快捷鍵（不使用修飾鍵）
+  if (!isEditing.value && !isEditingTitle.value) {
+    // 確保焦點不在 input 或 textarea
+    if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return
+
+    switch(event.key) {
+      case ' ':
+        // 空格：播放/暫停（僅非編輯模式）
+        event.preventDefault()
+        togglePlayPause()
+        break
+      case 'ArrowLeft':
+        // 左箭頭：快退 10 秒（僅非編輯模式）
+        event.preventDefault()
+        skipBackward()
+        break
+      case 'ArrowRight':
+        // 右箭頭：快進 10 秒（僅非編輯模式）
+        event.preventDefault()
+        skipForward()
+        break
+    }
+  }
+}
+
+// 監聽對話框開啟/關閉，控制鍵盤快捷鍵
+watch(showTranscriptDialog, (newValue) => {
+  if (newValue) {
+    // 對話框打開時，添加鍵盤監聽器
+    window.addEventListener('keydown', handleKeyboardShortcuts)
+  } else {
+    // 對話框關閉時，移除鍵盤監聽器
+    window.removeEventListener('keydown', handleKeyboardShortcuts)
+  }
+})
 
 // 改進的 timecode 匹配：結合位置和內容匹配
 function findActiveTimecode(charOffset) {
@@ -1512,7 +1761,9 @@ onUnmounted(() => {
 }
 
 .modal-body {
-  padding: 28px;
+  padding: 20px;
+  overflow-y: auto;
+  /* max-height 由 flex 布局自動處理，移除以避免衝突 */
 }
 
 .modal-section {
@@ -1651,6 +1902,147 @@ onUnmounted(() => {
   color: rgba(45, 45, 45, 0.4);
 }
 
+/* 標籤輸入樣式 */
+.tag-input-container {
+  margin-top: 10px;
+}
+
+.tag-input-wrapper {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.tag-input-wrapper .text-input {
+  flex: 1;
+  padding: 10px 12px;
+  font-size: 14px;
+  border: 2px solid rgba(221, 132, 72, 0.3);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #2d2d2d;
+  transition: all 0.3s;
+}
+
+.tag-input-wrapper .text-input:focus {
+  outline: none;
+  border-color: var(--electric-primary);
+  box-shadow: 0 0 0 3px rgba(221, 132, 72, 0.1);
+}
+
+.btn-add-tag {
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  color: white;
+  background: #77969A;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s;
+  white-space: nowrap;
+}
+
+.btn-add-tag:hover:not(:disabled) {
+  background: #336774;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(119, 150, 154, 0.3);
+}
+
+.btn-add-tag:disabled {
+  background: rgba(119, 150, 154, 0.4);
+  cursor: not-allowed;
+}
+
+.selected-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.selected-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(102, 126, 234, 0.15);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #667eea;
+  transition: all 0.2s;
+}
+
+.selected-tag:hover {
+  background: rgba(102, 126, 234, 0.2);
+  border-color: rgba(102, 126, 234, 0.4);
+}
+
+.remove-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  background: rgba(102, 126, 234, 0.2);
+  border: none;
+  border-radius: 50%;
+  color: #667eea;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.remove-tag:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+/* 信息提示框 */
+.info-section {
+  margin-top: 20px;
+  border: none;
+  padding: 0;
+}
+
+.info-box {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, rgba(221, 132, 72, 0.08) 0%, rgba(221, 132, 72, 0.04) 100%);
+  border-left: 3px solid var(--electric-primary);
+  border-radius: 8px;
+  align-items: flex-start;
+}
+
+.info-icon {
+  flex-shrink: 0;
+  color: var(--electric-primary);
+  margin-top: 2px;
+}
+
+.info-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+  color: #5d4e37;
+  line-height: 1.5;
+}
+
+.info-text strong {
+  color: var(--electric-primary);
+  font-weight: 600;
+}
+
+.info-text span {
+  color: #6d5d47;
+}
+
 .modal-actions {
   display: flex;
   gap: 12px;
@@ -1696,9 +2088,22 @@ onUnmounted(() => {
 .transcript-modal {
   width: 90%;
   max-width: 900px;
-  max-height: 85vh;
+  max-height: 90vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  height: 90vh;
+}
+
+/* 確保對話框內部的所有層級都正確傳遞 flex 布局 */
+.transcript-modal .electric-inner,
+.transcript-modal .electric-border-outer,
+.transcript-modal .electric-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .transcript-header {
@@ -1708,6 +2113,7 @@ onUnmounted(() => {
   margin-bottom: 16px;
   padding-bottom: 16px;
   border-bottom: 2px solid rgba(221, 132, 72, 0.2);
+  flex-shrink: 0;
 }
 
 /* 音檔播放器 */
@@ -2017,6 +2423,103 @@ onUnmounted(() => {
   box-shadow: 0 0 0 4px rgba(160, 82, 45, 0.2);
 }
 
+/* 快捷鍵說明 */
+.shortcuts-info {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.shortcuts-btn {
+  padding: 6px;
+  opacity: 0.7;
+  transition: all 0.2s;
+}
+
+.shortcuts-btn:hover {
+  opacity: 1;
+  background: rgba(160, 82, 45, 0.1);
+}
+
+.shortcuts-info:hover .shortcuts-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.shortcuts-tooltip {
+  position: absolute;
+  top: calc(100% + 12px);
+  right: 0;
+  background: white;
+  border: 1px solid rgba(160, 82, 45, 0.2);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  padding: 16px;
+  min-width: 320px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: all 0.2s ease;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.shortcuts-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #2d2d2d;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid rgba(160, 82, 45, 0.2);
+}
+
+.shortcuts-section {
+  margin-bottom: 12px;
+}
+
+.shortcuts-section:last-child {
+  margin-bottom: 0;
+}
+
+.shortcuts-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8b4513;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.shortcut-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 13px;
+  color: #2d2d2d;
+}
+
+.shortcut-item kbd {
+  display: inline-block;
+  padding: 3px 8px;
+  font-family: 'Monaco', 'Consolas', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: #2d2d2d;
+  background: linear-gradient(180deg, #ffffff 0%, #f5f5f5 100%);
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.shortcut-item span {
+  flex: 1;
+  color: rgba(45, 45, 45, 0.8);
+}
+
 /* 音檔錯誤訊息 */
 .audio-error {
   margin-top: 8px;
@@ -2071,8 +2574,8 @@ onUnmounted(() => {
   flex: 1;
   overflow: hidden;
   margin-bottom: 20px;
-  max-height: 70vh;
-  min-height: 500px;
+  max-height: calc(90vh - 350px);
+  min-height: min(400px, 60vh);
 }
 
 /* 固定顯示的當前 Timecode（右上角，貼在基準線上方） - 玻璃態設計 */
@@ -2129,6 +2632,8 @@ onUnmounted(() => {
   height: 100%;
   position: relative;
   z-index: 1;
+  overflow: hidden;
+  min-height: 0;
 }
 
 /* 當有側邊欄時，內容不需要 margin-bottom */
@@ -2226,7 +2731,8 @@ onUnmounted(() => {
   width: 100%;
   flex: 1;
   position: relative;
-  min-height: 400px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* 基準線 - 使用偽元素固定在 25% 位置（更細的線） */
@@ -2265,7 +2771,7 @@ onUnmounted(() => {
 .transcript-textarea {
   width: 100%;
   height: 100%;
-  min-height: 400px;
+  min-height: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   font-size: 15px;
   line-height: 1.8;
@@ -2322,6 +2828,9 @@ onUnmounted(() => {
   gap: 16px;
   justify-content: space-between;
   align-items: center;
+  flex-shrink: 0;
+  margin-top: auto;
+  padding-top: 20px;
 }
 
 .action-buttons {
@@ -2429,16 +2938,17 @@ onUnmounted(() => {
 /* RWD: 小螢幕調整 */
 @media (max-height: 800px) {
   .transcript-modal {
-    max-height: 90vh;
+    max-height: 92vh;
+    height: 92vh;
   }
 
   .modal-body {
-    padding: 20px;
+    padding: 16px;
   }
 
   .transcript-content-wrapper {
-    max-height: 55vh;
-    min-height: 300px;
+    max-height: calc(92vh - 320px);
+    min-height: min(300px, 50vh);
   }
 
   .transcript-header {
@@ -2449,16 +2959,17 @@ onUnmounted(() => {
 
 @media (max-height: 700px) {
   .transcript-modal {
-    max-height: 95vh;
+    max-height: 94vh;
+    height: 94vh;
   }
 
   .modal-body {
-    padding: 16px;
+    padding: 12px;
   }
 
   .transcript-content-wrapper {
-    max-height: 45vh;
-    min-height: 200px;
+    max-height: calc(94vh - 280px);
+    min-height: min(250px, 45vh);
   }
 
   .audio-player-container {
@@ -2482,30 +2993,31 @@ onUnmounted(() => {
 
 @media (max-height: 600px) {
   .transcript-modal {
-    max-height: 98vh;
+    max-height: 96vh;
+    height: 96vh;
   }
 
   .modal-body {
-    padding: 12px;
+    padding: 10px;
   }
 
   .transcript-content-wrapper {
-    max-height: 35vh;
-    min-height: 150px;
+    max-height: calc(96vh - 240px);
+    min-height: min(200px, 40vh);
   }
 
   .audio-player-container {
-    margin-bottom: 8px;
+    margin-bottom: 6px;
   }
 
   .transcript-header {
-    margin-bottom: 8px;
-    padding-bottom: 8px;
+    margin-bottom: 6px;
+    padding-bottom: 6px;
   }
 
   .transcript-meta {
     font-size: 12px;
-    gap: 12px;
+    gap: 10px;
   }
 
   .transcript-actions {
@@ -2514,19 +3026,65 @@ onUnmounted(() => {
   }
 
   .btn {
-    padding: 8px 12px;
-    font-size: 0.9em;
+    padding: 6px 10px;
+    font-size: 0.85em;
+  }
+}
+
+@media (max-height: 500px) {
+  .transcript-modal {
+    max-height: 98vh;
+    height: 98vh;
+  }
+
+  .modal-body {
+    padding: 8px;
+  }
+
+  .transcript-content-wrapper {
+    max-height: calc(98vh - 200px);
+    min-height: min(150px, 35vh);
+  }
+
+  .audio-player-container {
+    margin-bottom: 4px;
+  }
+
+  .transcript-header {
+    margin-bottom: 4px;
+    padding-bottom: 4px;
+  }
+
+  .transcript-meta {
+    font-size: 11px;
+    gap: 8px;
+  }
+
+  .transcript-actions {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .btn {
+    padding: 5px 8px;
+    font-size: 0.8em;
   }
 }
 
 @media (max-width: 768px) {
   .transcript-modal {
     width: 95%;
-    max-height: 90vh;
+    max-height: 92vh;
+    height: 92vh;
   }
 
   .modal-body {
     padding: 16px;
+  }
+
+  .transcript-content-wrapper {
+    max-height: calc(92vh - 300px);
+    min-height: min(300px, 50vh);
   }
 
   .transcript-header {

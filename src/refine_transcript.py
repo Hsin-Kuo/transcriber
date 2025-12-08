@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 # —— 可調參數 —— #
-GEMINI_MODEL = "gemini-2.0-flash"  # Gemini 模型
+GEMINI_MODEL = "gemini-flash-lite-latest"  # Gemini 模型
 CHUNK_SIZE = 3000  # 每段處理的字數
 
 def refine_with_gemini(text: str, style: str = "book_guide", chunk_size: int = CHUNK_SIZE) -> str:

@@ -1,10 +1,11 @@
 # Whisper 相關
 faster-whisper
-torch
-torchaudio
+torch<2.6
+torchaudio<2.6
 
 # Speaker Diarization
 pyannote.audio
+huggingface-hub>=0.21,<0.22
 
 # 音檔處理
 pydub
