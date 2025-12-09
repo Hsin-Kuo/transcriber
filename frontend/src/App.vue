@@ -29,18 +29,6 @@
                 </div>
               </div>
 
-              <!-- 轉錄語言 -->
-              <div class="modal-section">
-                <label class="section-label">轉錄語言</label>
-                <select id="language" v-model="selectedLanguage" class="select-input">
-                  <option value="zh">中文</option>
-                  <option value="en">English</option>
-                  <option value="ja">日本語</option>
-                  <option value="ko">한국어</option>
-                  <option value="auto">自動偵測</option>
-                </select>
-              </div>
-
               <!-- 說話者辨識 -->
               <div class="modal-section">
                 <label class="section-label">說話者辨識</label>
@@ -515,7 +503,6 @@ const enableDiarization = ref(true)
 const maxSpeakers = ref(null)
 const showConfirmDialog = ref(false)
 const pendingFile = ref(null)
-const selectedLanguage = ref('auto')
 const selectedTags = ref([])
 const tagInput = ref('')
 const showTranscriptDialog = ref(false)
@@ -605,7 +592,7 @@ async function confirmAndUpload() {
   formData.append('file', pendingFile.value)
   formData.append('punct_provider', 'gemini')
   formData.append('chunk_audio', 'true')
-  formData.append('language', selectedLanguage.value)
+  formData.append('language', 'auto')  // 使用 Whisper 自動偵測語言
   formData.append('diarize', enableDiarization.value ? 'true' : 'false')
   if (enableDiarization.value && maxSpeakers.value) {
     formData.append('max_speakers', maxSpeakers.value.toString())

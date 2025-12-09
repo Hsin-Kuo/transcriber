@@ -43,7 +43,15 @@ DEFAULT_MODEL = "medium"
 CHUNK_DURATION_MS = 10 * 60 * 1000
 OPENAI_MODEL = "gpt-4o-mini"
 GEMINI_MODEL = "gemini-2.0-flash"
-GEMINI_FALLBACK_MODEL = "gemini-flash-lite-latest"  # 配額耗盡時的備用模型
+# 多層備援模型列表（按優先順序）
+GEMINI_FALLBACK_MODELS = [
+    "gemini-2.0-flash-lite",      # 第一備援：2.0-flash-lite（輕量版，配額較寬鬆）
+    "gemini-flash-lite-latest",   # 第二備援：flash-lite-latest（最輕量，通常有配額）
+    "gemini-2.5-flash",           # 第三備援：2.5-flash（最新版本）
+    "gemini-flash-latest",        # 第四備援：flash-latest（通用版本）
+    "gemini-2.5-pro",             # 第五備援：2.5-pro（更強大但較慢）
+]
+GEMINI_FALLBACK_MODEL = "gemini-2.0-flash-lite"  # 向後兼容（已棄用）
 
 # 進度階段權重（固定分配，總和 100%）
 PROGRESS_WEIGHTS = {
@@ -337,7 +345,7 @@ def transcribe_single_chunk(
         return_segments: 是否返回帶時間戳的 segments（預設 True）
 
     Returns:
-        始終返回 (text, segments) 元組
+        返回 (text, segments, detected_language) 元組
     """
     # 標記此 chunk 開始處理（實際開始執行時才標記）
     if task_id and chunk_idx:
@@ -350,6 +358,9 @@ def transcribe_single_chunk(
         update_task_status(task_id, {})  # 觸發進度計算
 
     segments, info = model.transcribe(str(chunk_path), language=language, beam_size=5)
+
+    # 獲取 Whisper 偵測到的語言
+    detected_language = info.language if hasattr(info, 'language') else None
 
     # 始終收集 segments
     segments_list = []
@@ -365,10 +376,10 @@ def transcribe_single_chunk(
 
     text = "".join(text_parts).strip()
 
-    return text, segments_list
+    return text, segments_list, detected_language
 
 
-def transcribe_with_timestamps(model, audio_path: Path, language: Optional[str] = None) -> List[Dict]:
+def transcribe_with_timestamps(model, audio_path: Path, language: Optional[str] = None) -> tuple:
     """
     轉錄音檔並返回帶時間戳的 segments
 
@@ -378,11 +389,15 @@ def transcribe_with_timestamps(model, audio_path: Path, language: Optional[str] 
         language: 語言代碼（None 表示自動偵測，預設值）
 
     Returns:
-        List of segments with format:
-        [{"start": 0.0, "end": 5.2, "text": "hello"}, ...]
+        返回 (segments_list, detected_language) 元組
+        segments_list: List of segments with format [{"start": 0.0, "end": 5.2, "text": "hello"}, ...]
+        detected_language: Whisper 偵測到的語言代碼
     """
     segments_list = []
     segments, info = model.transcribe(str(audio_path), language=language, beam_size=5)
+
+    # 獲取 Whisper 偵測到的語言
+    detected_language = info.language if hasattr(info, 'language') else None
 
     for segment in segments:
         segments_list.append({
@@ -391,7 +406,7 @@ def transcribe_with_timestamps(model, audio_path: Path, language: Optional[str] 
             "text": segment.text
         })
 
-    return segments_list
+    return segments_list, detected_language
 
 
 def perform_diarization_in_process(audio_path_str: str, max_speakers: Optional[int], hf_token: str) -> Optional[List[Dict]]:
@@ -590,8 +605,8 @@ def transcribe_audio_in_chunks(
     # 如果音檔不長，直接轉錄
     if total_duration_ms <= chunk_duration_ms:
         print(f"📝 音檔長度在 {chunk_duration_ms/1000/60:.0f} 分鐘內，直接轉錄...")
-        text, segments = transcribe_single_chunk(model, audio_path, language=language)
-        return text, segments
+        text, segments, detected_language = transcribe_single_chunk(model, audio_path, language=language)
+        return text, segments, detected_language
 
     # 步驟 1：如果啟用 diarization，在背景並行執行說話者辨識
     diarization_future = None
@@ -755,6 +770,7 @@ def transcribe_audio_in_chunks(
                 future_to_chunk[future] = (chunk_idx, temp_path, time_offset_seconds)
 
             # 等待完成並更新進度
+            detected_language = None  # 用於記錄第一個 chunk 偵測到的語言
             for future in as_completed(future_to_chunk):
                 chunk_idx, temp_path, time_offset = future_to_chunk[future]
 
@@ -780,9 +796,13 @@ def transcribe_audio_in_chunks(
 
                     result = future.result()
 
-                    # 處理返回結果（始終是 (文字, segments) 元組）
-                    chunk_text, chunk_segments = result
+                    # 處理返回結果（現在是 (文字, segments, detected_language) 元組）
+                    chunk_text, chunk_segments, chunk_detected_language = result
                     all_segments.extend(chunk_segments)  # 收集所有 segments
+
+                    # 記錄第一個 chunk 偵測到的語言
+                    if detected_language is None and chunk_detected_language:
+                        detected_language = chunk_detected_language
 
                     chunks_text[chunk_idx - 1] = chunk_text
                     print(f"   ✅ 完成第 {chunk_idx}/{num_chunks} 段")
@@ -876,14 +896,14 @@ def transcribe_audio_in_chunks(
 
                 final_text = merge_transcription_with_diarization(all_segments, diarization_segments)
                 print(f"✅ 說話者資訊合併完成")
-                return final_text, all_segments
+                return final_text, all_segments, detected_language
             else:
                 print(f"⚠️  說話者辨識失敗，返回純文字轉錄")
                 if task_id:
                     update_task_status(task_id, {
                         "diarization_status": "failed"
                     })
-                return " ".join(chunks_text), all_segments
+                return " ".join(chunks_text), all_segments, detected_language
 
         except Exception as e:
             print(f"⚠️  等待說話者辨識時發生錯誤：{e}")
@@ -892,10 +912,10 @@ def transcribe_audio_in_chunks(
                 update_task_status(task_id, {
                     "diarization_status": "failed"
                 })
-            return " ".join(chunks_text), all_segments
+            return " ".join(chunks_text), all_segments, detected_language
     else:
         # 沒有 diarization，返回純文字和 segments
-        return " ".join(chunks_text), all_segments
+        return " ".join(chunks_text), all_segments, detected_language
 
 
 def detect_language_with_llm(text: str, provider: str = "gemini") -> str:
@@ -962,17 +982,12 @@ def get_punctuation_prompt(language: str, text: str) -> tuple[str, str]:
     """根據語言生成適當的標點提示語
 
     Args:
-        language: 語言代碼 (zh/en/ja/ko/auto)
+        language: 語言代碼 (zh/en/ja/ko/等)，由 Whisper 自動偵測或用戶指定
         text: 要處理的文字
 
     Returns:
         (system_message, user_message) 元組
     """
-    # 如果是自動偵測，先辨識語言
-    if language == "auto":
-        language = detect_language_with_llm(text, provider="gemini")
-        print(f"🔍 自動辨識語言: {language}")
-
     if language == "zh":
         system_msg = "你是嚴謹的逐字稿潤飾助手，只做標點與分段。"
         user_msg = (
@@ -1038,7 +1053,7 @@ def punctuate_with_openai(text: str, language: str = "zh") -> str:
 
 
 def call_gemini_with_retry(prompt: str, max_retries: int = None) -> str:
-    """調用 Gemini API，支援自動重試和 Key 切換，配額耗盡時自動切換到 fallback 模型"""
+    """調用 Gemini API，支援自動重試和 Key 切換，配額耗盡時自動切換到多層備援模型"""
     import google.generativeai as genai
 
     if max_retries is None:
@@ -1047,8 +1062,10 @@ def call_gemini_with_retry(prompt: str, max_retries: int = None) -> str:
     last_error = None
     quota_exceeded_count = 0
     current_model = GEMINI_MODEL
+    fallback_index = -1  # 追蹤當前使用的備援模型索引
+    tried_models = [GEMINI_MODEL]  # 追蹤已嘗試的模型
 
-    for attempt in range(max_retries):
+    for attempt in range(max_retries * (len(GEMINI_FALLBACK_MODELS) + 1)):  # 擴大重試次數以支援多層備援
         try:
             # 獲取下一個 API Key
             api_key = get_next_google_api_key()
@@ -1061,7 +1078,10 @@ def call_gemini_with_retry(prompt: str, max_retries: int = None) -> str:
                 generation_config={"temperature": 0.2}
             )
 
-            return (resp.text or "").strip()
+            result = (resp.text or "").strip()
+            if fallback_index >= 0:
+                print(f"✅ 使用備援模型 {current_model} 成功")
+            return result
 
         except Exception as e:
             last_error = e
@@ -1072,27 +1092,34 @@ def call_gemini_with_retry(prompt: str, max_retries: int = None) -> str:
 
             if is_quota_error:
                 quota_exceeded_count += 1
-                print(f"⚠️ Google API Key 配額已用完 (嘗試 {attempt + 1}/{max_retries})")
+                print(f"⚠️ Google API Key 配額已用完 (嘗試 {attempt + 1}，模型: {current_model})")
 
-                # 如果所有 keys 都配額耗盡，且還沒切換到 fallback 模型，則切換
-                if quota_exceeded_count >= len(GOOGLE_API_KEYS) and current_model == GEMINI_MODEL:
-                    print(f"💡 所有 {GEMINI_MODEL} 配額已用完，切換到備用模型 {GEMINI_FALLBACK_MODEL}")
-                    current_model = GEMINI_FALLBACK_MODEL
-                    quota_exceeded_count = 0  # 重置計數，用 fallback 模型再試一輪
-                    max_retries = attempt + len(GOOGLE_API_KEYS)  # 延長重試次數
-                    continue
+                # 如果所有 keys 都配額耗盡，嘗試切換到下一個備援模型
+                if quota_exceeded_count >= len(GOOGLE_API_KEYS):
+                    fallback_index += 1
+
+                    if fallback_index < len(GEMINI_FALLBACK_MODELS):
+                        current_model = GEMINI_FALLBACK_MODELS[fallback_index]
+                        print(f"💡 所有 API Keys 在 {tried_models[-1]} 的配額已用完，切換到備用模型 {current_model}")
+                        tried_models.append(current_model)
+                        quota_exceeded_count = 0  # 重置計數，用新備援模型再試一輪
+                        continue
+                    else:
+                        # 所有備援模型都用完了
+                        print(f"❌ 所有模型（{', '.join(tried_models)}）的配額都已用完")
+                        raise RuntimeError(f"所有 Google API Keys 都調用失敗。已嘗試模型: {', '.join(tried_models)}。最後錯誤: {error_msg}") from last_error
             else:
-                print(f"⚠️ Google API Key 調用失敗 (嘗試 {attempt + 1}/{max_retries}): {error_msg}")
+                print(f"⚠️ Google API Key 調用失敗 (嘗試 {attempt + 1}): {error_msg}")
 
             # 如果還有 key 可用，繼續嘗試
-            if attempt < max_retries - 1:
+            if attempt < max_retries * (len(GEMINI_FALLBACK_MODELS) + 1) - 1:
                 print(f"🔄 切換到下一個 API Key...")
                 continue
             else:
                 print(f"❌ 所有 API Keys 都已嘗試，失敗")
-                raise RuntimeError(f"所有 Google API Keys 都調用失敗。最後錯誤: {error_msg}") from last_error
+                raise RuntimeError(f"所有 Google API Keys 都調用失敗。已嘗試模型: {', '.join(tried_models)}。最後錯誤: {error_msg}") from last_error
 
-    raise RuntimeError("無法調用 Gemini API") from last_error
+    raise RuntimeError(f"無法調用 Gemini API。已嘗試模型: {', '.join(tried_models)}") from last_error
 
 
 def get_chunked_punctuation_prompt(language: str, chunk_text: str, chunk_idx: int, total_chunks: int) -> tuple[str, str]:
@@ -1159,30 +1186,24 @@ def punctuate_with_gemini(text: str, chunk_size: int = None, task_id: str = None
         text: 要加標點的文字
         chunk_size: 分段大小（字元數），None 則根據語言自動決定
         task_id: 任務 ID（用於更新進度）
-        language: 語言代碼 (zh/en/ja/ko/auto)，auto 會自動辨識
+        language: 語言代碼 (zh/en/ja/ko/等)，由 Whisper 自動偵測或用戶指定
     """
     if not GOOGLE_API_KEYS:
         raise RuntimeError("未設定任何 GOOGLE_API_KEY")
 
-    # 如果是自動偵測，先辨識語言
-    actual_language = language
-    if language == "auto":
-        actual_language = detect_language_with_llm(text, provider="gemini")
-        print(f"🔍 自動辨識語言: {actual_language}")
-
     # 根據語言決定合適的分段大小
     if chunk_size is None:
-        if actual_language in ['en', 'es', 'fr', 'de', 'it', 'pt']:
+        if language in ['en', 'es', 'fr', 'de', 'it', 'pt']:
             # 英文等字母語言：使用較大的字元數（因為單詞包含空格，字元數較多）
             chunk_size = 8000  # 約 1300-1600 個英文單詞
         else:
             # 中文、日文、韓文等：使用標準字元數
             chunk_size = 3000  # 約 3000 個字符
-        print(f"📏 根據語言 '{actual_language}' 設定分段大小：{chunk_size} 字元")
+        print(f"📏 根據語言 '{language}' 設定分段大小：{chunk_size} 字元")
 
     # 如果文本不長，直接處理
     if len(text) <= chunk_size:
-        system_msg, user_msg = get_punctuation_prompt(actual_language, text)
+        system_msg, user_msg = get_punctuation_prompt(language, text)
         prompt = system_msg + "\n\n" + user_msg
         return call_gemini_with_retry(prompt)
 
@@ -1192,7 +1213,7 @@ def punctuate_with_gemini(text: str, chunk_size: int = None, task_id: str = None
     start = 0
 
     # 根據語言選擇分段標記
-    split_markers = '。？！\n' if actual_language in ['zh', 'ja'] else '.?!\n'
+    split_markers = '。？！\n' if language in ['zh', 'ja'] else '.?!\n'
 
     while start < len(text):
         end = start + chunk_size
@@ -1230,7 +1251,7 @@ def punctuate_with_gemini(text: str, chunk_size: int = None, task_id: str = None
             })
 
         # 使用語言感知的提示語
-        system_msg, user_msg = get_chunked_punctuation_prompt(actual_language, chunk, idx, len(chunks))
+        system_msg, user_msg = get_chunked_punctuation_prompt(language, chunk, idx, len(chunks))
 
         prompt = system_msg + "\n\n" + user_msg
         result = call_gemini_with_retry(prompt)
@@ -1243,8 +1264,9 @@ def punctuate_with_gemini(text: str, chunk_size: int = None, task_id: str = None
 def cleanup_old_audio_files(current_task_id: str):
     """清理舊的音檔，保留規則：
     1. 最新的任務（current_task_id）始終保留
-    2. 用戶勾選保留的任務（keep_audio=True），最多 3 個
-    3. 總共最多保留 3+1 = 4 個音檔
+    2. 用戶勾選的任務（keep_audio=True）永遠保留（最多 3 個）
+    3. 系統最多保留 4 個音檔
+    4. 超過 4 個時，從沒有勾選的任務中，按完成時間從最舊的開始刪除
 
     Args:
         current_task_id: 當前最新任務的 ID
@@ -1281,16 +1303,31 @@ def cleanup_old_audio_files(current_task_id: str):
             files_to_keep.add(current_task_id)
             print(f"   ✓ 保留最新任務音檔：{current_task_id[:8]}...")
 
-        # 2. 用戶勾選保留的任務（keep_audio=True）
-        keep_audio_tasks = [t for t in tasks_with_audio if t["keep_audio"] and t["task_id"] != current_task_id]
-        # 按完成時間排序，保留最近勾選的
-        keep_audio_tasks.sort(key=lambda x: x["completed_at"], reverse=True)
-
-        for idx, task in enumerate(keep_audio_tasks[:3]):  # 最多 3 個
+        # 2. 用戶勾選保留的任務（keep_audio=True）永遠保留
+        keep_audio_tasks = [t for t in tasks_with_audio if t["keep_audio"]]
+        for idx, task in enumerate(keep_audio_tasks):
             files_to_keep.add(task["task_id"])
             print(f"   ✓ 保留用戶勾選音檔 #{idx+1}：{task['audio_file'].name}")
 
-        # 3. 標記要刪除的音檔
+        # 3. 如果保留的檔案超過 4 個，需要從沒有勾選的任務中刪除最舊的
+        # 系統最多保留 4 個音檔
+        MAX_AUDIO_FILES = 4
+
+        if len(files_to_keep) >= MAX_AUDIO_FILES:
+            # 已經達到或超過上限，不需要額外保留
+            print(f"   當前已保留 {len(files_to_keep)} 個音檔（達到上限）")
+        else:
+            # 還有空間，可以保留一些未勾選的任務
+            # 從未勾選的任務中，按完成時間排序，保留最新的
+            uncheckd_tasks = [t for t in tasks_with_audio if not t["keep_audio"] and t["task_id"] not in files_to_keep]
+            uncheckd_tasks.sort(key=lambda x: x["completed_at"], reverse=True)
+
+            slots_remaining = MAX_AUDIO_FILES - len(files_to_keep)
+            for idx, task in enumerate(uncheckd_tasks[:slots_remaining]):
+                files_to_keep.add(task["task_id"])
+                print(f"   ✓ 保留未勾選任務 #{idx+1}：{task['audio_file'].name}")
+
+        # 4. 標記要刪除的音檔（所有不在保留清單中的）
         files_to_delete = []
         tasks_to_update = []
 
@@ -1407,11 +1444,12 @@ def process_transcription_task(
         update_task_status(task_id, {"progress": "正在轉錄音訊..."})
 
         all_segments = []  # 用於儲存所有 segments
+        detected_language = None  # 用於儲存 Whisper 偵測到的語言
 
         if chunk_audio:
             # 分段模式：現在支援 diarization（先對完整音檔做說話者辨識，再分段轉錄）
             chunk_duration_ms = chunk_minutes * 60 * 1000
-            raw_text, all_segments = transcribe_audio_in_chunks(
+            raw_text, all_segments, detected_language = transcribe_audio_in_chunks(
                 wav_path,
                 whisper_model,
                 chunk_duration_ms,
@@ -1436,7 +1474,7 @@ def process_transcription_task(
 
                 # 執行轉錄（帶時間戳）
                 update_task_status(task_id, {"progress": "正在轉錄音訊（帶時間戳）..."})
-                transcription_segments = transcribe_with_timestamps(whisper_model, wav_path, language=whisper_language)
+                transcription_segments, detected_language = transcribe_with_timestamps(whisper_model, wav_path, language=whisper_language)
                 all_segments = transcription_segments  # 保存 segments
 
                 # 合併結果
@@ -1460,13 +1498,19 @@ def process_transcription_task(
                     raw_text = " ".join(seg["text"] for seg in transcription_segments)
             else:
                 print(f"📝 [{task_id}] 開始轉逐字稿...")
-                raw_text, all_segments = transcribe_single_chunk(whisper_model, wav_path, language=whisper_language)
+                raw_text, all_segments, detected_language = transcribe_single_chunk(whisper_model, wav_path, language=whisper_language)
 
         # 檢查是否已被取消
         if task_cancelled.get(task_id, False):
             raise RuntimeError("任務已被使用者取消")
 
         print(f"✅ [{task_id}] 轉錄完成（{len(raw_text)} 字）")
+
+        # 決定使用哪個語言進行標點處理
+        # 如果用戶選擇 auto，使用 Whisper 偵測的語言；否則使用用戶指定的語言
+        punct_language = detected_language if language == "auto" and detected_language else language
+        if detected_language and language == "auto":
+            print(f"🔍 [{task_id}] Whisper 偵測到的語言：{detected_language}")
 
         # 加標點
         final_text = raw_text
@@ -1475,8 +1519,8 @@ def process_transcription_task(
                 "punctuation_started": True,
                 "progress": "正在添加標點符號（Gemini）..."
             })
-            print(f"✨ [{task_id}] 使用 Gemini 加標點與分段...")
-            final_text = punctuate_with_gemini(raw_text, task_id=task_id, language=language)
+            print(f"✨ [{task_id}] 使用 Gemini 加標點與分段（語言：{punct_language}）...")
+            final_text = punctuate_with_gemini(raw_text, task_id=task_id, language=punct_language)
             update_task_status(task_id, {"punctuation_completed": True})
         elif punct_provider == "openai":
             update_task_status(task_id, {
@@ -1485,8 +1529,8 @@ def process_transcription_task(
             })
             if not os.getenv("OPENAI_API_KEY"):
                 raise ValueError("未設定 OPENAI_API_KEY")
-            print(f"✨ [{task_id}] 使用 OpenAI 加標點與分段...")
-            final_text = punctuate_with_openai(raw_text, language=language)
+            print(f"✨ [{task_id}] 使用 OpenAI 加標點與分段（語言：{punct_language}）...")
+            final_text = punctuate_with_openai(raw_text, language=punct_language)
             update_task_status(task_id, {"punctuation_completed": True})
 
         print(f"🎉 [{task_id}] 處理完成！")
@@ -2534,3 +2578,4 @@ Google API Keys: {len(GOOGLE_API_KEYS)} 個已載入
 """)
 
     uvicorn.run(app, host=args.host, port=args.port)
+ 
