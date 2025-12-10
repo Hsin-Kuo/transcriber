@@ -52,7 +52,13 @@ cp .env.example .env
 
 ### 2. 使用方式
 
-#### 後端服務啟動
+#### 系統架構
+
+本系統採用混合部署方式：
+- **後端**：使用背景執行模式（daemon），原生運行以獲得最佳性能
+- **前端**：使用 Docker 容器化部署，方便管理與更新
+
+#### 步驟 1：啟動後端服務（背景執行）
 
 **使用管理腳本（推薦）：**
 
@@ -83,31 +89,34 @@ tail -f backend.log
 python src/whisper_server.py --host 0.0.0.0 --port 8000 --model medium
 ```
 
-**使用前端界面：**
-
-服務啟動後，訪問前端界面上傳音檔：
-```bash
-# 前端開發服務器（如果尚未啟動）
-cd ㄑ
-npm run dev
-# 訪問 http://localhost:5173
-```
-
-#### Docker 部署
+#### 步驟 2：啟動前端服務（Docker）
 
 ```bash
-# 設定環境變數
-cp .env.example .env
-# 編輯 .env 填入 API 金鑰
-
-# 啟動容器
+# 使用 Docker Compose 啟動前端容器
 docker-compose up -d
 
-# 查看日誌
-docker-compose logs -f
+# 查看前端日誌
+docker-compose logs -f frontend
 
 # 訪問前端界面
-# http://localhost:5173
+# http://localhost:3000
+```
+
+**停止前端服務：**
+
+```bash
+docker-compose down
+```
+
+#### 開發模式（不使用 Docker）
+
+如果您想在開發時不使用 Docker，可以直接運行前端開發服務器：
+
+```bash
+cd frontend
+npm install
+npm run dev
+# 訪問 http://localhost:5173
 ```
 
 詳細說明請參考 [Docker 部署文檔](docs/DOCKER_README.md)
