@@ -25,43 +25,10 @@
 
     <!-- 標籤篩選區 -->
     <div v-if="allTags.length > 0" class="filter-section">
-      <div class="filter-header">
-        <span class="filter-label">篩選標籤：</span>
-        <div class="filter-header-actions">
-          <button
-            v-if="!isEditingFilterTags"
-            class="btn-edit-filter"
-            @click="startEditingFilter"
-            title="編輯標籤"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-            </svg>
+      <svg class="filter-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+      </svg>
 
-          </button>
-          <template v-else>
-            <button
-              class="btn-save-filter"
-              @click="saveFilterEdit"
-              title="儲存"
-            >
-              ✓
-            </button>
-          </template>
-          <button
-            v-if="selectedFilterTags.length > 0 && !isEditingFilterTags"
-            class="btn-clear-filter"
-            @click="clearFilter"
-            title="清除篩選"
-          >
-              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
-              </svg>
-
-          </button>
-        </div>
-      </div>
       <div class="filter-tags">
         <div
           v-for="(tag, index) in displayedTags"
@@ -156,6 +123,39 @@
             </button>
           </div>
         </div>
+      </div>
+
+      <div class="filter-header-actions">
+        <button
+          v-if="!isEditingFilterTags"
+          class="btn-edit-filter"
+          @click="startEditingFilter"
+          title="編輯標籤"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+          </svg>
+        </button>
+        <template v-else>
+          <button
+            class="btn-save-filter"
+            @click="saveFilterEdit"
+            title="儲存"
+          >
+            ✓
+          </button>
+        </template>
+        <button
+          v-if="selectedFilterTags.length > 0 && !isEditingFilterTags"
+          class="btn-clear-filter"
+          @click="clearFilter"
+          title="清除篩選"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+          </svg>
+        </button>
       </div>
     </div>
 
@@ -1653,13 +1653,16 @@ onMounted(() => {
   padding: 16px;
   margin-bottom: 20px;
   border: 1px solid rgba(221, 132, 72, 0.15);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
-.filter-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
+
+.filter-icon {
+  color: rgba(119, 150, 154, 0.8);
+  flex-shrink: 0;
 }
 
 .filter-label {
@@ -1672,6 +1675,8 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   align-items: center;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .btn-edit-filter {
@@ -1752,6 +1757,8 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
+  flex: 1;
+  align-items: center;
 }
 
 .filter-tag-item {

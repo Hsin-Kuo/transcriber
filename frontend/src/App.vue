@@ -77,6 +77,23 @@
                       新增
                     </button>
                   </div>
+
+                  <!-- 快速選擇現有標籤 -->
+                  <div v-if="availableQuickTags.length > 0" class="quick-tags-section">
+                    <div class="quick-tags">
+                      <button
+                        v-for="tag in availableQuickTags"
+                        :key="tag"
+                        type="button"
+                        class="quick-tag-btn"
+                        @click="addQuickTag(tag)"
+                        :title="`加入標籤：${tag}`"
+                      >
+                        + {{ tag }}
+                      </button>
+                    </div>
+                  </div>
+
                   <div v-if="selectedTags.length > 0" class="selected-tags">
                     <span
                       v-for="(tag, index) in selectedTags"
@@ -560,6 +577,22 @@ const failedTasks = computed(() =>
   tasks.value.filter(t => t.status === 'failed').length
 )
 
+// 獲取所有唯一標籤
+const allTags = computed(() => {
+  const tags = new Set()
+  tasks.value.forEach(task => {
+    if (task.tags && task.tags.length > 0) {
+      task.tags.forEach(tag => tags.add(tag))
+    }
+  })
+  return Array.from(tags).sort()
+})
+
+// 可用的快速標籤（排除已選擇的）
+const availableQuickTags = computed(() => {
+  return allTags.value.filter(tag => !selectedTags.value.includes(tag))
+})
+
 // 選擇檔案後顯示確認對話框
 function handleFileUpload(file) {
   pendingFile.value = file
@@ -574,6 +607,12 @@ function addTag() {
     tagInput.value = ''
   } else if (selectedTags.value.includes(tag)) {
     tagInput.value = ''
+  }
+}
+
+function addQuickTag(tag) {
+  if (!selectedTags.value.includes(tag)) {
+    selectedTags.value.push(tag)
   }
 }
 
@@ -1939,6 +1978,53 @@ onUnmounted(() => {
 .btn-add-tag:disabled {
   background: rgba(119, 150, 154, 0.4);
   cursor: not-allowed;
+}
+
+/* 快速標籤選擇區 */
+.quick-tags-section {
+  margin-bottom: 12px;
+  padding: 10px;
+  background: rgba(119, 150, 154, 0.05);
+  border-radius: 8px;
+  border: 1px dashed rgba(119, 150, 154, 0.2);
+}
+
+.quick-tags-label {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(119, 150, 154, 0.8);
+  margin-bottom: 8px;
+}
+
+.quick-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.quick-tag-btn {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #77969A;
+  background: white;
+  border: 1.5px solid rgba(119, 150, 154, 0.3);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.quick-tag-btn:hover {
+  background: rgba(119, 150, 154, 0.1);
+  border-color: #77969A;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(119, 150, 154, 0.15);
+}
+
+.quick-tag-btn:active {
+  transform: translateY(0);
 }
 
 .selected-tags {

@@ -183,3 +183,31 @@ INFO:     127.0.0.1:62062 - "GET /tags HTTP/1.1" 200 OK
 INFO:     127.0.0.1:62991 - "PUT /tags/order HTTP/1.1" 200 OK
 📋 更新標籤順序：4 個標籤
 INFO:     127.0.0.1:63008 - "PUT /tags/order HTTP/1.1" 200 OK
+INFO:     192.168.65.1:0 - "GET /tags HTTP/1.1" 200 OK
+INFO:     192.168.65.1:0 - "GET /transcribe/active/list HTTP/1.1" 200 OK
+INFO:     192.168.65.1:0 - "GET /tags/order HTTP/1.1" 200 OK
+INFO:     192.168.65.1:0 - "GET /tags HTTP/1.1" 200 OK
+📋 更新標籤順序：4 個標籤
+INFO:     192.168.65.1:0 - "PUT /tags/order HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54949 - "GET /transcribe/active/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54950 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54951 - "GET /tags/order HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54953 - "GET /tags HTTP/1.1" 200 OK
+INFO:     192.168.65.1:0 - "GET /tags HTTP/1.1" 200 OK
+INFO:     192.168.65.1:0 - "GET /tags/order HTTP/1.1" 200 OK
+INFO:     192.168.65.1:0 - "GET /transcribe/active/list HTTP/1.1" 200 OK
+INFO:     192.168.65.1:0 - "GET /tags HTTP/1.1" 200 OK
+INFO:     192.168.65.1:0 - "GET /tags HTTP/1.1" 200 OK
+INFO:     192.168.65.1:0 - "GET /transcribe/active/list HTTP/1.1" 200 OK
+INFO:     192.168.65.1:0 - "GET /tags/order HTTP/1.1" 200 OK
+INFO:     192.168.65.1:0 - "GET /tags HTTP/1.1" 200 OK
+📋 更新標籤順序：4 個標籤
+INFO:     192.168.65.1:0 - "PUT /tags/order HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59385 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59387 - "GET /tags/order HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59389 - "GET /transcribe/active/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59396 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59720 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59721 - "GET /tags/order HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59723 - "GET /transcribe/active/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59727 - "GET /tags HTTP/1.1" 200 OK
