@@ -1,13 +1,13 @@
 /Users/test/Documents/playground/transcriber/venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
   warnings.warn(
-INFO:     Started server process [27234]
+INFO:     Started server process [84340]
 INFO:     Waiting for application startup.
 /Users/test/Documents/playground/transcriber/venv/lib/python3.9/site-packages/lightning_fabric/utilities/cloud_io.py:73: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
 📂 正在載入任務記錄...
-✅ 已從磁碟載入 14 個任務記錄
-✅ 已載入 5 個標籤顏色設定
+✅ 已從磁碟載入 13 個任務記錄
+✅ 已載入 6 個標籤顏色設定
 ✅ 已載入標籤順序（4 個標籤）
 🎙 正在載入 Faster-Whisper 模型：medium...
 🔧 配置：device=auto, compute_type=int8（針對 M1 優化）
@@ -18,656 +18,168 @@ Your token has been saved to /Users/test/.cache/huggingface/token
 Login successful
 🔊 正在載入 Speaker Diarization 模型...
 ✅ Speaker Diarization 模型載入完成（使用 MPS 加速）！
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/active/list HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags/order HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/active/list HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags/order HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags/order HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/active/list HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags/order HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/active/list HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-📁 收到檔案：1205咪聽.m4a (77.82 MB)
-🔄 [cacc4aec-7524-4dd3-a661-815705d32b7b] 轉檔為 WAV...
-INFO:     172.20.0.1:0 - "POST /transcribe HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-🔊 載入音檔：input.wav
-📊 音檔總長度：36.4 分鐘
-🔊 在背景啟動說話者辨識（與轉錄並行執行）...
-🔄 音檔較長，將分為 4 段處理（每段約 10 分鐘）...
-📦 準備切分音檔...
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-   準備第 1/4 段 (0.0-10.0 分鐘)...
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-/Users/test/Documents/playground/transcriber/venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
-  warnings.warn(
-   準備第 2/4 段 (10.0-20.0 分鐘)...
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-/Users/test/Documents/playground/transcriber/venv/lib/python3.9/site-packages/lightning_fabric/utilities/cloud_io.py:73: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
-/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/linecache.py:54: UserWarning: Module 'speechbrain.pretrained' was deprecated, redirecting to 'speechbrain.inference'. Please update your script. This is a change from SpeechBrain 1.0. See: https://github.com/speechbrain/speechbrain/releases/tag/v1.0.0
-  if getattr(mod, '__file__', None) == filename:
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-   準備第 3/4 段 (20.0-30.0 分鐘)...
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-   準備第 4/4 段 (30.0-36.4 分鐘)...
-✅ 已準備 4 個音檔片段
-🚀 開始並行轉錄（並行數：2），同時進行說話者辨識...
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-Token has not been saved to git credential helper. Pass `add_to_git_credential=True` if you want to set the git credential as well.
-Token is valid (permission: read).
-Your token has been saved to /Users/test/.cache/huggingface/token
-Login successful
-🔊 [進程] 正在載入 diarization pipeline...
-🔊 [進程] 使用 MPS 加速
-🔊 [進程] 正在分析說話者...
-   [進程] 設定講者人數範圍：1-2 人
-   [進程] Diarization 參數：{'min_speakers': 1, 'max_speakers': 2}
-✅ [進程] 說話者分析完成，識別到 2 位說話者
-/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/linecache.py:54: UserWarning: Module 'speechbrain.pretrained' was deprecated, redirecting to 'speechbrain.inference'. Please update your script. This is a change from SpeechBrain 1.0. See: https://github.com/speechbrain/speechbrain/releases/tag/v1.0.0
-  if getattr(mod, '__file__', None) == filename:
-/Users/test/Documents/playground/transcriber/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:252: FutureWarning: You are using a Python version (3.9.6) past its end of life. Google will update google.api_core with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.api_core.
-  warnings.warn(message, FutureWarning)
-   ✅ 完成第 1/4 段
-   ✅ 完成第 2/4 段
-   ✅ 完成第 4/4 段
-   ✅ 完成第 3/4 段
-✅ Diarization 進程已關閉
-✅ 所有音檔片段轉錄完成
-⏳ 等待說話者辨識完成...
-✅ 說話者辨識完成，識別到 2 位說話者 (耗時 14 分 48 秒)
-🔗 正在合併說話者資訊與轉錄文字...
-✅ 說話者資訊合併完成
-✅ [cacc4aec-7524-4dd3-a661-815705d32b7b] 轉錄完成（10520 字）
-🔍 [cacc4aec-7524-4dd3-a661-815705d32b7b] Whisper 偵測到的語言：zh
-✨ [cacc4aec-7524-4dd3-a661-815705d32b7b] 使用 Gemini 加標點與分段（語言：zh）...
-📏 根據語言 'zh' 設定分段大小：3000 字元
-📊 文本長度 10520 字，將分段處理（每段約 3000 字）...
-🔄 共分為 4 段處理...
-   處理第 1/4 段...
-An error occurred: module 'importlib.metadata' has no attribute 'packages_distributions'
-🔑 使用 Google API Key #2/12
-⚠️ Google API Key 配額已用完 (嘗試 1，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #3/12
-⚠️ Google API Key 配額已用完 (嘗試 2，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #4/12
-⚠️ Google API Key 配額已用完 (嘗試 3，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #5/12
-⚠️ Google API Key 配額已用完 (嘗試 4，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #6/12
-⚠️ Google API Key 配額已用完 (嘗試 5，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #7/12
-⚠️ Google API Key 配額已用完 (嘗試 6，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #8/12
-⚠️ Google API Key 配額已用完 (嘗試 7，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #9/12
-⚠️ Google API Key 配額已用完 (嘗試 8，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #10/12
-⚠️ Google API Key 配額已用完 (嘗試 9，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #11/12
-⚠️ Google API Key 配額已用完 (嘗試 10，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #12/12
-⚠️ Google API Key 配額已用完 (嘗試 11，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #1/12
-⚠️ Google API Key 配額已用完 (嘗試 12，模型: gemini-2.0-flash)
-💡 所有 API Keys 在 gemini-2.0-flash 的配額已用完，切換到備用模型 gemini-2.0-flash-lite
-🔑 使用 Google API Key #2/12
-⚠️ Google API Key 配額已用完 (嘗試 13，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #3/12
-⚠️ Google API Key 配額已用完 (嘗試 14，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #4/12
-⚠️ Google API Key 配額已用完 (嘗試 15，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #5/12
-⚠️ Google API Key 配額已用完 (嘗試 16，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #6/12
-⚠️ Google API Key 配額已用完 (嘗試 17，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #7/12
-⚠️ Google API Key 配額已用完 (嘗試 18，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #8/12
-⚠️ Google API Key 配額已用完 (嘗試 19，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #9/12
-⚠️ Google API Key 配額已用完 (嘗試 20，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #10/12
-⚠️ Google API Key 配額已用完 (嘗試 21，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #11/12
-⚠️ Google API Key 配額已用完 (嘗試 22，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #12/12
-⚠️ Google API Key 配額已用完 (嘗試 23，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #1/12
-⚠️ Google API Key 配額已用完 (嘗試 24，模型: gemini-2.0-flash-lite)
-💡 所有 API Keys 在 gemini-2.0-flash-lite 的配額已用完，切換到備用模型 gemini-flash-lite-latest
-🔑 使用 Google API Key #2/12
-✅ 使用備援模型 gemini-flash-lite-latest 成功
-   處理第 2/4 段...
-🔑 使用 Google API Key #3/12
-⚠️ Google API Key 配額已用完 (嘗試 1，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #4/12
-⚠️ Google API Key 配額已用完 (嘗試 2，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #5/12
-⚠️ Google API Key 配額已用完 (嘗試 3，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #6/12
-⚠️ Google API Key 配額已用完 (嘗試 4，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #7/12
-⚠️ Google API Key 配額已用完 (嘗試 5，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #8/12
-⚠️ Google API Key 配額已用完 (嘗試 6，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #9/12
-⚠️ Google API Key 配額已用完 (嘗試 7，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #10/12
-⚠️ Google API Key 配額已用完 (嘗試 8，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #11/12
-⚠️ Google API Key 配額已用完 (嘗試 9，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #12/12
-⚠️ Google API Key 配額已用完 (嘗試 10，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #1/12
-⚠️ Google API Key 配額已用完 (嘗試 11，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #2/12
-⚠️ Google API Key 配額已用完 (嘗試 12，模型: gemini-2.0-flash)
-💡 所有 API Keys 在 gemini-2.0-flash 的配額已用完，切換到備用模型 gemini-2.0-flash-lite
-🔑 使用 Google API Key #3/12
-⚠️ Google API Key 配額已用完 (嘗試 13，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #4/12
-⚠️ Google API Key 配額已用完 (嘗試 14，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #5/12
-⚠️ Google API Key 配額已用完 (嘗試 15，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #6/12
-⚠️ Google API Key 配額已用完 (嘗試 16，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #7/12
-⚠️ Google API Key 配額已用完 (嘗試 17，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #8/12
-⚠️ Google API Key 配額已用完 (嘗試 18，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #9/12
-⚠️ Google API Key 配額已用完 (嘗試 19，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #10/12
-⚠️ Google API Key 配額已用完 (嘗試 20，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #11/12
-⚠️ Google API Key 配額已用完 (嘗試 21，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #12/12
-⚠️ Google API Key 配額已用完 (嘗試 22，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #1/12
-⚠️ Google API Key 配額已用完 (嘗試 23，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #2/12
-⚠️ Google API Key 配額已用完 (嘗試 24，模型: gemini-2.0-flash-lite)
-💡 所有 API Keys 在 gemini-2.0-flash-lite 的配額已用完，切換到備用模型 gemini-flash-lite-latest
-🔑 使用 Google API Key #3/12
-✅ 使用備援模型 gemini-flash-lite-latest 成功
-   處理第 3/4 段...
-🔑 使用 Google API Key #4/12
-⚠️ Google API Key 配額已用完 (嘗試 1，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #5/12
-⚠️ Google API Key 配額已用完 (嘗試 2，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #6/12
-⚠️ Google API Key 配額已用完 (嘗試 3，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #7/12
-⚠️ Google API Key 配額已用完 (嘗試 4，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #8/12
-⚠️ Google API Key 配額已用完 (嘗試 5，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #9/12
-⚠️ Google API Key 配額已用完 (嘗試 6，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #10/12
-⚠️ Google API Key 配額已用完 (嘗試 7，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #11/12
-⚠️ Google API Key 配額已用完 (嘗試 8，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #12/12
-⚠️ Google API Key 配額已用完 (嘗試 9，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #1/12
-⚠️ Google API Key 配額已用完 (嘗試 10，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #2/12
-⚠️ Google API Key 配額已用完 (嘗試 11，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #3/12
-⚠️ Google API Key 配額已用完 (嘗試 12，模型: gemini-2.0-flash)
-💡 所有 API Keys 在 gemini-2.0-flash 的配額已用完，切換到備用模型 gemini-2.0-flash-lite
-🔑 使用 Google API Key #4/12
-⚠️ Google API Key 配額已用完 (嘗試 13，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #5/12
-⚠️ Google API Key 配額已用完 (嘗試 14，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #6/12
-⚠️ Google API Key 配額已用完 (嘗試 15，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #7/12
-⚠️ Google API Key 配額已用完 (嘗試 16，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #8/12
-⚠️ Google API Key 配額已用完 (嘗試 17，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #9/12
-⚠️ Google API Key 配額已用完 (嘗試 18，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #10/12
-⚠️ Google API Key 配額已用完 (嘗試 19，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #11/12
-⚠️ Google API Key 配額已用完 (嘗試 20，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #12/12
-⚠️ Google API Key 配額已用完 (嘗試 21，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #1/12
-⚠️ Google API Key 配額已用完 (嘗試 22，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #2/12
-⚠️ Google API Key 配額已用完 (嘗試 23，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #3/12
-⚠️ Google API Key 配額已用完 (嘗試 24，模型: gemini-2.0-flash-lite)
-💡 所有 API Keys 在 gemini-2.0-flash-lite 的配額已用完，切換到備用模型 gemini-flash-lite-latest
-🔑 使用 Google API Key #4/12
-✅ 使用備援模型 gemini-flash-lite-latest 成功
-   處理第 4/4 段...
-🔑 使用 Google API Key #5/12
-⚠️ Google API Key 配額已用完 (嘗試 1，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #6/12
-⚠️ Google API Key 配額已用完 (嘗試 2，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #7/12
-⚠️ Google API Key 配額已用完 (嘗試 3，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #8/12
-⚠️ Google API Key 配額已用完 (嘗試 4，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #9/12
-⚠️ Google API Key 配額已用完 (嘗試 5，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #10/12
-⚠️ Google API Key 配額已用完 (嘗試 6，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #11/12
-⚠️ Google API Key 配額已用完 (嘗試 7，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #12/12
-⚠️ Google API Key 配額已用完 (嘗試 8，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #1/12
-⚠️ Google API Key 配額已用完 (嘗試 9，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #2/12
-⚠️ Google API Key 配額已用完 (嘗試 10，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #3/12
-⚠️ Google API Key 配額已用完 (嘗試 11，模型: gemini-2.0-flash)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #4/12
-⚠️ Google API Key 配額已用完 (嘗試 12，模型: gemini-2.0-flash)
-💡 所有 API Keys 在 gemini-2.0-flash 的配額已用完，切換到備用模型 gemini-2.0-flash-lite
-🔑 使用 Google API Key #5/12
-⚠️ Google API Key 配額已用完 (嘗試 13，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #6/12
-⚠️ Google API Key 配額已用完 (嘗試 14，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #7/12
-⚠️ Google API Key 配額已用完 (嘗試 15，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #8/12
-⚠️ Google API Key 配額已用完 (嘗試 16，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #9/12
-⚠️ Google API Key 配額已用完 (嘗試 17，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #10/12
-⚠️ Google API Key 配額已用完 (嘗試 18，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #11/12
-⚠️ Google API Key 配額已用完 (嘗試 19，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #12/12
-⚠️ Google API Key 配額已用完 (嘗試 20，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #1/12
-⚠️ Google API Key 配額已用完 (嘗試 21，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #2/12
-⚠️ Google API Key 配額已用完 (嘗試 22，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #3/12
-⚠️ Google API Key 配額已用完 (嘗試 23，模型: gemini-2.0-flash-lite)
-🔄 切換到下一個 API Key...
-🔑 使用 Google API Key #4/12
-⚠️ Google API Key 配額已用完 (嘗試 24，模型: gemini-2.0-flash-lite)
-💡 所有 API Keys 在 gemini-2.0-flash-lite 的配額已用完，切換到備用模型 gemini-flash-lite-latest
-🔑 使用 Google API Key #5/12
-✅ 使用備援模型 gemini-flash-lite-latest 成功
-✅ 所有段落處理完成，正在合併...
-🎉 [cacc4aec-7524-4dd3-a661-815705d32b7b] 處理完成！
-💾 [cacc4aec-7524-4dd3-a661-815705d32b7b] 文字檔已保存：output/1205咪聽_20251209_143408_transcript.txt
-📊 [cacc4aec-7524-4dd3-a661-815705d32b7b] Segments 已保存：output/1205咪聽_20251209_143408_segments.json
-🎵 [cacc4aec-7524-4dd3-a661-815705d32b7b] 音檔已保存（WAV 格式）：output/1205咪聽_cacc4aec-7524-4dd3-a661-815705d32b7b.wav
-🧹 開始清理舊音檔...
-   ✓ 保留最新任務音檔：cacc4aec...
-   ✓ 保留用戶勾選音檔 #1：0926老師講課_e353ac4b-4d72-4647-a738-caf1fbd72f7a.wav
-   ✓ 保留未勾選任務 #1：test2_395d20f7-155c-42ce-bedd-98082b3a5187.wav
-   ✓ 保留未勾選任務 #2：test2_a2378a38-9d8e-4118-9158-3718563c21a5.wav
-   🗑️ 已刪除舊音檔：test3_c137dcb6-3df7-4cb7-bb82-c7dac875b74b.wav
-✅ 清理完成：刪除了 1 個舊音檔，保留 4 個
-⏱️ [cacc4aec-7524-4dd3-a661-815705d32b7b] 總處理時間：15 分 23 秒
-🗑️ 已清理臨時目錄：tmp50y9l26k
-INFO:     172.20.0.1:0 - "GET /tags/order HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/active/list HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "DELETE /transcribe/8c4ac8f8-6b3c-4187-a3a2-0fdc9c972acd HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "DELETE /transcribe/46dd04f5-cd04-405c-a56b-a1b9e834f148 HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/download HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/segments HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-📝 [cacc4aec-7524-4dd3-a661-815705d32b7b] 準備更新檔案：/Users/test/Documents/playground/transcriber/output/1205咪聽_20251209_143408_transcript.txt
-   新內容前100字：這個發想是從研究貢獻來的，因為我在想說研究貢獻到底會用在哪裡？所以一開始就想說，我們大概可以通過這個 Visuationality這個概念，去得到幾個可能的這個計畫的研究貢獻：
-
-第一個貢獻當然就是對
-   檔案已更新，驗證前100字：這個發想是從研究貢獻來的，因為我在想說研究貢獻到底會用在哪裡？所以一開始就想說，我們大概可以通過這個 Visuationality這個概念，去得到幾個可能的這個計畫的研究貢獻：
-
-第一個貢獻當然就是對
-✅ [cacc4aec-7524-4dd3-a661-815705d32b7b] 逐字稿已更新（新長度：7797 字）
-INFO:     172.20.0.1:0 - "PUT /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/content HTTP/1.1" 200 OK
-🏷️  [cacc4aec-7524-4dd3-a661-815705d32b7b] 更新標籤：['宗文研究']
-INFO:     172.20.0.1:0 - "PUT /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/segments HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/download HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-📝 [cacc4aec-7524-4dd3-a661-815705d32b7b] 準備更新檔案：/Users/test/Documents/playground/transcriber/output/1205咪聽_20251209_143408_transcript.txt
-   新內容前100字：這個發想是從研究貢獻來的，因為我在想說研究貢獻到底會用在哪裡？所以一開始就想說，我們大概可以通過這個 Visuationality這個概念，去得到幾個可能的這個計畫的研究貢獻：
-
-第一個貢獻當然就是對
-   檔案已更新，驗證前100字：這個發想是從研究貢獻來的，因為我在想說研究貢獻到底會用在哪裡？所以一開始就想說，我們大概可以通過這個 Visuationality這個概念，去得到幾個可能的這個計畫的研究貢獻：
-
-第一個貢獻當然就是對
-✅ [cacc4aec-7524-4dd3-a661-815705d32b7b] 逐字稿已更新（新長度：7668 字）
-INFO:     172.20.0.1:0 - "PUT /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/content HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/segments HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/download HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/segments HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/download HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     172.20.0.1:0 - "GET /tags/order HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /transcribe/active/list HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     172.20.0.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /transcribe/active/list HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /tags/order HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/segments HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/download HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     192.168.65.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/segments HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/download HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     192.168.65.1:0 - "GET /transcribe/d2bcd990-509e-4b9b-9c72-356b17cef247/segments HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /transcribe/d2bcd990-509e-4b9b-9c72-356b17cef247/download HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/segments HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/download HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /transcribe/cacc4aec-7524-4dd3-a661-815705d32b7b/audio HTTP/1.1" 206 Partial Content
-INFO:     192.168.65.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /tags/order HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /transcribe/active/list HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /tags/order HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /transcribe/active/list HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63124 - "GET /tags HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63125 - "GET /transcribe/active/list HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63126 - "GET /tags/order HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63128 - "GET /tags HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64550 - "GET /tags HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64551 - "GET /tags/order HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64552 - "GET /transcribe/active/list HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64573 - "GET /tags HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64574 - "GET /tags/order HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64575 - "GET /transcribe/active/list HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64577 - "GET /tags HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /tags/order HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /transcribe/active/list HTTP/1.1" 200 OK
-INFO:     192.168.65.1:0 - "GET /tags HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64656 - "GET /transcribe/active/list HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64659 - "GET /tags/order HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64660 - "GET /tags HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64662 - "GET /tags HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64937 - "GET /tags HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64938 - "GET /tags/order HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64939 - "GET /transcribe/active/list HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64941 - "GET /tags HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49395 - "GET /tags HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49396 - "GET /tags/order HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49397 - "GET /transcribe/active/list HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49399 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52999 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53001 - "GET /transcribe/active/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53003 - "GET /tags/order HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53005 - "GET /tags HTTP/1.1" 200 OK
+🏷️  [395d20f7-155c-42ce-bedd-98082b3a5187] 更新標籤：['測試']
+INFO:     127.0.0.1:53035 - "PUT /transcribe/395d20f7-155c-42ce-bedd-98082b3a5187/tags HTTP/1.1" 200 OK
+🏷️  [a2378a38-9d8e-4118-9158-3718563c21a5] 更新標籤：['測試']
+INFO:     127.0.0.1:53038 - "PUT /transcribe/a2378a38-9d8e-4118-9158-3718563c21a5/tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53041 - "GET /tags HTTP/1.1" 200 OK
+🏷️  [c137dcb6-3df7-4cb7-bb82-c7dac875b74b] 更新標籤：['測試']
+INFO:     127.0.0.1:53045 - "PUT /transcribe/c137dcb6-3df7-4cb7-bb82-c7dac875b74b/tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53047 - "GET /tags HTTP/1.1" 200 OK
+🎨 更新標籤顏色：測試 -> #94002a
+INFO:     127.0.0.1:53051 - "PUT /tags/%E6%B8%AC%E8%A9%A6/color HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53053 - "GET /tags HTTP/1.1" 200 OK
+🏷️  [395d20f7-155c-42ce-bedd-98082b3a5187] 更新標籤：['測試用']
+INFO:     127.0.0.1:53139 - "PUT /transcribe/395d20f7-155c-42ce-bedd-98082b3a5187/tags HTTP/1.1" 200 OK
+🏷️  [a2378a38-9d8e-4118-9158-3718563c21a5] 更新標籤：['測試用']
+INFO:     127.0.0.1:53143 - "PUT /transcribe/a2378a38-9d8e-4118-9158-3718563c21a5/tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53145 - "GET /tags HTTP/1.1" 200 OK
+🏷️  [c137dcb6-3df7-4cb7-bb82-c7dac875b74b] 更新標籤：['測試用']
+INFO:     127.0.0.1:53150 - "PUT /transcribe/c137dcb6-3df7-4cb7-bb82-c7dac875b74b/tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53151 - "GET /tags HTTP/1.1" 200 OK
+🎨 更新標籤顏色：測試用 -> #94002a
+INFO:     127.0.0.1:53155 - "PUT /tags/%E6%B8%AC%E8%A9%A6%E7%94%A8/color HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53157 - "GET /tags HTTP/1.1" 200 OK
+🏷️  [395d20f7-155c-42ce-bedd-98082b3a5187] 更新標籤：['測試']
+INFO:     127.0.0.1:53178 - "PUT /transcribe/395d20f7-155c-42ce-bedd-98082b3a5187/tags HTTP/1.1" 200 OK
+🏷️  [a2378a38-9d8e-4118-9158-3718563c21a5] 更新標籤：['測試']
+INFO:     127.0.0.1:53183 - "PUT /transcribe/a2378a38-9d8e-4118-9158-3718563c21a5/tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53184 - "GET /tags HTTP/1.1" 200 OK
+🏷️  [c137dcb6-3df7-4cb7-bb82-c7dac875b74b] 更新標籤：['測試']
+INFO:     127.0.0.1:53188 - "PUT /transcribe/c137dcb6-3df7-4cb7-bb82-c7dac875b74b/tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53190 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53193 - "GET /tags HTTP/1.1" 200 OK
+🏷️  [395d20f7-155c-42ce-bedd-98082b3a5187] 更新標籤：['測試用']
+INFO:     127.0.0.1:53212 - "PUT /transcribe/395d20f7-155c-42ce-bedd-98082b3a5187/tags HTTP/1.1" 200 OK
+🏷️  [a2378a38-9d8e-4118-9158-3718563c21a5] 更新標籤：['測試用']
+INFO:     127.0.0.1:53216 - "PUT /transcribe/a2378a38-9d8e-4118-9158-3718563c21a5/tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53218 - "GET /tags HTTP/1.1" 200 OK
+🏷️  [c137dcb6-3df7-4cb7-bb82-c7dac875b74b] 更新標籤：['測試用']
+INFO:     127.0.0.1:53222 - "PUT /transcribe/c137dcb6-3df7-4cb7-bb82-c7dac875b74b/tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53224 - "GET /tags HTTP/1.1" 200 OK
+🎨 更新標籤顏色：測試用 -> #94002a
+INFO:     127.0.0.1:53228 - "PUT /tags/%E6%B8%AC%E8%A9%A6%E7%94%A8/color HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53230 - "GET /tags HTTP/1.1" 200 OK
+🏷️  [395d20f7-155c-42ce-bedd-98082b3a5187] 更新標籤：['測試']
+INFO:     127.0.0.1:53270 - "PUT /transcribe/395d20f7-155c-42ce-bedd-98082b3a5187/tags HTTP/1.1" 200 OK
+🏷️  [a2378a38-9d8e-4118-9158-3718563c21a5] 更新標籤：['測試']
+INFO:     127.0.0.1:53274 - "PUT /transcribe/a2378a38-9d8e-4118-9158-3718563c21a5/tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53276 - "GET /tags HTTP/1.1" 200 OK
+🏷️  [c137dcb6-3df7-4cb7-bb82-c7dac875b74b] 更新標籤：['測試']
+INFO:     127.0.0.1:53281 - "PUT /transcribe/c137dcb6-3df7-4cb7-bb82-c7dac875b74b/tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53282 - "GET /tags HTTP/1.1" 200 OK
+🎨 更新標籤顏色：測試 -> #94002a
+INFO:     127.0.0.1:53287 - "PUT /tags/%E6%B8%AC%E8%A9%A6/color HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53288 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53328 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53329 - "GET /transcribe/active/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53330 - "GET /tags/order HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53332 - "GET /tags HTTP/1.1" 200 OK
+🏷️  [395d20f7-155c-42ce-bedd-98082b3a5187] 更新標籤：['測試用']
+INFO:     127.0.0.1:53354 - "PUT /transcribe/395d20f7-155c-42ce-bedd-98082b3a5187/tags HTTP/1.1" 200 OK
+🏷️  [a2378a38-9d8e-4118-9158-3718563c21a5] 更新標籤：['測試用']
+INFO:     127.0.0.1:53356 - "PUT /transcribe/a2378a38-9d8e-4118-9158-3718563c21a5/tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53359 - "GET /tags HTTP/1.1" 200 OK
+🏷️  [c137dcb6-3df7-4cb7-bb82-c7dac875b74b] 更新標籤：['測試用']
+INFO:     127.0.0.1:53363 - "PUT /transcribe/c137dcb6-3df7-4cb7-bb82-c7dac875b74b/tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53365 - "GET /tags HTTP/1.1" 200 OK
+🎨 更新標籤顏色：測試用 -> #94002a
+INFO:     127.0.0.1:53369 - "PUT /tags/%E6%B8%AC%E8%A9%A6%E7%94%A8/color HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53371 - "GET /tags HTTP/1.1" 200 OK
+🏷️  [395d20f7-155c-42ce-bedd-98082b3a5187] 更新標籤：['測試']
+INFO:     127.0.0.1:53403 - "PUT /transcribe/395d20f7-155c-42ce-bedd-98082b3a5187/tags HTTP/1.1" 200 OK
+🏷️  [a2378a38-9d8e-4118-9158-3718563c21a5] 更新標籤：['測試']
+INFO:     127.0.0.1:53407 - "PUT /transcribe/a2378a38-9d8e-4118-9158-3718563c21a5/tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53409 - "GET /tags HTTP/1.1" 200 OK
+🏷️  [c137dcb6-3df7-4cb7-bb82-c7dac875b74b] 更新標籤：['測試']
+INFO:     127.0.0.1:53413 - "PUT /transcribe/c137dcb6-3df7-4cb7-bb82-c7dac875b74b/tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53415 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53420 - "GET /tags HTTP/1.1" 200 OK
+🎨 更新標籤顏色：測試 -> #94002a
+INFO:     127.0.0.1:53421 - "PUT /tags/%E6%B8%AC%E8%A9%A6/color HTTP/1.1" 200 OK
+🏷️  [395d20f7-155c-42ce-bedd-98082b3a5187] 更新標籤：['測試用']
+INFO:     127.0.0.1:54215 - "PUT /transcribe/395d20f7-155c-42ce-bedd-98082b3a5187/tags HTTP/1.1" 200 OK
+🏷️  [a2378a38-9d8e-4118-9158-3718563c21a5] 更新標籤：['測試用']
+INFO:     127.0.0.1:54219 - "PUT /transcribe/a2378a38-9d8e-4118-9158-3718563c21a5/tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54221 - "GET /tags HTTP/1.1" 200 OK
+🏷️  [c137dcb6-3df7-4cb7-bb82-c7dac875b74b] 更新標籤：['測試用']
+INFO:     127.0.0.1:54225 - "PUT /transcribe/c137dcb6-3df7-4cb7-bb82-c7dac875b74b/tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54227 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54230 - "GET /tags HTTP/1.1" 200 OK
+🏷️  [395d20f7-155c-42ce-bedd-98082b3a5187] 更新標籤：['測試']
+INFO:     127.0.0.1:54274 - "PUT /transcribe/395d20f7-155c-42ce-bedd-98082b3a5187/tags HTTP/1.1" 200 OK
+🏷️  [a2378a38-9d8e-4118-9158-3718563c21a5] 更新標籤：['測試']
+INFO:     127.0.0.1:54278 - "PUT /transcribe/a2378a38-9d8e-4118-9158-3718563c21a5/tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54280 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54284 - "GET /tags HTTP/1.1" 200 OK
+🏷️  [c137dcb6-3df7-4cb7-bb82-c7dac875b74b] 更新標籤：['測試']
+INFO:     127.0.0.1:54286 - "PUT /transcribe/c137dcb6-3df7-4cb7-bb82-c7dac875b74b/tags HTTP/1.1" 200 OK
+🎨 更新標籤顏色：測試 -> #94002a
+INFO:     127.0.0.1:54290 - "PUT /tags/%E6%B8%AC%E8%A9%A6/color HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54292 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55089 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55090 - "GET /tags/order HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55281 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55284 - "GET /tags/order HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55285 - "GET /transcribe/active/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55287 - "GET /tags HTTP/1.1" 200 OK
+🏷️  [395d20f7-155c-42ce-bedd-98082b3a5187] 更新標籤：['測試用']
+INFO:     127.0.0.1:55329 - "PUT /transcribe/395d20f7-155c-42ce-bedd-98082b3a5187/tags HTTP/1.1" 200 OK
+🏷️  [a2378a38-9d8e-4118-9158-3718563c21a5] 更新標籤：['測試用']
+INFO:     127.0.0.1:55331 - "PUT /transcribe/a2378a38-9d8e-4118-9158-3718563c21a5/tags HTTP/1.1" 200 OK
+🏷️  [c137dcb6-3df7-4cb7-bb82-c7dac875b74b] 更新標籤：['測試用']
+INFO:     127.0.0.1:55332 - "PUT /transcribe/c137dcb6-3df7-4cb7-bb82-c7dac875b74b/tags HTTP/1.1" 200 OK
+🎨 更新標籤顏色：測試用 -> #94002a
+INFO:     127.0.0.1:55335 - "PUT /tags/%E6%B8%AC%E8%A9%A6%E7%94%A8/color HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55360 - "GET /transcribe/active/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55363 - "GET /tags HTTP/1.1" 200 OK
+🏷️  [395d20f7-155c-42ce-bedd-98082b3a5187] 更新標籤：['測試']
+INFO:     127.0.0.1:55742 - "PUT /transcribe/395d20f7-155c-42ce-bedd-98082b3a5187/tags HTTP/1.1" 200 OK
+🏷️  [a2378a38-9d8e-4118-9158-3718563c21a5] 更新標籤：['測試']
+INFO:     127.0.0.1:55744 - "PUT /transcribe/a2378a38-9d8e-4118-9158-3718563c21a5/tags HTTP/1.1" 200 OK
+🏷️  [c137dcb6-3df7-4cb7-bb82-c7dac875b74b] 更新標籤：['測試']
+INFO:     127.0.0.1:55745 - "PUT /transcribe/c137dcb6-3df7-4cb7-bb82-c7dac875b74b/tags HTTP/1.1" 200 OK
+🎨 更新標籤顏色：測試 -> #94002a
+INFO:     127.0.0.1:55748 - "PUT /tags/%E6%B8%AC%E8%A9%A6/color HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55770 - "GET /transcribe/active/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55773 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56262 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56264 - "GET /tags/order HTTP/1.1" 200 OK
+🏷️  [395d20f7-155c-42ce-bedd-98082b3a5187] 更新標籤：['測試用']
+INFO:     127.0.0.1:56365 - "PUT /transcribe/395d20f7-155c-42ce-bedd-98082b3a5187/tags HTTP/1.1" 200 OK
+🏷️  [a2378a38-9d8e-4118-9158-3718563c21a5] 更新標籤：['測試用']
+INFO:     127.0.0.1:56366 - "PUT /transcribe/a2378a38-9d8e-4118-9158-3718563c21a5/tags HTTP/1.1" 200 OK
+🏷️  [c137dcb6-3df7-4cb7-bb82-c7dac875b74b] 更新標籤：['測試用']
+INFO:     127.0.0.1:56368 - "PUT /transcribe/c137dcb6-3df7-4cb7-bb82-c7dac875b74b/tags HTTP/1.1" 200 OK
+🎨 更新標籤顏色：測試用 -> #94002a
+INFO:     127.0.0.1:56373 - "PUT /tags/%E6%B8%AC%E8%A9%A6%E7%94%A8/color HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56385 - "GET /transcribe/active/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56388 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56425 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56427 - "GET /tags/order HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56572 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56574 - "GET /tags/order HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56742 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56744 - "GET /tags/order HTTP/1.1" 200 OK
+🏷️  [a2378a38-9d8e-4118-9158-3718563c21a5] 更新標籤：['測試']
+INFO:     127.0.0.1:56856 - "PUT /transcribe/a2378a38-9d8e-4118-9158-3718563c21a5/tags HTTP/1.1" 200 OK
+🏷️  [395d20f7-155c-42ce-bedd-98082b3a5187] 更新標籤：['測試']
+INFO:     127.0.0.1:56859 - "PUT /transcribe/395d20f7-155c-42ce-bedd-98082b3a5187/tags HTTP/1.1" 200 OK
+🏷️  [c137dcb6-3df7-4cb7-bb82-c7dac875b74b] 更新標籤：['測試']
+INFO:     127.0.0.1:56860 - "PUT /transcribe/c137dcb6-3df7-4cb7-bb82-c7dac875b74b/tags HTTP/1.1" 200 OK
+🎨 更新標籤顏色：測試 -> #94002a
+INFO:     127.0.0.1:56863 - "PUT /tags/%E6%B8%AC%E8%A9%A6/color HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56866 - "GET /transcribe/active/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56869 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62058 - "GET /tags/order HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62059 - "GET /transcribe/active/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62060 - "GET /tags HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62062 - "GET /tags HTTP/1.1" 200 OK
+📋 更新標籤順序：4 個標籤
+INFO:     127.0.0.1:62991 - "PUT /tags/order HTTP/1.1" 200 OK
+📋 更新標籤順序：4 個標籤
+INFO:     127.0.0.1:63008 - "PUT /tags/order HTTP/1.1" 200 OK

@@ -48,13 +48,6 @@
             >
               ✓
             </button>
-            <button
-              class="btn-cancel-filter"
-              @click="cancelFilterEdit"
-              title="取消"
-            >
-              ✕
-            </button>
           </template>
           <button
             v-if="selectedFilterTags.length > 0 && !isEditingFilterTags"
@@ -117,7 +110,24 @@
             </button>
           </div>
 
+          <!-- 編輯模式：可點擊編輯標籤文字 -->
+          <input
+            v-if="isEditingFilterTags && editingFilterTag === tag"
+            type="text"
+            class="filter-tag-input"
+            v-model="editingFilterTagText"
+            @blur="finishEditingFilterTag"
+            @keyup.enter="finishEditingFilterTag"
+            @keyup.esc="cancelEditingFilterTag"
+            ref="filterTagInput"
+            :style="{
+              borderColor: getTagColor(tag),
+              color: getTagColor(tag)
+            }"
+          />
+          <!-- 標籤按鈕 -->
           <button
+            v-else
             class="filter-tag-btn"
             :class="{ active: selectedFilterTags.includes(tag) }"
             :style="{
@@ -126,8 +136,8 @@
               borderColor: getTagColor(tag),
               color: selectedFilterTags.includes(tag) ? 'white' : getTagColor(tag)
             }"
-            @click="!isEditingFilterTags && toggleFilterTag(tag)"
-            :disabled="isEditingFilterTags"
+            @click="isEditingFilterTags ? startEditingFilterTag(tag) : toggleFilterTag(tag)"
+            :title="isEditingFilterTags ? '點擊編輯標籤名稱' : ''"
           >
             {{ tag }}
           </button>
@@ -670,6 +680,9 @@ const editingTagOrder = ref([])
 const draggingIndex = ref(null)
 const dragOverIndex = ref(null)
 const customTagOrder = ref([])
+const editingFilterTag = ref(null) // 正在編輯的篩選標籤名稱
+const editingFilterTagText = ref('') // 編輯中的標籤文字
+const isRenamingTag = ref(false) // 是否正在重命名標籤（防止併發操作）
 
 // ==== 批次編輯模式 ====
 const isBatchEditMode = ref(false)
@@ -1022,6 +1035,115 @@ function toggleFilterTag(tag) {
 
 function clearFilter() {
   selectedFilterTags.value = []
+}
+
+// 篩選標籤文字編輯功能
+function startEditingFilterTag(tag) {
+  // 如果正在重命名其他標籤，阻止操作
+  if (isRenamingTag.value) {
+    return
+  }
+  editingFilterTag.value = tag
+  editingFilterTagText.value = tag
+  // 在下一個 tick 後聚焦輸入框
+  nextTick(() => {
+    const inputs = document.querySelectorAll('.filter-tag-input')
+    inputs.forEach(input => input.focus())
+  })
+}
+
+async function finishEditingFilterTag() {
+  // 如果已經在重命名，防止重複執行
+  if (isRenamingTag.value) {
+    return
+  }
+
+  const oldTag = editingFilterTag.value
+  const newTag = editingFilterTagText.value.trim()
+
+  // 如果標籤沒有改變或新標籤為空，取消編輯
+  if (!newTag || newTag === oldTag) {
+    cancelEditingFilterTag()
+    return
+  }
+
+  // 檢查新標籤名稱是否已存在（排除當前正在編輯的標籤）
+  // 在編輯模式下，應該檢查 editingTagOrder，因為那是用戶當前看到的標籤列表
+  const currentTags = isEditingFilterTags.value && editingTagOrder.value.length > 0
+    ? editingTagOrder.value
+    : allTags.value
+  const otherTags = currentTags.filter(tag => tag !== oldTag)
+  if (otherTags.includes(newTag)) {
+    alert(`標籤 "${newTag}" 已存在，請使用其他名稱`)
+    return
+  }
+
+  // 設置重命名鎖，防止併發操作
+  isRenamingTag.value = true
+
+  try {
+    // 更新所有任務中的標籤
+    const tasksToUpdate = props.tasks.filter(task =>
+      task.tags && task.tags.includes(oldTag)
+    )
+
+    // 批量更新所有任務（使用 Promise.all 並行處理）
+    await Promise.all(
+      tasksToUpdate.map(task => {
+        const updatedTags = task.tags.map(t => t === oldTag ? newTag : t)
+        return axios.put(`${API_BASE}/transcribe/${task.task_id}/tags`, {
+          tags: updatedTags
+        })
+      })
+    )
+
+    // 更新自定義標籤順序
+    if (customTagOrder.value.includes(oldTag)) {
+      const index = customTagOrder.value.indexOf(oldTag)
+      customTagOrder.value[index] = newTag
+    }
+
+    // 更新編輯中的標籤順序
+    if (editingTagOrder.value.includes(oldTag)) {
+      const index = editingTagOrder.value.indexOf(oldTag)
+      editingTagOrder.value[index] = newTag
+    }
+
+    // 更新標籤顏色
+    if (tagColors.value[oldTag]) {
+      tagColors.value[newTag] = tagColors.value[oldTag]
+      delete tagColors.value[oldTag]
+      // 保存新標籤的顏色
+      await updateTagColor(newTag, tagColors.value[newTag])
+    }
+
+    // 更新選中的篩選標籤
+    if (selectedFilterTags.value.includes(oldTag)) {
+      const index = selectedFilterTags.value.indexOf(oldTag)
+      selectedFilterTags.value[index] = newTag
+    }
+
+    console.log(`✅ 標籤 "${oldTag}" 已重命名為 "${newTag}"`)
+
+    // 刷新任務列表以確保前後端數據同步
+    emit('refresh')
+  } catch (error) {
+    console.error('重命名標籤失敗:', error)
+    alert('重命名標籤失敗：' + (error.response?.data?.detail || error.message))
+  } finally {
+    // 釋放重命名鎖
+    isRenamingTag.value = false
+  }
+
+  // 清除編輯狀態
+  cancelEditingFilterTag()
+}
+
+function cancelEditingFilterTag() {
+  editingFilterTag.value = null
+  editingFilterTagText.value = ''
+  // 確保釋放鎖
+  isRenamingTag.value = false
 }
 
 // 標籤編輯模式
@@ -1559,16 +1681,16 @@ onMounted(() => {
   padding: 4px 12px;
   font-size: 12px;
   font-weight: 500;
-  color: #77969A;
-  background: rgba(119, 150, 154, 0.1);
-  border: 1px solid rgba(119, 150, 154, 0.3);
+  color: #ffffff;
+  background: rgb(119, 150, 154);
+  border: 1px solid rgb(119, 150, 154);
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .btn-edit-filter:hover {
-  background: rgba(119, 150, 154, 0.2);
+  background: #336774;
   border-color: rgba(119, 150, 154, 0.5);
   transform: translateY(-1px);
 }
@@ -1578,7 +1700,7 @@ onMounted(() => {
   font-size: 12px;
   font-weight: 500;
   color: white;
-  background: #43e97b;
+  background: #838A2D;
   border: none;
   border-radius: 6px;
   cursor: pointer;
@@ -1586,7 +1708,7 @@ onMounted(() => {
 }
 
 .btn-save-filter:hover {
-  background: #38d66a;
+  background: #5B622E;
   transform: translateY(-1px);
 }
 
@@ -1717,6 +1839,23 @@ onMounted(() => {
 .filter-tag-btn:disabled {
   cursor: default;
   opacity: 0.8;
+}
+
+/* 篩選標籤編輯輸入框 */
+.filter-tag-input {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border: 2px solid;
+  border-radius: 12px;
+  outline: none;
+  background: white;
+  min-width: 100px;
+  transition: all 0.2s;
+}
+
+.filter-tag-input:focus {
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
 }
 
 .filter-tag-btn:hover:not(.active):not(:disabled) {
@@ -2431,7 +2570,7 @@ onMounted(() => {
   justify-content: center;
   padding: 4px 8px;
   background: rgba(119, 150, 154, 0.1);
-  border: 1px solid rgba(119, 150, 154, 0.3);
+  border: 1px solid #77969a4d;
   border-radius: 8px;
   color: #77969A;
   cursor: pointer;
