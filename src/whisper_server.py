@@ -2553,6 +2553,357 @@ async def health():
     }
 
 
+# ==================== 音訊編輯功能 ====================
+
+# 音訊片段儲存目錄
+AUDIO_CLIPS_DIR = OUTPUT_DIR / "audio_clips"
+AUDIO_CLIPS_DIR.mkdir(exist_ok=True)
+
+# 片段元數據儲存
+audio_clips: Dict[str, Dict[str, Any]] = {}
+clips_lock = Lock()
+
+
+def save_audio_clip(audio_segment: AudioSegment, source_filename: str, clip_id: str = None) -> Dict[str, Any]:
+    """
+    保存音訊片段到磁碟
+
+    Args:
+        audio_segment: pydub AudioSegment 對象
+        source_filename: 來源檔案名稱
+        clip_id: 可選的片段 ID（用於合併）
+
+    Returns:
+        {
+            "clip_id": str,
+            "filename": str,
+            "duration": float,
+            "path": str
+        }
+    """
+    if clip_id is None:
+        clip_id = str(uuid.uuid4())
+
+    timestamp = datetime.now(TZ_UTC8).strftime("%Y%m%d_%H%M%S")
+    filename = f"clip_{timestamp}_{clip_id[:8]}.mp3"
+    filepath = AUDIO_CLIPS_DIR / filename
+
+    # 導出為 MP3
+    audio_segment.export(str(filepath), format="mp3", bitrate="192k")
+
+    clip_data = {
+        "clip_id": clip_id,
+        "filename": filename,
+        "duration": len(audio_segment) / 1000.0,  # 毫秒轉秒
+        "path": str(filepath),
+        "source": source_filename,
+        "created_at": get_current_time()
+    }
+
+    with clips_lock:
+        audio_clips[clip_id] = clip_data
+
+    return clip_data
+
+
+@app.post("/audio/clip")
+async def clip_audio(
+    audio_file: UploadFile = File(...),
+    regions: str = Form(..., description="區段 JSON 陣列，格式：[{start, end, id}]")
+):
+    """
+    剪輯音訊文件中的指定區段
+
+    - **audio_file**: 原始音訊文件
+    - **regions**: JSON 字串，包含區段陣列 [{"start": 10.5, "end": 25.3, "id": "xxx"}]
+
+    Returns:
+        {
+            "clips": [
+                {"clip_id": "...", "filename": "...", "duration": 14.8},
+                ...
+            ]
+        }
+    """
+    temp_dir = Path(tempfile.mkdtemp())
+
+    try:
+        # 保存上傳的音檔
+        file_suffix = Path(audio_file.filename).suffix
+        temp_audio_path = temp_dir / f"input{file_suffix}"
+
+        with temp_audio_path.open("wb") as f:
+            content = await audio_file.read()
+            f.write(content)
+
+        print(f"🎵 載入音檔進行剪輯：{audio_file.filename}")
+
+        # 載入音檔
+        audio = AudioSegment.from_file(str(temp_audio_path))
+
+        # 解析區段
+        import json
+        regions_data = json.loads(regions)
+
+        if not regions_data or len(regions_data) == 0:
+            raise HTTPException(status_code=400, detail="未提供任何區段")
+
+        # 剪輯每個區段
+        clips = []
+        for idx, region in enumerate(regions_data):
+            start_ms = int(region["start"] * 1000)
+            end_ms = int(region["end"] * 1000)
+
+            # 邊界檢查
+            if end_ms > len(audio):
+                end_ms = len(audio)
+
+            if start_ms >= end_ms:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"區段 {idx + 1} 的起始時間大於或等於結束時間"
+                )
+
+            # 提取片段
+            clip_segment = audio[start_ms:end_ms]
+
+            # 保存片段
+            clip_data = save_audio_clip(clip_segment, audio_file.filename)
+            clips.append({
+                "clip_id": clip_data["clip_id"],
+                "filename": clip_data["filename"],
+                "duration": clip_data["duration"]
+            })
+
+        print(f"✅ 成功剪輯 {len(clips)} 個片段")
+
+        return JSONResponse({
+            "clips": clips,
+            "source_file": audio_file.filename,
+            "total_clips": len(clips)
+        })
+
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="regions 格式錯誤，需為有效 JSON")
+    except Exception as e:
+        print(f"❌ 剪輯失敗：{e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"剪輯失敗：{str(e)}")
+    finally:
+        # 清理臨時文件
+        cleanup_temp_dir(temp_dir)
+
+
+@app.post("/audio/merge")
+async def merge_audio(
+    clip_ids: str = Form(..., description="要合併的片段 ID 陣列（JSON 字串）"),
+    mode: str = Form("different-files", description="合併模式")
+):
+    """
+    合併多個音訊片段
+
+    - **clip_ids**: 片段 ID 陣列（JSON 字串）
+    - **mode**: 合併模式
+        - "different-files": 合併不同音檔（中間無間隔）
+        - "same-file-clips": 合併同一音檔的片段（保持原始時間順序）
+
+    Returns:
+        {
+            "merged_id": "...",
+            "filename": "...",
+            "duration": 120.5
+        }
+    """
+    try:
+        # 解析 clip_ids
+        import json
+        clip_ids_list = json.loads(clip_ids)
+
+        if len(clip_ids_list) < 2:
+            raise HTTPException(status_code=400, detail="至少需要 2 個片段")
+
+        # 取得所有片段
+        with clips_lock:
+            clips_to_merge = []
+            for clip_id in clip_ids_list:
+                if clip_id not in audio_clips:
+                    raise HTTPException(status_code=404, detail=f"片段 {clip_id} 不存在")
+                clips_to_merge.append(audio_clips[clip_id])
+
+        print(f"🔗 合併 {len(clips_to_merge)} 個片段（模式：{mode}）")
+
+        # 載入所有片段
+        segments = []
+        for clip_data in clips_to_merge:
+            segment = AudioSegment.from_file(clip_data["path"])
+            segments.append(segment)
+
+        # 合併邏輯
+        merged = segments[0]
+        for seg in segments[1:]:
+            merged += seg
+
+        # 保存合併結果
+        merged_id = str(uuid.uuid4())
+        merged_data = save_audio_clip(
+            merged,
+            f"merged_{len(clips_to_merge)}_clips",
+            merged_id
+        )
+
+        duration_str = format_duration(merged_data['duration'])
+        print(f"✅ 合併完成：{merged_data['filename']} ({duration_str})")
+
+        return JSONResponse({
+            "merged_id": merged_data["clip_id"],
+            "filename": merged_data["filename"],
+            "duration": merged_data["duration"]
+        })
+
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="clip_ids 格式錯誤")
+    except Exception as e:
+        print(f"❌ 合併失敗：{e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"合併失敗：{str(e)}")
+
+
+@app.get("/audio/download/{clip_id}")
+async def download_clip(clip_id: str):
+    """下載音訊片段或合併結果"""
+    with clips_lock:
+        if clip_id not in audio_clips:
+            raise HTTPException(status_code=404, detail="片段不存在")
+
+        clip_data = audio_clips[clip_id]
+
+    filepath = Path(clip_data["path"])
+
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="檔案已被刪除")
+
+    return FileResponse(
+        path=str(filepath),
+        filename=clip_data["filename"],
+        media_type="audio/mpeg"
+    )
+
+
+@app.post("/audio/cleanup")
+async def cleanup_old_clips(max_age_hours: int = 24):
+    """
+    清理超過指定時間的音訊片段
+
+    - **max_age_hours**: 最大保留時間（小時），預設 24 小時
+    """
+    from datetime import datetime, timedelta
+
+    cutoff_time = datetime.now(TZ_UTC8) - timedelta(hours=max_age_hours)
+
+    deleted_count = 0
+    with clips_lock:
+        clips_to_delete = []
+
+        for clip_id, clip_data in audio_clips.items():
+            # 解析創建時間
+            created_str = clip_data.get("created_at", "")
+            try:
+                created_time = datetime.strptime(created_str, "%Y-%m-%d %H:%M:%S")
+                created_time = created_time.replace(tzinfo=TZ_UTC8)
+
+                if created_time < cutoff_time:
+                    clips_to_delete.append(clip_id)
+            except:
+                continue
+
+        # 刪除過期片段
+        for clip_id in clips_to_delete:
+            clip_data = audio_clips[clip_id]
+            filepath = Path(clip_data["path"])
+
+            if filepath.exists():
+                filepath.unlink()
+
+            del audio_clips[clip_id]
+            deleted_count += 1
+
+    print(f"🧹 清理了 {deleted_count} 個過期音訊片段")
+
+    return JSONResponse({
+        "deleted_count": deleted_count,
+        "message": f"成功清理 {deleted_count} 個超過 {max_age_hours} 小時的片段"
+    })
+
+
+@app.post("/audio/convert-to-web-format")
+async def convert_audio_to_web_format(
+    audio_file: UploadFile = File(..., description="要轉換的音檔")
+):
+    """
+    將音訊檔案轉換為瀏覽器相容的格式 (MP3)
+    用於解決瀏覽器無法解碼某些格式的問題
+    """
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_dir_path = Path(temp_dir)
+
+        # 儲存上傳的檔案
+        temp_input_path = temp_dir_path / audio_file.filename
+        with open(temp_input_path, "wb") as f:
+            content = await audio_file.read()
+            f.write(content)
+
+        try:
+            # 使用 pydub 載入音訊（支援各種格式）
+            print(f"🔄 正在轉換音訊格式：{audio_file.filename}")
+            audio = AudioSegment.from_file(str(temp_input_path))
+
+            # 轉換為 MP3 格式（瀏覽器廣泛支援）
+            # 使用較高的位元率以保持音質
+            output_filename = f"converted_{Path(audio_file.filename).stem}.mp3"
+            output_path = AUDIO_CLIPS_DIR / output_filename
+
+            audio.export(
+                str(output_path),
+                format="mp3",
+                bitrate="192k",
+                parameters=["-ar", "44100"]  # 44.1kHz 取樣率
+            )
+
+            # 取得音訊資訊
+            duration = len(audio) / 1000.0
+            file_size = output_path.stat().st_size
+
+            # 儲存到 clips 管理
+            clip_id = str(uuid.uuid4())
+            with clips_lock:
+                audio_clips[clip_id] = {
+                    "clip_id": clip_id,
+                    "filename": output_filename,
+                    "path": str(output_path),
+                    "duration": duration,
+                    "size": file_size,
+                    "created_at": datetime.now(),
+                    "original_filename": audio_file.filename
+                }
+
+            print(f"✅ 音訊轉換完成：{output_filename} ({duration:.2f}秒, {file_size / 1024 / 1024:.2f}MB)")
+
+            return JSONResponse({
+                "clip_id": clip_id,
+                "filename": output_filename,
+                "duration": duration,
+                "size": file_size,
+                "format": "mp3",
+                "message": "音訊已成功轉換為瀏覽器相容格式"
+            })
+
+        except Exception as e:
+            print(f"❌ 音訊轉換失敗：{str(e)}")
+            raise HTTPException(status_code=400, detail=f"音訊轉換失敗：{str(e)}")
+
+
 if __name__ == "__main__":
     import argparse
 
