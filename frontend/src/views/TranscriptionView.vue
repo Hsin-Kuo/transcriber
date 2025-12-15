@@ -429,13 +429,17 @@
                     type="text"
                     placeholder="尋找"
                     class="replace-input-inline"
-                    @keyup.enter="replaceAll"
+                    @compositionstart="isComposing = true"
+                    @compositionend="isComposing = false"
+                    @keydown.enter="replaceAll"
                   />
                   <input
                     v-model="replaceText"
                     type="text"
                     placeholder="取代為"
                     class="replace-input-inline"
+                    @compositionstart="isComposing = true"
+                    @compositionend="isComposing = false"
                     @keyup.enter="replaceAll"
                   />
                   <button
@@ -531,6 +535,7 @@ const savingTranscript = ref(false)
 const originalContent = ref('')
 const findText = ref('')
 const replaceText = ref('')
+const isComposing = ref(false)
 const segments = ref([])
 const timecodeMarkers = ref([])
 const audioElement = ref(null)
@@ -1527,6 +1532,7 @@ function closeTranscriptDialog() {
   replaceText.value = ''
   segments.value = []
   timecodeMarkers.value = []
+  isComposing.value = false
 }
 
 // 從對話框下載逐字稿
@@ -1637,10 +1643,13 @@ async function saveTaskName() {
 
 // 全文取代
 function replaceAll() {
+
+  if (isComposing.value) return   // 中文選字中，不觸發
   if (!findText.value) {
     alert('請輸入要尋找的文字')
     return
   }
+
 
   const content = currentTranscript.value.content
   const searchText = findText.value

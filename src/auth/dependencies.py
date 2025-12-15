@@ -75,15 +75,26 @@ async def get_current_admin(
 
 
 async def check_quota(
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database)
 ):
-    """檢查用戶配額（預留，後續實作）
+    """檢查用戶配額（基本檢查，具體音訊時長檢查在轉錄端點）
 
     Args:
         current_user: 當前用戶
+        db: 資料庫實例
 
     Returns:
-        用戶資料
+        用戶資料（包含 db 實例）
     """
-    # TODO: 在階段二實作配額檢查
+    from .quota import QuotaManager
+    from ..database.repositories.task_repo import TaskRepository
+
+    # 檢查並發任務數
+    task_repo = TaskRepository(db)
+    active_tasks = await task_repo.find_active_by_user(str(current_user["_id"]))
+    await QuotaManager.check_concurrent_tasks(current_user, len(active_tasks))
+
+    # 返回用戶資料（加上 db 實例供後續使用）
+    current_user["_db"] = db
     return current_user
