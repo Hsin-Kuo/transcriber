@@ -1515,23 +1515,41 @@ def process_transcription_task(
         # 加標點
         final_text = raw_text
         if punct_provider == "gemini":
-            update_task_status(task_id, {
-                "punctuation_started": True,
-                "progress": "正在添加標點符號（Gemini）..."
-            })
-            print(f"✨ [{task_id}] 使用 Gemini 加標點與分段（語言：{punct_language}）...")
-            final_text = punctuate_with_gemini(raw_text, task_id=task_id, language=punct_language)
-            update_task_status(task_id, {"punctuation_completed": True})
+            try:
+                update_task_status(task_id, {
+                    "punctuation_started": True,
+                    "progress": "正在添加標點符號（Gemini）..."
+                })
+                print(f"✨ [{task_id}] 使用 Gemini 加標點與分段（語言：{punct_language}）...")
+                final_text = punctuate_with_gemini(raw_text, task_id=task_id, language=punct_language)
+                update_task_status(task_id, {"punctuation_completed": True})
+            except Exception as e:
+                print(f"⚠️ [{task_id}] Gemini 加標點失敗：{e}")
+                print(f"📝 [{task_id}] 將使用 Whisper 原始轉錄結果")
+                update_task_status(task_id, {
+                    "punctuation_completed": False,
+                    "punctuation_error": str(e),
+                    "progress": "標點符號添加失敗，使用原始轉錄結果"
+                })
         elif punct_provider == "openai":
-            update_task_status(task_id, {
-                "punctuation_started": True,
-                "progress": "正在添加標點符號（OpenAI）..."
-            })
-            if not os.getenv("OPENAI_API_KEY"):
-                raise ValueError("未設定 OPENAI_API_KEY")
-            print(f"✨ [{task_id}] 使用 OpenAI 加標點與分段（語言：{punct_language}）...")
-            final_text = punctuate_with_openai(raw_text, language=punct_language)
-            update_task_status(task_id, {"punctuation_completed": True})
+            try:
+                update_task_status(task_id, {
+                    "punctuation_started": True,
+                    "progress": "正在添加標點符號（OpenAI）..."
+                })
+                if not os.getenv("OPENAI_API_KEY"):
+                    raise ValueError("未設定 OPENAI_API_KEY")
+                print(f"✨ [{task_id}] 使用 OpenAI 加標點與分段（語言：{punct_language}）...")
+                final_text = punctuate_with_openai(raw_text, language=punct_language)
+                update_task_status(task_id, {"punctuation_completed": True})
+            except Exception as e:
+                print(f"⚠️ [{task_id}] OpenAI 加標點失敗：{e}")
+                print(f"📝 [{task_id}] 將使用 Whisper 原始轉錄結果")
+                update_task_status(task_id, {
+                    "punctuation_completed": False,
+                    "punctuation_error": str(e),
+                    "progress": "標點符號添加失敗，使用原始轉錄結果"
+                })
 
         print(f"🎉 [{task_id}] 處理完成！")
 
