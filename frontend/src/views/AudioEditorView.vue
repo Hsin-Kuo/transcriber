@@ -132,6 +132,36 @@
       />
     </div>
 
+    <!-- 時間軸編輯器切換按鈕 -->
+    <div v-if="clips.length > 0" class="timeline-toggle-section electric-card">
+      <div class="electric-inner">
+        <div class="electric-border-outer">
+          <div class="electric-main timeline-toggle-content">
+            <button @click="showTimeline = !showTimeline" class="btn btn-timeline">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon v-if="!showTimeline" points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                <template v-else>
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </template>
+              </svg>
+              {{ showTimeline ? '關閉' : '✨ 開啟' }}時間軸編輯器
+            </button>
+            <p class="timeline-hint">拖曳排序片段、調整音量、淡入淡出效果 </p>
+          </div>
+        </div>
+        <div class="electric-glow-1"></div>
+        <div class="electric-glow-2"></div>
+      </div>
+    </div>
+
+    <!-- 時間軸編輯器 -->
+    <TimelineEditor
+      v-if="showTimeline"
+      :clips="clips"
+      @timeline-export="handleTimelineExport"
+    />
+
     <div v-if="processing" class="processing-overlay">
       <div class="spinner-large"></div>
       <p>{{ processingMessage }}</p>
@@ -145,6 +175,7 @@ import WaveformViewer from '../components/editor/WaveformViewer.vue'
 import RegionControls from '../components/editor/RegionControls.vue'
 import ClipManager from '../components/editor/ClipManager.vue'
 import MergePanel from '../components/editor/MergePanel.vue'
+import TimelineEditor from '../components/timeline/TimelineEditor.vue'
 import axios from 'axios'
 
 const API_BASE = '/api'
@@ -157,6 +188,7 @@ const mergeMode = ref('same-file-clips')
 const processing = ref(false)
 const processingMessage = ref('')
 const waveformRef = ref(null)
+const showTimeline = ref(false)
 let fileIdCounter = 0
 
 const currentFile = computed(() => {
@@ -325,6 +357,40 @@ async function handleMerge(selectedItems) {
   } catch (error) {
     console.error('合併失敗:', error)
     alert('合併失敗：' + (error.response?.data?.detail || error.message))
+  } finally {
+    processing.value = false
+  }
+}
+
+async function handleTimelineExport(timelineData) {
+  processing.value = true
+  processingMessage.value = '正在匯出時間軸音訊...'
+
+  try {
+    const formData = new FormData()
+    formData.append('timeline_data', JSON.stringify(timelineData))
+
+    // For now, use the existing merge endpoint
+    // In Stage 3, we'll implement the dedicated /audio/arrange endpoint
+    const clipIds = []
+    timelineData.tracks.forEach(track => {
+      track.clips.forEach(clip => {
+        clipIds.push(clip.clipId)
+      })
+    })
+
+    formData.append('clip_ids', JSON.stringify(clipIds))
+    formData.append('mode', 'same-file-clips')
+
+    const response = await axios.post(`${API_BASE}/audio/merge`, formData)
+
+    const downloadUrl = `${API_BASE}/audio/download/${response.data.merged_id}`
+    window.open(downloadUrl, '_blank')
+
+    alert('時間軸匯出成功！正在下載...')
+  } catch (error) {
+    console.error('匯出失敗:', error)
+    alert('匯出失敗：' + (error.response?.data?.detail || error.message))
   } finally {
     processing.value = false
   }
@@ -511,6 +577,37 @@ function handleClipDelete(clipId) {
   .action-panels {
     grid-template-columns: 1fr;
   }
+}
+
+.timeline-toggle-section {
+  margin-top: 24px;
+}
+
+.timeline-toggle-content {
+  padding: 24px;
+  background: linear-gradient(135deg, rgba(28, 28, 28, 0.95) 0%, rgba(20, 20, 20, 0.95) 100%);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.btn-timeline {
+  background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);
+  color: white;
+  font-size: 1.1rem;
+}
+
+.btn-timeline:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(155, 89, 182, 0.4);
+}
+
+.timeline-hint {
+  color: #888;
+  font-size: 0.9rem;
+  margin: 0;
 }
 
 .btn {

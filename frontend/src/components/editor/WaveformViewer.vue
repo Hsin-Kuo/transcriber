@@ -99,12 +99,21 @@ const errorMessage = ref('')
 const converting = ref(false)
 const currentAudioFile = ref(null)
 
+// 快取已轉換的音檔，避免重複轉換
+const convertedFilesCache = new Map()
+
 onMounted(() => {
   initWavesurfer()
 })
 
 onBeforeUnmount(() => {
   wavesurfer.value?.destroy()
+
+  // 清理快取的 ObjectURLs 以釋放記憶體
+  convertedFilesCache.forEach(url => {
+    URL.revokeObjectURL(url)
+  })
+  convertedFilesCache.clear()
 })
 
 watch(() => props.audioFile, (newFile) => {
@@ -201,6 +210,17 @@ function loadAudio(file) {
   errorMessage.value = '' // 清除之前的錯誤訊息
   converting.value = false
   currentAudioFile.value = file // 儲存檔案以便轉換失敗時重試
+
+  // 檢查是否已經轉換過此檔案
+  const cacheKey = `${file.name}-${file.size}-${file.lastModified}`
+  if (convertedFilesCache.has(cacheKey)) {
+    console.log('✨ 使用快取的轉換檔案，跳過重複轉換')
+    const cachedUrl = convertedFilesCache.get(cacheKey)
+    wavesurfer.value.load(cachedUrl)
+    return
+  }
+
+  // 載入原始檔案
   const url = URL.createObjectURL(file)
   wavesurfer.value.load(url)
 }
@@ -233,6 +253,11 @@ async function tryConvertAndLoad() {
     const audioResponse = await fetch(convertedAudioUrl)
     const audioBlob = await audioResponse.blob()
     const audioUrl = URL.createObjectURL(audioBlob)
+
+    // 儲存到快取
+    const cacheKey = `${currentAudioFile.value.name}-${currentAudioFile.value.size}-${currentAudioFile.value.lastModified}`
+    convertedFilesCache.set(cacheKey, audioUrl)
+    console.log(`💾 已快取轉換後的音檔: ${currentAudioFile.value.name}`)
 
     // 載入轉換後的音檔
     wavesurfer.value.load(audioUrl)
