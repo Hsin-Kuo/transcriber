@@ -30,6 +30,10 @@ import uvicorn
 from dotenv import load_dotenv
 load_dotenv()
 
+# 認證系統模組
+from src.database.mongodb import MongoDB
+from src.routers import auth as auth_router
+
 # Speaker Diarization
 try:
     from pyannote.audio import Pipeline
@@ -283,15 +287,22 @@ app = FastAPI(
 )
 
 # 添加 CORS 中間件
+# 從環境變數讀取允許的來源
+cors_origins_str = os.getenv("CORS_ORIGINS", "*")
+cors_origins = [origin.strip() for origin in cors_origins_str.split(",")] if cors_origins_str != "*" else ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 生產環境應該限制具體域名
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],  # 允許前端訪問所有響應頭
     max_age=3600,  # preflight 請求快取時間（秒）
 )
+
+# 註冊認證路由
+app.include_router(auth_router.router)
 
 
 # ---------- 工具函式 ----------
@@ -1636,6 +1647,13 @@ async def startup_event():
     """啟動時載入 Whisper 模型和任務記錄"""
     global whisper_model, current_model_name
 
+    # 連接 MongoDB
+    print(f"🔌 正在連接 MongoDB...")
+    try:
+        await MongoDB.connect()
+    except Exception as e:
+        print(f"⚠️  MongoDB 連接失敗（將繼續使用 JSON 檔案）: {e}")
+
     # 載入任務記錄
     print(f"📂 正在載入任務記錄...")
     load_tasks_from_disk()
@@ -1686,6 +1704,13 @@ async def startup_event():
             print("   1. 訪問 https://huggingface.co/settings/tokens")
             print("   2. 創建 access token")
             print("   3. 在 .env 添加：HF_TOKEN=your_token_here")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """關閉時斷開 MongoDB 連接"""
+    print(f"🔌 正在關閉 MongoDB 連接...")
+    await MongoDB.close()
 
 
 @app.get("/")
