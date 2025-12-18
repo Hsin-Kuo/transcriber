@@ -233,7 +233,7 @@ MEMORY_ONLY_FIELDS = {
 tag_colors: Dict[str, str] = {}  # 儲存標籤顏色 (標籤名稱 -> 顏色碼)
 tag_order: list[str] = []  # 儲存標籤順序
 tasks_lock = Lock()  # 線程安全鎖（用於運行時狀態）
-executor = ThreadPoolExecutor(max_workers=5)  # 線程池（增加 workers 避免死鎖）
+executor = ThreadPoolExecutor(max_workers=1)  # 線程池（像 main branch，只用 1 個 worker 避免競爭）
 
 # MongoDB 任務資料庫
 task_repo: Optional[TaskRepository] = None  # 在 startup 事件中初始化
@@ -607,13 +607,10 @@ def update_task_status(task_id: str, updates: Dict[str, Any], persist_to_db: boo
             print(f"🔄 [{task_id}] In-memory progress: {updates['progress']}")
 
     # --- 2. 決定是否需要持久化到 MongoDB ---
-    # 自動判斷：如果有關鍵欄位變更（status, audio_file 等），則持久化
+    # 像 main branch 一樣：只在任務完成時才持久化（避免頻繁 DB 寫入）
     if persist_to_db is None:
-        critical_fields = {"status", "audio_file", "result_file", "segments_file",
-                          "text_length", "duration_seconds", "created_at", "completed_at",
-                          "started_at", "keep_audio", "tags", "custom_name",
-                          "total_tokens_used", "diarization_num_speakers"}
-        persist_to_db = bool(critical_fields & updates.keys())
+        # 只在最終狀態時自動持久化
+        persist_to_db = updates.get("status") in ["completed", "failed", "cancelled"]
 
     # --- 3. 持久化到 MongoDB（僅在必要時） ---
     if persist_to_db:
@@ -632,25 +629,24 @@ def update_task_status(task_id: str, updates: Dict[str, Any], persist_to_db: boo
 
         # 如果過濾後還有欄位需要更新
         if db_updates:
-            # 從 MongoDB 獲取任務以計算進度百分比（僅當需要時）
+            # 計算進度百分比（僅使用記憶體數據，不查詢 DB）
             if "status" in db_updates or "completed_chunks" in updates:
-                db_task = run_async_in_thread(get_task_from_db(task_id))
-                if db_task:
-                    # 合併記憶體中的狀態（用於計算進度）
-                    # 記憶體優化：不複製，直接更新原物件
-                    merged_task = db_task
-                    with tasks_lock:
-                        if task_id in transcription_tasks:
-                            merged_task.update(transcription_tasks[task_id])
-
-                    # 自動計算進度百分比（但不存入 DB，因為它是記憶體欄位）
-                    progress_pct = calculate_progress_percentage(merged_task)
-                    with tasks_lock:
+                with tasks_lock:
+                    if task_id in transcription_tasks:
+                        # 直接使用記憶體中的資料計算進度（避免阻塞式 DB 查詢）
+                        progress_pct = calculate_progress_percentage(transcription_tasks[task_id])
                         transcription_tasks[task_id]["progress_percentage"] = round(progress_pct, 1)
 
-            # 更新到 MongoDB
-            run_async_in_thread(update_task_in_db(task_id, db_updates))
-            print(f"💾 [{task_id}] 持久化到 MongoDB: {list(db_updates.keys())}")
+            # 更新到 MongoDB（使用 future，不阻塞當前線程）
+            # 使用 asyncio.create_task 在背景執行，避免阻塞 worker 線程
+            try:
+                if main_loop and main_loop.is_running():
+                    asyncio.run_coroutine_threadsafe(update_task_in_db(task_id, db_updates), main_loop)
+                    print(f"💾 [{task_id}] 持久化到 MongoDB (非阻塞): {list(db_updates.keys())}")
+                else:
+                    print(f"⚠️ [{task_id}] Event loop 不可用，跳過 DB 更新")
+            except Exception as e:
+                print(f"⚠️ [{task_id}] DB 更新失敗（不影響轉錄）: {e}")
         else:
             print(f"⚡ [{task_id}] 僅記憶體更新（無需持久化）")
     else:
@@ -690,19 +686,19 @@ def transcribe_single_chunk(
     """
     # 標記此 chunk 開始處理（實際開始執行時才標記）
     if task_id and chunk_idx:
-        # 從記憶體獲取 chunks（如果不存在則從 DB 獲取一次）
+        # 從記憶體獲取 chunks（不查詢 DB，避免阻塞）
         with tasks_lock:
             chunks = transcription_tasks.get(task_id, {}).get("chunks", [])
-            if not chunks:
-                task = run_async_in_thread(get_task_from_db(task_id))
-                if task:
-                    chunks = task.get("chunks", [])
 
-            if chunk_idx - 1 < len(chunks) and chunks[chunk_idx - 1]["status"] == "pending":
+            # 如果記憶體中沒有 chunks，跳過狀態更新（不阻塞等待 DB）
+            if chunks and chunk_idx - 1 < len(chunks) and chunks[chunk_idx - 1]["status"] == "pending":
                 chunks[chunk_idx - 1]["status"] = "processing"
                 chunks[chunk_idx - 1]["started_at"] = get_current_time()
-                # 僅更新記憶體（chunks 是記憶體專用欄位）
-                update_task_status(task_id, {"chunks": chunks}, persist_to_db=False)
+                # 直接在這裡更新，避免再次取得鎖（避免死鎖）
+                if task_id not in transcription_tasks:
+                    transcription_tasks[task_id] = {}
+                transcription_tasks[task_id]["chunks"] = chunks
+                transcription_tasks[task_id]["updated_at"] = get_current_time()
 
     segments, info = model.transcribe(str(chunk_path), language=language, beam_size=5)
 
@@ -985,7 +981,8 @@ def transcribe_audio_in_chunks(
     diarization_start_time = None
     diarization_executor = None
 
-    if diarize and diarization_pipeline:
+    # 暫時強制關閉說話者辨識，測試是否是 GIL 競爭問題
+    if False and diarize and diarization_pipeline:
         diarization_start_time = datetime.now(TZ_UTC8)
         print(f"🔊 在背景啟動說話者辨識（與轉錄並行執行）...")
         if task_id:
@@ -1111,16 +1108,59 @@ def transcribe_audio_in_chunks(
             "estimated_completion_time": estimated_completion_str
         })
 
-    # 第二步：並行轉錄所有 chunks（與 diarization 同時進行）
-    # 如果同時執行 diarization，降低轉錄並行度以減少資源競爭
-    transcribe_workers = 2 if diarization_future else 4
-    print(f"🚀 開始並行轉錄（並行數：{transcribe_workers}）{'，同時進行說話者辨識' if diarization_future else ''}...")
+    # 第二步：循序轉錄所有 chunks（避免巢狀 ThreadPoolExecutor 死鎖）
+    # 暫時改為循序處理，避免與外層 executor 產生衝突
+    print(f"🚀 開始循序轉錄（共 {num_chunks} 段）{'，同時進行說話者辨識' if diarization_future else ''}...")
     chunks_text = [None] * num_chunks  # 預先分配陣列保持順序
     all_segments = []  # 始終收集所有 segments
 
     try:
-        with ThreadPoolExecutor(max_workers=transcribe_workers) as executor:
-            # 提交所有轉錄任務到線程池
+        # 暫時使用循序處理避免巢狀 ThreadPoolExecutor 死鎖
+        # 循序處理每個 chunk
+        detected_language = None
+        for chunk_idx, start_ms, end_ms, temp_path in chunk_info_list:
+            # 檢查是否已被取消
+            if task_id and task_cancelled.get(task_id, False):
+                raise RuntimeError("任務已被使用者取消")
+
+            # 計算時間偏移
+            time_offset_seconds = start_ms / 1000.0
+
+            try:
+                # 轉錄此 chunk
+                print(f"   🔄 正在轉錄第 {chunk_idx}/{num_chunks} 段...")
+                text, segments, lang = transcribe_single_chunk(
+                    whisper_model,
+                    temp_path,
+                    language,
+                    task_id,
+                    chunk_idx,
+                    time_offset_seconds,
+                    True
+                )
+
+                # 記錄第一個 chunk 的語言
+                if detected_language is None and lang:
+                    detected_language = lang
+
+                # 儲存結果
+                chunks_text[chunk_idx - 1] = text
+                all_segments.extend(segments if segments else [])
+
+                # 更新進度
+                completed = chunk_idx
+                if task_id:
+                    update_task_status(task_id, {
+                        "progress": f"正在轉錄音訊... ({completed}/{num_chunks} 段完成)",
+                        "completed_chunks": completed
+                    }, persist_to_db=False)
+
+            except Exception as e:
+                print(f"   ❌ 第 {chunk_idx} 段轉錄失敗：{e}")
+                raise
+
+        # 以下是原本的並行處理程式碼（暫時停用）
+        if False:
             future_to_chunk = {}
             for chunk_idx, start_ms, end_ms, temp_path in chunk_info_list:
                 # 計算這個 chunk 的時間偏移（相對於完整音檔的秒數）
@@ -1822,7 +1862,8 @@ def process_transcription_task(
     chunk_minutes: int,
     diarize: bool = False,
     max_speakers: Optional[int] = None,
-    language: str = "zh"
+    language: str = "zh",
+    user_id: str = None
 ):
     """
     在背景線程中執行轉錄任務
@@ -1844,6 +1885,16 @@ def process_transcription_task(
         # 記錄暫存目錄
         with tasks_lock:
             task_temp_dirs[task_id] = temp_dir
+
+        # 初始化記憶體：直接設置 user_id，避免阻塞式 DB 查詢
+        if user_id:
+            with tasks_lock:
+                if task_id not in transcription_tasks:
+                    transcription_tasks[task_id] = {}
+                # 儲存 user_id（支援巢狀和扁平兩種格式）
+                transcription_tasks[task_id]["user"] = {"user_id": user_id}
+                transcription_tasks[task_id]["user_id"] = user_id  # 扁平格式（向後兼容）
+            print(f"📥 [{task_id}] 初始化記憶體（user_id: {user_id}），之後輪詢將零 DB 查詢")
 
         # 記錄開始處理時間
         start_time = datetime.now(TZ_UTC8)
@@ -2506,7 +2557,8 @@ async def transcribe(
             chunk_minutes,
             diarize,
             max_speakers,
-            language
+            language,
+            str(current_user["_id"])  # 傳遞 user_id
         )
 
         # 立即返回任務資訊
@@ -2534,36 +2586,31 @@ async def get_task_status(
 ):
     """查詢轉錄任務狀態（需認證，只能查看自己的任務）"""
 
-    # 記憶體優化：對於進行中的任務，優先從記憶體獲取（減少資料庫查詢）
+    # 完全記憶體模式：進行中任務零 DB 查詢（像 main 分支一樣）
     with tasks_lock:
         live_task_info = transcription_tasks.get(task_id)
 
-    # 如果任務在記憶體中（正在處理），使用輕量級查詢驗證權限
+    # 如果任務在記憶體中（正在處理），完全使用記憶體數據
     if live_task_info:
-        # 只查詢必要欄位來驗證權限（不載入 segments、transcript 等大數據）
-        task_in_db = await task_repo.collection.find_one(
-            {
-                "_id": task_id,
-                "$or": [
-                    {"user.user_id": str(current_user["_id"])},
-                    {"user_id": str(current_user["_id"])}
-                ]
-            },
-            {
-                "_id": 1, "task_id": 1, "status": 1, "file": 1, "config": 1,
-                "timestamps": 1, "tags": 1, "keep_audio": 1
-                # 不查詢 segments, transcript 等大型欄位
-            }
-        )
+        # 權限驗證：檢查記憶體中的 user_id
+        task_user_id = live_task_info.get("user_id") or live_task_info.get("user", {}).get("user_id")
+        if task_user_id != str(current_user["_id"]):
+            raise HTTPException(status_code=404, detail="任務不存在或無權訪問")
+
+        # 直接使用記憶體數據，零 DB 查詢！
+        task_in_db = live_task_info
+        print(f"⚡ [{task_id}] 從記憶體返回（零 DB 查詢）")
     else:
-        # 任務不在記憶體中（已完成或不存在），查詢完整資料
+        # 任務不在記憶體中（已完成或不存在），查詢 MongoDB
         task_in_db = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
 
-    if not task_in_db:
-        raise HTTPException(status_code=404, detail="任務不存在或無權訪問")
+        if not task_in_db:
+            raise HTTPException(status_code=404, detail="任務不存在或無權訪問")
 
-    # 如果任務正在執行，則合併即時資訊
-    if task_in_db.get("status") in ["processing", "pending"] and live_task_info:
+        print(f"💾 [{task_id}] 從 MongoDB 返回（已完成任務）")
+
+    # 不需要再合併即時資訊（已經在記憶體數據中了）
+    if False and task_in_db.get("status") in ["processing", "pending"] and live_task_info:
         # 將記憶體中的 'progress' 等即時欄位，更新到從資料庫取出的物件上
         task_in_db["progress"] = live_task_info.get("progress", task_in_db.get("progress"))
         

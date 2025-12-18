@@ -217,22 +217,35 @@ async def logout(
 
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_info(
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database)
 ):
     """獲取當前用戶資訊
 
     Args:
-        current_user: 當前用戶
+        current_user: 當前用戶（來自 JWT token）
+        db: 資料庫實例
 
     Returns:
         用戶資訊
     """
+    # 從資料庫獲取完整用戶資料（包含 quota, usage, created_at）
+    # 這個端點只在登入時調用一次，不像輪詢那樣頻繁，所以可以查 DB
+    user_repo = UserRepository(db)
+    full_user = await user_repo.get_by_id(str(current_user["_id"]))
+
+    if not full_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="用戶不存在"
+        )
+
     return UserResponse(
-        id=str(current_user["_id"]),
-        email=current_user["email"],
-        role=current_user["role"],
-        is_active=current_user["is_active"],
-        quota=current_user["quota"],
-        usage=current_user["usage"],
-        created_at=current_user["created_at"].isoformat()
+        id=str(full_user["_id"]),
+        email=full_user["email"],
+        role=full_user["role"],
+        is_active=full_user["is_active"],
+        quota=full_user["quota"],
+        usage=full_user["usage"],
+        created_at=full_user["created_at"].isoformat()
     )

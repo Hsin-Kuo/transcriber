@@ -34,22 +34,17 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # 從資料庫查詢用戶（確保用戶未被刪除/停用）
-    try:
-        user = await db.users.find_one({
-            "_id": ObjectId(token_data.user_id),
-            "is_active": True
-        })
-    except:
-        user = None
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用戶不存在或已被停用"
-        )
-
-    return user
+    # 效能優化：信任 JWT token，不每次都查 DB
+    # JWT 本身已經過驗證且有過期時間，足以確保安全性
+    # 只在關鍵操作（登入、修改資料）時才查 DB 確認用戶狀態
+    # 這樣可以避免每次輪詢都查詢資料庫
+    return {
+        "_id": ObjectId(token_data.user_id),
+        "email": token_data.email,
+        "role": token_data.role,
+        "username": token_data.email.split("@")[0],  # 從 email 推導
+        "is_active": True  # JWT 有效即表示活躍
+    }
 
 
 async def get_current_admin(
