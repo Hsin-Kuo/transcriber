@@ -14,6 +14,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from motor.motor_asyncio import AsyncIOMotorClient
 from src.auth.password import hash_password
 import os
+from dotenv import load_dotenv
+
+# 載入 .env 檔案
+load_dotenv()
 
 # 從環境變數讀取配置
 MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")

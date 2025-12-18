@@ -11,6 +11,58 @@
     <!-- 上傳區域 -->
     <UploadZone @file-selected="handleFileUpload" :uploading="uploading" />
 
+    <!-- 配額顯示 -->
+    <div class="quota-card electric-card">
+      <div class="electric-inner">
+        <div class="electric-border-outer">
+          <div class="electric-main quota-content">
+            <div class="quota-header">
+              <h3>📊 配額使用情況</h3>
+              <span class="quota-tier">{{ quotaTierName }}</span>
+            </div>
+
+            <div class="quota-items">
+              <div class="quota-item">
+                <div class="quota-label">
+                  <span>轉錄次數</span>
+                  <span class="quota-value">{{ authStore.usage?.transcriptions || 0 }} / {{ authStore.quota?.max_transcriptions || 0 }}</span>
+                </div>
+                <div class="quota-bar">
+                  <div
+                    class="quota-progress"
+                    :class="{ 'quota-warning': authStore.quotaPercentage?.transcriptions > 80 }"
+                    :style="{ width: `${authStore.quotaPercentage?.transcriptions || 0}%` }"
+                  ></div>
+                </div>
+                <div class="quota-remaining">
+                  剩餘 {{ authStore.remainingQuota?.transcriptions || 0 }} 次
+                </div>
+              </div>
+
+              <div class="quota-item">
+                <div class="quota-label">
+                  <span>轉錄時長</span>
+                  <span class="quota-value">{{ Math.round(authStore.usage?.duration_minutes || 0) }} / {{ authStore.quota?.max_duration_minutes || 0 }} 分鐘</span>
+                </div>
+                <div class="quota-bar">
+                  <div
+                    class="quota-progress"
+                    :class="{ 'quota-warning': authStore.quotaPercentage?.duration > 80 }"
+                    :style="{ width: `${authStore.quotaPercentage?.duration || 0}%` }"
+                  ></div>
+                </div>
+                <div class="quota-remaining">
+                  剩餘 {{ Math.round(authStore.remainingQuota?.duration || 0) }} 分鐘
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="electric-glow-1"></div>
+        <div class="electric-glow-2"></div>
+      </div>
+    </div>
+
     <!-- 確認對話框 -->
     <div v-if="showConfirmDialog" class="modal-overlay" @click.self="cancelUpload">
       <div class="modal-content electric-card">
@@ -510,13 +562,13 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import axios from 'axios'
+import api, { API_BASE } from '../utils/api'
+import { useAuthStore } from '../stores/auth'
 import ElectricBorder from '../components/shared/ElectricBorder.vue'
 import UploadZone from '../components/UploadZone.vue'
 import TaskList from '../components/TaskList.vue'
 
-// 統一使用 /api，由 Vite dev server 或 Nginx 代理到後端
-const API_BASE = '/api'
+const authStore = useAuthStore()
 
 const tasks = ref([])
 const uploading = ref(false)
@@ -569,6 +621,18 @@ watch(showTranscriptDialog, (newValue) => {
     // 對話框關閉時，恢復背景滾動
     document.body.style.overflow = ''
   }
+})
+
+// 配額層級名稱
+const quotaTierName = computed(() => {
+  const tier = authStore.quota?.tier || 'free'
+  const tierNames = {
+    free: '免費版',
+    basic: '基礎版',
+    pro: '專業版',
+    enterprise: '企業版'
+  }
+  return tierNames[tier] || '未知'
 })
 
 // 統計數據
@@ -646,7 +710,7 @@ async function confirmAndUpload() {
   }
 
   try {
-    const response = await axios.post(`${API_BASE}/transcribe`, formData, {
+    const response = await api.post('/transcribe', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
 
@@ -678,11 +742,15 @@ function cancelUpload() {
 }
 
 // 輪詢更新任務狀態
+const pollingInProgress = ref(false)
+
 async function pollTaskStatus(task) {
   if (!['pending', 'processing'].includes(task.status) && !task.cancelling) return
 
   try {
-    const response = await axios.get(`${API_BASE}/transcribe/${task.task_id}`)
+    const response = await api.get(`/transcribe/${task.task_id}`, {
+      timeout: 30000 // 設定 30 秒超時（處理大量數據時可能需要較長時間）
+    })
     // 保存 cancelling 狀態，避免被伺服器回應覆蓋
     const cancelling = task.cancelling
     Object.assign(task, response.data)
@@ -690,12 +758,17 @@ async function pollTaskStatus(task) {
     // 如果任務正在取消中，只有當後端狀態變成 cancelled 時才清除 cancelling
     if (cancelling && response.data.status === 'cancelled') {
       task.cancelling = false
+      delete task.cancelledAt  // 清除取消時間戳
       console.log('任務已完全停止:', task.task_id)
     } else if (cancelling) {
       task.cancelling = true
     }
   } catch (error) {
-    console.error('獲取任務狀態失敗:', error)
+    if (error.code === 'ECONNABORTED') {
+      console.warn('請求超時:', task.task_id)
+    } else {
+      console.error('獲取任務狀態失敗:', error.message)
+    }
   }
 }
 
@@ -703,18 +776,51 @@ async function pollTaskStatus(task) {
 function startPolling() {
   if (pollInterval) return
 
-  pollInterval = setInterval(() => {
-    const activeTasks = tasks.value.filter(t =>
-      ['pending', 'processing'].includes(t.status) || t.cancelling
-    )
+  pollInterval = setInterval(async () => {
+    // 如果上一輪輪詢還在進行中，跳過本次輪詢
+    if (pollingInProgress.value) {
+      console.log('⏭️ 跳過本次輪詢（上一輪尚未完成）')
+      return
+    }
+
+    const now = Date.now()
+    const CANCEL_TIMEOUT = 30000  // 30 秒
+
+    const activeTasks = tasks.value.filter(t => {
+      // 進行中的任務
+      if (['pending', 'processing'].includes(t.status)) {
+        return true
+      }
+
+      // 取消中的任務：只輪詢 30 秒，超時後假設已取消並停止輪詢
+      if (t.cancelling && t.cancelledAt) {
+        const elapsed = now - t.cancelledAt
+        if (elapsed > CANCEL_TIMEOUT) {
+          console.log(`⏱️ 任務 ${t.task_id} 取消超時（${elapsed}ms），停止輪詢`)
+          t.cancelling = false
+          t.status = 'cancelled'  // 假設已取消
+          delete t.cancelledAt
+          return false
+        }
+        return true
+      }
+
+      return false
+    })
 
     if (activeTasks.length === 0) {
       stopPolling()
       return
     }
 
-    activeTasks.forEach(task => pollTaskStatus(task))
-  }, 2000) // 每 2 秒輪詢一次
+    pollingInProgress.value = true
+    try {
+      // 使用 Promise.all 並行請求，但限制在合理範圍內
+      await Promise.all(activeTasks.map(task => pollTaskStatus(task)))
+    } finally {
+      pollingInProgress.value = false
+    }
+  }, 5000) // 每 5 秒輪詢一次
 }
 
 // 停止輪詢
@@ -728,7 +834,7 @@ function stopPolling() {
 // 下載結果
 async function downloadTask(taskId) {
   try {
-    const response = await axios.get(`${API_BASE}/transcribe/${taskId}/download`, {
+    const response = await api.get(`/transcribe/${taskId}/download`, {
       responseType: 'blob'
     })
 
@@ -772,10 +878,11 @@ async function cancelTask(taskId) {
   const task = tasks.value.find(t => t.task_id === taskId)
   if (task) {
     task.cancelling = true
+    task.cancelledAt = Date.now()  // 記錄取消時間
   }
 
   try {
-    await axios.post(`${API_BASE}/transcribe/${taskId}/cancel`)
+    await api.post(`/transcribe/${taskId}/cancel`)
 
     console.log('任務取消指令已發送:', taskId)
 
@@ -786,6 +893,7 @@ async function cancelTask(taskId) {
     console.error('取消失敗:', error)
     if (task) {
       task.cancelling = false
+      delete task.cancelledAt
     }
     alert('取消失敗：' + (error.response?.data?.detail || error.message))
   }
@@ -798,7 +906,7 @@ async function deleteTask(taskId) {
   }
 
   try {
-    await axios.delete(`${API_BASE}/transcribe/${taskId}`)
+    await api.delete(`/transcribe/${taskId}`)
 
     // 從本地列表中移除
     const index = tasks.value.findIndex(t => t.task_id === taskId)
@@ -816,7 +924,7 @@ async function deleteTask(taskId) {
 // 刷新所有任務
 async function refreshTasks() {
   try {
-    const response = await axios.get(`${API_BASE}/transcribe/active/list`)
+    const response = await api.get('/transcribe/active/list')
     const serverTasks = response.data.all_tasks || []
 
     // 保存本地任務的 cancelling 狀態
@@ -1439,26 +1547,26 @@ async function viewTranscript(taskId) {
   timecodeMarkers.value = []
   activeTimecodeIndex.value = -1  // 重置活躍索引
 
-  // 設置基本資訊
+  // 設置基本資訊（巢狀結構）
   currentTranscript.value = {
     task_id: task.task_id,
-    filename: task.filename,
+    filename: task.file?.filename || task.filename, // 支援巢狀與扁平格式
     custom_name: task.custom_name,
-    created_at: task.completed_at || task.created_at,
-    text_length: task.text_length,
+    created_at: task.timestamps?.completed_at || task.timestamps?.created_at || task.completed_at || task.created_at,
+    text_length: task.result?.text_length || task.text_length,
     duration_text: task.duration_text,
-    result_filename: task.result_filename,
-    hasAudio: !!task.audio_file,  // 檢查是否有音檔
+    result_filename: task.result?.transcription_filename || task.result_filename,
+    hasAudio: !!(task.result?.audio_file || task.audio_file),  // 檢查是否有音檔
     content: ''
   }
 
   try {
     // 並行獲取逐字稿和 segments
     const [transcriptResponse, segmentsResponse] = await Promise.all([
-      axios.get(`${API_BASE}/transcribe/${taskId}/download`, {
+      api.get(`/transcribe/${taskId}/download`, {
         responseType: 'text'
       }),
-      axios.get(`${API_BASE}/transcribe/${taskId}/segments`).catch(err => {
+      api.get(`/transcribe/${taskId}/segments`).catch(err => {
         console.log('無法獲取 segments（可能是舊任務）:', err)
         return null
       })
@@ -1562,7 +1670,7 @@ async function saveTranscript() {
   savingTranscript.value = true
 
   try {
-    await axios.put(`${API_BASE}/transcribe/${currentTranscript.value.task_id}/content`, {
+    await api.put(`/transcribe/${currentTranscript.value.task_id}/content`, {
       content: currentTranscript.value.content
     }, {
       headers: { 'Content-Type': 'application/json' }
@@ -1616,8 +1724,8 @@ async function saveTaskName() {
   savingName.value = true
 
   try {
-    const response = await axios.put(
-      `${API_BASE}/transcribe/${currentTranscript.value.task_id}/metadata`,
+    const response = await api.put(
+      `/transcribe/${currentTranscript.value.task_id}/metadata`,
       {
         custom_name: editingTaskName.value || null
       },
@@ -3239,5 +3347,92 @@ onUnmounted(() => {
 
 .title-input:focus {
   box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.3);
+}
+
+/* 配額卡片樣式 */
+.quota-card {
+  max-width: 800px;
+  margin: 24px auto;
+}
+
+.quota-content {
+  padding: 24px;
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(15px) saturate(180%);
+  -webkit-backdrop-filter: blur(15px) saturate(180%);
+}
+
+.quota-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid rgba(139, 69, 19, 0.2);
+}
+
+.quota-header h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: #8b4513;
+  font-weight: 600;
+}
+
+.quota-tier {
+  padding: 4px 12px;
+  background: linear-gradient(135deg, rgba(139, 69, 19, 0.15), rgba(160, 82, 45, 0.15));
+  border: 1px solid rgba(139, 69, 19, 0.3);
+  border-radius: 12px;
+  font-size: 0.85rem;
+  color: #8b4513;
+  font-weight: 600;
+}
+
+.quota-items {
+  display: grid;
+  gap: 20px;
+}
+
+.quota-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.quota-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.95rem;
+  color: #666;
+}
+
+.quota-value {
+  font-weight: 600;
+  color: #8b4513;
+}
+
+.quota-bar {
+  height: 8px;
+  background: rgba(139, 69, 19, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.quota-progress {
+  height: 100%;
+  background: linear-gradient(90deg, #8b4513, #a0522d);
+  border-radius: 4px;
+  transition: width 0.3s ease, background 0.3s ease;
+}
+
+.quota-progress.quota-warning {
+  background: linear-gradient(90deg, #ff6b35, #ff8c42);
+}
+
+.quota-remaining {
+  font-size: 0.85rem;
+  color: #999;
+  text-align: right;
 }
 </style>

@@ -6,16 +6,28 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PID_FILE="$SCRIPT_DIR/backend.pid"
 
-if [ ! -f "$PID_FILE" ]; then
-    echo "⚠️  找不到 PID 檔案，後端可能未運行"
-    exit 1
-fi
+# 嘗試從 PID 文件讀取
+if [ -f "$PID_FILE" ]; then
+    PID=$(cat "$PID_FILE")
+    echo "📋 從 PID 檔案讀取：$PID"
+else
+    # 如果找不到 PID 文件，嘗試自動查找進程
+    echo "⚠️  找不到 PID 檔案，嘗試自動查找 whisper_server 進程..."
+    PID=$(ps aux | grep "[w]hisper_server.py" | awk '{print $2}' | head -1)
 
-PID=$(cat "$PID_FILE")
+    if [ -z "$PID" ]; then
+        echo "❌ 找不到運行中的 whisper_server 進程"
+        echo ""
+        echo "提示：如果服務確實在運行，請檢查："
+        echo "  ps aux | grep whisper_server"
+        exit 1
+    fi
+    echo "✅ 找到運行中的進程：$PID"
+fi
 
 if ! ps -p $PID > /dev/null 2>&1; then
     echo "⚠️  進程 $PID 不存在，可能已停止"
-    rm "$PID_FILE"
+    [ -f "$PID_FILE" ] && rm "$PID_FILE"
     exit 1
 fi
 
@@ -28,7 +40,7 @@ kill $PID
 for i in {1..10}; do
     if ! ps -p $PID > /dev/null 2>&1; then
         echo "✅ 後端服務已停止"
-        rm "$PID_FILE"
+        [ -f "$PID_FILE" ] && rm "$PID_FILE"
         exit 0
     fi
     sleep 1
@@ -40,7 +52,7 @@ kill -9 $PID 2>/dev/null
 
 if ! ps -p $PID > /dev/null 2>&1; then
     echo "✅ 後端服務已強制停止"
-    rm "$PID_FILE"
+    [ -f "$PID_FILE" ] && rm "$PID_FILE"
 else
     echo "❌ 無法停止進程 $PID"
     exit 1

@@ -297,28 +297,28 @@
               <div class="task-main">
                 <div class="task-info">
                   <div class="task-header">
-                    <h3>{{ task.custom_name || task.filename || task.file }}</h3>
+                    <h3>{{ task.custom_name || task.file?.filename || task.filename || task.file }}</h3>
                     <span :class="['badge', `badge-${task.status}`]">
                       {{ getStatusText(task.status) }}
                     </span>
                   </div>
 
                   <div class="task-meta">
-                    <span v-if="task.file_size_mb">
-                      📦 {{ task.file_size_mb }} MB
+                    <span v-if="task.file?.size_mb || task.file_size_mb">
+                      📦 {{ task.file?.size_mb || task.file_size_mb }} MB
                     </span>
-                    <span v-if="task.created_at">
-                      🕒 {{ task.created_at }}
+                    <span v-if="task.timestamps?.created_at || task.created_at">
+                      🕒 {{ task.timestamps?.created_at || task.created_at }}
                     </span>
-                    <span v-if="task.punct_provider">
-                      ✨ {{ task.punct_provider }}
+                    <span v-if="task.config?.punct_provider || task.punct_provider">
+                      ✨ {{ task.config?.punct_provider || task.punct_provider }}
                     </span>
-                    <span v-if="task.diarize" class="badge-diarize" :title="task.max_speakers ? `最多 ${task.max_speakers} 位講者` : '自動偵測講者人數'">
-                      說話者辨識{{ task.max_speakers ? ` (≤${task.max_speakers}人)` : '' }}
+                    <span v-if="task.config?.diarize || task.diarize" class="badge-diarize" :title="(task.config?.max_speakers || task.max_speakers) ? `最多 ${task.config?.max_speakers || task.max_speakers} 位講者` : '自動偵測講者人數'">
+                      說話者辨識{{ (task.config?.max_speakers || task.max_speakers) ? ` (≤${task.config?.max_speakers || task.max_speakers}人)` : '' }}
                     </span>
                     <!-- 展開/收起按鈕 -->
                     <button
-                      v-if="!isBatchEditMode && (task.progress || (task.status === 'completed' && task.text_length))"
+                      v-if="!isBatchEditMode && (task.progress || (task.status === 'completed' && (task.result?.text_length || task.text_length)))"
                       class="btn-toggle-details"
                       @click="toggleTaskExpanded(task.task_id)"
                       :title="isTaskExpanded(task.task_id) ? '收起轉錄資訊' : '展開轉錄資訊'"
@@ -490,7 +490,7 @@
                       </span>
                     </p>
                     <!-- 顯示說話者辨識狀態 -->
-                    <p v-if="task.diarize && getDiarizationStatusText(task)" class="diarization-status" :class="`status-${task.diarization_status}`">
+                    <p v-if="(task.config?.diarize || task.diarize) && getDiarizationStatusText(task)" class="diarization-status" :class="`status-${task.stats?.diarization?.status || task.diarization_status}`">
                       {{ getDiarizationStatusText(task) }}
                     </p>
                     <!-- 顯示正在處理的 chunks -->
@@ -499,8 +499,8 @@
                     </p>
                   </div>
 
-                  <div v-if="task.status === 'completed' && task.text_length && isTaskExpanded(task.task_id)" class="task-result">
-                    <div>📝 已轉錄 {{ task.text_length }} 字</div>
+                  <div v-if="task.status === 'completed' && (task.result?.text_length || task.text_length) && isTaskExpanded(task.task_id)" class="task-result">
+                    <div>📝 已轉錄 {{ task.result?.text_length || task.text_length }} 字</div>
                     <div v-if="task.duration_text" class="duration">
                       ⏱️ 處理時間：{{ task.duration_text }}
                     </div>
@@ -513,7 +513,7 @@
 
                 <div class="task-actions">
                   <!-- 保留音檔開關（僅已完成且有音檔的任務） -->
-                  <div v-if="task.status === 'completed' && task.audio_file" class="keep-audio-toggle" :title="getKeepAudioTooltip(task)">
+                  <div v-if="task.status === 'completed' && (task.result?.audio_file || task.audio_file)" class="keep-audio-toggle" :title="getKeepAudioTooltip(task)">
                     <label class="toggle-label">
                       <div class="toggle-switch-wrapper">
                         <input
@@ -750,13 +750,26 @@ const sortedTasks = computed(() => {
   })
 })
 
-// 初始化展開狀態：只展開最新任務
+// 初始化展開狀態：優先展開進行中的任務，否則展開最新任務
 watch(() => props.tasks, (newTasks) => {
-  if (newTasks.length > 0 && expandedTaskIds.value.size === 0) {
-    // 只展開第一個（最新）任務
-    const firstTask = sortedTasks.value[0]
-    if (firstTask) {
-      expandedTaskIds.value.add(firstTask.task_id)
+  if (newTasks.length > 0) {
+    // 找出所有進行中的任務
+    const processingTasks = sortedTasks.value.filter(task =>
+      task.status === 'processing' || task.status === 'pending'
+    )
+
+    // 如果有進行中的任務，只展開進行中的任務，並收起其他任務
+    if (processingTasks.length > 0) {
+      expandedTaskIds.value.clear()
+      processingTasks.forEach(task => {
+        expandedTaskIds.value.add(task.task_id)
+      })
+    } else if (expandedTaskIds.value.size === 0) {
+      // 如果沒有進行中的任務且尚未展開任何任務，展開最新任務
+      const firstTask = sortedTasks.value[0]
+      if (firstTask) {
+        expandedTaskIds.value.add(firstTask.task_id)
+      }
     }
   }
 }, { immediate: true })
@@ -810,13 +823,15 @@ function getProgressWidth(task) {
 }
 
 function getDiarizationStatusText(task) {
-  if (!task.diarization_status) {
+  // 支援巢狀結構和扁平結構
+  const diarizationStatus = task.stats?.diarization?.status || task.diarization_status
+  if (!diarizationStatus) {
     return null
   }
 
-  const status = task.diarization_status
-  const numSpeakers = task.diarization_num_speakers
-  const duration = task.diarization_duration_seconds
+  const status = diarizationStatus
+  const numSpeakers = task.stats?.diarization?.num_speakers || task.diarization_num_speakers
+  const duration = task.stats?.diarization?.duration_seconds || task.diarization_duration_seconds
 
   if (status === 'running') {
     return '說話者辨識進行中...'
@@ -1296,9 +1311,31 @@ async function updateTagColor(tag, color) {
   }
 }
 
-// 監聽 tasks 變化，重新獲取標籤顏色
-watch(() => props.tasks, () => {
-  fetchTagColors()
+// 監聽 tasks 變化，只在標籤真的改變時重新獲取標籤顏色
+watch(() => props.tasks, (newTasks, oldTasks) => {
+  // 只有在標籤數量或內容改變時才重新獲取
+  const newTagsSet = new Set()
+  const oldTagsSet = new Set()
+
+  newTasks.forEach(task => {
+    if (task.tags) {
+      task.tags.forEach(tag => newTagsSet.add(tag))
+    }
+  })
+
+  if (oldTasks) {
+    oldTasks.forEach(task => {
+      if (task.tags) {
+        task.tags.forEach(tag => oldTagsSet.add(tag))
+      }
+    })
+  }
+
+  // 只有標籤集合改變時才重新獲取
+  if (newTagsSet.size !== oldTagsSet.size ||
+      ![...newTagsSet].every(tag => oldTagsSet.has(tag))) {
+    fetchTagColors()
+  }
 }, { deep: true })
 
 // ==== 保留音檔功能 ====

@@ -22,6 +22,25 @@
               </svg>
               <span>音訊剪輯</span>
             </router-link>
+            <router-link to="/admin" class="nav-link" active-class="active">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="3" y1="9" x2="21" y2="9"></line>
+                <line x1="9" y1="21" x2="9" y2="9"></line>
+              </svg>
+              <span>系統統計</span>
+            </router-link>
+          </div>
+          <div v-if="authStore.isAuthenticated" class="nav-user">
+            <span class="user-email">{{ authStore.user?.email }}</span>
+            <button @click="handleLogout" class="logout-btn">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                <polyline points="16 17 21 12 16 7"></polyline>
+                <line x1="21" y1="12" x2="9" y2="12"></line>
+              </svg>
+              <span>登出</span>
+            </button>
           </div>
         </div>
       </div>
@@ -33,14 +52,23 @@
 
 <script setup>
 import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
+import { useAuthStore } from '../../stores/auth'
 
 const route = useRoute()
+const router = useRouter()
+const authStore = useAuthStore()
 
 // 根據當前路由決定主題
 const themeClass = computed(() => {
   return route.path === '/' ? 'glass-theme' : 'dark-theme'
 })
+
+// 登出處理
+async function handleLogout() {
+  await authStore.logout()
+  router.push('/login')
+}
 </script>
 
 <style scoped>
@@ -142,6 +170,65 @@ const themeClass = computed(() => {
   stroke: currentColor;
 }
 
+.nav-user {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.user-email {
+  font-size: 0.9rem;
+  font-weight: 500;
+  opacity: 0.8;
+  transition: opacity 0.3s ease;
+}
+
+.glass-theme .user-email {
+  color: #666;
+}
+
+.dark-theme .user-email {
+  color: #aaa;
+}
+
+.logout-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  font-size: 0.9rem;
+}
+
+.glass-theme .logout-btn {
+  color: #666;
+}
+
+.glass-theme .logout-btn:hover {
+  background: rgba(139, 69, 19, 0.1);
+  color: #8b4513;
+  border-color: rgba(139, 69, 19, 0.3);
+}
+
+.dark-theme .logout-btn {
+  color: #aaa;
+}
+
+.dark-theme .logout-btn:hover {
+  background: rgba(255, 107, 53, 0.1);
+  color: #FF6B35;
+  border-color: rgba(255, 107, 53, 0.3);
+}
+
+.logout-btn svg {
+  stroke: currentColor;
+}
+
 @media (max-width: 640px) {
   .nav-content {
     flex-direction: column;
@@ -154,6 +241,19 @@ const themeClass = computed(() => {
   }
 
   .nav-link span {
+    display: none;
+  }
+
+  .nav-user {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .user-email {
+    font-size: 0.85rem;
+  }
+
+  .logout-btn span {
     display: none;
   }
 }
