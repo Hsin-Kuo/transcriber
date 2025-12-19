@@ -562,7 +562,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import api, { API_BASE } from '../utils/api'
+import api, { API_BASE, TokenManager } from '../utils/api'
 import { useAuthStore } from '../stores/auth'
 import ElectricBorder from '../components/shared/ElectricBorder.vue'
 import UploadZone from '../components/UploadZone.vue'
@@ -610,7 +610,9 @@ const isEditingTitle = ref(false)
 const editingTaskName = ref('')
 const titleInput = ref(null)
 const savingName = ref(false)
-let pollInterval = null
+
+// SSE 連接管理
+const eventSources = new Map() // 存儲每個任務的 SSE 連接
 
 // 監聽對話框開關，控制背景滾動
 watch(showTranscriptDialog, (newValue) => {
@@ -721,7 +723,8 @@ async function confirmAndUpload() {
     }
 
     tasks.value.unshift(newTask)
-    startPolling()
+    // 為新任務建立 SSE 連接
+    connectTaskSSE(newTask.task_id)
   } catch (error) {
     console.error('上傳失敗:', error)
     alert('上傳失敗：' + (error.response?.data?.detail || error.message))
@@ -741,94 +744,102 @@ function cancelUpload() {
   tagInput.value = ''
 }
 
-// 輪詢更新任務狀態
-const pollingInProgress = ref(false)
-
-async function pollTaskStatus(task) {
-  if (!['pending', 'processing'].includes(task.status) && !task.cancelling) return
-
-  try {
-    const response = await api.get(`/transcribe/${task.task_id}`, {
-      timeout: 30000 // 設定 30 秒超時（處理大量數據時可能需要較長時間）
-    })
-    // 保存 cancelling 狀態，避免被伺服器回應覆蓋
-    const cancelling = task.cancelling
-    Object.assign(task, response.data)
-
-    // 如果任務正在取消中，只有當後端狀態變成 cancelled 時才清除 cancelling
-    if (cancelling && response.data.status === 'cancelled') {
-      task.cancelling = false
-      delete task.cancelledAt  // 清除取消時間戳
-      console.log('任務已完全停止:', task.task_id)
-    } else if (cancelling) {
-      task.cancelling = true
-    }
-  } catch (error) {
-    if (error.code === 'ECONNABORTED') {
-      console.warn('請求超時:', task.task_id)
-    } else {
-      console.error('獲取任務狀態失敗:', error.message)
-    }
+// SSE 實時更新任務狀態
+function connectTaskSSE(taskId) {
+  // 如果已經有連接，不要重複建立
+  if (eventSources.has(taskId)) {
+    console.log(`⏭️ 跳過 SSE 連接（已存在）: ${taskId}`)
+    return
   }
-}
 
-// 開始輪詢
-function startPolling() {
-  if (pollInterval) return
+  const token = TokenManager.getAccessToken()
+  if (!token) {
+    console.error('❌ 無法建立 SSE 連接：未登入')
+    return
+  }
 
-  pollInterval = setInterval(async () => {
-    // 如果上一輪輪詢還在進行中，跳過本次輪詢
-    if (pollingInProgress.value) {
-      console.log('⏭️ 跳過本次輪詢（上一輪尚未完成）')
-      return
-    }
+  // 創建 SSE 連接（帶 token）
+  const url = `${API_BASE}/transcribe/${taskId}/events?token=${token}`
+  const eventSource = new EventSource(url)
 
-    const now = Date.now()
-    const CANCEL_TIMEOUT = 30000  // 30 秒
+  console.log(`🔌 建立 SSE 連接: ${taskId}`)
 
-    const activeTasks = tasks.value.filter(t => {
-      // 進行中的任務
-      if (['pending', 'processing'].includes(t.status)) {
-        return true
-      }
-
-      // 取消中的任務：只輪詢 30 秒，超時後假設已取消並停止輪詢
-      if (t.cancelling && t.cancelledAt) {
-        const elapsed = now - t.cancelledAt
-        if (elapsed > CANCEL_TIMEOUT) {
-          console.log(`⏱️ 任務 ${t.task_id} 取消超時（${elapsed}ms），停止輪詢`)
-          t.cancelling = false
-          t.status = 'cancelled'  // 假設已取消
-          delete t.cancelledAt
-          return false
-        }
-        return true
-      }
-
-      return false
-    })
-
-    if (activeTasks.length === 0) {
-      stopPolling()
-      return
-    }
-
-    pollingInProgress.value = true
+  eventSource.onmessage = (event) => {
     try {
-      // 使用 Promise.all 並行請求，但限制在合理範圍內
-      await Promise.all(activeTasks.map(task => pollTaskStatus(task)))
-    } finally {
-      pollingInProgress.value = false
+      const data = JSON.parse(event.data)
+
+      // 找到對應的任務並更新
+      const task = tasks.value.find(t => t.task_id === taskId)
+      if (task) {
+        // 保存 cancelling 狀態
+        const cancelling = task.cancelling
+        Object.assign(task, data)
+
+        // 處理取消狀態
+        if (cancelling && data.status === 'cancelled') {
+          task.cancelling = false
+          delete task.cancelledAt
+          console.log('✅ 任務已完全停止:', taskId)
+        } else if (cancelling) {
+          task.cancelling = true
+        }
+
+        // 如果任務已完成、失敗或取消，主動關閉 SSE 連接
+        if (['completed', 'failed', 'cancelled'].includes(data.status)) {
+          console.log(`✅ 任務結束（${data.status}），關閉 SSE: ${taskId}`)
+          disconnectTaskSSE(taskId)
+        }
+      }
+    } catch (error) {
+      console.error('❌ 解析 SSE 數據失敗:', error)
     }
-  }, 5000) // 每 5 秒輪詢一次
+  }
+
+  eventSource.addEventListener('end', (event) => {
+    console.log(`✅ 任務完成，關閉 SSE: ${taskId}`)
+    disconnectTaskSSE(taskId)
+  })
+
+  eventSource.addEventListener('error', (event) => {
+    console.error(`❌ SSE 錯誤: ${taskId}`)
+    // 嘗試解析錯誤訊息
+    try {
+      const data = JSON.parse(event.data)
+      console.error('錯誤詳情:', data.error)
+    } catch (e) {
+      // 無法解析錯誤訊息
+    }
+  })
+
+  eventSource.onerror = (error) => {
+    console.error(`❌ SSE 連接錯誤: ${taskId}`, error)
+    // SSE 會自動重連，但如果是權限問題或任務不存在，應該關閉連接
+    if (eventSource.readyState === EventSource.CLOSED) {
+      console.log(`🔌 SSE 連接已關閉: ${taskId}`)
+      disconnectTaskSSE(taskId)
+    }
+  }
+
+  eventSources.set(taskId, eventSource)
 }
 
-// 停止輪詢
-function stopPolling() {
-  if (pollInterval) {
-    clearInterval(pollInterval)
-    pollInterval = null
+// 斷開 SSE 連接
+function disconnectTaskSSE(taskId) {
+  const eventSource = eventSources.get(taskId)
+  if (eventSource) {
+    eventSource.close()
+    eventSources.delete(taskId)
+    console.log(`🔌 關閉 SSE: ${taskId}`)
   }
+}
+
+// 斷開所有 SSE 連接
+function disconnectAllSSE() {
+  eventSources.forEach((eventSource, taskId) => {
+    eventSource.close()
+    console.log(`🔌 關閉 SSE: ${taskId}`)
+  })
+  eventSources.clear()
 }
 
 // 下載結果
@@ -942,6 +953,13 @@ async function refreshTasks() {
         return { ...serverTask, cancelling: cancellingStates.get(serverTask.task_id) }
       }
       return serverTask
+    })
+
+    // 為進行中的任務建立 SSE 連接
+    tasks.value.forEach(task => {
+      if (['pending', 'processing'].includes(task.status)) {
+        connectTaskSSE(task.task_id)
+      }
     })
   } catch (error) {
     console.error('刷新任務列表失敗:', error)
@@ -1593,9 +1611,14 @@ async function viewTranscript(taskId) {
   }
 }
 
-// 獲取音檔 URL
+// 獲取音檔 URL（添加 token 查詢參數，因為 audio 元素不支持 Authorization header）
 function getAudioUrl(taskId) {
-  return `${API_BASE}/transcribe/${taskId}/audio`
+  const token = TokenManager.getAccessToken()
+  if (!token) {
+    console.warn('無法獲取音檔：未登入')
+    return ''
+  }
+  return `${API_BASE}/transcribe/${taskId}/audio?token=${encodeURIComponent(token)}`
 }
 
 // 音檔載入成功
@@ -1785,12 +1808,11 @@ function replaceAll() {
 
 // 生命週期
 onMounted(() => {
-  refreshTasks()
-  startPolling()
+  refreshTasks()  // refreshTasks 內部會自動為進行中的任務建立 SSE 連接
 })
 
 onUnmounted(() => {
-  stopPolling()
+  disconnectAllSSE()  // 斷開所有 SSE 連接
 })
 </script>
 

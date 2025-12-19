@@ -20,10 +20,12 @@ import multiprocessing
 from faster_whisper import WhisperModel
 from pydub import AudioSegment
 from pydub.silence import detect_nonsilent
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, Depends
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, Depends, Query, status
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
+from bson import ObjectId
 import uvicorn
 
 # 載入環境變數
@@ -35,7 +37,7 @@ from src.database.mongodb import MongoDB, get_database
 from src.database.repositories.task_repo import TaskRepository
 from src.database.repositories.tag_repo import TagRepository
 from src.routers import auth as auth_router
-from src.auth.dependencies import check_quota, get_current_user
+from src.auth.dependencies import check_quota, get_current_user, get_current_user_sse
 from src.auth.quota import QuotaManager
 
 # Speaker Diarization
@@ -233,7 +235,7 @@ MEMORY_ONLY_FIELDS = {
 tag_colors: Dict[str, str] = {}  # 儲存標籤顏色 (標籤名稱 -> 顏色碼)
 tag_order: list[str] = []  # 儲存標籤順序
 tasks_lock = Lock()  # 線程安全鎖（用於運行時狀態）
-executor = ThreadPoolExecutor(max_workers=1)  # 線程池（像 main branch，只用 1 個 worker 避免競爭）
+executor = ThreadPoolExecutor(max_workers=3)  # 線程池：1個用於主任務 + 2個用於並行處理 chunks
 
 # MongoDB 任務資料庫
 task_repo: Optional[TaskRepository] = None  # 在 startup 事件中初始化
@@ -290,6 +292,102 @@ def save_tag_settings():
             json.dump(tag_order, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"❌ 保存標籤設定失敗：{e}")
+
+
+async def migrate_tags_to_db():
+    """遷移舊的標籤設定（tag_colors.json 和 tag_order.json）到資料庫
+
+    策略：
+    1. 載入舊的全域標籤設定
+    2. 為每個用戶創建他們使用過的標籤
+    3. 使用全域的顏色和順序設定
+    """
+    if not tag_repo:
+        print("⚠️  TagRepository 未初始化，跳過標籤遷移")
+        return
+
+    try:
+        # 檢查是否已經遷移過（如果 tags collection 已有資料，則跳過）
+        tag_count = await tag_repo.collection.count_documents({})
+        if tag_count > 0:
+            print(f"ℹ️  標籤已存在於資料庫中（{tag_count} 個），跳過遷移")
+            return
+
+        # 載入舊設定
+        load_tag_settings()
+
+        if not tag_colors and not tag_order:
+            print("ℹ️  沒有舊的標籤設定需要遷移")
+            return
+
+        print(f"🔄 開始遷移標籤設定到資料庫...")
+        print(f"   - 標籤顏色：{len(tag_colors)} 個")
+        print(f"   - 標籤順序：{len(tag_order)} 個")
+
+        # 獲取所有用戶
+        db = MongoDB.get_db()
+        users_cursor = db.tasks.aggregate([
+            {"$group": {"_id": "$user_id"}},
+            {"$match": {"_id": {"$ne": None}}}
+        ])
+        user_ids = [doc["_id"] for doc in await users_cursor.to_list(length=None)]
+
+        # 同時支援巢狀結構的用戶
+        nested_users_cursor = db.tasks.aggregate([
+            {"$group": {"_id": "$user.user_id"}},
+            {"$match": {"_id": {"$ne": None}}}
+        ])
+        nested_user_ids = [doc["_id"] for doc in await nested_users_cursor.to_list(length=None)]
+
+        all_user_ids = list(set(user_ids + nested_user_ids))
+        print(f"   - 找到 {len(all_user_ids)} 個用戶")
+
+        total_migrated = 0
+        for user_id in all_user_ids:
+            # 獲取該用戶使用過的標籤
+            user_tags = await task_repo.get_all_user_tags(user_id)
+
+            if not user_tags:
+                continue
+
+            # 為每個標籤創建資料庫條目
+            for i, tag_name in enumerate(user_tags):
+                try:
+                    # 確定順序
+                    if tag_name in tag_order:
+                        order = tag_order.index(tag_name)
+                    else:
+                        order = i + 1000  # 未在順序中的標籤排在後面
+
+                    # 獲取顏色
+                    color = tag_colors.get(tag_name, None)
+
+                    # 創建標籤（如果已存在會拋出異常，我們忽略它）
+                    await tag_repo.create(user_id, tag_name, color=color)
+
+                    # 更新順序
+                    tag = await tag_repo.get_by_name(user_id, tag_name)
+                    if tag:
+                        await tag_repo.collection.update_one(
+                            {"tag_id": tag["tag_id"]},
+                            {"$set": {"order": order}}
+                        )
+
+                    total_migrated += 1
+
+                except ValueError:
+                    # 標籤已存在，跳過
+                    pass
+                except Exception as e:
+                    print(f"⚠️  遷移標籤 '{tag_name}' 失敗：{e}")
+
+        print(f"✅ 標籤遷移完成！共遷移 {total_migrated} 個標籤條目")
+
+    except Exception as e:
+        print(f"❌ 標籤遷移失敗：{e}")
+        import traceback
+        traceback.print_exc()
+
 
 # ==================== MongoDB 輔助函數 ====================
 def run_async_in_thread(coro):
@@ -949,7 +1047,6 @@ def transcribe_audio_in_chunks(
         ], capture_output=True, text=True, timeout=10)
 
         if result.returncode == 0:
-            import json
             probe_data = json.loads(result.stdout)
             total_duration_seconds = float(probe_data['format']['duration'])
             total_duration_ms = int(total_duration_seconds * 1000)
@@ -1108,49 +1205,102 @@ def transcribe_audio_in_chunks(
             "estimated_completion_time": estimated_completion_str
         })
 
-    # 第二步：循序轉錄所有 chunks（避免巢狀 ThreadPoolExecutor 死鎖）
-    # 暫時改為循序處理，避免與外層 executor 產生衝突
-    print(f"🚀 開始循序轉錄（共 {num_chunks} 段）{'，同時進行說話者辨識' if diarization_future else ''}...")
+    # 第二步：使用全局 executor 並行轉錄所有 chunks（避免巢狀 ThreadPoolExecutor）
+    global executor  # 使用全局 executor，避免創建新的巢狀 executor
+    print(f"🚀 開始並行轉錄（共 {num_chunks} 段）{'，同時進行說話者辨識' if diarization_future else ''}...")
     chunks_text = [None] * num_chunks  # 預先分配陣列保持順序
     all_segments = []  # 始終收集所有 segments
 
     try:
-        # 暫時使用循序處理避免巢狀 ThreadPoolExecutor 死鎖
-        # 循序處理每個 chunk
-        detected_language = None
+        # 使用全局 executor 進行並行處理
+        future_to_chunk = {}
         for chunk_idx, start_ms, end_ms, temp_path in chunk_info_list:
-            # 檢查是否已被取消
-            if task_id and task_cancelled.get(task_id, False):
-                raise RuntimeError("任務已被使用者取消")
-
-            # 計算時間偏移
+            # 計算這個 chunk 的時間偏移（相對於完整音檔的秒數）
             time_offset_seconds = start_ms / 1000.0
 
+            # 始終返回帶時間戳的 segments
+            future = executor.submit(
+                transcribe_single_chunk,
+                model,
+                temp_path,
+                language,  # 使用指定的語言
+                task_id,
+                chunk_idx,
+                time_offset_seconds,
+                True  # return_segments 始終為 True
+            )
+            future_to_chunk[future] = (chunk_idx, temp_path, time_offset_seconds)
+
+        # 等待完成並更新進度
+        detected_language = None  # 用於記錄第一個 chunk 偵測到的語言
+        for future in as_completed(future_to_chunk):
+            chunk_idx, temp_path, time_offset = future_to_chunk[future]
+
+            # 檢查是否已被取消
+            if task_id and task_cancelled.get(task_id, False):
+                # 取消所有未完成的 futures（不能 shutdown 全局 executor）
+                for f in future_to_chunk.keys():
+                    f.cancel()
+                # 強制終止 diarization 進程
+                if diarization_future and diarization_executor:
+                    print(f"🛑 正在強制終止說話者辨識進程...")
+                    diarization_executor.shutdown(wait=False, cancel_futures=True)
+                raise RuntimeError("任務已被使用者取消")
+
             try:
-                # 轉錄此 chunk
-                print(f"   🔄 正在轉錄第 {chunk_idx}/{num_chunks} 段...")
-                text, segments, lang = transcribe_single_chunk(
-                    whisper_model,
-                    temp_path,
-                    language,
-                    task_id,
-                    chunk_idx,
-                    time_offset_seconds,
-                    True
-                )
-
-                # 記錄第一個 chunk 的語言
-                if detected_language is None and lang:
-                    detected_language = lang
-
-                # 儲存結果
-                chunks_text[chunk_idx - 1] = text
-                all_segments.extend(segments if segments else [])
-
-                # 更新進度
-                completed = chunk_idx
+                # 記憶體優化：從記憶體獲取 chunk 開始時間，避免查詢資料庫
+                chunk_start_time = None
                 if task_id:
+                    with tasks_lock:
+                        live_info = transcription_tasks.get(task_id, {})
+                        chunks = live_info.get("chunks", [])
+                        if chunk_idx - 1 < len(chunks):
+                            start_str = chunks[chunk_idx - 1].get("started_at")
+                            if start_str:
+                                try:
+                                    chunk_start_time = datetime.strptime(start_str, "%Y-%m-%d %H:%M:%S")
+                                except:
+                                    pass  # 忽略解析錯誤
+
+                result = future.result()
+
+                # 處理返回結果（現在是 (文字, segments, detected_language) 元組）
+                chunk_text, chunk_segments, chunk_detected_language = result
+                all_segments.extend(chunk_segments)  # 收集所有 segments
+
+                # 記錄第一個 chunk 偵測到的語言
+                if detected_language is None and chunk_detected_language:
+                    detected_language = chunk_detected_language
+
+                chunks_text[chunk_idx - 1] = chunk_text
+                print(f"   ✅ 完成第 {chunk_idx}/{num_chunks} 段")
+
+                # 計算 chunk 處理時間
+                chunk_duration = None
+                if chunk_start_time:
+                    chunk_end_time = datetime.now(TZ_UTC8)
+                    chunk_duration = (chunk_end_time - chunk_start_time.replace(tzinfo=TZ_UTC8)).total_seconds()
+
+                # 更新 chunk 狀態為 completed
+                completed = sum(1 for t in chunks_text if t is not None)
+                if task_id:
+                    # 從記憶體獲取 chunks
+                    with tasks_lock:
+                        chunks = transcription_tasks.get(task_id, {}).get("chunks", [])
+                        if not chunks:
+                            task = run_async_in_thread(get_task_from_db(task_id))
+                            if task:
+                                chunks = task.get("chunks", [])
+
+                        if chunk_idx - 1 < len(chunks):
+                            chunks[chunk_idx - 1]["status"] = "completed"
+                            chunks[chunk_idx - 1]["completed_at"] = get_current_time()
+                            if chunk_duration:
+                                chunks[chunk_idx - 1]["duration_seconds"] = round(chunk_duration, 1)
+
+                    # 僅更新記憶體（chunks, progress, completed_chunks 都是記憶體專用欄位）
                     update_task_status(task_id, {
+                        "chunks": chunks,
                         "progress": f"正在轉錄音訊... ({completed}/{num_chunks} 段完成)",
                         "completed_chunks": completed
                     }, persist_to_db=False)
@@ -1158,102 +1308,6 @@ def transcribe_audio_in_chunks(
             except Exception as e:
                 print(f"   ❌ 第 {chunk_idx} 段轉錄失敗：{e}")
                 raise
-
-        # 以下是原本的並行處理程式碼（暫時停用）
-        if False:
-            future_to_chunk = {}
-            for chunk_idx, start_ms, end_ms, temp_path in chunk_info_list:
-                # 計算這個 chunk 的時間偏移（相對於完整音檔的秒數）
-                time_offset_seconds = start_ms / 1000.0
-
-                # 始終返回帶時間戳的 segments
-                future = executor.submit(
-                    transcribe_single_chunk,
-                    model,
-                    temp_path,
-                    language,  # 使用指定的語言
-                    task_id,
-                    chunk_idx,
-                    time_offset_seconds,
-                    True  # return_segments 始終為 True
-                )
-                future_to_chunk[future] = (chunk_idx, temp_path, time_offset_seconds)
-
-            # 等待完成並更新進度
-            detected_language = None  # 用於記錄第一個 chunk 偵測到的語言
-            for future in as_completed(future_to_chunk):
-                chunk_idx, temp_path, time_offset = future_to_chunk[future]
-
-                # 檢查是否已被取消
-                if task_id and task_cancelled.get(task_id, False):
-                    executor.shutdown(wait=False, cancel_futures=True)
-                    # 強制終止 diarization 進程
-                    if diarization_future and diarization_executor:
-                        print(f"🛑 正在強制終止說話者辨識進程...")
-                        diarization_executor.shutdown(wait=False, cancel_futures=True)
-                    raise RuntimeError("任務已被使用者取消")
-
-                try:
-                    # 記憶體優化：從記憶體獲取 chunk 開始時間，避免查詢資料庫
-                    chunk_start_time = None
-                    if task_id:
-                        with tasks_lock:
-                            live_info = transcription_tasks.get(task_id, {})
-                            chunks = live_info.get("chunks", [])
-                            if chunk_idx - 1 < len(chunks):
-                                start_str = chunks[chunk_idx - 1].get("started_at")
-                                if start_str:
-                                    try:
-                                        chunk_start_time = datetime.strptime(start_str, "%Y-%m-%d %H:%M:%S")
-                                    except:
-                                        pass  # 忽略解析錯誤
-
-                    result = future.result()
-
-                    # 處理返回結果（現在是 (文字, segments, detected_language) 元組）
-                    chunk_text, chunk_segments, chunk_detected_language = result
-                    all_segments.extend(chunk_segments)  # 收集所有 segments
-
-                    # 記錄第一個 chunk 偵測到的語言
-                    if detected_language is None and chunk_detected_language:
-                        detected_language = chunk_detected_language
-
-                    chunks_text[chunk_idx - 1] = chunk_text
-                    print(f"   ✅ 完成第 {chunk_idx}/{num_chunks} 段")
-
-                    # 計算 chunk 處理時間
-                    chunk_duration = None
-                    if chunk_start_time:
-                        chunk_end_time = datetime.now(TZ_UTC8)
-                        chunk_duration = (chunk_end_time - chunk_start_time.replace(tzinfo=TZ_UTC8)).total_seconds()
-
-                    # 更新 chunk 狀態為 completed
-                    completed = sum(1 for t in chunks_text if t is not None)
-                    if task_id:
-                        # 從記憶體獲取 chunks
-                        with tasks_lock:
-                            chunks = transcription_tasks.get(task_id, {}).get("chunks", [])
-                            if not chunks:
-                                task = run_async_in_thread(get_task_from_db(task_id))
-                                if task:
-                                    chunks = task.get("chunks", [])
-
-                            if chunk_idx - 1 < len(chunks):
-                                chunks[chunk_idx - 1]["status"] = "completed"
-                                chunks[chunk_idx - 1]["completed_at"] = get_current_time()
-                                if chunk_duration:
-                                    chunks[chunk_idx - 1]["duration_seconds"] = round(chunk_duration, 1)
-
-                        # 僅更新記憶體（chunks, progress, completed_chunks 都是記憶體專用欄位）
-                        update_task_status(task_id, {
-                            "chunks": chunks,
-                            "progress": f"正在轉錄音訊... ({completed}/{num_chunks} 段完成)",
-                            "completed_chunks": completed
-                        }, persist_to_db=False)
-
-                except Exception as e:
-                    print(f"   ❌ 第 {chunk_idx} 段轉錄失敗：{e}")
-                    raise
 
     finally:
         # 清理所有臨時檔案
@@ -1450,12 +1504,17 @@ def get_punctuation_prompt(language: str, text: str) -> tuple[str, str]:
     return system_msg, user_msg
 
 
-def punctuate_with_openai(text: str, language: str = "zh") -> str:
+def punctuate_with_openai(text: str, language: str = "zh", return_usage: bool = False):
     """用 OpenAI 幫逐字稿加標點與分段（支援多語言）
 
     Args:
         text: 要加標點的文字
         language: 語言代碼 (zh/en/ja/ko/auto)，auto 會自動辨識
+        return_usage: 是否回傳 token 使用量資訊
+
+    Returns:
+        若 return_usage=False: 回傳文字字串
+        若 return_usage=True: 回傳 (文字, token_usage_dict)
     """
     from openai import OpenAI
     client = OpenAI()
@@ -1471,7 +1530,21 @@ def punctuate_with_openai(text: str, language: str = "zh") -> str:
         ],
         temperature=0.2,
     )
-    return resp.choices[0].message.content.strip()
+
+    result = resp.choices[0].message.content.strip()
+
+    # 提取 token 使用量資訊
+    if return_usage and hasattr(resp, 'usage'):
+        usage = {
+            "prompt_tokens": resp.usage.prompt_tokens,
+            "completion_tokens": resp.usage.completion_tokens,
+            "total_tokens": resp.usage.total_tokens,
+            "model": OPENAI_MODEL
+        }
+        print(f"📊 Token 使用: {usage['total_tokens']} (輸入: {usage['prompt_tokens']}, 輸出: {usage['completion_tokens']})")
+        return result, usage
+
+    return result
 
 
 def call_gemini_with_retry(prompt: str, max_retries: int = None, return_usage: bool = False):
@@ -1740,28 +1813,38 @@ def punctuate_with_gemini(text: str, chunk_size: int = None, task_id: str = None
     return "\n\n".join(results)
 
 
-def cleanup_old_audio_files(current_task_id: str):
+def cleanup_old_audio_files(current_task_id: str, user_id: str = None):
     """清理舊的音檔，保留規則：
     1. 最新的任務（current_task_id）始終保留
     2. 用戶勾選的任務（keep_audio=True）永遠保留（最多 3 個）
-    3. 系統最多保留 4 個音檔
+    3. 每個用戶最多保留 4 個音檔
     4. 超過 4 個時，從沒有勾選的任務中，按完成時間從最舊的開始刪除
 
     Args:
         current_task_id: 當前最新任務的 ID
+        user_id: 用戶 ID（用於只清理該用戶的音檔）
 
     Note:
         必須在任務狀態更新（設定 audio_file）之後調用
     """
     try:
-        print(f"🧹 開始清理舊音檔...")
+        print(f"🧹 ========== 開始清理舊音檔 ==========")
+        print(f"   當前任務 ID: {current_task_id[:8]}...")
+        print(f"   用戶 ID: {user_id or '❌ 未提供（這會導致跨用戶刪除！）'}")
+
+        if not user_id:
+            print(f"   ⚠️ 警告：未提供 user_id，將查詢所有用戶的音檔！這可能導致跨用戶刪除問題！")
+            print(f"   ⚠️ 建議立即停止清理並修復傳遞 user_id 的問題")
+            return  # 安全措施：如果沒有 user_id，直接返回，避免誤刪
 
         # 收集所有已完成且有音檔的任務（從 MongoDB）
         # 記憶體優化：只查詢需要的欄位，限制為 100 個（而非之前的 1000）
         tasks_with_audio = []
 
         # 使用優化的查詢方法（只返回必要欄位，不載入 segments、transcript 等大型數據）
-        all_tasks = run_async_in_thread(task_repo.find_tasks_with_audio(limit=100))
+        # 傳遞 user_id 以只查詢該用戶的任務
+        all_tasks = run_async_in_thread(task_repo.find_tasks_with_audio(limit=100, user_id=user_id))
+        print(f"   🔍 找到 {len(all_tasks)} 個有音檔的任務（用戶：{user_id or '全部'}）")
 
         for task in all_tasks:
             audio_file_path = get_task_field(task, "audio_file")
@@ -1838,9 +1921,10 @@ def cleanup_old_audio_files(current_task_id: str):
         # 5. 更新任務記錄，清除已刪除音檔的引用（在 MongoDB 中）
         if tasks_to_update:
             for tid in tasks_to_update:
+                # 使用巢狀格式更新（MongoDB dot notation）
                 updates = {
-                    "audio_file": None,
-                    "audio_filename": None,
+                    "result.audio_file": None,
+                    "result.audio_filename": None,
                     "keep_audio": False,  # 清除保留標記
                     "updated_at": get_current_time()
                 }
@@ -2045,8 +2129,19 @@ def process_transcription_task(
                 if not os.getenv("OPENAI_API_KEY"):
                     raise ValueError("未設定 OPENAI_API_KEY")
                 print(f"✨ [{task_id}] 使用 OpenAI 加標點與分段（語言：{punct_language}）...")
-                final_text = punctuate_with_openai(raw_text, language=punct_language)
-                update_task_status(task_id, {"punctuation_completed": True})
+                final_text, usage = punctuate_with_openai(raw_text, language=punct_language, return_usage=True)
+
+                # 記錄 token 使用量到資料庫
+                if usage:
+                    update_task_status(task_id, {
+                        "total_tokens_used": usage['total_tokens'],
+                        "prompt_tokens_used": usage['prompt_tokens'],
+                        "completion_tokens_used": usage['completion_tokens'],
+                        "llm_model_used": usage['model'],
+                        "punctuation_completed": True
+                    })
+                else:
+                    update_task_status(task_id, {"punctuation_completed": True})
             except Exception as e:
                 print(f"⚠️ [{task_id}] OpenAI 加標點失敗：{e}")
                 print(f"📝 [{task_id}] 將使用 Whisper 原始轉錄結果")
@@ -2090,7 +2185,6 @@ def process_transcription_task(
             ], capture_output=True, text=True, timeout=10)
 
             if result.returncode == 0:
-                import json
                 probe_data = json.loads(result.stdout)
                 audio_duration_seconds = float(probe_data['format']['duration'])
             else:
@@ -2151,9 +2245,9 @@ def process_transcription_task(
         except Exception as e:
             print(f"⚠️  [{task_id}] 配額更新過程出錯：{e}")
 
-        # 清理舊的音檔（只保留最新的 3 個）
+        # 清理舊的音檔（只保留最新的 4 個，每個用戶獨立計算）
         # 必須在 update_task_status 之後，這樣當前任務的音檔才會被計入
-        cleanup_old_audio_files(task_id)
+        cleanup_old_audio_files(task_id, user_id)
 
         print(f"⏱️ [{task_id}] 總處理時間：{format_duration(duration_seconds)}")
 
@@ -2345,8 +2439,8 @@ async def startup_event():
     # 啟動定期記憶體清理任務（每 10 分鐘執行一次）
     asyncio.create_task(periodic_memory_cleanup())
 
-    # 載入標籤設定
-    load_tag_settings()
+    # 遷移標籤設定到資料庫（僅首次啟動時執行）
+    await migrate_tags_to_db()
 
     # 載入 Faster-Whisper 模型
     current_model_name = DEFAULT_MODEL
@@ -2491,7 +2585,6 @@ async def transcribe(
         task_tags = []
         if tags:
             try:
-                import json
                 task_tags = json.loads(tags)
             except:
                 task_tags = []
@@ -2625,6 +2718,111 @@ async def get_task_status(
     return enriched_task_dict
 
 
+def serialize_for_json(obj):
+    """將包含 datetime 等特殊類型的對象轉換為可 JSON 序列化的格式"""
+    from datetime import datetime
+    from bson import ObjectId
+
+    if isinstance(obj, dict):
+        return {k: serialize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [serialize_for_json(item) for item in obj]
+    elif isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, ObjectId):
+        return str(obj)
+    else:
+        return obj
+
+
+@app.get("/transcribe/{task_id}/events")
+async def task_status_events(
+    task_id: str,
+    current_user: dict = Depends(get_current_user_sse)
+):
+    """
+    SSE (Server-Sent Events) endpoint for real-time task status updates.
+    客戶端連接後，服務器會持續推送任務狀態更新，直到任務完成或失敗。
+    """
+
+    async def event_generator():
+        """生成 SSE 事件流"""
+        try:
+            # 首先驗證權限
+            with tasks_lock:
+                live_task_info = transcription_tasks.get(task_id)
+
+            # 檢查任務是否存在以及權限
+            if live_task_info:
+                task_user_id = live_task_info.get("user_id") or live_task_info.get("user", {}).get("user_id")
+            else:
+                task_in_db = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
+                if not task_in_db:
+                    yield f"event: error\ndata: {json.dumps({'error': '任務不存在或無權訪問'})}\n\n"
+                    return
+                task_user_id = str(task_in_db.get("user_id") or task_in_db.get("user", {}).get("user_id", ""))
+
+            if task_user_id != str(current_user["_id"]):
+                yield f"event: error\ndata: {json.dumps({'error': '無權訪問此任務'})}\n\n"
+                return
+
+            # 持續推送狀態更新
+            previous_status = None
+            previous_progress = None
+
+            while True:
+                # 從記憶體或資料庫獲取任務狀態
+                with tasks_lock:
+                    live_task_info = transcription_tasks.get(task_id)
+
+                if live_task_info:
+                    task_data = live_task_info
+                else:
+                    task_data = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
+                    if not task_data:
+                        yield f"event: error\ndata: {json.dumps({'error': '任務不存在'})}\n\n"
+                        break
+
+                # 豐富任務數據
+                enriched_data = enrich_task_data(task_data)
+                current_status = enriched_data.get("status")
+                current_progress = enriched_data.get("progress")
+
+                # 只在狀態或進度改變時推送
+                if current_status != previous_status or current_progress != previous_progress:
+                    # 序列化數據（處理 datetime 等特殊類型）
+                    serialized_data = serialize_for_json(enriched_data)
+                    yield f"data: {json.dumps(serialized_data)}\n\n"
+                    previous_status = current_status
+                    previous_progress = current_progress
+
+                # 如果任務已完成或失敗，結束推送
+                if current_status in ["completed", "failed", "cancelled"]:
+                    yield f"event: end\ndata: {json.dumps({'status': current_status})}\n\n"
+                    break
+
+                # 等待 1 秒再檢查（比輪詢更頻繁，因為不需要 HTTP 往返）
+                await asyncio.sleep(1)
+
+        except asyncio.CancelledError:
+            # 客戶端斷開連接
+            print(f"🔌 [{task_id}] SSE 連接已關閉")
+            raise
+        except Exception as e:
+            print(f"❌ [{task_id}] SSE 錯誤：{e}")
+            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # 禁用 nginx 緩衝
+        }
+    )
+
+
 @app.get("/transcribe/{task_id}/download")
 async def download_task_result(
     task_id: str,
@@ -2684,16 +2882,55 @@ async def download_task_result(
 @app.get("/transcribe/{task_id}/audio")
 async def get_task_audio(
     task_id: str,
-    current_user: dict = Depends(check_quota)
+    token: Optional[str] = Query(None, description="JWT access token (查詢參數，用於 audio 元素)"),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
+    db = Depends(get_database)
 ):
-    """獲取任務的音檔（需認證，只能訪問自己的任務）"""
+    """獲取任務的音檔（需認證，只能訪問自己的任務）
+
+    支持兩種認證方式：
+    1. Authorization header (Bearer token) - 用於 API 調用
+    2. 查詢參數 token - 用於 HTML audio 元素（因為 audio 元素不支持自定義 headers）
+    """
+    # 優先使用 header 中的 token，其次使用查詢參數
+    access_token = None
+    if credentials:
+        access_token = credentials.credentials
+    elif token:
+        access_token = token
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="需要認證：請提供 Authorization header 或 token 查詢參數"
+        )
+
+    # 驗證 token 並獲取用戶資訊
+    from src.auth.jwt_handler import verify_token
+    token_data = verify_token(access_token, "access")
+
+    if not token_data:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="無效或過期的 Token"
+        )
+
+    current_user = {
+        "_id": ObjectId(token_data.user_id),
+        "email": token_data.email,
+        "role": token_data.role,
+    }
+
+    print(f"🎵 [{task_id[:8]}] 請求音檔，用戶：{current_user.get('email', 'unknown')}")
+
     # 從 MongoDB 獲取任務（含權限檢查）
     task = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
 
     if not task:
+        print(f"❌ [{task_id[:8]}] 任務不存在或無權訪問")
         raise HTTPException(status_code=404, detail="任務不存在或無權訪問")
 
     if task["status"] != "completed":
+        print(f"❌ [{task_id[:8]}] 任務尚未完成，狀態：{task['status']}")
         raise HTTPException(
             status_code=400,
             detail=f"任務尚未完成（當前狀態：{task['status']}）"
@@ -2701,11 +2938,18 @@ async def get_task_audio(
 
     # 檢查是否有音檔
     audio_file_path = get_task_field(task, "audio_file")
+    print(f"🔍 [{task_id[:8]}] 音檔路徑：{audio_file_path}")
+    print(f"🔍 [{task_id[:8]}] 任務完整資料（result 部分）：{task.get('result', {})}")
+
     if not audio_file_path:
+        print(f"❌ [{task_id[:8]}] 資料庫中沒有 audio_file 欄位")
         raise HTTPException(status_code=404, detail="此任務沒有保存音檔（可能是較舊的任務）")
 
     audio_file = Path(audio_file_path)
+    print(f"🔍 [{task_id[:8]}] 檢查文件是否存在：{audio_file}, exists={audio_file.exists()}")
+
     if not audio_file.exists():
+        print(f"❌ [{task_id[:8]}] 音檔文件不存在於路徑：{audio_file}")
         raise HTTPException(status_code=404, detail="音檔不存在")
 
     # 根據檔案副檔名決定 media type
@@ -2720,6 +2964,7 @@ async def get_task_audio(
     media_type = media_types.get(suffix, "audio/mpeg")
 
     audio_filename = get_task_field(task, "audio_filename") or ("audio" + suffix)
+    print(f"✅ [{task_id[:8]}] 返回音檔：{audio_filename}, 類型：{media_type}")
     return FileResponse(
         audio_file,
         media_type=media_type,
@@ -2960,15 +3205,24 @@ async def update_keep_audio(
 @app.get("/tags")
 async def get_all_tags(current_user: dict = Depends(get_current_user)):
     """獲取當前用戶的所有標籤及其顏色（需認證）"""
-    # 從 MongoDB 獲取用戶的所有標籤
-    user_tags = await task_repo.get_all_user_tags(str(current_user["_id"]))
+    user_id = str(current_user["_id"])
+
+    # 從 tag_repo 獲取標籤元數據（顏色、順序）
+    tags_from_db = await tag_repo.get_all_by_user(user_id)
+    tag_metadata = {tag["name"]: tag for tag in tags_from_db}
+
+    # 從任務中獲取實際使用的標籤
+    user_tags = await task_repo.get_all_user_tags(user_id)
+
+    # 合併標籤（包含在任務中使用但尚未在 tag collection 的標籤）
+    all_tag_names = set(user_tags) | set(tag_metadata.keys())
 
     # 返回標籤及其顏色
     tags_with_colors = []
-    for tag in sorted(user_tags):
+    for tag in sorted(all_tag_names):
         tags_with_colors.append({
             "name": tag,
-            "color": tag_colors.get(tag, None)  # 如果沒有設定顏色則為 None
+            "color": tag_metadata.get(tag, {}).get("color", None)
         })
 
     return {
@@ -2978,14 +3232,30 @@ async def get_all_tags(current_user: dict = Depends(get_current_user)):
 
 
 @app.put("/tags/{tag_name}/color")
-async def update_tag_color(tag_name: str, color_update: TagColorUpdate):
-    """更新標籤的顏色"""
+async def update_tag_color(
+    tag_name: str,
+    color_update: TagColorUpdate,
+    current_user: dict = Depends(get_current_user)
+):
+    """更新標籤的顏色（需認證）"""
     try:
-        tag_colors[tag_name] = color_update.color
-        print(f"🎨 更新標籤顏色：{tag_name} -> {color_update.color}")
+        user_id = str(current_user["_id"])
 
-        # 保存到磁碟
-        save_tag_settings()
+        # 檢查標籤是否存在
+        existing_tag = await tag_repo.get_by_name(user_id, tag_name)
+
+        if existing_tag:
+            # 更新現有標籤的顏色
+            await tag_repo.update(
+                existing_tag["tag_id"],
+                user_id,
+                color=color_update.color
+            )
+        else:
+            # 創建新標籤（如果用戶在任務中使用過該標籤但尚未創建）
+            await tag_repo.create(user_id, tag_name, color=color_update.color)
+
+        print(f"🎨 更新標籤顏色：{tag_name} -> {color_update.color}")
 
         return {
             "message": "標籤顏色已更新",
@@ -2999,29 +3269,53 @@ async def update_tag_color(tag_name: str, color_update: TagColorUpdate):
 
 
 @app.get("/tags/order")
-async def get_tag_order():
-    """獲取標籤順序"""
+async def get_tag_order(current_user: dict = Depends(get_current_user)):
+    """獲取標籤順序（需認證）"""
+    user_id = str(current_user["_id"])
+
+    # 從資料庫獲取標籤，已按 order 排序
+    tags = await tag_repo.get_all_by_user(user_id)
+
+    # 提取標籤名稱列表
+    tag_names = [tag["name"] for tag in tags]
+
     return {
-        "order": tag_order,
-        "count": len(tag_order)
+        "order": tag_names,
+        "count": len(tag_names)
     }
 
 
 @app.put("/tags/order")
-async def update_tag_order(order_update: TagOrderUpdate):
-    """更新標籤順序"""
+async def update_tag_order(
+    order_update: TagOrderUpdate,
+    current_user: dict = Depends(get_current_user)
+):
+    """更新標籤順序（需認證）"""
     try:
-        global tag_order
-        tag_order = order_update.order
-        print(f"📋 更新標籤順序：{len(tag_order)} 個標籤")
+        user_id = str(current_user["_id"])
+        tag_names = order_update.order
 
-        # 保存到磁碟
-        save_tag_settings()
+        # 獲取所有標籤，建立名稱到 ID 的映射
+        tags = await tag_repo.get_all_by_user(user_id)
+        name_to_id = {tag["name"]: tag["tag_id"] for tag in tags}
+
+        # 為新標籤（在任務中使用但尚未創建）創建條目
+        for tag_name in tag_names:
+            if tag_name not in name_to_id:
+                new_tag = await tag_repo.create(user_id, tag_name)
+                name_to_id[tag_name] = new_tag["tag_id"]
+
+        # 轉換標籤名稱為 ID
+        tag_ids = [name_to_id[name] for name in tag_names if name in name_to_id]
+
+        # 更新順序
+        updated_count = await tag_repo.update_order(user_id, tag_ids)
+        print(f"📋 更新標籤順序：{updated_count} 個標籤")
 
         return {
             "message": "標籤順序已更新",
-            "order": tag_order,
-            "count": len(tag_order)
+            "order": tag_names,
+            "count": len(tag_names)
         }
 
     except Exception as e:
@@ -3235,12 +3529,16 @@ async def delete_task(
     task_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """刪除任務及其相關檔案（需認證，只能刪除自己的任務）"""
+    """軟刪除任務（標記為已刪除但保留記錄供統計），物理刪除相關檔案（需認證，只能刪除自己的任務）"""
     # 從 MongoDB 獲取任務（含權限檢查）
     task = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
 
     if not task:
         raise HTTPException(status_code=404, detail="任務不存在或無權訪問")
+
+    # 檢查是否已被刪除
+    if task.get("deleted", False):
+        raise HTTPException(status_code=400, detail="任務已被刪除")
 
     # 不允許刪除進行中的任務
     if task["status"] in ["pending", "processing"]:
@@ -3251,9 +3549,9 @@ async def delete_task(
 
     deleted_files = []
 
-    # 刪除結果檔案（如果存在）
+    # 物理刪除結果檔案（如果存在）
     result_file_path = get_task_field(task, "result_file")
-    if task["status"] == "completed" and result_file_path:
+    if result_file_path:
         result_file = Path(result_file_path)
         try:
             if result_file.exists():
@@ -3263,9 +3561,9 @@ async def delete_task(
         except Exception as e:
             print(f"⚠️ 刪除轉錄檔案失敗：{e}")
 
-    # 刪除 segments 檔案（如果存在）
+    # 物理刪除 segments 檔案（如果存在）
     segments_file_path = get_task_field(task, "segments_file")
-    if task["status"] == "completed" and segments_file_path:
+    if segments_file_path:
         segments_file = Path(segments_file_path)
         try:
             if segments_file.exists():
@@ -3275,9 +3573,9 @@ async def delete_task(
         except Exception as e:
             print(f"⚠️ 刪除 segments 檔案失敗：{e}")
 
-    # 刪除音檔（如果存在）
+    # 物理刪除音檔（如果存在）
     audio_file_path = get_task_field(task, "audio_file")
-    if task["status"] == "completed" and audio_file_path:
+    if audio_file_path:
         audio_file = Path(audio_file_path)
         try:
             if audio_file.exists():
@@ -3287,11 +3585,13 @@ async def delete_task(
         except Exception as e:
             print(f"⚠️ 刪除音檔失敗：{e}")
 
-    # 從資料庫中刪除任務
-    await task_repo.delete(task_id, str(current_user["_id"]))
+    # 軟刪除：標記任務為已刪除（保留記錄供統計使用）
+    await task_repo.soft_delete(task_id, str(current_user["_id"]))
+
+    print(f"✅ [{task_id}] 任務已軟刪除（記錄保留，檔案已清除）")
 
     return {
-        "message": "任務已刪除",
+        "message": "任務已刪除（記錄已保留供統計使用）",
         "task_id": task_id,
         "deleted_files": deleted_files
     }
@@ -3318,7 +3618,7 @@ async def batch_delete_tasks(
 
         # 刪除結果檔案
         result_file_path = get_task_field(task, "result_file")
-        if task["status"] == "completed" and result_file_path:
+        if result_file_path:
             result_file = Path(result_file_path)
             try:
                 if result_file.exists():
@@ -3329,7 +3629,7 @@ async def batch_delete_tasks(
 
         # 刪除 segments 檔案
         segments_file_path = get_task_field(task, "segments_file")
-        if task["status"] == "completed" and segments_file_path:
+        if segments_file_path:
             segments_file = Path(segments_file_path)
             try:
                 if segments_file.exists():
@@ -3340,7 +3640,7 @@ async def batch_delete_tasks(
 
         # 刪除音檔
         audio_file_path = get_task_field(task, "audio_file")
-        if task["status"] == "completed" and audio_file_path:
+        if audio_file_path:
             audio_file = Path(audio_file_path)
             try:
                 if audio_file.exists():
@@ -3351,8 +3651,8 @@ async def batch_delete_tasks(
 
         deleted_files_map[task_id] = deleted_files
 
-    # 從資料庫批次刪除任務
-    deleted_count, deleted_ids = await task_repo.bulk_delete(
+    # 從資料庫批次軟刪除任務
+    deleted_count, deleted_ids = await task_repo.bulk_soft_delete(
         request.task_ids,
         str(current_user["_id"])
     )
@@ -3637,7 +3937,6 @@ async def clip_audio(
         audio = AudioSegment.from_file(str(temp_audio_path))
 
         # 解析區段
-        import json
         regions_data = json.loads(regions)
 
         if not regions_data or len(regions_data) == 0:
@@ -3712,7 +4011,6 @@ async def merge_audio(
     """
     try:
         # 解析 clip_ids
-        import json
         clip_ids_list = json.loads(clip_ids)
 
         if len(clip_ids_list) < 2:

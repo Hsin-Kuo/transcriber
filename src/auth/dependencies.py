@@ -1,9 +1,10 @@
 """認證中介層（依賴注入）"""
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from .jwt_handler import verify_token
 from ..database.mongodb import get_database
 from bson import ObjectId
+from typing import Optional
 
 security = HTTPBearer()
 
@@ -44,6 +45,41 @@ async def get_current_user(
         "role": token_data.role,
         "username": token_data.email.split("@")[0],  # 從 email 推導
         "is_active": True  # JWT 有效即表示活躍
+    }
+
+
+async def get_current_user_sse(
+    token: str = Query(..., description="JWT access token"),
+    db=Depends(get_database)
+):
+    """驗證 Access Token（用於 SSE，從查詢參數讀取）
+
+    EventSource API 不支持自定義 headers，所以需要從查詢參數讀取 token
+
+    Args:
+        token: JWT access token (從查詢參數)
+        db: 資料庫實例
+
+    Returns:
+        用戶資料
+
+    Raises:
+        HTTPException: Token 無效或用戶不存在
+    """
+    token_data = verify_token(token, "access")
+
+    if not token_data:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="無效或過期的 Token"
+        )
+
+    return {
+        "_id": ObjectId(token_data.user_id),
+        "email": token_data.email,
+        "role": token_data.role,
+        "username": token_data.email.split("@")[0],
+        "is_active": True
     }
 
 

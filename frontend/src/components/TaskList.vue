@@ -652,7 +652,7 @@
 
 <script setup>
 import { computed, ref, onMounted, watch, nextTick } from 'vue'
-import axios from 'axios'
+import api from '../utils/api'
 
 const props = defineProps({
   tasks: {
@@ -663,7 +663,6 @@ const props = defineProps({
 
 const emit = defineEmits(['download', 'refresh', 'delete', 'cancel', 'view'])
 
-const API_BASE = '/api'
 const tagColors = ref({})
 const editingTaskId = ref(null)
 const editingTags = ref([])
@@ -692,6 +691,7 @@ const isTagSectionCollapsed = ref(true)
 
 // ==== 任務展開/收起狀態 ====
 const expandedTaskIds = ref(new Set())
+const previousTaskIds = ref(new Set())
 
 // 預設顏色選項
 const presetColors = [
@@ -750,29 +750,52 @@ const sortedTasks = computed(() => {
   })
 })
 
-// 初始化展開狀態：優先展開進行中的任務，否則展開最新任務
+// 智能展開邏輯：自動展開新增的任務，保留用戶手動操作的狀態
 watch(() => props.tasks, (newTasks) => {
-  if (newTasks.length > 0) {
-    // 找出所有進行中的任務
+  if (newTasks.length === 0) {
+    expandedTaskIds.value.clear()
+    previousTaskIds.value.clear()
+    return
+  }
+
+  const currentTaskIds = new Set(newTasks.map(t => t.task_id))
+
+  // 首次載入：展開進行中的任務和最新任務
+  if (previousTaskIds.value.size === 0) {
     const processingTasks = sortedTasks.value.filter(task =>
       task.status === 'processing' || task.status === 'pending'
     )
 
-    // 如果有進行中的任務，只展開進行中的任務，並收起其他任務
-    if (processingTasks.length > 0) {
-      expandedTaskIds.value.clear()
-      processingTasks.forEach(task => {
-        expandedTaskIds.value.add(task.task_id)
-      })
-    } else if (expandedTaskIds.value.size === 0) {
-      // 如果沒有進行中的任務且尚未展開任何任務，展開最新任務
-      const firstTask = sortedTasks.value[0]
-      if (firstTask) {
-        expandedTaskIds.value.add(firstTask.task_id)
-      }
+    processingTasks.forEach(task => {
+      expandedTaskIds.value.add(task.task_id)
+    })
+
+    // 如果沒有進行中的任務，展開最新任務
+    if (processingTasks.length === 0 && sortedTasks.value.length > 0) {
+      expandedTaskIds.value.add(sortedTasks.value[0].task_id)
     }
+  } else {
+    // 檢測新增的任務
+    const newTaskIds = [...currentTaskIds].filter(id => !previousTaskIds.value.has(id))
+
+    // 自動展開新增的任務
+    newTaskIds.forEach(taskId => {
+      expandedTaskIds.value.add(taskId)
+    })
+
+    // 移除已刪除任務的展開狀態
+    const deletedTaskIds = [...previousTaskIds.value].filter(id => !currentTaskIds.has(id))
+    deletedTaskIds.forEach(taskId => {
+      expandedTaskIds.value.delete(taskId)
+    })
   }
-}, { immediate: true })
+
+  // 更新任務 ID 列表
+  previousTaskIds.value = new Set(currentTaskIds)
+
+  // 觸發響應式更新
+  expandedTaskIds.value = new Set(expandedTaskIds.value)
+}, { immediate: true, deep: true })
 
 // 切換任務的展開/收起狀態
 function toggleTaskExpanded(taskId) {
@@ -885,7 +908,7 @@ function getProcessingChunksText(task) {
 // 標籤相關功能
 async function fetchTagColors() {
   try {
-    const response = await axios.get(`${API_BASE}/tags`)
+    const response = await api.get('/tags')
     const colors = {}
     response.data.tags.forEach(tag => {
       if (tag.color) {
@@ -900,7 +923,7 @@ async function fetchTagColors() {
 
 async function fetchTagOrder() {
   try {
-    const response = await axios.get(`${API_BASE}/tags/order`)
+    const response = await api.get('/tags/order')
     if (response.data.order && response.data.order.length > 0) {
       customTagOrder.value = response.data.order
       console.log('✅ 已從伺服器載入標籤順序：', response.data.count, '個標籤')
@@ -976,7 +999,7 @@ const availableTags = computed(() => {
 
 async function saveTaskTags(task) {
   try {
-    await axios.put(`${API_BASE}/transcribe/${task.task_id}/tags`, {
+    await api.put(`/transcribe/${task.task_id}/tags`, {
       tags: editingTags.value
     })
 
@@ -1106,7 +1129,7 @@ async function finishEditingFilterTag() {
     await Promise.all(
       tasksToUpdate.map(task => {
         const updatedTags = task.tags.map(t => t === oldTag ? newTag : t)
-        return axios.put(`${API_BASE}/transcribe/${task.task_id}/tags`, {
+        return api.put(`/transcribe/${task.task_id}/tags`, {
           tags: updatedTags
         })
       })
@@ -1171,7 +1194,7 @@ async function saveFilterEdit() {
   // 保存標籤順序到伺服器
   customTagOrder.value = [...editingTagOrder.value]
   try {
-    await axios.put(`${API_BASE}/tags/order`, {
+    await api.put('/tags/order', {
       order: customTagOrder.value
     })
     console.log('✅ 已儲存標籤順序到伺服器')
@@ -1297,7 +1320,7 @@ function closeColorPicker() {
 
 async function updateTagColor(tag, color) {
   try {
-    await axios.put(`${API_BASE}/tags/${encodeURIComponent(tag)}/color`, {
+    await api.put(`/tags/${encodeURIComponent(tag)}/color`, {
       color: color
     })
 
@@ -1451,7 +1474,7 @@ async function toggleKeepAudio(task) {
   }
 
   try {
-    await axios.put(`${API_BASE}/transcribe/${task.task_id}/keep-audio`, {
+    await api.put(`/transcribe/${task.task_id}/keep-audio`, {
       keep_audio: newValue
     })
 
@@ -1516,7 +1539,7 @@ async function batchDelete() {
 
   try {
     const taskIds = Array.from(selectedTaskIds.value)
-    await axios.post(`${API_BASE}/transcribe/batch/delete`, {
+    await api.post('/transcribe/batch/delete', {
       task_ids: taskIds
     })
 
@@ -1550,7 +1573,7 @@ async function batchAddTags() {
 
   try {
     const taskIds = Array.from(selectedTaskIds.value)
-    await axios.post(`${API_BASE}/transcribe/batch/tags/add`, {
+    await api.post('/transcribe/batch/tags/add', {
       task_ids: taskIds,
       tags: tags
     })
@@ -1585,7 +1608,7 @@ async function batchRemoveTags() {
 
   try {
     const taskIds = Array.from(selectedTaskIds.value)
-    await axios.post(`${API_BASE}/transcribe/batch/tags/remove`, {
+    await api.post('/transcribe/batch/tags/remove', {
       task_ids: taskIds,
       tags: tags
     })
@@ -1607,7 +1630,7 @@ async function quickBatchAddTag(tag) {
 
   try {
     const taskIds = Array.from(selectedTaskIds.value)
-    await axios.post(`${API_BASE}/transcribe/batch/tags/add`, {
+    await api.post('/transcribe/batch/tags/add', {
       task_ids: taskIds,
       tags: [tag]
     })
@@ -1627,7 +1650,7 @@ async function quickBatchRemoveTag(tag) {
 
   try {
     const taskIds = Array.from(selectedTaskIds.value)
-    await axios.post(`${API_BASE}/transcribe/batch/tags/remove`, {
+    await api.post('/transcribe/batch/tags/remove', {
       task_ids: taskIds,
       tags: [tag]
     })
