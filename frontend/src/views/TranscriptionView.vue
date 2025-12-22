@@ -216,15 +216,10 @@
       </div>
     </div>
 
-    <!-- 任務列表 -->
-    <TaskList
-      :tasks="tasks"
-      @download="downloadTask"
-      @refresh="refreshTasks"
-      @delete="deleteTask"
-      @cancel="cancelTask"
-      @view="viewTranscript"
-    />
+    <!-- 提示：查看任務 -->
+    <div class="tasks-prompt card">
+      <p>上傳的任務可以在 <router-link to="/tasks" class="tasks-link">所有任務</router-link> 頁面查看和管理</p>
+    </div>
 
     <!-- 瀏覽逐字稿對話框 -->
     <div v-if="showTranscriptDialog" class="modal-overlay">
@@ -566,7 +561,6 @@ import api, { API_BASE, TokenManager } from '../utils/api'
 import { useAuthStore } from '../stores/auth'
 import ElectricBorder from '../components/shared/ElectricBorder.vue'
 import UploadZone from '../components/UploadZone.vue'
-import TaskList from '../components/TaskList.vue'
 
 const authStore = useAuthStore()
 
@@ -3144,7 +3138,7 @@ onUnmounted(() => {
   background: #783d16df;
   color: rgb(255, 255, 255);
 
-  /* transform: translateY(-1px); */
+  transform: translateY(-1px);
 }
 
 /* RWD: 小螢幕調整 */
@@ -3456,5 +3450,32 @@ onUnmounted(() => {
   font-size: 0.85rem;
   color: #999;
   text-align: right;
+}
+
+.tasks-prompt {
+  text-align: center;
+  padding: 24px;
+  background: var(--neu-bg);
+  border-radius: 20px;
+  box-shadow: var(--neu-shadow-inset);
+  margin-bottom: 20px;
+}
+
+.tasks-prompt p {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--neu-text);
+}
+
+.tasks-link {
+  color: var(--neu-primary);
+  text-decoration: none;
+  font-weight: 600;
+  transition: color 0.3s ease;
+}
+
+.tasks-link:hover {
+  color: var(--neu-primary-dark);
+  text-decoration: underline;
 }
 </style>

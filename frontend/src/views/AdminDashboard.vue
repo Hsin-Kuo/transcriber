@@ -269,19 +269,22 @@ onMounted(() => {
 
 .admin-title {
   text-align: center;
-  color: #333;
+  color: var(--neu-primary);
   margin-bottom: 30px;
+  font-weight: 700;
 }
 
 .loading, .error-message {
   text-align: center;
   padding: 40px;
   font-size: 18px;
+  color: var(--neu-text);
 }
 
 .spinner {
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #3498db;
+  border: 4px solid transparent;
+  border-top: 4px solid var(--neu-primary);
+  border-right: 4px solid var(--neu-primary-light);
   border-radius: 50%;
   width: 40px;
   height: 40px;
@@ -302,10 +305,11 @@ onMounted(() => {
 }
 
 .stat-card {
-  background: white;
-  border-radius: 8px;
-  padding: 20px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  background: var(--neu-bg);
+  border-radius: 20px;
+  padding: 24px;
+  box-shadow: var(--neu-shadow-raised);
+  border: 1px solid rgba(255, 255, 255, 0.3);
 }
 
 .stat-card.wide {
@@ -319,14 +323,15 @@ onMounted(() => {
 .stat-card h2 {
   font-size: 18px;
   margin-bottom: 15px;
-  color: #555;
+  color: var(--neu-primary);
+  font-weight: 700;
 }
 
 .stat-item {
   display: flex;
   justify-content: space-between;
-  padding: 8px 0;
-  border-bottom: 1px solid #eee;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(163, 177, 198, 0.2);
 }
 
 .stat-item:last-child {
@@ -334,39 +339,43 @@ onMounted(() => {
 }
 
 .label {
-  color: #666;
+  color: var(--neu-text-light);
+  font-weight: 500;
 }
 
 .value {
-  font-weight: bold;
-  color: #333;
+  font-weight: 700;
+  color: var(--neu-text);
 }
 
 .value.success {
-  color: #27ae60;
+  color: #2e7d32;
 }
 
 .value.warning {
-  color: #f39c12;
+  color: #f57c00;
 }
 
 .value.danger {
-  color: #e74c3c;
+  color: #c62828;
 }
 
 .value.highlight {
-  color: #3498db;
+  color: var(--neu-primary);
   font-size: 1.2em;
 }
 
 .cost-estimate {
   margin-top: 15px;
-  padding: 10px;
-  background: #fff3cd;
-  border-radius: 4px;
+  padding: 12px;
+  background: linear-gradient(145deg, #f5d9c4, #e8c4a8);
+  border-radius: 12px;
   text-align: center;
-  font-weight: bold;
-  color: #856404;
+  font-weight: 700;
+  color: #a0522d;
+  box-shadow:
+    inset 2px 2px 5px var(--neu-shadow-dark),
+    inset -2px -2px 5px var(--neu-shadow-light);
 }
 
 .data-table {
@@ -376,37 +385,49 @@ onMounted(() => {
 
 .data-table th,
 .data-table td {
-  padding: 10px;
+  padding: 12px;
   text-align: left;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid rgba(163, 177, 198, 0.2);
 }
 
 .data-table th {
-  background: #f8f9fa;
-  font-weight: bold;
-  color: #555;
+  background: var(--neu-bg);
+  font-weight: 700;
+  color: var(--neu-primary);
+  box-shadow:
+    inset 2px 2px 4px var(--neu-shadow-dark),
+    inset -2px -2px 4px var(--neu-shadow-light);
 }
 
 .data-table code {
-  background: #f8f9fa;
-  padding: 2px 6px;
-  border-radius: 3px;
+  background: var(--neu-bg);
+  padding: 4px 8px;
+  border-radius: 8px;
   font-size: 0.9em;
+  box-shadow:
+    inset 2px 2px 4px var(--neu-shadow-dark),
+    inset -2px -2px 4px var(--neu-shadow-light);
 }
 
 .progress-bar {
   position: relative;
   width: 100%;
-  height: 20px;
-  background: #eee;
-  border-radius: 10px;
+  height: 24px;
+  background: var(--neu-bg);
+  border-radius: 12px;
   overflow: hidden;
+  box-shadow:
+    inset 3px 3px 6px var(--neu-shadow-dark),
+    inset -3px -3px 6px var(--neu-shadow-light);
 }
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #3498db, #2ecc71);
+  background: linear-gradient(90deg, var(--neu-primary), var(--neu-primary-light));
   transition: width 0.3s;
+  box-shadow:
+    2px 2px 4px var(--neu-shadow-dark),
+    -2px -2px 4px var(--neu-shadow-light);
 }
 
 .progress-text {
@@ -415,8 +436,8 @@ onMounted(() => {
   left: 50%;
   transform: translate(-50%, -50%);
   font-size: 0.85em;
-  font-weight: bold;
-  color: #333;
+  font-weight: 700;
+  color: var(--neu-text);
 }
 
 .chart-container {
@@ -429,7 +450,7 @@ onMounted(() => {
   align-items: flex-end;
   justify-content: space-around;
   height: 250px;
-  gap: 4px;
+  gap: 6px;
 }
 
 .chart-bar-wrapper {
@@ -442,16 +463,23 @@ onMounted(() => {
 
 .chart-bar {
   width: 100%;
-  background: linear-gradient(180deg, #3498db, #2980b9);
-  border-radius: 4px 4px 0 0;
+  background: linear-gradient(180deg, var(--neu-primary-light), var(--neu-primary));
+  border-radius: 8px 8px 0 0;
   position: relative;
   min-height: 20px;
   transition: all 0.3s;
   cursor: pointer;
+  box-shadow:
+    3px 3px 6px var(--neu-shadow-dark),
+    -3px -3px 6px var(--neu-shadow-light);
 }
 
 .chart-bar:hover {
-  background: linear-gradient(180deg, #2ecc71, #27ae60);
+  background: linear-gradient(180deg, #a5d6a7, #66bb6a);
+  transform: translateY(-3px);
+  box-shadow:
+    5px 5px 10px var(--neu-shadow-dark),
+    -5px -5px 10px var(--neu-shadow-light);
 }
 
 .bar-value {
@@ -460,16 +488,18 @@ onMounted(() => {
   left: 50%;
   transform: translateX(-50%);
   font-size: 0.75em;
-  font-weight: bold;
+  font-weight: 700;
   white-space: nowrap;
+  color: var(--neu-text);
 }
 
 .bar-label {
   margin-top: 5px;
   font-size: 0.7em;
-  color: #666;
+  color: var(--neu-text-light);
   writing-mode: horizontal-tb;
   text-align: center;
+  font-weight: 600;
 }
 
 .refresh-section {
@@ -482,23 +512,32 @@ onMounted(() => {
 }
 
 .refresh-btn {
-  padding: 10px 20px;
-  background: #3498db;
-  color: white;
+  padding: 12px 24px;
+  background: linear-gradient(145deg, #e9eef5, #d1d9e6);
+  color: var(--neu-primary);
   border: none;
-  border-radius: 6px;
+  border-radius: 12px;
   cursor: pointer;
   font-size: 16px;
-  transition: background 0.3s;
+  font-weight: 700;
+  transition: all 0.3s;
+  box-shadow: var(--neu-shadow-btn);
 }
 
 .refresh-btn:hover {
-  background: #2980b9;
+  box-shadow: var(--neu-shadow-btn-hover);
+  transform: translateY(-2px);
+}
+
+.refresh-btn:active {
+  box-shadow: var(--neu-shadow-btn-active);
+  transform: translateY(0);
 }
 
 .last-update {
-  color: #999;
+  color: var(--neu-text-light);
   font-size: 14px;
+  font-weight: 500;
 }
 
 @media (max-width: 768px) {

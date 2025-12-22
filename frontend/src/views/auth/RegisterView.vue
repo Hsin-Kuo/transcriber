@@ -174,7 +174,7 @@ async function handleRegister() {
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  background: var(--neu-bg);
 }
 
 .auth-card {
@@ -191,15 +191,13 @@ async function handleRegister() {
   font-size: 2rem;
   margin: 0 0 10px 0;
   text-align: center;
-  background: linear-gradient(135deg, #00f2ff 0%, #00aaff 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--neu-primary);
+  font-weight: 700;
 }
 
 .auth-subtitle {
   text-align: center;
-  color: #8892b0;
+  color: var(--neu-text-light);
   margin: 0 0 30px 0;
   font-size: 0.9rem;
 }
@@ -218,24 +216,27 @@ async function handleRegister() {
 
 .form-group label {
   font-size: 0.9rem;
-  color: #8892b0;
-  font-weight: 500;
+  color: var(--neu-text);
+  font-weight: 600;
 }
 
 .form-group input {
-  padding: 12px 16px;
-  border: 2px solid rgba(100, 255, 218, 0.3);
-  border-radius: 8px;
-  background: rgba(17, 34, 64, 0.5);
-  color: #e6f1ff;
+  padding: 14px 18px;
+  border: none;
+  border-radius: 12px;
+  background: var(--neu-bg);
+  color: var(--neu-text);
   font-size: 1rem;
   transition: all 0.3s ease;
+  box-shadow: var(--neu-shadow-inset);
 }
 
 .form-group input:focus {
   outline: none;
-  border-color: #64ffda;
-  box-shadow: 0 0 15px rgba(100, 255, 218, 0.3);
+  box-shadow:
+    inset 6px 6px 10px var(--neu-shadow-dark),
+    inset -6px -6px 10px var(--neu-shadow-light),
+    0 0 0 3px rgba(108, 139, 163, 0.2);
 }
 
 .form-group input:disabled {
@@ -248,53 +249,68 @@ async function handleRegister() {
   flex-direction: column;
   gap: 6px;
   margin-top: 8px;
-  padding: 12px;
-  background: rgba(17, 34, 64, 0.3);
-  border-radius: 6px;
+  padding: 12px 16px;
+  background: var(--neu-bg);
+  border-radius: 12px;
+  box-shadow:
+    inset 3px 3px 6px var(--neu-shadow-dark),
+    inset -3px -3px 6px var(--neu-shadow-light);
 }
 
 .requirement {
   font-size: 0.85rem;
-  color: #8892b0;
+  color: var(--neu-text-light);
   transition: color 0.3s ease;
+  font-weight: 500;
 }
 
 .requirement.met {
-  color: #64ffda;
+  color: var(--neu-primary);
+  font-weight: 600;
 }
 
 .error-hint {
   font-size: 0.85rem;
-  color: #ff6b6b;
+  color: #c62828;
   margin-top: 4px;
+  font-weight: 600;
 }
 
 .error-message {
-  padding: 12px;
-  background: rgba(255, 107, 107, 0.1);
-  border: 1px solid rgba(255, 107, 107, 0.3);
-  border-radius: 6px;
-  color: #ff6b6b;
+  padding: 14px;
+  background: linear-gradient(145deg, #f5c4c4, #e8a8a8);
+  border-radius: 12px;
+  color: #c62828;
   font-size: 0.9rem;
   text-align: center;
+  font-weight: 600;
+  box-shadow:
+    4px 4px 8px var(--neu-shadow-dark),
+    -4px -4px 8px var(--neu-shadow-light);
 }
 
 .btn-primary {
   padding: 14px 24px;
-  background: linear-gradient(135deg, #00f2ff 0%, #00aaff 100%);
-  color: #0a192f;
+  background: linear-gradient(145deg, #e9eef5, #d1d9e6);
+  color: var(--neu-primary);
   border: none;
-  border-radius: 8px;
+  border-radius: 12px;
   font-size: 1rem;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
   transition: all 0.3s ease;
   margin-top: 10px;
+  box-shadow: var(--neu-shadow-btn);
 }
 
 .btn-primary:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 5px 20px rgba(0, 242, 255, 0.4);
+  box-shadow: var(--neu-shadow-btn-hover);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: var(--neu-shadow-btn-active);
 }
 
 .btn-primary:disabled {
@@ -306,35 +322,37 @@ async function handleRegister() {
 .auth-footer {
   margin-top: 30px;
   text-align: center;
-  color: #8892b0;
+  color: var(--neu-text-light);
   font-size: 0.9rem;
 }
 
 .auth-footer a {
-  color: #64ffda;
+  color: var(--neu-primary);
   text-decoration: none;
-  font-weight: 500;
+  font-weight: 600;
   transition: color 0.3s ease;
 }
 
 .auth-footer a:hover {
-  color: #00f2ff;
+  color: var(--neu-primary-dark);
 }
 
 .quota-info {
   margin-top: 30px;
   padding: 20px;
-  background: rgba(100, 255, 218, 0.05);
-  border: 1px solid rgba(100, 255, 218, 0.2);
-  border-radius: 8px;
+  background: var(--neu-bg);
+  border-radius: 16px;
+  box-shadow:
+    inset 4px 4px 8px var(--neu-shadow-dark),
+    inset -4px -4px 8px var(--neu-shadow-light);
 }
 
 .quota-title {
   font-size: 0.95rem;
-  color: #64ffda;
+  color: var(--neu-primary);
   margin: 0 0 15px 0;
   text-align: center;
-  font-weight: 500;
+  font-weight: 700;
 }
 
 .quota-details {
@@ -352,12 +370,13 @@ async function handleRegister() {
 
 .quota-label {
   font-size: 0.85rem;
-  color: #8892b0;
+  color: var(--neu-text-light);
+  font-weight: 500;
 }
 
 .quota-value {
   font-size: 1.1rem;
-  color: #e6f1ff;
-  font-weight: 600;
+  color: var(--neu-text);
+  font-weight: 700;
 }
 </style>

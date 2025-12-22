@@ -1,33 +1,68 @@
-/* CSS 變數 - 電流主題（淺色背景版本） */
+/* CSS 變數 - Neumorphism 主題 */
 :root {
-  /* 主色調 - 深橘棕色系（按鈕用） */
-  --electric-primary: #8b4513;
-  --electric-primary-light: #a0522d;
-  --electric-primary-dark: #6b3410;
+  /* Neumorphism 背景色 */
+  --neu-bg: #e0e5ec;
+  --neu-bg-dark: #a3b1c6;
+  --neu-bg-light: #ffffff;
 
-  /* 電流邊框顏色 - 淡金色接近白色 */
-  --electric-border-color: rgba(255, 250, 235, 0.9);
-  --electric-border-glow: rgba(255, 248, 220, 0.7);
-  --electric-border-bright: rgba(255, 253, 245, 0.95);
+  /* 主色調 - 柔和的藍灰色系 */
+  --neu-primary: #6c8ba3;
+  --neu-primary-light: #8ba5bd;
+  --neu-primary-dark: #4a6680;
+
+  /* Neumorphism 陰影 */
+  --neu-shadow-light: #ffffff;
+  --neu-shadow-dark: #a3b1c6;
+
+  /* 外陰影 - 凸出效果（圓鼓立體感） */
+  --neu-shadow-raised:
+    4px 4px 6px 0px rgba(163, 177, 198, 0.3),
+    -4px -4px 4px 0px rgba(255, 255, 255, 0.4),
+    inset -2px -2px 4px 0px rgba(163, 177, 198, 0.3),
+    inset 4px 4px 5px 0px rgba(255, 255, 255, 0.4);
+
+  /* 內陰影 - 凹陷效果（更自然的深度） */
+  --neu-shadow-inset:
+    -4px -4px 6px 0px rgba(163, 177, 198, 0.4),
+    4px 4px 6px 0px rgba(255, 255, 255, 0.6),
+    inset 6px 6px 7px 0px rgba(163, 177, 198, 0.4),
+    inset -6px -6px 7px 0px rgba(255, 255, 255, 0.6);
+
+  /* 內陰影 - 凹陷效果（更深） */
+  --neu-shadow-inset-hover:
+    -4px -4px 6px 0px rgba(163, 177, 198, 0.5),
+    4px 4px 6px 0px rgba(255, 255, 255, 0.7),
+    inset 8px 8px 14px 0px rgba(163, 177, 198, 0.5),
+    inset -8px -8px 14px 0px rgba(255, 255, 255, 0.7);
+
+  /* 按鈕陰影 - 圓鼓隆起效果 */
+  --neu-shadow-btn:
+    8px 8px 12px 0px rgba(163, 177, 198, 0.4),
+    -8px -8px 12px 0px rgba(255, 255, 255, 0.7),
+    inset -2px -2px 4px 0px rgba(163, 177, 198, 0.4),
+    inset 1px 1px 3px 0px rgba(255, 255, 255, 0.8);
+
+  --neu-shadow-btn-hover:
+    6px 6px 12px 0px rgba(163, 177, 198, 0.55),
+    -5px -5px 12px 0px rgba(255, 255, 255, 0.75),
+    inset -2px -2px 4px 0px rgba(163, 177, 198, 0.4),
+    inset 1px 1px 3px 0px rgba(255, 255, 255, 0.85);
+
+  --neu-shadow-btn-active:
+    -2px -2px 4px 0px rgba(163, 177, 198, 0.6),
+    2px 2px 4px 0px rgba(255, 255, 255, 0.6),
+    inset 6px 6px 12px 0px rgba(163, 177, 198, 0.4),
+    inset -6px -6px 12px 0px rgba(255, 255, 255, 0.5);
+
+  /* 文字顏色 */
+  --neu-text: #4a5568;
+  --neu-text-light: #718096;
+  --neu-text-lighter: #a0aec0;
 
   /* 中性色 */
   --neutral-900: #1a1a1a;
   --neutral-800: #2d2d2d;
   --neutral-100: #f5f5f5;
-
-  /* 玻璃態效果 */
-  --glass-bg: rgba(255, 255, 255, 0.04);
-  --glass-bg-hover: rgba(255, 255, 255, 0.08);
-  --glass-border: rgba(255, 255, 255, 0.12);
-
-  /* 陰影 */
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.1);
-  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.2);
-  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.3);
-  --shadow-glow: 0 0 20px var(--electric-border-glow);
-
-  /* 漸變色 */
-  --gradient-bg: linear-gradient(135deg, #1a1410 0%, #2d1f1a 100%);
 }
 
 * {
@@ -39,16 +74,10 @@
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
     Ubuntu, Cantarell, sans-serif;
-  /* 背景照片設定 - 將 background.jpg 放在 /frontend/public/images/ */
-  background-image: url('/images/background.jpg');
-  background-size: cover;
-  background-position: center;
-  background-attachment: fixed;
-  background-repeat: no-repeat;
-  /* 如果沒有照片，使用淺色作為後備 */
-  background-color: #f5f5f5;
+  /* Neumorphism 背景 - 使用純色 */
+  background-color: #e0e5ec;
   min-height: 100vh;
-  padding: 20px;
+  padding: 0;
 }
 
 /* 可訪問性：減少動畫 */
@@ -65,26 +94,29 @@ body {
 }
 
 #app {
-  max-width: 1200px;
-  margin: 0 auto;
+  width: 100%;
 }
 
 /* 通用樣式 */
 .card {
-  background: white;
-  border-radius: 12px;
+  background: var(--neu-bg);
+  border-radius: 20px;
   padding: 24px;
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--neu-shadow-raised);
   margin-bottom: 20px;
   position: relative;
+  color: var(--neu-text);
+  border: none;
 }
 
-/* 電流邊框效果樣式 */
+/* Neumorphism 卡片效果樣式 */
 .electric-card {
-  padding: 3px;
-  border-radius: 16px;
+  padding: 0;
+  border-radius: 20px;
   position: relative;
-  background: transparent;
+  background: var(--neu-bg);
+  box-shadow: var(--neu-shadow-raised);
+  border: none;
 }
 
 .electric-inner {
@@ -92,38 +124,23 @@ body {
 }
 
 .electric-border-outer {
-  border: 1px solid var(--electric-border-glow);
-  border-radius: 16px;
-  padding-right: 3px;
-  padding-bottom: 3px;
+  border-radius: 20px;
+  padding: 0;
 }
 
 .electric-main {
-  border-radius: 16px;
-  border: 1px solid var(--electric-border-color);
-  margin-top: -3px;
-  margin-left: -3px;
-  background: rgba(255, 255, 255, 0.5);
-  backdrop-filter: blur(15px) saturate(180%);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  border-radius: 20px;
+  background: var(--neu-bg);
   position: relative;
   overflow: hidden;
-  color: #2d2d2d;
+  color: var(--neu-text);
+  margin: 0;
+  border: none;
 }
 
-/* 電流動畫只應用在偽元素邊框上，不影響內容 */
+/* 移除電流動畫效果 */
 .electric-main.animated::before {
-  content: '';
-  position: absolute;
-  top: -1px;
-  left: -1px;
-  right: -1px;
-  bottom: -1px;
-  border-radius: 16px;
-  border: 1px solid var(--electric-border-color);
-  filter: url(#electric-turbulence);
-  pointer-events: none;
-  z-index: -1;
+  display: none;
 }
 
 /* 確保內容不受影響 */
@@ -132,187 +149,125 @@ body {
   z-index: 1;
 }
 
-/* 光暈層 */
-.electric-glow-1 {
-  border: 1px solid var(--electric-border-glow);
-  border-radius: 16px;
-  width: 100%;
-  height: 100%;
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  filter: blur(2px);
-  pointer-events: none;
-}
-
-.electric-glow-2 {
-  border: 1px solid var(--electric-border-bright);
-  border-radius: 16px;
-  width: 100%;
-  height: 100%;
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  filter: blur(6px);
-  pointer-events: none;
-}
-
-/* 疊加效果 - 淡化以保持透明度 */
-.electric-overlay {
-  position: absolute;
-  width: 100%;
-  height: 100%;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  border-radius: 16px;
-  opacity: 0.15;
-  mix-blend-mode: overlay;
-  transform: scale(1.05);
-  filter: blur(12px);
-  background: linear-gradient(
-    -30deg,
-    white,
-    transparent 30%,
-    transparent 70%,
-    white
-  );
-  pointer-events: none;
-}
-
-/* 背景光暈 - 淡化以保持透明度 */
+/* 移除光暈層 */
+.electric-glow-1,
+.electric-glow-2,
+.electric-overlay,
 .electric-bg-glow {
-  position: absolute;
-  width: 100%;
-  height: 100%;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  border-radius: 16px;
-  filter: blur(24px);
-  transform: scale(1.1);
-  opacity: 0.1;
-  z-index: -1;
-  background: linear-gradient(
-    -30deg,
-    var(--electric-primary-light),
-    transparent,
-    var(--electric-primary)
-  );
-  pointer-events: none;
+  display: none;
 }
 
 .btn {
-  padding: 10px 20px;
-  border: 1px solid transparent;
-  border-radius: 6px;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 12px;
   cursor: pointer;
   font-size: 14px;
-  font-weight: 500;
-  transition: all 0.3s;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  background: var(--neu-bg);
+  color: var(--neu-text);
+  box-shadow: var(--neu-shadow-btn);
+  position: relative;
+  overflow: hidden;
+}
+
+.btn:hover:not(:disabled) {
+  box-shadow: var(--neu-shadow-btn-hover);
+  transform: translateY(-2px);
+}
+
+.btn:active:not(:disabled) {
+  box-shadow: var(--neu-shadow-btn-active);
+  transform: translateY(0);
 }
 
 .btn-primary {
-  background: rgba(139, 69, 19, 0.7);
-  color: white;
+  background: linear-gradient(145deg, #e9eef5, #d1d9e6);
+  color: var(--neu-primary);
 }
 
-.btn-primary:hover {
-  background: rgba(139, 69, 19, 0.85);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(139, 69, 19, 0.4);
+.btn-primary:hover:not(:disabled) {
+  color: var(--neu-primary-dark);
 }
 
 .btn-primary:disabled {
-  background: #ccc;
+  opacity: 0.5;
   cursor: not-allowed;
   transform: none;
+  box-shadow: var(--neu-shadow-btn);
 }
 
 .btn-secondary {
-  background: #f59e42;
-  color: white;
+  background: linear-gradient(145deg, #ccd5e0, #a3b1c6);
+  color: var(--neu-bg-light);
 }
 
-.btn-secondary:hover {
-  background: #e68a2e;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(245, 158, 66, 0.4);
+.btn-secondary:hover:not(:disabled) {
+  background: linear-gradient(145deg, #b8c4d4, #8a9db5);
 }
 
 .btn-danger {
-  background: transparent;
-  color: var(--electric-primary);
-  border-color: var(--electric-primary);
+  background: var(--neu-bg);
+  color: #d64545;
+  box-shadow: var(--neu-shadow-btn);
 }
 
-.btn-danger:hover {
-  background: rgba(139, 69, 19, 0.1);
-  border-color: var(--electric-primary-light);
-  color: var(--electric-primary-light);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(139, 69, 19, 0.3);
+.btn-danger:hover:not(:disabled) {
+  color: #b83939;
 }
 
 .btn-warning {
-  background: #d4884a;
-  color: white;
+  background: linear-gradient(145deg, #f5d9c4, #e8c4a8);
+  color: #a0522d;
 }
 
 .btn-warning:hover:not(:disabled) {
-  background: #bc7540;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(212, 136, 74, 0.4);
+  background: linear-gradient(145deg, #e8c4a8, #d9b599);
 }
 
 .btn-warning:disabled {
-  background: #d4884a;
-  cursor: not-allowed;
   opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: var(--neu-shadow-btn);
 }
 
 .badge {
   display: inline-block;
-  padding: 4px 12px;
-  border-radius: 12px;
+  padding: 6px 14px;
+  border-radius: 16px;
   font-size: 12px;
-  font-weight: 400;
+  font-weight: 600;
+  box-shadow:
+    inset 2px 2px 5px var(--neu-shadow-dark),
+    inset -2px -2px 5px var(--neu-shadow-light);
+  background: var(--neu-bg);
 }
 
 .badge-pending {
-  background: rgba(245, 158, 66, 0.2);
-  color: #ffffff;
-  border: 1px solid rgba(245, 158, 66, 0.4);
+  background: linear-gradient(145deg, #f5d9c4, #e8c4a8);
+  color: #a0522d;
 }
 
 .badge-processing {
-  background: rgba(221, 132, 72, 0.25);
-  color: #a0522d;
-  border: 1px solid rgba(221, 132, 72, 0.5);
+  background: linear-gradient(145deg, #d1d9e6, #b8c4d4);
+  color: var(--neu-primary);
 }
 
 .badge-completed {
-  background: rgba(91, 183, 48, 0.15);
-  color: #6d9544;
-  border: 1px solid rgba(45, 129, 65, 0.4);
+  background: linear-gradient(145deg, #c8e6c9, #a5d6a7);
+  color: #2e7d32;
 }
 
 .badge-failed {
-  background: rgba(196, 116, 61, 0.2);
-  color: #a0522d;
-  border: 1px solid rgba(196, 116, 61, 0.4);
+  background: linear-gradient(145deg, #f5c4c4, #e8a8a8);
+  color: #c62828;
 }
 
 .badge-cancelled {
-  background: rgba(115, 115, 115, 0.2);
-  color: #ffffff;
-  border: 1px solid rgba(115, 115, 115, 0.4);
+  background: linear-gradient(145deg, #d0d0d0, #b8b8b8);
+  color: #616161;
 }
 
 /* 動畫 */

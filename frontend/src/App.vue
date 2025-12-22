@@ -2,13 +2,13 @@
   <div class="app-container">
     <ElectricBorder />
     <Navigation />
-    <div class="content-wrapper">
+    <main class="content-wrapper">
       <router-view v-slot="{ Component }">
         <transition name="fade" mode="out-in">
           <component :is="Component" />
         </transition>
       </router-view>
-    </div>
+    </main>
   </div>
 </template>
 
@@ -31,11 +31,21 @@ import Navigation from './components/shared/Navigation.vue'
 
 .app-container {
   min-height: 100vh;
-  padding: 20px;
+  display: flex;
+  gap: 20px;
+  padding: 20px 20px 20px 8px;
 }
 
 .content-wrapper {
+  flex: 1;
   max-width: 1400px;
   margin: 0 auto;
+  width: 100%;
+}
+
+@media (max-width: 768px) {
+  .app-container {
+    flex-direction: column;
+  }
 }
 </style>

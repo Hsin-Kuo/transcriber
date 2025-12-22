@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import TranscriptionView from '../views/TranscriptionView.vue'
+import TasksView from '../views/TasksView.vue'
 import AudioEditorView from '../views/AudioEditorView.vue'
 import AdminDashboard from '../views/AdminDashboard.vue'
 import LoginView from '../views/auth/LoginView.vue'
@@ -13,6 +14,15 @@ const routes = [
     component: TranscriptionView,
     meta: {
       title: '轉錄服務',
+      requiresAuth: true
+    }
+  },
+  {
+    path: '/tasks',
+    name: 'tasks',
+    component: TasksView,
+    meta: {
+      title: '所有任務',
       requiresAuth: true
     }
   },
