@@ -1,6 +1,6 @@
 <template>
   <div class="admin-container">
-    <h1 class="admin-title">📊 系統統計後台</h1>
+    <h1 class="admin-title">系統統計後台</h1>
 
     <div v-if="loading" class="loading">
       <div class="spinner"></div>
@@ -14,7 +14,7 @@
     <div v-else class="stats-grid">
       <!-- 總覽卡片 -->
       <div class="stat-card">
-        <h2>📈 總覽</h2>
+        <h2>總覽</h2>
         <div class="stat-item">
           <span class="label">總任務數：</span>
           <span class="value">{{ stats.overview.total_tasks }}</span>
@@ -39,7 +39,7 @@
 
       <!-- Token 使用量卡片 -->
       <div class="stat-card">
-        <h2>🎯 Token 使用量</h2>
+        <h2>Token 使用量</h2>
         <div class="stat-item">
           <span class="label">總 Token：</span>
           <span class="value highlight">{{ formatNumber(stats.token_usage.total_tokens) }}</span>
@@ -61,7 +61,7 @@
           <span class="value">{{ formatNumber(stats.token_usage.avg_tokens_per_task) }}</span>
         </div>
         <div class="cost-estimate">
-          💰 預估成本: ${{ estimatedCost.toFixed(4) }} USD
+          預估成本: ${{ estimatedCost.toFixed(4) }} USD
         </div>
       </div>
 
@@ -115,7 +115,7 @@
 
       <!-- 標點服務使用統計 -->
       <div class="stat-card">
-        <h2>✏️ 標點服務使用</h2>
+        <h2>標點服務使用</h2>
         <div v-for="provider in stats.punct_provider_usage" :key="provider.provider" class="stat-item">
           <span class="label">{{ provider.provider }}：</span>
           <span class="value">{{ provider.count }}</span>
@@ -145,7 +145,7 @@
 
       <!-- 每日統計圖表 -->
       <div class="stat-card full-width">
-        <h2>📅 每日統計（最近 30 天）</h2>
+        <h2>每日統計（最近 30 天）</h2>
         <div class="chart-container">
           <div class="chart-bars">
             <div

@@ -3815,6 +3815,36 @@ async def list_active_tasks(current_user: dict = Depends(get_current_user)):
     }
 
 
+@app.get("/transcribe/recent/preview")
+async def get_recent_tasks_preview(current_user: dict = Depends(get_current_user)):
+    """獲取最近任務預覽（側欄用）- 只返回必要字段"""
+    user_id = str(current_user["_id"])
+
+    # 查詢最近 10 個已完成的任務
+    tasks = await task_repo.find_by_user(
+        user_id,
+        limit=10,
+        sort=[("timestamps.completed_at", -1)]
+    )
+
+    # 只返回已完成的任務，並提取必要字段
+    preview_tasks = []
+    for task in tasks:
+        # 只處理已完成的任務
+        if task.get("status") == "completed":
+            preview_tasks.append({
+                "task_id": task.get("task_id"),
+                "display_name": task.get("custom_name") or task.get("file", {}).get("filename", "未命名"),
+                "completed_at": task.get("timestamps", {}).get("completed_at")
+            })
+
+        # 限制最多返回 10 個
+        if len(preview_tasks) >= 10:
+            break
+
+    return {"tasks": preview_tasks, "count": len(preview_tasks)}
+
+
 @app.get("/transcripts")
 async def list_transcripts():
     """列出已保存的轉錄文字檔"""

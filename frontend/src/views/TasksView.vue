@@ -17,7 +17,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import api from '../utils/api'
 import TaskList from '../components/TaskList.vue'
 import { useRouter } from 'vue-router'
@@ -28,16 +28,6 @@ const tasks = ref([])
 // 初始化時載入任務
 onMounted(async () => {
   await refreshTasks()
-
-  // 設定自動刷新
-  const interval = setInterval(() => {
-    refreshTasks()
-  }, 10000) // 每 10 秒刷新一次
-
-  // 儲存 interval ID 以便清理
-  onUnmounted(() => {
-    clearInterval(interval)
-  })
 })
 
 // 刷新任務列表
@@ -118,11 +108,9 @@ async function deleteTask(taskId) {
   }
 }
 
-// 查看逐字稿（保留此功能，可能需要打開詳情對話框）
+// 查看逐字稿 - 導航到詳情頁面
 function viewTranscript(taskId) {
-  // 這裡可以導航到詳情頁面，或者在未來實現對話框
-  console.log('查看任務:', taskId)
-  // 暫時不實現，可以在未來添加
+  router.push(`/transcript/${taskId}`)
 }
 </script>
 

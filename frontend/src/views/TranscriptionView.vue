@@ -11,58 +11,6 @@
     <!-- 上傳區域 -->
     <UploadZone @file-selected="handleFileUpload" :uploading="uploading" />
 
-    <!-- 配額顯示 -->
-    <div class="quota-card electric-card">
-      <div class="electric-inner">
-        <div class="electric-border-outer">
-          <div class="electric-main quota-content">
-            <div class="quota-header">
-              <h3>📊 配額使用情況</h3>
-              <span class="quota-tier">{{ quotaTierName }}</span>
-            </div>
-
-            <div class="quota-items">
-              <div class="quota-item">
-                <div class="quota-label">
-                  <span>轉錄次數</span>
-                  <span class="quota-value">{{ authStore.usage?.transcriptions || 0 }} / {{ authStore.quota?.max_transcriptions || 0 }}</span>
-                </div>
-                <div class="quota-bar">
-                  <div
-                    class="quota-progress"
-                    :class="{ 'quota-warning': authStore.quotaPercentage?.transcriptions > 80 }"
-                    :style="{ width: `${authStore.quotaPercentage?.transcriptions || 0}%` }"
-                  ></div>
-                </div>
-                <div class="quota-remaining">
-                  剩餘 {{ authStore.remainingQuota?.transcriptions || 0 }} 次
-                </div>
-              </div>
-
-              <div class="quota-item">
-                <div class="quota-label">
-                  <span>轉錄時長</span>
-                  <span class="quota-value">{{ Math.round(authStore.usage?.duration_minutes || 0) }} / {{ authStore.quota?.max_duration_minutes || 0 }} 分鐘</span>
-                </div>
-                <div class="quota-bar">
-                  <div
-                    class="quota-progress"
-                    :class="{ 'quota-warning': authStore.quotaPercentage?.duration > 80 }"
-                    :style="{ width: `${authStore.quotaPercentage?.duration || 0}%` }"
-                  ></div>
-                </div>
-                <div class="quota-remaining">
-                  剩餘 {{ Math.round(authStore.remainingQuota?.duration || 0) }} 分鐘
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="electric-glow-1"></div>
-        <div class="electric-glow-2"></div>
-      </div>
-    </div>
-
     <!-- 確認對話框 -->
     <div v-if="showConfirmDialog" class="modal-overlay" @click.self="cancelUpload">
       <div class="modal-content electric-card">
@@ -194,31 +142,6 @@
         <div class="electric-overlay"></div>
         <div class="electric-bg-glow"></div>
       </div>
-    </div>
-
-    <!-- 統計面板 -->
-    <div class="stats-panel" v-if="tasks.length > 0">
-      <div class="stat-item">
-        <span class="stat-label">Total Tasks</span>
-        <span class="stat-value">{{ tasks.length }}</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-label">Active</span>
-        <span class="stat-value">{{ activeTasks }}</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-label">Completed</span>
-        <span class="stat-value">{{ completedTasks }}</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-label">Failed</span>
-        <span class="stat-value">{{ failedTasks }}</span>
-      </div>
-    </div>
-
-    <!-- 提示：查看任務 -->
-    <div class="tasks-prompt card">
-      <p>上傳的任務可以在 <router-link to="/tasks" class="tasks-link">所有任務</router-link> 頁面查看和管理</p>
     </div>
 
     <!-- 瀏覽逐字稿對話框 -->
@@ -558,11 +481,8 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import api, { API_BASE, TokenManager } from '../utils/api'
-import { useAuthStore } from '../stores/auth'
 import ElectricBorder from '../components/shared/ElectricBorder.vue'
 import UploadZone from '../components/UploadZone.vue'
-
-const authStore = useAuthStore()
 
 const tasks = ref([])
 const uploading = ref(false)
@@ -618,29 +538,6 @@ watch(showTranscriptDialog, (newValue) => {
     document.body.style.overflow = ''
   }
 })
-
-// 配額層級名稱
-const quotaTierName = computed(() => {
-  const tier = authStore.quota?.tier || 'free'
-  const tierNames = {
-    free: '免費版',
-    basic: '基礎版',
-    pro: '專業版',
-    enterprise: '企業版'
-  }
-  return tierNames[tier] || '未知'
-})
-
-// 統計數據
-const activeTasks = computed(() =>
-  tasks.value.filter(t => ['pending', 'processing'].includes(t.status)).length
-)
-const completedTasks = computed(() =>
-  tasks.value.filter(t => t.status === 'completed').length
-)
-const failedTasks = computed(() =>
-  tasks.value.filter(t => t.status === 'failed').length
-)
 
 // 獲取所有唯一標籤
 const allTags = computed(() => {
@@ -1842,48 +1739,6 @@ onUnmounted(() => {
 .header p {
   font-size: 16px;
   opacity: 0.8;
-}
-
-.stats-panel {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 20px;
-  margin-bottom: 24px;
-}
-
-.stat-item {
-  text-align: center;
-  padding: 20px;
-  background: rgba(255, 255, 255, 0.5);
-  border-radius: 12px;
-  border: 1px solid rgba(255, 250, 235, 0.6);
-  backdrop-filter: blur(15px) saturate(180%);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-  transition: all 0.3s;
-}
-
-.stat-item:hover {
-  border-color: rgba(255, 253, 245, 0.9);
-  box-shadow: 0 6px 20px rgba(255, 250, 235, 0.3);
-  transform: translateY(-2px);
-}
-
-.stat-label {
-  display: block;
-  font-size: 14px;
-  color: rgba(45, 45, 45, 0.6);
-  margin-bottom: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  font-weight: 500;
-}
-
-.stat-value {
-  display: block;
-  font-size: 36px;
-  font-weight: bold;
-  color: var(--electric-primary);
-  text-shadow: 0 2px 4px rgba(139, 69, 19, 0.2);
 }
 
 /* 確認對話框 */
@@ -3363,93 +3218,6 @@ onUnmounted(() => {
 
 .title-input:focus {
   box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.3);
-}
-
-/* 配額卡片樣式 */
-.quota-card {
-  max-width: 800px;
-  margin: 24px auto;
-}
-
-.quota-content {
-  padding: 24px;
-  background: rgba(255, 255, 255, 0.6);
-  backdrop-filter: blur(15px) saturate(180%);
-  -webkit-backdrop-filter: blur(15px) saturate(180%);
-}
-
-.quota-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
-  padding-bottom: 16px;
-  border-bottom: 2px solid rgba(139, 69, 19, 0.2);
-}
-
-.quota-header h3 {
-  margin: 0;
-  font-size: 1.25rem;
-  color: #8b4513;
-  font-weight: 600;
-}
-
-.quota-tier {
-  padding: 4px 12px;
-  background: linear-gradient(135deg, rgba(139, 69, 19, 0.15), rgba(160, 82, 45, 0.15));
-  border: 1px solid rgba(139, 69, 19, 0.3);
-  border-radius: 12px;
-  font-size: 0.85rem;
-  color: #8b4513;
-  font-weight: 600;
-}
-
-.quota-items {
-  display: grid;
-  gap: 20px;
-}
-
-.quota-item {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.quota-label {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 0.95rem;
-  color: #666;
-}
-
-.quota-value {
-  font-weight: 600;
-  color: #8b4513;
-}
-
-.quota-bar {
-  height: 8px;
-  background: rgba(139, 69, 19, 0.1);
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.quota-progress {
-  height: 100%;
-  background: linear-gradient(90deg, #8b4513, #a0522d);
-  border-radius: 4px;
-  transition: width 0.3s ease, background 0.3s ease;
-}
-
-.quota-progress.quota-warning {
-  background: linear-gradient(90deg, #ff6b35, #ff8c42);
-}
-
-.quota-remaining {
-  font-size: 0.85rem;
-  color: #999;
-  text-align: right;
 }
 
 .tasks-prompt {

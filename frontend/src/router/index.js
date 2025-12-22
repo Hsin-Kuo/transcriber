@@ -4,6 +4,8 @@ import TranscriptionView from '../views/TranscriptionView.vue'
 import TasksView from '../views/TasksView.vue'
 import AudioEditorView from '../views/AudioEditorView.vue'
 import AdminDashboard from '../views/AdminDashboard.vue'
+import UserSettingsView from '../views/UserSettingsView.vue'
+import TranscriptDetailView from '../views/TranscriptDetailView.vue'
 import LoginView from '../views/auth/LoginView.vue'
 import RegisterView from '../views/auth/RegisterView.vue'
 
@@ -41,6 +43,24 @@ const routes = [
     component: AdminDashboard,
     meta: {
       title: '系統統計後台',
+      requiresAuth: true
+    }
+  },
+  {
+    path: '/settings',
+    name: 'settings',
+    component: UserSettingsView,
+    meta: {
+      title: '使用者設定',
+      requiresAuth: true
+    }
+  },
+  {
+    path: '/transcript/:taskId',
+    name: 'transcript',
+    component: TranscriptDetailView,
+    meta: {
+      title: '逐字稿詳情',
       requiresAuth: true
     }
   },

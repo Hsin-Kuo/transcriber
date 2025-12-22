@@ -310,9 +310,6 @@
                     <span v-if="task.timestamps?.created_at || task.created_at">
                       🕒 {{ task.timestamps?.created_at || task.created_at }}
                     </span>
-                    <span v-if="task.config?.punct_provider || task.punct_provider">
-                      ✨ {{ task.config?.punct_provider || task.punct_provider }}
-                    </span>
                     <span v-if="task.config?.diarize || task.diarize" class="badge-diarize" :title="(task.config?.max_speakers || task.max_speakers) ? `最多 ${task.config?.max_speakers || task.max_speakers} 位講者` : '自動偵測講者人數'">
                       說話者辨識{{ (task.config?.max_speakers || task.max_speakers) ? ` (≤${task.config?.max_speakers || task.max_speakers}人)` : '' }}
                     </span>
