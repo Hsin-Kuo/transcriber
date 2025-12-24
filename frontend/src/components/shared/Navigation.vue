@@ -1,38 +1,50 @@
 <template>
-  <nav class="navigation">
+  <nav class="navigation" :class="{ collapsed: isCollapsed }">
+    <!-- 收合/展開按鈕 -->
+    <button class="toggle-btn" @click="toggleCollapse" :title="isCollapsed ? '展開側欄' : '收合側欄'">
+      <!-- 展開時顯示《（向左，表示收合） -->
+      <svg v-if="!isCollapsed" width="16" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="15 18 9 12 15 6"></polyline>
+      </svg>
+      <!-- 收合時顯示》（向右，表示展開） -->
+      <svg v-else width="16" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="9 18 15 12 9 6"></polyline>
+      </svg>
+    </button>
+
     <div class="nav-brand">
-      <h2>🎙️ Soundtime</h2>
+      <h2 v-if="!isCollapsed">🎙️ Soundtime</h2>
+      <h2 v-else class="brand-icon">🎙️</h2>
     </div>
 
     <div class="nav-links">
-      <router-link to="/" class="nav-link" active-class="active">
+      <router-link to="/" class="nav-link" active-class="active" :title="isCollapsed ? '轉錄服務' : ''">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
           <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
           <line x1="12" y1="19" x2="12" y2="23"></line>
           <line x1="8" y1="23" x2="16" y2="23"></line>
         </svg>
-        <span>轉錄服務</span>
+        <span v-if="!isCollapsed">轉錄服務</span>
       </router-link>
 
-      <router-link to="/editor" class="nav-link" active-class="active">
+      <router-link to="/editor" class="nav-link" active-class="active" :title="isCollapsed ? '音訊剪輯' : ''">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
         </svg>
-        <span>音訊剪輯</span>
+        <span v-if="!isCollapsed">音訊剪輯</span>
       </router-link>
-      <router-link to="/admin" class="nav-link" active-class="active">
+
+      <!-- 所有任務按鈕（收合時顯示） -->
+      <router-link v-if="authStore.isAuthenticated && isCollapsed" to="/tasks" class="nav-link tasks-link" active-class="active" title="所有任務">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-          <line x1="3" y1="9" x2="21" y2="9"></line>
-          <line x1="9" y1="21" x2="9" y2="9"></line>
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
         </svg>
-        <span>系統統計</span>
       </router-link>
     </div>
 
-    <!-- 最近任務預覽 -->
-    <div v-if="authStore.isAuthenticated" class="recent-tasks">
+    <!-- 最近任務預覽（展開時顯示） -->
+    <div v-if="authStore.isAuthenticated && !isCollapsed" class="recent-tasks">
       <div class="recent-tasks-header">
         <div class="header-left">
           <h3>近期</h3>
@@ -59,19 +71,22 @@
       </div>
     </div>
 
+    <!-- Spacer 將下方內容推到底部（收合時顯示） -->
+    <div v-if="isCollapsed" class="nav-spacer"></div>
+
     <div v-if="authStore.isAuthenticated" class="nav-user">
       <router-link to="/settings" class="user-avatar-btn" :title="authStore.user?.email">
         <div class="avatar-circle">
           {{ getFirstLetter(authStore.user?.email) }}
         </div>
       </router-link>
-      <button @click="handleLogout" class="logout-btn">
+      <button @click="handleLogout" class="logout-btn" :title="isCollapsed ? '登出' : ''">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
           <polyline points="16 17 21 12 16 7"></polyline>
           <line x1="21" y1="12" x2="9" y2="12"></line>
         </svg>
-        <span>登出</span>
+        <span v-if="!isCollapsed">登出</span>
       </button>
     </div>
   </nav>
@@ -88,16 +103,22 @@ const router = useRouter()
 const authStore = useAuthStore()
 const recentTasks = ref([])
 
-// 根據當前路由決定主題
-const themeClass = computed(() => {
-  return route.path === '/' ? 'glass-theme' : 'dark-theme'
-})
+// 側欄收合狀態
+const isCollapsed = ref(false)
+
+// 切換收合狀態
+function toggleCollapse() {
+  isCollapsed.value = !isCollapsed.value
+  localStorage.setItem('navCollapsed', JSON.stringify(isCollapsed.value))
+}
 
 // 載入最近任務
 async function loadRecentTasks() {
   if (!authStore.isAuthenticated) return
   try {
-    const response = await api.get('/transcribe/recent/preview')
+    const response = await api.get('/tasks/recent', {
+      params: { limit: 10 }
+    })
     recentTasks.value = response.data.tasks || []
   } catch (error) {
     console.error('載入最近任務失敗:', error)
@@ -108,30 +129,6 @@ async function loadRecentTasks() {
 function truncateName(name) {
   const maxLength = 18
   return name.length <= maxLength ? name : name.substring(0, 15) + '...'
-}
-
-// 格式化時間為相對時間
-function formatTime(timestamp) {
-  if (!timestamp) return ''
-  try {
-    const date = new Date(timestamp)
-    const now = new Date()
-    const diffMs = now - date
-    const diffMins = Math.floor(diffMs / 60000)
-
-    if (diffMins < 1) return '剛剛'
-    if (diffMins < 60) return `${diffMins}分鐘前`
-
-    const diffHours = Math.floor(diffMins / 60)
-    if (diffHours < 24) return `${diffHours}小時前`
-
-    const diffDays = Math.floor(diffHours / 24)
-    if (diffDays < 7) return `${diffDays}天前`
-
-    return date.toLocaleDateString('zh-TW', { month: 'short', day: 'numeric' })
-  } catch {
-    return ''
-  }
 }
 
 // 取得郵箱首字母
@@ -148,8 +145,25 @@ async function handleLogout() {
 
 // 組件掛載時載入數據
 onMounted(() => {
+  // 載入收合狀態
+  const saved = localStorage.getItem('navCollapsed')
+  if (saved !== null) {
+    isCollapsed.value = JSON.parse(saved)
+  }
+
+  // 載入最近任務
   if (authStore.isAuthenticated) {
     loadRecentTasks()
+  }
+})
+
+// 監聽認證狀態變化，確保登入後載入近期任務
+watch(() => authStore.isAuthenticated, (isAuth) => {
+  if (isAuth) {
+    loadRecentTasks()
+  } else {
+    // 登出時清空近期任務
+    recentTasks.value = []
   }
 })
 
@@ -178,6 +192,48 @@ watch(() => route.path, (newPath, oldPath) => {
   transition: all 0.3s ease;
 }
 
+/* 收合狀態 */
+.navigation.collapsed {
+  width: 80px;
+  min-width: 80px;
+  padding: 20px 12px;
+  align-items: center;
+}
+
+/* 切換按鈕 */
+.toggle-btn {
+  position: absolute;
+  top: 16px;
+  right: 12px;
+  width: 28px;
+  height: 36px;
+  border: none;
+  background: var(--neu-bg);
+  border-radius: 6px;
+  box-shadow: var(--neu-shadow-btn-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  z-index: 10;
+}
+
+.toggle-btn:hover {
+  box-shadow: var(--neu-shadow-btn-hover-sm);
+  transform: translateX(-2px);
+}
+
+.toggle-btn:active {
+  box-shadow: var(--neu-shadow-btn-active-sm);
+  transform: translateX(0);
+}
+
+.toggle-btn svg {
+  stroke: var(--neu-primary);
+  transition: all 0.2s ease;
+}
+
 .nav-brand {
   padding-bottom: 20px;
   border-bottom: 1px solid rgba(163, 177, 198, 0.2);
@@ -190,6 +246,15 @@ watch(() => route.path, (newPath, oldPath) => {
   letter-spacing: -0.5px;
   color: var(--neu-primary);
   text-align: center;
+  transition: all 0.3s ease;
+}
+
+.navigation.collapsed .nav-brand {
+  padding-bottom: 16px;
+}
+
+.brand-icon {
+  font-size: 1.8rem;
 }
 
 .nav-links {
@@ -233,6 +298,27 @@ watch(() => route.path, (newPath, oldPath) => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: opacity 0.3s ease;
+}
+
+/* 收合狀態下的連結 */
+.navigation.collapsed .nav-link {
+  justify-content: center;
+  padding: 12px;
+}
+
+.navigation.collapsed .nav-link span {
+  display: none;
+}
+
+.navigation.collapsed .nav-link:hover {
+  transform: translateY(-2px);
+}
+
+/* Spacer 將下方內容推到底部 */
+.nav-spacer {
+  flex: 1;
+  min-height: 20px;
 }
 
 .nav-user {
@@ -243,6 +329,13 @@ watch(() => route.path, (newPath, oldPath) => {
   gap: 12px;
   padding-top: 20px;
   border-top: 1px solid rgba(163, 177, 198, 0.2);
+  transition: all 0.3s ease;
+}
+
+/* 收合狀態下的使用者區域 - 垂直排列 */
+.navigation.collapsed .nav-user {
+  flex-direction: column;
+  gap: 12px;
 }
 
 .user-avatar-btn {
@@ -315,6 +408,21 @@ watch(() => route.path, (newPath, oldPath) => {
   flex-shrink: 0;
 }
 
+.logout-btn span {
+  transition: opacity 0.3s ease;
+}
+
+/* 收合狀態下的登出按鈕 */
+.navigation.collapsed .logout-btn {
+  padding: 12px;
+  width: 44px;
+  min-width: 44px;
+}
+
+.navigation.collapsed .logout-btn span {
+  display: none;
+}
+
 .recent-tasks {
   padding: 6px 6px 0 0;
   flex: 1;
@@ -380,7 +488,7 @@ watch(() => route.path, (newPath, oldPath) => {
   flex-direction: column;
   gap: 6px;
   overflow-y: auto;
-  max-height: 240px;
+  max-height: 300px;
   padding-right: 4px;
 }
 

@@ -1,6 +1,16 @@
 <template>
   <div class="admin-container">
-    <h1 class="admin-title">ㄏ</h1>
+    <!-- 導航 -->
+    <nav class="admin-nav">
+      <router-link to="/" class="nav-link" exact-active-class="active">
+        📊 系統統計
+      </router-link>
+      <router-link to="/audit-logs" class="nav-link" exact-active-class="active">
+        📝 操作記錄
+      </router-link>
+    </nav>
+
+    <h1 class="admin-title">系統統計後台</h1>
 
     <div v-if="loading" class="loading">
       <div class="spinner"></div>
@@ -265,6 +275,40 @@ onMounted(() => {
   max-width: 1400px;
   margin: 0 auto;
   padding: 20px;
+}
+
+/* 導航 */
+.admin-nav {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 30px;
+  background: var(--neu-bg);
+  padding: 15px 20px;
+  border-radius: 20px;
+  box-shadow: var(--neu-shadow-raised);
+  justify-content: center;
+}
+
+.nav-link {
+  padding: 12px 24px;
+  background: linear-gradient(145deg, #e9eef5, #d1d9e6);
+  color: var(--neu-text);
+  text-decoration: none;
+  border-radius: 12px;
+  font-weight: 600;
+  transition: all 0.3s;
+  box-shadow: var(--neu-shadow-btn);
+}
+
+.nav-link:hover {
+  box-shadow: var(--neu-shadow-btn-hover);
+  transform: translateY(-2px);
+}
+
+.nav-link.active {
+  background: linear-gradient(145deg, var(--neu-primary-light), var(--neu-primary));
+  color: white;
+  box-shadow: var(--neu-shadow-btn-active);
 }
 
 .admin-title {

@@ -36,6 +36,7 @@ class TagUpdate(BaseModel):
     """更新標籤的請求模型"""
     name: Optional[str] = Field(None, min_length=1, max_length=50, description="標籤名稱")
     color: Optional[str] = Field(None, pattern="^#[0-9A-Fa-f]{6}$", description="顏色（HEX 格式）")
+    description: Optional[str] = Field(None, max_length=200, description="標籤描述")
 
 
 class TagOrderUpdate(BaseModel):

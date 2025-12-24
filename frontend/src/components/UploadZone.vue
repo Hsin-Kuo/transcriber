@@ -3,10 +3,11 @@
   <div
     class="upload-zone"
     :class="{
-      'drag-over': isDragOver,
-      'uploading': uploading
+      'drag-over': isDragOver && !disabled,
+      'uploading': uploading,
+      'disabled': disabled
     }"
-    @dragover.prevent="isDragOver = true"
+    @dragover.prevent="!disabled && (isDragOver = true)"
     @dragleave.prevent="isDragOver = false"
     @drop.prevent="handleDrop"
     @click="triggerFileInput"
@@ -46,7 +47,8 @@
 import { ref } from 'vue'
 
 const props = defineProps({
-  uploading: Boolean
+  uploading: Boolean,
+  disabled: Boolean
 })
 
 const emit = defineEmits(['file-selected'])
@@ -55,12 +57,14 @@ const fileInput = ref(null)
 const isDragOver = ref(false)
 
 function triggerFileInput() {
-  if (!props.uploading) {
+  if (!props.uploading && !props.disabled) {
     fileInput.value?.click()
   }
 }
 
 function handleFileChange(event) {
+  if (props.disabled) return
+
   const file = event.target.files?.[0]
   if (file) {
     emit('file-selected', file)
@@ -70,7 +74,7 @@ function handleFileChange(event) {
 
 function handleDrop(event) {
   isDragOver.value = false
-  if (props.uploading) return
+  if (props.uploading || props.disabled) return
 
   const file = event.dataTransfer.files?.[0]
   if (file) {
@@ -105,6 +109,12 @@ function handleDrop(event) {
 .upload-zone.uploading {
   cursor: not-allowed;
   opacity: 0.8;
+}
+
+.upload-zone.disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  pointer-events: none;
 }
 
 .upload-icon {

@@ -3,7 +3,6 @@ import { useAuthStore } from '../stores/auth'
 import TranscriptionView from '../views/TranscriptionView.vue'
 import TasksView from '../views/TasksView.vue'
 import AudioEditorView from '../views/AudioEditorView.vue'
-import AdminDashboard from '../views/AdminDashboard.vue'
 import UserSettingsView from '../views/UserSettingsView.vue'
 import TranscriptDetailView from '../views/TranscriptDetailView.vue'
 import LoginView from '../views/auth/LoginView.vue'
@@ -34,15 +33,6 @@ const routes = [
     component: AudioEditorView,
     meta: {
       title: '音訊編輯',
-      requiresAuth: true
-    }
-  },
-  {
-    path: '/admin',
-    name: 'admin',
-    component: AdminDashboard,
-    meta: {
-      title: '系統統計後台',
       requiresAuth: true
     }
   },

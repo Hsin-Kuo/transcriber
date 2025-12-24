@@ -54,7 +54,7 @@ mkdir -p "$SCRIPT_DIR/temp"
 
 # 在背景啟動服務，輸出到日誌檔（從專案根目錄運行）
 cd "$SCRIPT_DIR"
-nohup python src/whisper_server.py --host 0.0.0.0 --port 8000 > "$LOG_FILE" 2>&1 &
+nohup uvicorn src.main:app --host 0.0.0.0 --port 8000 > "$LOG_FILE" 2>&1 &
 
 # 保存 PID
 echo $! > "$PID_FILE"

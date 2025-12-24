@@ -12,14 +12,14 @@ if [ -f "$PID_FILE" ]; then
     echo "📋 從 PID 檔案讀取：$PID"
 else
     # 如果找不到 PID 文件，嘗試自動查找進程
-    echo "⚠️  找不到 PID 檔案，嘗試自動查找 whisper_server 進程..."
-    PID=$(ps aux | grep "[w]hisper_server.py" | awk '{print $2}' | head -1)
+    echo "⚠️  找不到 PID 檔案，嘗試自動查找 uvicorn 進程..."
+    PID=$(ps aux | grep "[u]vicorn src.main:app" | awk '{print $2}' | head -1)
 
     if [ -z "$PID" ]; then
-        echo "❌ 找不到運行中的 whisper_server 進程"
+        echo "❌ 找不到運行中的 uvicorn 進程"
         echo ""
         echo "提示：如果服務確實在運行，請檢查："
-        echo "  ps aux | grep whisper_server"
+        echo "  ps aux | grep uvicorn"
         exit 1
     fi
     echo "✅ 找到運行中的進程：$PID"

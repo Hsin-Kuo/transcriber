@@ -1,5 +1,5 @@
 """認證路由"""
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from datetime import datetime
 from ..models.auth import (
     UserRegister,
@@ -13,6 +13,7 @@ from ..auth.jwt_handler import create_access_token, create_refresh_token, verify
 from ..auth.dependencies import get_current_user
 from ..database.mongodb import get_database
 from ..database.repositories.user_repo import UserRepository
+from ..utils.audit_logger import get_audit_logger
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -95,12 +96,14 @@ async def register(
 
 @router.post("/login", response_model=TokenResponse)
 async def login(
+    request: Request,
     credentials: UserLogin,
     db=Depends(get_database)
 ):
     """用戶登入
 
     Args:
+        request: FastAPI Request 對象
         credentials: 登入憑證（email, password）
         db: 資料庫實例
 
@@ -110,11 +113,20 @@ async def login(
     Raises:
         HTTPException: Email 或密碼錯誤、帳號已停用
     """
+    audit_logger = get_audit_logger()
     user_repo = UserRepository(db)
     user = await user_repo.get_by_email(credentials.email)
 
     # 驗證用戶和密碼
     if not user or not verify_password(credentials.password, user["password_hash"]):
+        # 記錄登入失敗
+        await audit_logger.log_auth(
+            request=request,
+            action="login_failed",
+            user_id=str(user["_id"]) if user else None,
+            status_code=401,
+            message=f"登入失敗: {credentials.email}"
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Email 或密碼錯誤",
@@ -122,6 +134,14 @@ async def login(
         )
 
     if not user.get("is_active"):
+        # 記錄帳號停用嘗試登入
+        await audit_logger.log_auth(
+            request=request,
+            action="login_disabled_account",
+            user_id=str(user["_id"]),
+            status_code=403,
+            message="嘗試登入已停用帳號"
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="帳號已被停用"
@@ -140,6 +160,15 @@ async def login(
 
     # 存儲 Refresh Token
     await user_repo.save_refresh_token(str(user["_id"]), refresh_token)
+
+    # 記錄成功登入
+    await audit_logger.log_auth(
+        request=request,
+        action="login",
+        user_id=str(user["_id"]),
+        status_code=200,
+        message="登入成功"
+    )
 
     return {
         "access_token": access_token,

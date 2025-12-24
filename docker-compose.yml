@@ -31,5 +31,17 @@ services:
     depends_on:
       - mongodb
 
+  # 管理後台前端
+  admin-frontend:
+    build: ./admin-frontend
+    container_name: whisper-admin-frontend
+    ports:
+      - "3003:3003"
+    restart: unless-stopped
+    environment:
+      - VITE_API_URL=http://host.docker.internal:8000
+    depends_on:
+      - mongodb
+
 volumes:
   whisper_mongo_data:

@@ -4,7 +4,11 @@
   "description": "Whisper transcriber with frontend and backend",
   "scripts": {
     "dev": "cd frontend && npm run dev",
+    "dev:admin": "cd admin-frontend && npm run dev",
+    "dev:all": "npm run dev & npm run dev:admin",
     "build": "cd frontend && npm run build",
+    "build:admin": "cd admin-frontend && npm run build",
+    "build:all": "npm run build && npm run build:admin",
     "preview": "cd frontend && npm run preview",
     "backend": "./start_backend_daemon.sh",
     "backend:stop": "./stop_backend.sh",

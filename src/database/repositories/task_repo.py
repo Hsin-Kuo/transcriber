@@ -301,64 +301,15 @@ class TaskRepository:
         result = await self.collection.insert_many(tasks, ordered=False)
         return len(result.inserted_ids)
 
-    async def update_content(self, task_id: str, user_id: str, content: str) -> bool:
-        """更新任務的轉錄內容（需要權限檢查）"""
-        result = await self.collection.update_one(
-            {"_id": task_id, "user_id": user_id},
-            {"$set": {
-                "text_length": len(content),
-                "updated_at": datetime.utcnow()
-            }}
-        )
-        return result.modified_count > 0
-
-    async def update_metadata(self, task_id: str, user_id: str, custom_name: Optional[str] = None) -> bool:
-        """更新任務的元數據"""
-        updates = {"updated_at": datetime.utcnow()}
-        if custom_name is not None:
-            # 驗證檔名（移除非法字符）
-            import re
-            safe_name = re.sub(r'[<>:"/\\|?*]', '_', custom_name)
-            updates["custom_name"] = safe_name
-
-        result = await self.collection.update_one(
-            {"_id": task_id, "user_id": user_id},
-            {"$set": updates}
-        )
-        return result.modified_count > 0
-
-    async def update_tags(self, task_id: str, user_id: str, tags: List[str]) -> bool:
-        """更新任務的標籤"""
-        result = await self.collection.update_one(
-            {"_id": task_id, "user_id": user_id},
-            {"$set": {
-                "tags": tags,
-                "updated_at": datetime.utcnow()
-            }}
-        )
-        return result.modified_count > 0
-
-    async def update_keep_audio(self, task_id: str, user_id: str, keep_audio: bool) -> bool:
-        """更新任務的音檔保留狀態"""
-        result = await self.collection.update_one(
-            {"_id": task_id, "user_id": user_id},
-            {"$set": {
-                "keep_audio": keep_audio,
-                "updated_at": datetime.utcnow()
-            }}
-        )
-        return result.modified_count > 0
-
-    async def mark_as_cancelled(self, task_id: str, user_id: str) -> bool:
-        """標記任務為已取消"""
-        result = await self.collection.update_one(
-            {"_id": task_id, "user_id": user_id},
-            {"$set": {
-                "status": "cancelled",
-                "updated_at": datetime.utcnow()
-            }}
-        )
-        return result.modified_count > 0
+    # ========== 已移除的業務邏輯方法 ==========
+    # 以下方法已移至 TaskService，以符合三層架構原則：
+    # - update_content() -> TaskService.update_transcription_content()
+    # - update_metadata() -> TaskService.update_task_metadata()
+    # - update_tags() -> TaskService.update_task_tags()
+    # - update_keep_audio() -> TaskService.update_keep_audio()
+    # - mark_as_cancelled() -> TaskService.mark_task_as_cancelled()
+    #
+    # Repository 層現在只負責純資料存取操作，不包含業務邏輯（如驗證、計算、轉換）
 
     async def count_by_status(self, user_id: str, status: str) -> int:
         """計算特定狀態的任務數量"""

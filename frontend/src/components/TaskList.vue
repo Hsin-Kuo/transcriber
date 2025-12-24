@@ -99,9 +99,7 @@
             :class="{ active: selectedFilterTags.includes(tag) }"
             :style="{
               '--tag-color': getTagColor(tag),
-              backgroundColor: selectedFilterTags.includes(tag) ? getTagColor(tag) : `${getTagColor(tag)}20`,
-              borderColor: getTagColor(tag),
-              color: selectedFilterTags.includes(tag) ? 'white' : getTagColor(tag)
+              color: getTagColor(tag)
             }"
             @click="isEditingFilterTags ? startEditingFilterTag(tag) : toggleFilterTag(tag)"
             :title="isEditingFilterTags ? '點擊編輯標籤名稱' : ''"
@@ -223,9 +221,7 @@
                   class="tag-pill"
                   :class="{ 'tag-added': item.isAdded, 'tag-available': !item.isAdded }"
                   :style="{
-                    backgroundColor: item.isAdded ? getTagColor(item.tag) : 'white',
-                    borderColor: getTagColor(item.tag),
-                    color: item.isAdded ? 'white' : getTagColor(item.tag)
+                    color: getTagColor(item.tag)
                   }"
                   @click="item.isAdded ? quickBatchRemoveTag(item.tag) : quickBatchAddTag(item.tag)"
                   :title="item.isAdded ? `點擊移除「${item.tag}」` : `點擊加入「${item.tag}」`"
@@ -313,15 +309,6 @@
                     <span v-if="task.config?.diarize || task.diarize" class="badge-diarize" :title="(task.config?.max_speakers || task.max_speakers) ? `最多 ${task.config?.max_speakers || task.max_speakers} 位講者` : '自動偵測講者人數'">
                       說話者辨識{{ (task.config?.max_speakers || task.max_speakers) ? ` (≤${task.config?.max_speakers || task.max_speakers}人)` : '' }}
                     </span>
-                    <!-- 展開/收起按鈕 -->
-                    <button
-                      v-if="!isBatchEditMode && (task.progress || (task.status === 'completed' && (task.result?.text_length || task.text_length)))"
-                      class="btn-toggle-details"
-                      @click="toggleTaskExpanded(task.task_id)"
-                      :title="isTaskExpanded(task.task_id) ? '收起轉錄資訊' : '展開轉錄資訊'"
-                    >
-                      {{ isTaskExpanded(task.task_id) ? '▲ 顯示較少' : '▼ 顯示更多' }}
-                    </button>
                   </div>
 
                   <!-- 標籤列 -->
@@ -661,6 +648,7 @@ const props = defineProps({
 const emit = defineEmits(['download', 'refresh', 'delete', 'cancel', 'view'])
 
 const tagColors = ref({})
+const tagsData = ref([]) // 存儲完整的標籤信息（包含 ID）
 const editingTaskId = ref(null)
 const editingTags = ref([])
 const editingTagInput = ref('')
@@ -685,10 +673,6 @@ const isBatchEditMode = ref(false)
 const selectedTaskIds = ref(new Set())
 const batchTagInput = ref('')
 const isTagSectionCollapsed = ref(true)
-
-// ==== 任務展開/收起狀態 ====
-const expandedTaskIds = ref(new Set())
-const previousTaskIds = ref(new Set())
 
 // 預設顏色選項
 const presetColors = [
@@ -747,67 +731,12 @@ const sortedTasks = computed(() => {
   })
 })
 
-// 智能展開邏輯：自動展開新增的任務，保留用戶手動操作的狀態
-watch(() => props.tasks, (newTasks) => {
-  if (newTasks.length === 0) {
-    expandedTaskIds.value.clear()
-    previousTaskIds.value.clear()
-    return
-  }
-
-  const currentTaskIds = new Set(newTasks.map(t => t.task_id))
-
-  // 首次載入：展開進行中的任務和最新任務
-  if (previousTaskIds.value.size === 0) {
-    const processingTasks = sortedTasks.value.filter(task =>
-      task.status === 'processing' || task.status === 'pending'
-    )
-
-    processingTasks.forEach(task => {
-      expandedTaskIds.value.add(task.task_id)
-    })
-
-    // 如果沒有進行中的任務，展開最新任務
-    if (processingTasks.length === 0 && sortedTasks.value.length > 0) {
-      expandedTaskIds.value.add(sortedTasks.value[0].task_id)
-    }
-  } else {
-    // 檢測新增的任務
-    const newTaskIds = [...currentTaskIds].filter(id => !previousTaskIds.value.has(id))
-
-    // 自動展開新增的任務
-    newTaskIds.forEach(taskId => {
-      expandedTaskIds.value.add(taskId)
-    })
-
-    // 移除已刪除任務的展開狀態
-    const deletedTaskIds = [...previousTaskIds.value].filter(id => !currentTaskIds.has(id))
-    deletedTaskIds.forEach(taskId => {
-      expandedTaskIds.value.delete(taskId)
-    })
-  }
-
-  // 更新任務 ID 列表
-  previousTaskIds.value = new Set(currentTaskIds)
-
-  // 觸發響應式更新
-  expandedTaskIds.value = new Set(expandedTaskIds.value)
-}, { immediate: true, deep: true })
-
-// 切換任務的展開/收起狀態
-function toggleTaskExpanded(taskId) {
-  if (expandedTaskIds.value.has(taskId)) {
-    expandedTaskIds.value.delete(taskId)
-  } else {
-    expandedTaskIds.value.add(taskId)
-  }
-  // 觸發響應式更新
-  expandedTaskIds.value = new Set(expandedTaskIds.value)
-}
-
-// 檢查任務是否展開
+// 檢查任務是否展開 - 只有進行中的任務才展開
 function isTaskExpanded(taskId) {
-  return expandedTaskIds.value.has(taskId)
+  const task = sortedTasks.value.find(t => t.task_id === taskId)
+  if (!task) return false
+  // 只有 pending 和 processing 狀態的任務才展開
+  return ['pending', 'processing'].includes(task.status)
 }
 
 function getStatusText(status) {
@@ -907,7 +836,12 @@ async function fetchTagColors() {
   try {
     const response = await api.get('/tags')
     const colors = {}
-    response.data.tags.forEach(tag => {
+    const tags = response.data || []
+
+    // 存儲完整的標籤信息
+    tagsData.value = tags
+
+    tags.forEach(tag => {
       if (tag.color) {
         colors[tag.name] = tag.color
       }
@@ -996,7 +930,7 @@ const availableTags = computed(() => {
 
 async function saveTaskTags(task) {
   try {
-    await api.put(`/transcribe/${task.task_id}/tags`, {
+    await api.put(`/tasks/${task.task_id}/tags`, {
       tags: editingTags.value
     })
 
@@ -1126,7 +1060,7 @@ async function finishEditingFilterTag() {
     await Promise.all(
       tasksToUpdate.map(task => {
         const updatedTags = task.tags.map(t => t === oldTag ? newTag : t)
-        return api.put(`/transcribe/${task.task_id}/tags`, {
+        return api.put(`/tasks/${task.task_id}/tags`, {
           tags: updatedTags
         })
       })
@@ -1191,8 +1125,19 @@ async function saveFilterEdit() {
   // 保存標籤順序到伺服器
   customTagOrder.value = [...editingTagOrder.value]
   try {
+    // 將標籤名稱轉換為標籤 ID
+    const tagIds = editingTagOrder.value.map(tagName => {
+      const tagObj = tagsData.value.find(t => t.name === tagName)
+      const tagId = tagObj ? (tagObj._id || tagObj.tag_id) : null
+      console.log(`標籤 "${tagName}" -> ID: ${tagId}`, tagObj)
+      return tagId
+    }).filter(id => id !== null)
+
+    console.log('發送的標籤 ID 列表:', tagIds)
+    console.log('tagsData:', tagsData.value)
+
     await api.put('/tags/order', {
-      order: customTagOrder.value
+      tag_ids: tagIds
     })
     console.log('✅ 已儲存標籤順序到伺服器')
   } catch (error) {
@@ -1315,14 +1260,23 @@ function closeColorPicker() {
   colorPickerPosition.value = {}
 }
 
-async function updateTagColor(tag, color) {
+async function updateTagColor(tagName, color) {
   try {
-    await api.put(`/tags/${encodeURIComponent(tag)}/color`, {
-      color: color
+    // 從 tagsData 中找到對應的標籤對象
+    const tagObj = tagsData.value.find(t => t.name === tagName)
+    if (!tagObj) {
+      throw new Error('找不到標籤信息')
+    }
+
+    // 使用正確的 API 端點和標籤 ID
+    await api.put(`/tags/${tagObj._id || tagObj.tag_id}`, {
+      name: tagObj.name,
+      color: color,
+      description: tagObj.description || null
     })
 
     // 更新本地顏色
-    tagColors.value[tag] = color
+    tagColors.value[tagName] = color
 
     // 不自動關閉顏色選擇器，讓使用者可以連續調整多個標籤
   } catch (error) {
@@ -1471,7 +1425,7 @@ async function toggleKeepAudio(task) {
   }
 
   try {
-    await api.put(`/transcribe/${task.task_id}/keep-audio`, {
+    await api.put(`/tasks/${task.task_id}/keep-audio`, {
       keep_audio: newValue
     })
 
@@ -1536,7 +1490,7 @@ async function batchDelete() {
 
   try {
     const taskIds = Array.from(selectedTaskIds.value)
-    await api.post('/transcribe/batch/delete', {
+    await api.post('/tasks/batch/delete', {
       task_ids: taskIds
     })
 
@@ -1570,7 +1524,7 @@ async function batchAddTags() {
 
   try {
     const taskIds = Array.from(selectedTaskIds.value)
-    await api.post('/transcribe/batch/tags/add', {
+    await api.post('/tasks/batch/tags/add', {
       task_ids: taskIds,
       tags: tags
     })
@@ -1605,7 +1559,7 @@ async function batchRemoveTags() {
 
   try {
     const taskIds = Array.from(selectedTaskIds.value)
-    await api.post('/transcribe/batch/tags/remove', {
+    await api.post('/tasks/batch/tags/remove', {
       task_ids: taskIds,
       tags: tags
     })
@@ -1627,7 +1581,7 @@ async function quickBatchAddTag(tag) {
 
   try {
     const taskIds = Array.from(selectedTaskIds.value)
-    await api.post('/transcribe/batch/tags/add', {
+    await api.post('/tasks/batch/tags/add', {
       task_ids: taskIds,
       tags: [tag]
     })
@@ -1647,7 +1601,7 @@ async function quickBatchRemoveTag(tag) {
 
   try {
     const taskIds = Array.from(selectedTaskIds.value)
-    await api.post('/transcribe/batch/tags/remove', {
+    await api.post('/tasks/batch/tags/remove', {
       task_ids: taskIds,
       tags: [tag]
     })
@@ -1704,12 +1658,11 @@ onMounted(() => {
 
 /* 標籤篩選區 */
 .filter-section {
-  background: rgba(255, 255, 255, 0.5);
-  backdrop-filter: blur(15px);
+  background: var(--neu-bg);
   border-radius: 12px;
   padding: 16px;
   margin-bottom: 20px;
-  border: 1px solid rgba(221, 132, 72, 0.15);
+  box-shadow: var(--neu-shadow-inset);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1894,10 +1847,12 @@ onMounted(() => {
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
-  border: 1.5px solid;
+  border: none;
   border-radius: 12px;
   cursor: pointer;
   transition: all 0.2s;
+  background: var(--neu-bg);
+  box-shadow: var(--neu-shadow-btn);
 }
 
 .filter-tag-btn:disabled {
@@ -1910,33 +1865,32 @@ onMounted(() => {
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
-  border: 2px solid;
+  border: 2px solid var(--neu-primary);
   border-radius: 12px;
   outline: none;
-  background: white;
+  background: var(--neu-bg);
+  box-shadow: var(--neu-shadow-inset);
   min-width: 100px;
   transition: all 0.2s;
 }
 
 .filter-tag-input:focus {
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+  box-shadow: var(--neu-shadow-inset-hover);
 }
 
 .filter-tag-btn:hover:not(.active):not(:disabled) {
-  filter: brightness(0.95);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--neu-shadow-btn-hover);
+  transform: translateY(-2px);
 }
 
 .filter-tag-btn.active {
   font-weight: 600;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--neu-shadow-btn-active);
 }
 
 .filter-tag-btn.active:hover:not(:disabled) {
-  transform: translateY(-1px) scale(1.02);
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
-  filter: brightness(1.05);
+  box-shadow: var(--neu-shadow-btn-hover);
+  transform: translateY(-2px);
 }
 
 /* 標籤顏色選擇器 */
@@ -2425,39 +2379,50 @@ onMounted(() => {
   pointer-events: none;
 }
 
-/* 三聯按鈕組 */
+/* 三聯按鈕組 - Neumorphism 風格 */
 .btn-group {
   display: inline-flex;
-  border-radius: 8px;
-  overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  overflow: visible;
+  gap: 8px;
+  background: transparent;
 }
 
 .btn-group .btn {
-  border-radius: 0;
+  border-radius: 12px;
   margin: 0;
   position: relative;
+  background: var(--neu-bg);
+  box-shadow: var(--neu-shadow-btn-sm);
+  transition: all 0.3s ease;
 }
 
 .btn-group .btn:not(:last-child) {
-  border-right: 1px solid rgba(255, 255, 255, 0.2);
+  border-right: none;
 }
 
 .btn-group-left {
-  border-radius: 8px 0 0 8px !important;
+  border-radius: 12px !important;
 }
 
 .btn-group-middle {
-  border-radius: 0 !important;
+  border-radius: 12px !important;
 }
 
 .btn-group-right {
-  border-radius: 0 8px 8px 0 !important;
+  border-radius: 12px !important;
 }
 
 /* 確保三聯組中的按鈕 hover 效果不會被覆蓋 */
 .btn-group .btn:hover {
   z-index: 1;
+  box-shadow: var(--neu-shadow-btn-hover-sm);
+  transform: translateY(-2px);
+}
+
+.btn-group .btn:active {
+  box-shadow: var(--neu-shadow-btn-active-sm);
+  transform: translateY(0);
 }
 
 /* 圖標按鈕樣式 */
@@ -2475,47 +2440,39 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-/* 瀏覽按鈕 - 實心填滿咖啡棕色 */
+/* 瀏覽按鈕 - Neumorphism 風格 */
 .btn-view {
-  background: #77969A;
-  color: white;
+  background: var(--neu-bg);
+  color: #6c8ba3;
   border: none;
   font-weight: 500;
 }
 
 .btn-view:hover {
-  background: #336774;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(160, 82, 45, 0.4);
+  color: #4a6680;
 }
 
 .btn-download {
-  background: #77969A;
-  color: white;
+  background: var(--neu-bg);
+  color: #6c8ba3;
   border: none;
   font-weight: 500;
 }
 
 .btn-download:hover {
-  background: #336774;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(160, 82, 45, 0.4);
+  color: #4a6680;
 }
 
-/* 刪除按鈕 - 空心邊框咖啡紅棕色 */
+/* 刪除按鈕 - Neumorphism 風格 */
 .task-actions .btn-danger {
-  background: transparent;
-  color: #5e7b7f;
-  border: 1px solid #759977;
+  background: var(--neu-bg);
+  color: #d64545;
+  border: none;
   font-weight: 500;
 }
 
 .task-actions .btn-danger:hover {
-  background: #33677425;
-  border-color: #62592c00;
-  color: #4e6c4f;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(19, 139, 19, 0.25);
+  color: #b83939;
 }
 
 /* 標籤樣式 */
@@ -3222,6 +3179,10 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding: 16px;
+  background: var(--neu-bg);
+  border-radius: 12px;
+  box-shadow: var(--neu-shadow-inset);
 }
 
 .tags-hint {
@@ -3270,7 +3231,7 @@ onMounted(() => {
   gap: 6px;
   height: 32px;
   padding: 0 14px;
-  border: 2px solid;
+  border: none;
   border-radius: 16px;
   font-size: 13px;
   font-weight: 500;
@@ -3279,55 +3240,47 @@ onMounted(() => {
   white-space: nowrap;
   flex-shrink: 0;
   position: relative;
-  overflow: hidden;
-}
-
-.tag-pill::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(255, 255, 255, 0.2);
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-.tag-pill:hover::before {
-  opacity: 1;
+  background: var(--neu-bg);
+  box-shadow: var(--neu-shadow-btn);
 }
 
 .tag-pill:hover {
+  box-shadow: var(--neu-shadow-btn-hover);
   transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
 }
 
 .tag-pill:active {
+  box-shadow: var(--neu-shadow-btn-active);
   transform: translateY(0);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 /* 已加入的標籤 */
 .tag-pill.tag-added {
   font-weight: 600;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--neu-shadow-btn);
 }
 
 .tag-pill.tag-added svg {
   stroke-width: 2.5;
 }
 
+.tag-pill.tag-added:hover {
+  box-shadow: var(--neu-shadow-btn-hover);
+}
+
+.tag-pill.tag-added:active {
+  box-shadow: var(--neu-shadow-btn-active);
+}
+
 /* 可用的標籤 */
 .tag-pill.tag-available {
-  background: white !important;
-  border-style: dashed;
+  background: var(--neu-bg);
+  opacity: 0.7;
   font-weight: 500;
 }
 
 .tag-pill.tag-available:hover {
-  border-style: solid;
-  background: rgba(221, 132, 72, 0.05) !important;
+  opacity: 1;
 }
 
 /* Pill 圖標 */
