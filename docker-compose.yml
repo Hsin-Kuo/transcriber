@@ -1,9 +1,23 @@
 version: '3.8'
 
-# Plan B: 僅運行前端容器，後端在本地原生運行
-# 用法：docker-compose -f docker-compose.frontend-only.yml up
-
 services:
+  # MongoDB 資料庫
+  mongodb:
+    image: mongo:7.0
+    container_name: whisper-mongodb
+    ports:
+      - "27020:27017"  # 使用 27020 避免端口衝突
+    volumes:
+      - whisper_mongo_data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=whisper_transcriber
+    restart: unless-stopped
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/whisper_transcriber --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # 前端 Web 介面
   frontend:
     build: ./frontend
@@ -14,3 +28,20 @@ services:
     environment:
       # 前端連接到主機上的後端（macOS Docker 使用 host.docker.internal）
       - VITE_API_URL=http://host.docker.internal:8000
+    depends_on:
+      - mongodb
+
+  # 管理後台前端
+  admin-frontend:
+    build: ./admin-frontend
+    container_name: whisper-admin-frontend
+    ports:
+      - "3003:3003"
+    restart: unless-stopped
+    environment:
+      - VITE_API_URL=http://host.docker.internal:8000
+    depends_on:
+      - mongodb
+
+volumes:
+  whisper_mongo_data:

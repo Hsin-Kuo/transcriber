@@ -306,8 +306,8 @@ curl -X POST http://localhost:8000/transcribe \
 #   ...
 # }
 
-# 2. 查詢狀態（每 2 秒查一次）
-watch -n 2 curl -s http://localhost:8000/transcribe/abc-123
+# 2. 查詢狀態（每 5 秒查一次）
+watch -n 5 curl -s http://localhost:8000/transcribe/abc-123
 
 # 3. 下載結果
 curl http://localhost:8000/transcribe/abc-123/download -o transcript.txt
@@ -343,7 +343,7 @@ while True:
         print(f"轉錄失敗：{task.get('error')}")
         break
 
-    time.sleep(2)  # 每 2 秒查詢一次
+    time.sleep(5)  # 每 5 秒查詢一次
 
 # 3. 下載結果
 if task['status'] == 'completed':
@@ -384,7 +384,7 @@ async function transcribeAudio(audioFile) {
         clearInterval(interval);
         reject(new Error(task.error));
       }
-    }, 2000);  // 每 2 秒查詢
+    }, 5000);  // 每 5 秒查詢
   });
 }
 

@@ -1,0 +1,19 @@
+# 認證系統相關套件
+
+# JWT 處理
+python-jose[cryptography]==3.3.0  # JWT 編碼/解碼
+
+# 密碼加密
+passlib[bcrypt]==1.7.4            # 密碼雜湊
+bcrypt==4.1.2                     # bcrypt 演算法
+
+# MongoDB
+motor==3.3.2                      # 異步 MongoDB 驅動 (FastAPI 推薦)
+pymongo==4.6.1                    # 同步驅動 (備選)
+
+# 資料驗證
+pydantic[email]==2.5.0            # Email 驗證
+
+# Rate Limiting (可選)
+# slowapi==0.1.9                  # FastAPI rate limiter
+# redis==5.0.1                    # Redis 客戶端

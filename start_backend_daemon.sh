@@ -40,23 +40,30 @@ echo "🚀 啟動 Whisper 後端服務（守護進程模式）..."
 # 激活虛擬環境
 source "$SCRIPT_DIR/venv/bin/activate"
 
-# 載入環境變數
-export $(cat "$SCRIPT_DIR/.env" | grep -v '^#' | xargs)
+# 載入環境變數（安全方式，避免特殊字符問題）
+set -a
+source "$SCRIPT_DIR/.env"
+set +a
+
+# 設置 PYTHONPATH
+export PYTHONPATH="$SCRIPT_DIR"
 
 # 創建必要目錄
 mkdir -p "$SCRIPT_DIR/output"
 mkdir -p "$SCRIPT_DIR/temp"
 
-# 在背景啟動服務，輸出到日誌檔
-cd "$SCRIPT_DIR/src"
-nohup python3 -m uvicorn whisper_server:app --host 0.0.0.0 --port 8000 > "$LOG_FILE" 2>&1 &
+# 在背景啟動服務，輸出到日誌檔（從專案根目錄運行）
+cd "$SCRIPT_DIR"
+nohup uvicorn src.main:app --host 0.0.0.0 --port 8000 > "$LOG_FILE" 2>&1 &
 
 # 保存 PID
 echo $! > "$PID_FILE"
 
 echo "✅ 後端服務已在背景啟動"
 echo ""
-echo "📍 API 端點：http://localhost:8000"
+echo "📍 API 端點："
+echo "   - http://localhost:8000"
+echo "   - http://100.66.247.23:8000"
 echo "📋 日誌檔案：$LOG_FILE"
 echo "🔢 進程 ID：$(cat $PID_FILE)"
 echo ""
