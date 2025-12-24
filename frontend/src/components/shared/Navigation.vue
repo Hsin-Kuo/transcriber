@@ -179,17 +179,78 @@ watch(() => route.path, (newPath, oldPath) => {
 .navigation {
   width: 240px;
   min-width: 240px;
-  height: calc(100vh - 40px);
+  height: 100vh;
   position: sticky;
-  top: 20px;
+  top: 0;
   display: flex;
   flex-direction: column;
   gap: 24px;
   padding: 28px 20px;
-  background: var(--neu-bg);
-  border-radius: 20px;
+  background: var(--nav-bg);
+  border-radius: 0;
   box-shadow: var(--neu-shadow-raised);
   transition: all 0.3s ease;
+}
+
+.navigation::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image:
+    /* 垂直 - 密集細線 */
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 3px,
+      rgba(255, 255, 255, 0.018) 3px,
+      rgba(255, 255, 255, 0.018) 4px
+    ),
+    /* 垂直 - 中等間距 */
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 9px,
+      rgba(255, 255, 255, 0.028) 9px,
+      rgba(255, 255, 255, 0.028) 11px
+    ),
+    /* 垂直 - 稀疏粗線 */
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 19px,
+      rgba(255, 255, 255, 0.038) 19px,
+      rgba(255, 255, 255, 0.038) 21px
+    ),
+    /* 水平 - 密集細線 */
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 5px,
+      rgba(0, 0, 0, 0.018) 5px,
+      rgba(0, 0, 0, 0.018) 6px
+    ),
+    /* 水平 - 中等間距 */
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 13px,
+      rgba(0, 0, 0, 0.028) 13px,
+      rgba(0, 0, 0, 0.028) 15px
+    ),
+    /* 水平 - 稀疏粗線 */
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 31px,
+      rgba(0, 0, 0, 0.038) 31px,
+      rgba(0, 0, 0, 0.038) 33px
+    );
+  pointer-events: none;
+  opacity: 0.4;
+  z-index: 0;
 }
 
 /* 收合狀態 */
@@ -208,7 +269,7 @@ watch(() => route.path, (newPath, oldPath) => {
   width: 28px;
   height: 36px;
   border: none;
-  background: var(--neu-bg);
+  background: var(--nav-bg);
   border-radius: 6px;
   box-shadow: var(--neu-shadow-btn-sm);
   cursor: pointer;
@@ -236,7 +297,17 @@ watch(() => route.path, (newPath, oldPath) => {
 
 .nav-brand {
   padding-bottom: 20px;
-  border-bottom: 1px solid rgba(163, 177, 198, 0.2);
+  position: relative;
+}
+
+.nav-brand::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 80px;
+  right: -50px;
+  height: 1px;
+  background-color: black;
 }
 
 .nav-brand h2 {
@@ -244,7 +315,7 @@ watch(() => route.path, (newPath, oldPath) => {
   margin: 0;
   font-weight: 700;
   letter-spacing: -0.5px;
-  color: var(--neu-primary);
+  color: var(--nav-text);
   text-align: center;
   transition: all 0.3s ease;
 }
@@ -271,8 +342,8 @@ watch(() => route.path, (newPath, oldPath) => {
   border-radius: 12px;
   text-decoration: none;
   font-weight: 600;
-  color: var(--neu-text);
-  background: var(--neu-bg);
+  color: var(--nav-text);
+  background: var(--nav-bg);
   box-shadow: var(--neu-shadow-btn);
   transition: all 0.3s ease;
 }
@@ -285,8 +356,8 @@ watch(() => route.path, (newPath, oldPath) => {
 
 .nav-link.active {
   box-shadow: var(--neu-shadow-btn-active);
-  color: var(--neu-primary-dark);
-  background: #dee5d2;
+  color: var(--nav-recent-text);
+  background: var(--nav-active-bg);
 }
 
 .nav-link svg {
@@ -319,6 +390,74 @@ watch(() => route.path, (newPath, oldPath) => {
 .nav-spacer {
   flex: 1;
   min-height: 20px;
+  background: var(--nav-recent-bg);
+  margin: 0 -20px -24px -20px;
+  padding-bottom: 24px;
+  position: relative;
+}
+
+.nav-spacer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image:
+    /* 垂直 - 密集細線 */
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 1px,
+      rgba(255, 255, 255, 0.022) 1px,
+      rgba(255, 255, 255, 0.022) 2px
+    ),
+    /* 垂直 - 中等間距 */
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 7px,
+      rgba(255, 255, 255, 0.032) 7px,
+      rgba(255, 255, 255, 0.032) 9px
+    ),
+    /* 垂直 - 稀疏粗線 */
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 23px,
+      rgba(255, 255, 255, 0.048) 23px,
+      rgba(255, 255, 255, 0.048) 25px
+    ),
+    /* 水平 - 密集細線 */
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 3px,
+      rgba(0, 0, 0, 0.022) 3px,
+      rgba(0, 0, 0, 0.022) 4px
+    ),
+    /* 水平 - 中等間距 */
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 12px,
+      rgba(0, 0, 0, 0.032) 12px,
+      rgba(0, 0, 0, 0.032) 14px
+    ),
+    /* 水平 - 稀疏粗線 */
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 29px,
+      rgba(0, 0, 0, 0.048) 29px,
+      rgba(0, 0, 0, 0.048) 31px
+    );
+  pointer-events: none;
+  opacity: 0.3;
+}
+
+.navigation.collapsed .nav-spacer {
+  margin: 0 -12px -24px -12px;
 }
 
 .nav-user {
@@ -327,15 +466,87 @@ watch(() => route.path, (newPath, oldPath) => {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding-top: 20px;
+  padding: 20px 20px 28px 20px;
+  margin: 0 -20px -28px -20px;
+  background: var(--nav-recent-bg);
   border-top: 1px solid rgba(163, 177, 198, 0.2);
   transition: all 0.3s ease;
+  position: relative;
+}
+
+.nav-user::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image:
+    /* 垂直 - 密集細線 */
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(255, 255, 255, 0.025) 2px,
+      rgba(255, 255, 255, 0.025) 4px
+    ),
+    /* 垂直 - 中等間距 */
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 10px,
+      rgba(255, 255, 255, 0.04) 10px,
+      rgba(255, 255, 255, 0.04) 12px
+    ),
+    /* 垂直 - 稀疏粗線 */
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 18px,
+      rgba(255, 255, 255, 0.052) 18px,
+      rgba(255, 255, 255, 0.052) 20px
+    ),
+    /* 水平 - 密集細線 */
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 6px,
+      rgba(0, 0, 0, 0.025) 6px,
+      rgba(0, 0, 0, 0.025) 7px
+    ),
+    /* 水平 - 中等間距 */
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 14px,
+      rgba(0, 0, 0, 0.04) 14px,
+      rgba(0, 0, 0, 0.04) 16px
+    ),
+    /* 水平 - 稀疏粗線 */
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 24px,
+      rgba(0, 0, 0, 0.052) 24px,
+      rgba(0, 0, 0, 0.052) 26px
+    );
+  pointer-events: none;
+  opacity: 0.1;
+  z-index: 0;
 }
 
 /* 收合狀態下的使用者區域 - 垂直排列 */
 .navigation.collapsed .nav-user {
   flex-direction: column;
   gap: 12px;
+  padding: 20px 12px 20px 12px;
+  margin: 0 -12px -20px -12px;
+  background: transparent;
+  border-top: none;
+}
+
+.navigation.collapsed .nav-user::before {
+  display: none;
 }
 
 .user-avatar-btn {
@@ -344,6 +555,8 @@ watch(() => route.path, (newPath, oldPath) => {
   justify-content: center;
   text-decoration: none;
   transition: transform 0.2s ease;
+  position: relative;
+  z-index: 1;
 }
 
 .user-avatar-btn:hover {
@@ -354,14 +567,14 @@ watch(() => route.path, (newPath, oldPath) => {
   width: 48px;
   height: 48px;
   border-radius: 50%;
-  background: var(--neu-bg);
+  background: var(--nav-bg);
   box-shadow: var(--neu-shadow-btn);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 1.25rem;
   font-weight: 700;
-  color: var(--neu-primary);
+  color: var(--nav-text);
   transition: all 0.3s ease;
   cursor: pointer;
 }
@@ -383,13 +596,15 @@ watch(() => route.path, (newPath, oldPath) => {
   padding: 12px 16px;
   border-radius: 12px;
   border: none;
-  background: var(--neu-bg);
+  background: var(--nav-bg);
   cursor: pointer;
   font-weight: 600;
   font-size: 0.9rem;
-  color: var(--neu-text);
+  color: var(--nav-text);
   box-shadow: var(--neu-shadow-btn);
   transition: all 0.3s ease;
+  position: relative;
+  z-index: 1;
 }
 
 .logout-btn:hover {
@@ -424,13 +639,78 @@ watch(() => route.path, (newPath, oldPath) => {
 }
 
 .recent-tasks {
-  padding: 6px 6px 0 0;
+  padding: 16px 20px 24px 20px;
   flex: 1;
   display: flex;
   flex-direction: column;
   gap: 8px;
   min-height: 0;
   overflow: hidden;
+  background: var(--nav-recent-bg);
+  margin: 0 -20px -24px -20px;
+  border-radius: 0;
+  position: relative;
+}
+
+.recent-tasks::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image:
+    /* 垂直 - 密集細線 */
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 3px,
+      rgba(255, 255, 255, 0.024) 3px,
+      rgba(255, 255, 255, 0.024) 5px
+    ),
+    /* 垂直 - 中等間距 */
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 6px,
+      rgba(255, 255, 255, 0.036) 6px,
+      rgba(255, 255, 255, 0.036) 8px
+    ),
+    /* 垂直 - 稀疏粗線 */
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 25px,
+      rgba(255, 255, 255, 0.046) 25px,
+      rgba(255, 255, 255, 0.046) 27px
+    ),
+    /* 水平 - 密集細線 */
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 5px,
+      rgba(0, 0, 0, 0.024) 5px,
+      rgba(0, 0, 0, 0.024) 7px
+    ),
+    /* 水平 - 中等間距 */
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 9px,
+      rgba(0, 0, 0, 0.036) 9px,
+      rgba(0, 0, 0, 0.036) 11px
+    ),
+    /* 水平 - 稀疏粗線 */
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 33px,
+      rgba(0, 0, 0, 0.046) 33px,
+      rgba(0, 0, 0, 0.046) 35px
+    );
+  pointer-events: none;
+  opacity: 0;
+  z-index: 0;
 }
 
 .recent-tasks-header {
@@ -439,6 +719,8 @@ watch(() => route.path, (newPath, oldPath) => {
   align-items: center;
   padding: 0 4px;
   margin-bottom: 8px;
+  position: relative;
+  z-index: 1;
 }
 
 .header-left {
@@ -455,7 +737,7 @@ watch(() => route.path, (newPath, oldPath) => {
 .header-left h3 {
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--neu-text-light);
+  color: var(--neu-text-lighter);
   margin: 0;
 }
 
@@ -463,9 +745,9 @@ watch(() => route.path, (newPath, oldPath) => {
   padding: 4px 10px;
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--neu-text);
+  color: var(--neu-text-lighter);
   text-decoration: none;
-  background: var(--neu-bg);
+  background: var(--nav-recent-btn);
   box-shadow: var(--neu-shadow-btn-sm);
   border-radius: 8px;
   transition: all 0.2s ease;
@@ -490,6 +772,8 @@ watch(() => route.path, (newPath, oldPath) => {
   overflow-y: auto;
   max-height: 300px;
   padding-right: 4px;
+  position: relative;
+  z-index: 1;
 }
 
 .recent-tasks-list::-webkit-scrollbar {
@@ -510,46 +794,31 @@ watch(() => route.path, (newPath, oldPath) => {
   flex-direction: column;
   gap: 4px;
   padding: 3px 12px;
-  /* border-radius: 10px; */
-  background: var(--neu-bg);
-  /* box-shadow: var(--neu-shadow-btn); */
+  border-radius: 8px;
+  background: transparent;
   text-decoration: none;
   transition: all 0.2s ease;
   cursor: pointer;
 }
 
 .recent-task-item:hover {
-  /* box-shadow: var(--neu-shadow-btn-hover); */
+  background: transparent;
   transform: translateX(2px);
 }
 
 .recent-task-item:active {
-  box-shadow: var(--neu-shadow-btn-active);
+  background: transparent;
   transform: translateX(0);
 }
 
 .task-name {
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--neu-text);
+  color: var(--neu-text-lighter);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1.3;
-}
-
-.task-time {
-  font-size: 0.7rem;
-  color: var(--neu-text-lighter);
-  line-height: 1.2;
-}
-
-.recent-task-empty {
-  padding: 16px 12px;
-  text-align: center;
-  font-size: 0.75rem;
-  color: var(--neu-text-lighter);
-  font-style: italic;
 }
 
 @media (max-width: 768px) {

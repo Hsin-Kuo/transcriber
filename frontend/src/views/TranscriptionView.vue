@@ -1276,6 +1276,13 @@ function replaceAll() {
 // 生命週期
 onMounted(() => {
   refreshTasks()
+  // 限制視窗高度
+  document.body.classList.add('upload-page')
+})
+
+onUnmounted(() => {
+  // 清理：移除視窗高度限制
+  document.body.classList.remove('upload-page')
 })
 </script>
 

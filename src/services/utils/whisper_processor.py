@@ -162,12 +162,18 @@ class WhisperProcessor:
         Returns:
             (segments 列表, 偵測到的語言)
         """
+        print(f"🎯 [_transcribe_with_timestamps] 開始 Whisper 模型轉錄")
+        print(f"🎯 [_transcribe_with_timestamps] 音檔路徑: {audio_path}")
+        print(f"🎯 [_transcribe_with_timestamps] 語言: {language}")
+
         segments_list = []
+        print(f"⏳ [_transcribe_with_timestamps] 調用 model.transcribe()...")
         segments, info = self.model.transcribe(
             str(audio_path),
             language=language,
             beam_size=5
         )
+        print(f"✅ [_transcribe_with_timestamps] model.transcribe() 完成！")
 
         # 獲取 Whisper 偵測到的語言
         detected_language = info.language if hasattr(info, 'language') else None

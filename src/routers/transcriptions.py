@@ -8,6 +8,7 @@ from urllib.parse import quote
 import tempfile
 import uuid
 import json
+import shutil
 
 from ..auth.dependencies import get_current_user, check_quota
 from ..database.mongodb import get_database
@@ -218,6 +219,46 @@ async def create_transcription(
 
         print(f"📁 收到檔案：{file.filename} ({len(content) / 1024 / 1024:.2f} MB)")
 
+        # 獲取音檔時長
+        from src.services.audio_service import AudioService
+        audio_service = AudioService()
+        try:
+            audio_duration_ms = audio_service.get_audio_duration(temp_audio)
+            audio_duration_seconds = audio_duration_ms / 1000.0
+            print(f"⏱️ 音檔時長：{audio_duration_seconds:.2f} 秒")
+        except Exception as e:
+            print(f"⚠️ 獲取音檔時長失敗：{e}")
+            shutil.rmtree(temp_dir)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"無法讀取音檔資訊：{str(e)}"
+            )
+
+        # 獲取完整用戶資料（包含配額）
+        from src.database.repositories.user_repo import UserRepository
+        user_repo = UserRepository(db)
+        full_user_data = await user_repo.get_by_id(str(current_user["_id"]))
+
+        if not full_user_data:
+            shutil.rmtree(temp_dir)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="無法獲取用戶資訊"
+            )
+
+        # 檢查轉錄配額
+        from src.auth.quota import QuotaManager
+        try:
+            await QuotaManager.check_transcription_quota(
+                full_user_data,
+                audio_duration_seconds
+            )
+        except HTTPException as quota_error:
+            # 清理臨時檔案
+            shutil.rmtree(temp_dir)
+            # 拋出配額不足異常
+            raise quota_error
+
         # 檢查 diarization 可用性
         if diarize and not _diarization_processor:
             raise HTTPException(
@@ -269,6 +310,11 @@ async def create_transcription(
 
             # 狀態
             "status": "pending",
+
+            # 統計資訊
+            "stats": {
+                "audio_duration_seconds": audio_duration_seconds,
+            },
 
             # 使用者設定與標籤
             "tags": task_tags,

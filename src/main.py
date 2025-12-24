@@ -177,7 +177,7 @@ async def startup_event():
         current_model_name,
         device="auto",
         compute_type="int8",
-        cpu_threads=1,
+        cpu_threads=8,  # 增加 CPU 線程數以提升性能
         num_workers=4
     )
     print(f"✅ Whisper 模型載入完成！")

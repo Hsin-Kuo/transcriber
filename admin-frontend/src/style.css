@@ -129,53 +129,7 @@ body {
   border: none;
 }
 
-/* Neumorphism 卡片效果樣式 */
-.electric-card {
-  padding: 0;
-  border-radius: 20px;
-  position: relative;
-  background: var(--neu-bg);
-  box-shadow: var(--neu-shadow-raised);
-  border: none;
-}
 
-.electric-inner {
-  position: relative;
-}
-
-.electric-border-outer {
-  border-radius: 20px;
-  padding: 0;
-}
-
-.electric-main {
-  border-radius: 20px;
-  background: var(--neu-bg);
-  position: relative;
-  overflow: hidden;
-  color: var(--neu-text);
-  margin: 0;
-  border: none;
-}
-
-/* 移除電流動畫效果 */
-.electric-main.animated::before {
-  display: none;
-}
-
-/* 確保內容不受影響 */
-.electric-main > * {
-  position: relative;
-  z-index: 1;
-}
-
-/* 移除光暈層 */
-.electric-glow-1,
-.electric-glow-2,
-.electric-overlay,
-.electric-bg-glow {
-  display: none;
-}
 
 .btn {
   padding: 12px 24px;

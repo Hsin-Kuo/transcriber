@@ -93,7 +93,7 @@
         <audio
           ref="audioElement"
           preload="metadata"
-          :src="getAudioUrl(currentTranscript.task_id)"
+          :src="audioUrl"
           @error="handleAudioError"
           @loadedmetadata="handleAudioLoaded"
           @play="isPlaying = true"
@@ -108,7 +108,16 @@
         </audio>
 
         <div v-if="audioError" class="audio-error">
-          ⚠️ {{ audioError }}
+          <div class="error-message">⚠️ {{ audioError }}</div>
+          <button @click="reloadAudio" class="btn-retry">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+              <path d="M21 3v5h-5"/>
+              <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+              <path d="M3 21v-5h5"/>
+            </svg>
+            重試載入
+          </button>
         </div>
 
         <div class="custom-audio-player circular-player">
@@ -379,6 +388,7 @@ const originalContent = ref('')
 // 音訊播放器狀態
 const audioElement = ref(null)
 const audioError = ref(null)
+const audioUrl = ref('')
 const isPlaying = ref(false)
 const progressBar = ref(null)
 const currentTime = ref(0)
@@ -484,6 +494,12 @@ async function loadTranscript(taskId) {
       content: ''
     }
 
+    // 初始化音檔 URL
+    if (currentTranscript.value.hasAudio) {
+      audioUrl.value = getAudioUrl(task.task_id)
+      audioError.value = null
+    }
+
     // 並行獲取逐字稿和 segments
     const [transcriptResponse, segmentsResponse] = await Promise.all([
       api.get(NEW_ENDPOINTS.transcriptions.download(taskId), {
@@ -536,6 +552,15 @@ watch(() => route.params.taskId, (newTaskId) => {
   }
 })
 
+// 監聽編輯狀態變化，控制視窗高度
+watch(isEditing, (editing) => {
+  if (editing) {
+    document.body.classList.add('editing-transcript')
+  } else {
+    document.body.classList.remove('editing-transcript')
+  }
+})
+
 // 鍵盤快捷鍵
 onMounted(() => {
   window.addEventListener('keydown', handleKeyboardShortcuts)
@@ -543,6 +568,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyboardShortcuts)
+  document.body.classList.remove('editing-transcript')
 })
 
 // 格式化日期
@@ -654,29 +680,113 @@ function goBack() {
 // 音訊播放器功能
 function getAudioUrl(taskId) {
   const token = TokenManager.getAccessToken()
-  if (!token) return ''
-  return `${API_BASE}${NEW_ENDPOINTS.transcriptions.audio(taskId)}?token=${encodeURIComponent(token)}`
+  if (!token) {
+    console.warn('無法獲取 access token，音檔載入失敗')
+    return ''
+  }
+  // 添加時間戳避免瀏覽器緩存
+  return `${API_BASE}${NEW_ENDPOINTS.transcriptions.audio(taskId)}?token=${encodeURIComponent(token)}&t=${Date.now()}`
+}
+
+// 重新載入音檔（當 token 刷新或需要重試時）
+function reloadAudio() {
+  if (!currentTranscript.value.task_id || !currentTranscript.value.hasAudio) return
+
+  const newUrl = getAudioUrl(currentTranscript.value.task_id)
+  if (!newUrl) {
+    audioError.value = '無法獲取授權 Token，請重新登入'
+    return
+  }
+
+  // 保存當前播放位置
+  const currentPosition = audioElement.value?.currentTime || 0
+  const wasPlaying = isPlaying.value
+
+  // 更新音檔 URL
+  audioUrl.value = newUrl
+  audioError.value = null
+
+  // 恢復播放位置和狀態
+  if (audioElement.value) {
+    audioElement.value.load()
+    audioElement.value.addEventListener('loadedmetadata', () => {
+      if (audioElement.value && currentPosition > 0) {
+        audioElement.value.currentTime = currentPosition
+      }
+      if (wasPlaying) {
+        audioElement.value?.play().catch(err => console.log('恢復播放失敗:', err))
+      }
+    }, { once: true })
+  }
 }
 
 function handleAudioLoaded() {
   audioError.value = null
 }
 
-function handleAudioError(event) {
+async function handleAudioError(event) {
   const audio = event.target
   if (audio.error) {
-    switch (audio.error.code) {
-      case audio.error.MEDIA_ERR_NETWORK:
-        audioError.value = '網路錯誤，無法載入音檔'
-        break
-      case audio.error.MEDIA_ERR_DECODE:
-        audioError.value = '音檔格式錯誤或損壞'
-        break
-      case audio.error.MEDIA_ERR_SRC_NOT_SUPPORTED:
-        audioError.value = '不支援的音檔格式或音檔不存在'
-        break
-      default:
-        audioError.value = '音檔載入失敗'
+    console.error('音檔載入錯誤:', {
+      code: audio.error.code,
+      message: audio.error.message,
+      src: audio.src
+    })
+
+    // 嘗試診斷實際的錯誤原因
+    if (audio.error.code === audio.error.MEDIA_ERR_SRC_NOT_SUPPORTED) {
+      try {
+        // 使用 fetch 檢查後端實際返回了什麼
+        const response = await fetch(audio.src)
+        const contentType = response.headers.get('content-type')
+
+        console.log('後端響應診斷:', {
+          status: response.status,
+          statusText: response.statusText,
+          contentType: contentType
+        })
+
+        if (!response.ok) {
+          // 後端返回錯誤狀態碼
+          if (response.status === 401 || response.status === 403) {
+            audioError.value = '授權已過期或無效。請點擊「重試載入」以更新授權。'
+          } else if (response.status === 404) {
+            audioError.value = '音檔不存在或已被刪除。'
+          } else {
+            const errorText = await response.text()
+            console.error('後端錯誤響應:', errorText)
+            audioError.value = `後端錯誤 (${response.status}): ${response.statusText}`
+          }
+        } else if (contentType && !contentType.includes('audio')) {
+          // 後端返回了非音檔內容
+          const responseText = await response.text()
+          console.error('後端返回了非音檔內容:', responseText.substring(0, 200))
+          audioError.value = `後端返回了無效的內容類型: ${contentType}。預期為音檔格式。`
+        } else {
+          // 其他未知原因
+          audioError.value = '音檔格式不被瀏覽器支援，或檔案已損壞。'
+        }
+      } catch (fetchError) {
+        console.error('診斷錯誤時發生問題:', fetchError)
+        const token = TokenManager.getAccessToken()
+        if (!token) {
+          audioError.value = '授權 Token 已失效，請重新登入或點擊「重試載入」。'
+        } else {
+          audioError.value = '無法存取音檔。可能原因：音檔不存在、已被刪除，或授權已過期。'
+        }
+      }
+    } else {
+      // 其他類型的錯誤
+      switch (audio.error.code) {
+        case audio.error.MEDIA_ERR_NETWORK:
+          audioError.value = '網路錯誤，無法載入音檔。請檢查網路連線或授權是否過期。'
+          break
+        case audio.error.MEDIA_ERR_DECODE:
+          audioError.value = '音檔格式錯誤或損壞，無法解碼。'
+          break
+        default:
+          audioError.value = '音檔載入失敗。請稍後再試或重新整理頁面。'
+      }
     }
   }
 }
@@ -1274,7 +1384,7 @@ function handleKeyboardShortcuts(event) {
   width: 100%;
   font-size: 1.75rem;
   font-weight: 700;
-  color: var(--neu-primary);
+  color: var(--nav-recent-bg);
   padding: 8px 12px;
   border: 2px solid var(--neu-primary);
   border-radius: 8px;
@@ -1303,11 +1413,54 @@ function handleKeyboardShortcuts(event) {
 }
 
 .audio-error {
-  padding: 12px;
-  background: #ffebee;
-  color: #c62828;
+  padding: 16px;
+  background: rgba(255, 235, 238, 0.9);
+  border-left: 4px solid #c62828;
   border-radius: 8px;
   margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 2px 8px rgba(198, 40, 40, 0.1);
+}
+
+.error-message {
+  color: #c62828;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.btn-retry {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--neu-bg);
+  color: #c62828;
+  border: 1px solid #c62828;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  align-self: flex-start;
+}
+
+.btn-retry:hover {
+  background: #c62828;
+  color: white;
+  box-shadow: 0 2px 8px rgba(198, 40, 40, 0.2);
+  transform: translateY(-1px);
+}
+
+.btn-retry:active {
+  transform: translateY(0);
+}
+
+.btn-retry svg {
+  stroke: currentColor;
+  flex-shrink: 0;
 }
 
 /* 圓形播放器 */
@@ -1852,7 +2005,7 @@ function handleKeyboardShortcuts(event) {
 }
 
 .transcript-textarea.editing {
-  background: #fff;
+  background: var(--upload-bg);
   box-shadow: 0 0 0 2px var(--neu-primary);
 }
 

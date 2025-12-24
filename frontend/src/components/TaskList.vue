@@ -268,7 +268,6 @@
 
     <div v-if="tasks.length === 0" class="empty-state">
       <p>尚無轉錄任務</p>
-      <p class="text-muted">上傳音訊檔案以開始轉錄</p>
     </div>
 
     <div v-else class="tasks" :class="{ 'batch-mode': isBatchEditMode }">
@@ -294,17 +293,29 @@
                 <div class="task-info">
                   <div class="task-header">
                     <h3>{{ task.custom_name || task.file?.filename || task.filename || task.file }}</h3>
-                    <span :class="['badge', `badge-${task.status}`]">
-                      {{ getStatusText(task.status) }}
-                    </span>
+                    <template v-if="task.status !== 'completed'">
+                      <span class="task-divider">/</span>
+                      <span :class="['badge', `badge-${task.status}`]">
+                        {{ getStatusText(task.status) }}
+                      </span>
+                    </template>
                   </div>
 
                   <div class="task-meta">
-                    <span v-if="task.file?.size_mb || task.file_size_mb">
-                      📦 {{ task.file?.size_mb || task.file_size_mb }} MB
+                    <span v-if="getAudioDuration(task)" class="meta-item">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M9 18V5l12-2v13"></path>
+                        <circle cx="6" cy="18" r="3"></circle>
+                        <circle cx="18" cy="16" r="3"></circle>
+                      </svg>
+                      {{ getAudioDuration(task) }}
                     </span>
-                    <span v-if="task.timestamps?.created_at || task.created_at">
-                      🕒 {{ task.timestamps?.created_at || task.created_at }}
+                    <span v-if="task.timestamps?.created_at || task.created_at" class="meta-item">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polyline points="12 6 12 12 16 14"></polyline>
+                      </svg>
+                      {{ task.timestamps?.created_at || task.created_at }}
                     </span>
                     <span v-if="task.config?.diarize || task.diarize" class="badge-diarize" :title="(task.config?.max_speakers || task.max_speakers) ? `最多 ${task.config?.max_speakers || task.max_speakers} 位講者` : '自動偵測講者人數'">
                       說話者辨識{{ (task.config?.max_speakers || task.max_speakers) ? ` (≤${task.config?.max_speakers || task.max_speakers}人)` : '' }}
@@ -748,6 +759,23 @@ function getStatusText(status) {
     cancelled: '已取消'
   }
   return statusMap[status] || status
+}
+
+function getAudioDuration(task) {
+  // 優先使用新的 audio_duration_seconds 欄位（音檔實際時長）
+  const duration = task.stats?.audio_duration_seconds || task.audio_duration_seconds
+  if (!duration) {
+    return null
+  }
+
+  const minutes = Math.floor(duration / 60)
+  const seconds = Math.floor(duration % 60)
+
+  if (minutes > 0) {
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`
+  } else {
+    return `0:${seconds.toString().padStart(2, '0')}`
+  }
 }
 
 function getProgressWidth(task) {
@@ -1621,6 +1649,8 @@ onMounted(() => {
 
 <style scoped>
 .task-list {
+  margin-top: 24px;
+  margin-left: 15px;
   margin-bottom: 20px;
 }
 
@@ -1646,10 +1676,16 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   border-radius: 8px;
+  background: transparent;
+  color: var(--nav-recent-bg);
+  box-shadow: none;
 }
 
 .btn-icon:hover {
   transform: translateY(-1px) rotate(180deg);
+  background: transparent;
+  color: var(--nav-recent-bg);
+  box-shadow: none;
 }
 
 .btn-icon svg {
@@ -1848,7 +1884,7 @@ onMounted(() => {
   font-size: 13px;
   font-weight: 500;
   border: none;
-  border-radius: 12px;
+  border-radius: 0;
   cursor: pointer;
   transition: all 0.2s;
   background: var(--neu-bg);
@@ -1886,6 +1922,7 @@ onMounted(() => {
 .filter-tag-btn.active {
   font-weight: 600;
   box-shadow: var(--neu-shadow-btn-active);
+  border-bottom: 2px solid var(--nav-recent-bg);
 }
 
 .filter-tag-btn.active:hover:not(:disabled) {
@@ -2066,6 +2103,13 @@ onMounted(() => {
   margin: 0;
 }
 
+.task-divider {
+  font-size: 14px;
+  font-weight: 300;
+  color: rgba(0, 0, 0, 0.3);
+  margin: 0 -4px;
+}
+
 .task-meta {
   display: flex;
   gap: 16px;
@@ -2074,6 +2118,17 @@ onMounted(() => {
   margin-bottom: 12px;
   flex-wrap: wrap;
   align-items: center;
+}
+
+.task-meta .meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.task-meta .meta-item svg {
+  flex-shrink: 0;
+  opacity: 0.7;
 }
 
 .badge-diarize {
@@ -2443,7 +2498,7 @@ onMounted(() => {
 /* 瀏覽按鈕 - Neumorphism 風格 */
 .btn-view {
   background: var(--neu-bg);
-  color: #6c8ba3;
+  color: #2d2d2d;
   border: none;
   font-weight: 500;
 }
@@ -2454,7 +2509,7 @@ onMounted(() => {
 
 .btn-download {
   background: var(--neu-bg);
-  color: #6c8ba3;
+  color: #2d2d2d;
   border: none;
   font-weight: 500;
 }
@@ -2815,6 +2870,15 @@ onMounted(() => {
   font-size: 14px;
   font-weight: 500;
   transition: all 0.3s ease;
+  background: transparent;
+  color: var(--nav-recent-bg);
+  box-shadow: none;
+}
+
+.btn-batch-edit:hover {
+  background: transparent;
+  color: var(--nav-recent-bg);
+  box-shadow: none;
 }
 
 .btn-batch-edit.active {

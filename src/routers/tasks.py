@@ -275,9 +275,31 @@ def enrich_task_data(task: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         豐富後的任務數據
     """
-    # 這裡可以添加額外的計算欄位
-    # 例如：格式化時間、計算進度百分比等
-    return task
+    # 創建副本避免修改原始數據
+    enriched = task.copy()
+
+    # 確保進行中的任務總是有進度信息
+    status = enriched.get("status")
+
+    # 如果沒有進度信息，根據狀態添加默認值
+    if "progress" not in enriched or not enriched["progress"]:
+        if status == "pending":
+            enriched["progress"] = "等待處理中..."
+            enriched["progress_percentage"] = 0
+        elif status == "processing":
+            # 如果是處理中但沒有具體進度，提供一個默認進度
+            enriched["progress"] = enriched.get("progress", "轉錄處理中...")
+            if "progress_percentage" not in enriched or enriched["progress_percentage"] is None:
+                enriched["progress_percentage"] = 5  # 給一個小的進度值表示已開始
+
+    # 確保 progress_percentage 總是數字
+    if "progress_percentage" in enriched and enriched["progress_percentage"] is not None:
+        try:
+            enriched["progress_percentage"] = float(enriched["progress_percentage"])
+        except (TypeError, ValueError):
+            enriched["progress_percentage"] = 0
+
+    return enriched
 
 
 def serialize_for_json(obj):

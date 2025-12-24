@@ -51,6 +51,7 @@ class DiarizationStats(BaseModel):
 
 class TaskStats(BaseModel):
     """任務統計資訊"""
+    audio_duration_seconds: Optional[float] = Field(None, description="音檔實際時長（秒）")
     duration_seconds: Optional[float] = Field(None, description="任務執行時長（秒）")
     token_usage: Optional[TokenUsage] = Field(None, description="Token 使用統計")
     diarization: Optional[DiarizationStats] = Field(None, description="說話者辨識統計")
