@@ -318,7 +318,11 @@ async def create_transcription(
 
             # 使用者設定與標籤
             "tags": task_tags,
-            "keep_audio": True,  # 默認保留音檔
+            # ⚠️ keep_audio 默認為 False
+            # 注意：False 不代表不保存音檔！所有音檔都會被保存到 uploads/
+            # False 的意思是「可以被自動清理機制刪除」
+            # True 的意思是「用戶手動勾選保留，不會被自動刪除」
+            "keep_audio": False,
 
             # 時間戳記
             "timestamps": {

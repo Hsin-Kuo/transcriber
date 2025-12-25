@@ -1,27 +1,6 @@
 <template>
   <div class="task-list">
-    <div class="list-header">
-      <h2>Transcription Tasks</h2>
-      <div class="header-actions">
-        <button
-          class="btn btn-secondary btn-batch-edit"
-          :class="{ active: isBatchEditMode }"
-          @click="toggleBatchEditMode"
-          :title="isBatchEditMode ? '退出批次編輯' : '批次編輯'"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M9 11l3 3L22 4"></path>
-            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
-          </svg>
-          {{ isBatchEditMode ? '退出編輯' : '批次編輯' }}
-        </button>
-        <button class="btn btn-secondary btn-icon" @click="emit('refresh')" title="Refresh">
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
-          </svg>
-        </button>
-      </div>
-    </div>
+
 
     <!-- 標籤篩選區 -->
     <div v-if="allTags.length > 0" class="filter-section">
@@ -156,7 +135,27 @@
         </button>
       </div>
     </div>
-
+    <div class="list-header">
+      <div class="header-actions">
+        <button
+          class="btn btn-secondary btn-batch-edit"
+          :class="{ active: isBatchEditMode }"
+          @click="toggleBatchEditMode"
+          :title="isBatchEditMode ? '退出批次編輯' : '批次編輯'"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 11l3 3L22 4"></path>
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+          </svg>
+          {{ isBatchEditMode ? '退出編輯' : '批次編輯' }}
+        </button>
+        <button class="btn btn-secondary btn-icon" @click="emit('refresh')" title="Refresh">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+          </svg>
+        </button>
+      </div>
+    </div>
     <!-- 批次編輯工具列 -->
     <div v-if="isBatchEditMode" class="batch-toolbar">
       <div class="batch-toolbar-header">
@@ -1444,7 +1443,8 @@ function getKeepAudioTooltip(task) {
 
 // 切換保留音檔狀態
 async function toggleKeepAudio(task) {
-  const newValue = !task.keep_audio
+  const oldValue = task.keep_audio
+  const newValue = !oldValue
 
   // 如果要勾選，檢查是否超過限制
   if (newValue && keepAudioCount.value >= 3) {
@@ -1452,20 +1452,26 @@ async function toggleKeepAudio(task) {
     return
   }
 
+  // 先樂觀更新 UI（立即反映變化）
+  task.keep_audio = newValue
+
   try {
     await api.put(`/tasks/${task.task_id}/keep-audio`, {
       keep_audio: newValue
     })
-
-    // 更新本地狀態
-    task.keep_audio = newValue
 
     // 刷新任務列表
     emit('refresh')
 
   } catch (error) {
     console.error('更新音檔保留狀態失敗:', error)
-    alert('更新失敗：' + (error.response?.data?.detail || error.message))
+
+    // 恢復舊狀態
+    task.keep_audio = oldValue
+
+    // 顯示錯誤訊息
+    const errorMessage = error.response?.data?.detail || error.message
+    alert('更新失敗：' + errorMessage)
   }
 }
 
@@ -2072,6 +2078,15 @@ onMounted(() => {
   transition: all 0.3s;
   position: relative;
   z-index: 1;
+  background: var(--upload-bg);
+  clip-path: polygon(
+    25px 0,
+    100% 0,
+    100% calc(100% - 25px),
+    calc(100% - 25px) 100%,
+    0 100%,
+    0 25px
+  );
 }
 
 .task-wrapper:hover .task-item {
@@ -2094,7 +2109,9 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: #000000 0.5px solid;
 }
 
 .task-header h3 {

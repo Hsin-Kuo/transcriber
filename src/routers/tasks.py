@@ -596,18 +596,19 @@ async def delete_task(
         except Exception as e:
             print(f"⚠️ 刪除 segments 檔案失敗：{e}")
 
-    # 物理刪除音檔（如果存在且 keep_audio 為 False）
-    if not task.get("keep_audio", False):
-        audio_file_path = get_task_field(task, "audio_file")
-        if audio_file_path:
-            audio_file = Path(audio_file_path)
-            try:
-                if audio_file.exists():
-                    audio_file.unlink()
-                    deleted_files.append(audio_file.name)
-                    print(f"🗑️ 已刪除音檔：{audio_file.name}")
-            except Exception as e:
-                print(f"⚠️ 刪除音檔失敗：{e}")
+    # 物理刪除音檔（如果存在）
+    # ⚠️ 手動刪除任務時，應刪除所有相關檔案（包括音檔）
+    # keep_audio 只控制「自動清理機制」，不影響「用戶手動刪除」
+    audio_file_path = get_task_field(task, "audio_file")
+    if audio_file_path:
+        audio_file = Path(audio_file_path)
+        try:
+            if audio_file.exists():
+                audio_file.unlink()
+                deleted_files.append(audio_file.name)
+                print(f"🗑️ 已刪除音檔：{audio_file.name}")
+        except Exception as e:
+            print(f"⚠️ 刪除音檔失敗：{e}")
 
     # 清理記憶體狀態
     task_service.cleanup_task_memory(task_id)
@@ -701,16 +702,39 @@ async def update_keep_audio(
             detail="任務不存在或無權訪問"
         )
 
-    # 更新 keep_audio 設定
-    keep_audio = keep_audio_data.get("keep_audio", False)
-    await task_service.update_task_status(task_id, {"keep_audio": keep_audio})
+    new_keep_audio = keep_audio_data.get("keep_audio", False)
 
-    print(f"🎵 已更新任務 {task_id} 的保留音檔設定：{keep_audio}")
+    # 如果要設為 True，檢查保留數量限制
+    if new_keep_audio:
+        # 查詢該用戶目前有多少個已保留的音檔
+        user_id = str(current_user["_id"])
+        from src.database.mongodb import MongoDB
+        db = MongoDB.get_db()
+
+        # 查詢已保留的音檔任務（排除當前任務和已刪除的任務）
+        kept_tasks = await db.tasks.count_documents({
+            "user.user_id": user_id,
+            "keep_audio": True,
+            "_id": {"$ne": task_id},
+            "result.audio_file": {"$exists": True, "$ne": None},
+            "deleted": {"$ne": True}  # 排除已刪除的任務
+        })
+
+        if kept_tasks >= 3:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="最多只能保留 3 個音檔，請先取消其他音檔的保留設定"
+            )
+
+    # 更新設定
+    await task_service.update_task_status(task_id, {"keep_audio": new_keep_audio})
+
+    print(f"🎵 已更新任務 {task_id} 的保留音檔設定：{new_keep_audio}")
 
     return {
         "message": "保留音檔設定已更新",
         "task_id": task_id,
-        "keep_audio": keep_audio
+        "keep_audio": new_keep_audio
     }
 
 

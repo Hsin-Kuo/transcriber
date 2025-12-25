@@ -216,11 +216,15 @@ class TranscriptionService:
                 task_id,
                 result_file_path,
                 segments_file_path,
-                detected_language or language
+                detected_language or language,
+                final_text  # 传递文本用于计算字数
             )
 
-            # 6. 清理臨時檔案
+            # 6. 清理臨時檔案（包含保存音檔）
             self._cleanup_temp_files(task_id, wav_path)
+
+            # 7. 清理超出限制的舊音檔（在新音檔保存後才執行）
+            self._cleanup_old_audio_files(task_id)
 
             print(f"✅ 任務 {task_id} 完成！")
 
@@ -357,9 +361,11 @@ class TranscriptionService:
         import os
 
         try:
-            mongo_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
-            client = MongoClient(mongo_uri)
-            db = client.transcriber
+            # 使用與主應用相同的 MongoDB 配置
+            mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
+            db_name = os.getenv("MONGODB_DB_NAME", "transcriber")
+            client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+            db = client[db_name]
 
             task = db.tasks.find_one({"_id": task_id})
             client.close()
@@ -378,10 +384,11 @@ class TranscriptionService:
         import os
 
         try:
-            # 創建同步的 MongoDB 客戶端
-            mongo_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+            # 創建同步的 MongoDB 客戶端，使用與主應用相同的配置
+            mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
+            db_name = os.getenv("MONGODB_DB_NAME", "transcriber")
             client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
-            db = client.transcriber
+            db = client[db_name]
 
             # 添加 updated_at
             updates["updated_at"] = datetime.utcnow()
@@ -406,7 +413,8 @@ class TranscriptionService:
         task_id: str,
         result_file_path: Path,
         segments_file_path: Path,
-        language: Optional[str]
+        language: Optional[str],
+        transcription_text: str = ""
     ) -> None:
         """標記任務完成
 
@@ -415,8 +423,13 @@ class TranscriptionService:
             result_file_path: 結果檔案路徑
             segments_file_path: Segments 檔案路徑
             language: 偵測到的語言
+            transcription_text: 轉錄文本（用於計算字數）
         """
         from src.services.utils.async_utils import run_async_in_thread
+
+        # 計算字數統計
+        text_length = len(transcription_text)
+        word_count = len(transcription_text.split())
 
         # 1. 使用同步方法更新任務狀態
         self._update_task_sync(task_id, {
@@ -424,10 +437,14 @@ class TranscriptionService:
             "result.transcription_file": str(result_file_path),
             "result.transcription_filename": result_file_path.name,
             "result.segments_file": str(segments_file_path),
+            "result.text_length": text_length,  # 字符數
+            "result.word_count": word_count,    # 詞數
             "config.language": language,
             "timestamps.completed_at": datetime.now(TZ_UTC8).strftime("%Y-%m-%d %H:%M:%S"),
             "progress": "轉錄完成"
         })
+
+        print(f"📊 字數統計：{text_length} 字元，{word_count} 詞")
 
         # 2. 獲取任務信息並處理配額扣除（使用同步方法）
         try:
@@ -449,9 +466,10 @@ class TranscriptionService:
                             from bson import ObjectId
                             import os
 
-                            mongo_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
-                            client = MongoClient(mongo_uri)
-                            db = client.transcriber
+                            mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
+                            db_name = os.getenv("MONGODB_DB_NAME", "transcriber")
+                            client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+                            db = client[db_name]
 
                             db.users.update_one(
                                 {"_id": ObjectId(user_id)},
@@ -557,6 +575,114 @@ class TranscriptionService:
         """
         return self.task_service.is_cancelled(task_id)
 
+    def _cleanup_old_audio_files(self, task_id: str) -> None:
+        """清理超出限制的舊音檔
+
+        ⚠️ 重要邏輯說明（請勿修改）：
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        【自動清理規則】
+        1. 每個用戶最多保留 4 個音檔
+        2. 超過 4 個時：
+           - 從最舊的開始刪除
+           - 跳過 keep_audio = True 的音檔（用戶手動保留）
+           - 直到剩餘 4 個或無法再刪除為止
+
+        【範例】
+        假設有 5 個音檔：
+        - 音檔1（舊）keep_audio=False → 會被刪除
+        - 音檔2      keep_audio=False → 會被刪除
+        - 音檔3      keep_audio=True  → 跳過（受保護）
+        - 音檔4      keep_audio=False → 保留
+        - 音檔5（新）keep_audio=False → 保留
+        結果：保留音檔 3, 4, 5
+
+        【重要】
+        - keep_audio 不影響音檔是否被保存
+        - 所有音檔都會被保存（見 _cleanup_temp_files）
+        - keep_audio 只影響是否可以被自動刪除
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+        Args:
+            task_id: 當前任務 ID
+        """
+        try:
+            from pymongo import MongoClient
+            import os
+
+            # 獲取當前任務的用戶 ID
+            task = self._get_task_sync(task_id)
+            if not task:
+                return
+
+            if isinstance(task.get("user"), dict):
+                user_id = task["user"].get("user_id")
+            else:
+                user_id = task.get("user_id")
+
+            if not user_id:
+                return
+
+            # 連接數據庫
+            mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
+            db_name = os.getenv("MONGODB_DB_NAME", "transcriber")
+            client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+            db = client[db_name]
+
+            # 查詢該用戶所有有音檔的任務，按創建時間排序
+            # ⚠️ 排除已刪除的任務（deleted: True），已刪除的任務不計入額度
+            tasks_with_audio = list(db.tasks.find({
+                "user.user_id": user_id,
+                "status": "completed",
+                "result.audio_file": {"$exists": True, "$ne": None},
+                "deleted": {"$ne": True}  # 排除已刪除的任務
+            }).sort("timestamps.created_at", 1))  # 1 = 升序（舊到新）
+
+            print(f"🔍 用戶 {user_id} 共有 {len(tasks_with_audio)} 個音檔")
+
+            # 如果超過 4 個，刪除最舊的（跳過勾選保留的）
+            if len(tasks_with_audio) > 4:
+                to_delete_count = len(tasks_with_audio) - 4
+                deleted_count = 0
+
+                for old_task in tasks_with_audio:
+                    if deleted_count >= to_delete_count:
+                        break
+
+                    # 跳過勾選保留的
+                    if old_task.get("keep_audio", False):
+                        print(f"⏭️  跳過任務 {old_task['_id']}（用戶已勾選保留）")
+                        continue
+
+                    # 刪除音檔
+                    audio_file_path = old_task.get("result", {}).get("audio_file")
+                    if audio_file_path:
+                        from pathlib import Path
+                        audio_file = Path(audio_file_path)
+                        if audio_file.exists():
+                            try:
+                                audio_file.unlink()
+                                print(f"🗑️ 已刪除舊音檔：{audio_file_path}")
+                                deleted_count += 1
+
+                                # 更新資料庫，清除音檔路徑
+                                db.tasks.update_one(
+                                    {"_id": old_task["_id"]},
+                                    {"$set": {
+                                        "result.audio_file": None,
+                                        "result.audio_filename": None
+                                    }}
+                                )
+                            except Exception as e:
+                                print(f"⚠️ 刪除音檔失敗：{e}")
+
+                print(f"✅ 自動清理完成，共刪除 {deleted_count} 個舊音檔")
+
+            client.close()
+        except Exception as e:
+            print(f"⚠️ 清理舊音檔時發生錯誤：{e}")
+            import traceback
+            traceback.print_exc()
+
     def _save_audio_file_sync(self, task_id: str, temp_dir: Path, audio_files: list) -> None:
         """同步處理音檔保存和更新（避免 event loop 衝突）"""
         print(f"🔧 [_save_audio_file_sync] 開始處理，audio_files 數量: {len(audio_files)}")
@@ -593,6 +719,22 @@ class TranscriptionService:
     def _cleanup_temp_files(self, task_id: str, wav_path: Optional[Path]) -> None:
         """清理臨時檔案
 
+        ⚠️ 重要邏輯說明（請勿修改）：
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        1. 【所有音檔都會保存】
+           - 不管 keep_audio 是 True 還是 False
+           - 所有完成的轉錄都會將音檔保存到 uploads/
+
+        2. 【keep_audio 的作用】
+           - False（默認）：可以被自動清理機制刪除
+           - True（用戶勾選）：受保護，不會被自動刪除
+
+        3. 【自動清理機制】
+           - 在轉錄完成後由 _cleanup_old_audio_files() 執行
+           - 用戶超過 4 個音檔時，從最舊的開始刪除
+           - 跳過 keep_audio = True 的音檔
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
         Args:
             task_id: 任務 ID
             wav_path: WAV 檔案路徑（可選）
@@ -607,7 +749,7 @@ class TranscriptionService:
 
         # 檢查是否需要保留音檔（使用同步方法）
         task = self._get_task_sync(task_id)
-        keep_audio = task.get("keep_audio", True) if task else True  # 默認改為 True
+        keep_audio = task.get("keep_audio", False) if task else False  # 默認不保留
 
         print(f"🔍 任務 {task_id} 的 keep_audio 設定: {keep_audio}")
         if task:
@@ -619,26 +761,23 @@ class TranscriptionService:
             audio_files = list(temp_dir.glob("input.*"))
             print(f"🎵 找到的音檔: {[f.name for f in audio_files]}")
 
-            if keep_audio:
-                # 保留音檔：將原始音檔移動到永久儲存目錄
-                try:
-                    # 使用同步方法處理音檔保存（避免 event loop 衝突）
-                    self._save_audio_file_sync(task_id, temp_dir, audio_files)
+            # 總是保存音檔到永久目錄（不管 keep_audio 的值）
+            # keep_audio 只影響之後的自動清理機制
+            try:
+                # 使用同步方法處理音檔保存（避免 event loop 衝突）
+                self._save_audio_file_sync(task_id, temp_dir, audio_files)
 
-                    # 清理臨時目錄（不包含已移動的音檔）
-                    shutil.rmtree(temp_dir)
-                    print(f"🗑️ 已清理臨時目錄：{temp_dir.name}")
-                except Exception as e:
-                    print(f"⚠️ 保存音檔失敗：{e}")
-                    # 如果保存失敗，還是清理臨時目錄
-                    try:
-                        shutil.rmtree(temp_dir)
-                    except:
-                        pass
-            else:
-                # 不保留音檔：直接刪除臨時目錄
+                # 清理臨時目錄（不包含已移動的音檔）
+                shutil.rmtree(temp_dir)
+
+                if keep_audio:
+                    print(f"🗑️ 已清理臨時目錄，音檔已保存並標記為受保護")
+                else:
+                    print(f"🗑️ 已清理臨時目錄，音檔已保存（可被自動清理）")
+            except Exception as e:
+                print(f"⚠️ 保存音檔失敗：{e}")
+                # 如果保存失敗，還是清理臨時目錄
                 try:
                     shutil.rmtree(temp_dir)
-                    print(f"🗑️ 已清理臨時目錄（含音檔）：{temp_dir.name}")
-                except Exception as e:
-                    print(f"⚠️ 清理臨時目錄失敗：{e}")
+                except:
+                    pass
