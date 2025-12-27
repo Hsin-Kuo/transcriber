@@ -10,6 +10,17 @@
       </router-view>
     </main>
     <NotificationToast ref="notificationToast" />
+    <!-- 右下角三角形裝飾線 -->
+    <!-- <svg class="corner-decoration" viewBox="0 0 130 100" preserveAspectRatio="xMaxYMax meet"> -->
+      <!-- 正三角形的兩條上邊（從右下角→頂點→左下角） -->
+      <!-- <polyline
+        points="180,100 100,0 20,100"
+        fill="none"
+        stroke="#000"
+        stroke-width="0.8"
+        vector-effect="non-scaling-stroke"
+      />
+    </svg> -->
   </div>
 </template>
 
@@ -99,6 +110,33 @@ body.upload-page .content-wrapper {
 @media (max-width: 768px) {
   .app-container {
     flex-direction: column;
+  }
+}
+
+/* 右下角三角形裝飾線（SVG 響應式） */
+.corner-decoration {
+  position: fixed;
+  bottom: 0;
+  right: 0;
+  width: 200vw;  /* 視窗寬度的 8% */
+  height: 200vh; /* 視窗高度的 8% */
+  min-width: 60px;  /* 最小寬度，避免太小 */
+  min-height: 60px; /* 最小高度，避免太小 */
+  max-width: 500px; /* 最大寬度，避免太大 */
+  max-height: 500px; /* 最大高度，避免太大 */
+  pointer-events: none;
+  z-index: 000;
+}
+
+/* 響應式：小螢幕縮小 */
+@media (max-width: 768px) {
+  .corner-decoration {
+    width: 16vw;
+    height: 16vh;
+    min-width: 40px;
+    min-height: 40px;
+    max-width: 80px;
+    max-height: 80px;
   }
 }
 </style>

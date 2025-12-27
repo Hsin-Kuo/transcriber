@@ -33,6 +33,7 @@ _transcription_service: Optional[TranscriptionService] = None
 def init_transcription_service(
     whisper_model,
     task_service: TaskService,
+    model_name: str = "medium",
     diarization_pipeline=None,
     executor=None,
     output_dir: Optional[Path] = None
@@ -42,6 +43,7 @@ def init_transcription_service(
     Args:
         whisper_model: Whisper 模型實例
         task_service: TaskService 實例
+        model_name: 模型名稱（用於 ProcessPoolExecutor 中重新載入模型）
         diarization_pipeline: Diarization pipeline（可選）
         executor: 線程池執行器（可選）
         output_dir: 輸出目錄（可選）
@@ -49,7 +51,7 @@ def init_transcription_service(
     global _whisper_processor, _punctuation_processor, _diarization_processor, _transcription_service
 
     # 初始化處理器
-    _whisper_processor = WhisperProcessor(whisper_model)
+    _whisper_processor = WhisperProcessor(whisper_model, model_name)
     _punctuation_processor = PunctuationProcessor()
     _diarization_processor = DiarizationProcessor(diarization_pipeline) if diarization_pipeline else None
 
@@ -161,6 +163,7 @@ def get_task_field(task: dict, field: str):
 async def create_transcription(
     request: Request,
     file: UploadFile = File(..., description="音檔 (支援 mp3/m4a/wav/mp4 等格式)"),
+    task_type: str = Form("paragraph", description="任務類型 (paragraph/subtitle)"),
     punct_provider: str = Form("gemini", description="標點提供者 (openai/gemini/none)"),
     chunk_audio: bool = Form(True, description="是否使用分段模式"),
     chunk_minutes: int = Form(10, description="分段長度（分鐘）"),
@@ -178,6 +181,7 @@ async def create_transcription(
 
     Args:
         file: 音檔檔案
+        task_type: 任務類型 (paragraph=段落/subtitle=字幕)
         punct_provider: 標點提供者 (openai/gemini/none)
         chunk_audio: 是否使用分段模式
         chunk_minutes: 分段長度（分鐘）
@@ -194,6 +198,17 @@ async def create_transcription(
     Raises:
         HTTPException: 服務未就緒或參數錯誤
     """
+    # 驗證任務類型
+    if task_type not in ["paragraph", "subtitle"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="任務類型必須是 'paragraph' 或 'subtitle'"
+        )
+
+    # 字幕類型強制不使用標點符號
+    if task_type == "subtitle":
+        punct_provider = "none"
+        print(f"ℹ️  字幕模式：已自動停用標點符號處理")
     # 獲取服務
     try:
         transcription_service = get_transcription_service()
@@ -266,6 +281,17 @@ async def create_transcription(
                 detail="Speaker diarization 功能未啟用。請設定 HF_TOKEN 環境變數並重啟服務。"
             )
 
+        # 檢查當前處理中的任務數量（限流機制）
+        MAX_CONCURRENT_TASKS = 2  # 最多同時處理 2 個任務
+        processing_count = await transcription_service.task_service.count_processing_tasks()
+        pending_count = await transcription_service.task_service.count_pending_tasks()
+
+        # 判斷是否需要排隊
+        should_queue = processing_count >= MAX_CONCURRENT_TASKS
+
+        if should_queue:
+            print(f"⚠️  系統忙碌中（{processing_count} 個任務處理中，{pending_count} 個任務排隊中），新任務加入隊列")
+
         # 解析標籤
         task_tags = []
         if tags:
@@ -285,6 +311,9 @@ async def create_transcription(
         task_data = {
             "_id": task_id,
             "task_id": task_id,
+
+            # 任務類型（新增）
+            "task_type": task_type,
 
             # 使用者資訊
             "user": {
@@ -335,25 +364,36 @@ async def create_transcription(
         task_repo = TaskRepository(db)
         await task_repo.create(task_data)
 
+        # 初始化記憶體狀態（確保 SSE 能立即讀取到正確狀態）
+        transcription_service.task_service.update_memory_state(task_id, {
+            "status": "pending",
+            "progress": "等待處理中..."
+        })
+
         # 記錄臨時目錄
         transcription_service.task_service.set_temp_dir(task_id, temp_dir)
 
-        # 啟動轉錄（異步執行）
-        use_punctuation = punct_provider != "none"
-        language_code = None if language == "auto" else language
+        # 根據系統負載決定是否立即啟動或加入隊列
+        if not should_queue:
+            # 系統空閒，立即啟動轉錄（異步執行）
+            use_punctuation = punct_provider != "none"
+            language_code = None if language == "auto" else language
 
-        await transcription_service.start_transcription(
-            task_id=task_id,
-            audio_file_path=temp_audio,
-            language=language_code,
-            use_chunking=chunk_audio,
-            use_punctuation=use_punctuation,
-            punctuation_provider=punct_provider,
-            use_diarization=diarize,
-            max_speakers=max_speakers
-        )
+            await transcription_service.start_transcription(
+                task_id=task_id,
+                audio_file_path=temp_audio,
+                language=language_code,
+                use_chunking=chunk_audio,
+                use_punctuation=use_punctuation,
+                punctuation_provider=punct_provider,
+                use_diarization=diarize,
+                max_speakers=max_speakers
+            )
 
-        print(f"✅ 任務 {task_id} 已建立，正在背景執行轉錄...")
+            print(f"✅ 任務 {task_id} 已建立，正在背景執行轉錄...")
+        else:
+            # 系統忙碌，加入隊列（保持 pending 狀態）
+            print(f"📋 任務 {task_id} 已加入隊列，等待處理...（隊列中有 {pending_count + 1} 個任務）")
 
         # 記錄 audit log（創建轉錄任務）
         try:
@@ -378,10 +418,20 @@ async def create_transcription(
         except Exception as e:
             print(f"⚠️ 記錄 audit log 失敗：{e}")
 
+        # 返回結果（根據是否排隊調整消息）
+        if should_queue:
+            message = f"轉錄任務已加入隊列，目前有 {processing_count} 個任務處理中，{pending_count + 1} 個任務等待中"
+            queue_position = pending_count + 1
+        else:
+            message = "轉錄任務已建立，正在背景處理"
+            queue_position = 0
+
         return {
             "task_id": task_id,
             "status": "pending",
-            "message": "轉錄任務已建立，正在背景處理",
+            "message": message,
+            "queued": should_queue,
+            "queue_position": queue_position,
             "file": {
                 "filename": file.filename,
                 "size_mb": round(len(content) / 1024 / 1024, 2)

@@ -518,9 +518,11 @@ async function loadTranscript(taskId) {
     if (segmentsResponse && segmentsResponse.data.segments) {
       segments.value = segmentsResponse.data.segments
       timecodeMarkers.value = generateTimecodeMarkers(segments.value)
+      console.log('✅ 生成時間碼標記:', timecodeMarkers.value.length, '個')
       // 初始化 activeTimecodeIndex
       if (timecodeMarkers.value.length > 0) {
         activeTimecodeIndex.value = 0
+        console.log('📍 初始化 activeTimecodeIndex:', activeTimecodeIndex.value, '/', timecodeMarkers.value.length)
       }
     }
 
@@ -1091,6 +1093,11 @@ function syncScroll() {
 
   if (closestIndex !== activeTimecodeIndex.value) {
     activeTimecodeIndex.value = closestIndex
+    console.log('🕐 時間碼更新:',
+      timecodeMarkers.value[closestIndex].label,
+      `(${closestIndex + 1}/${timecodeMarkers.value.length})`,
+      `字元位置: ${estimatedCharPos}/${contentLength}`
+    )
   }
 }
 

@@ -81,6 +81,11 @@ class TranscriptionService:
             use_diarization: 是否使用說話者辨識
             max_speakers: 最大講者人數（2-10）
         """
+        # 如果 max_speakers 為 1，視為不需要辨識（只有一個講者無需辨識）
+        if max_speakers == 1:
+            use_diarization = False
+            print(f"ℹ️  [start_transcription] max_speakers=1，停用說話者辨識")
+
         # 在背景執行轉錄
         print(f"🚀 [start_transcription] 準備提交任務 {task_id} 到線程池")
         print(f"🔧 [start_transcription] 線程池狀態: {self.executor._threads if hasattr(self.executor, '_threads') else 'unknown'}")
@@ -132,6 +137,9 @@ class TranscriptionService:
         print(f"🔧 [_process_transcription] 音檔是否存在: {audio_file_path.exists()}")
 
         try:
+            # 更新任務狀態為 processing
+            self.task_service.update_memory_state(task_id, {"status": "processing"})
+
             # 1. 音訊轉換（轉為 WAV 格式）
             print(f"🔄 [_process_transcription] 開始轉換音檔格式")
             self._update_progress(task_id, "正在轉換音檔格式...", {"audio_converted": False})
@@ -144,24 +152,119 @@ class TranscriptionService:
                 self._cleanup_temp_files(task_id, wav_path)
                 return
 
-            # 2. 執行轉錄
-            print(f"🎤 [_process_transcription] 開始 Whisper 轉錄 (chunking={use_chunking})")
-            if use_chunking:
-                self._update_progress(task_id, "正在分段轉錄音檔...")
-                full_text, segments, detected_language = self.whisper.transcribe_in_chunks(
-                    wav_path,
-                    language=language,
-                    progress_callback=lambda idx, total: self._update_chunk_progress(
-                        task_id, idx, total
+            # 2. 並行執行轉錄和說話者辨識（如果啟用）
+            print(f"🎤 [_process_transcription] 開始並行處理：轉錄 + 說話者辨識")
+
+            # 準備並行任務
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            # 初始化變數
+            full_text = None
+            segments = None
+            detected_language = None
+            diarization_segments = None
+
+            if use_diarization and self.diarization:
+                # 並行模式：同時執行轉錄和說話者辨識
+                self._update_progress(task_id, "正在並行執行轉錄和說話者辨識...", {
+                    "diarization_started": True
+                })
+
+                with ThreadPoolExecutor(max_workers=2) as parallel_executor:
+                    # 提交轉錄任務
+                    transcription_future = parallel_executor.submit(
+                        self._run_transcription,
+                        task_id,
+                        wav_path,
+                        language,
+                        use_chunking
                     )
-                )
+
+                    # 提交說話者辨識任務
+                    diarization_future = parallel_executor.submit(
+                        self._run_diarization,
+                        task_id,
+                        wav_path,
+                        max_speakers
+                    )
+
+                    # 等待兩個任務完成（使用 result() 會阻塞直到完成）
+                    try:
+                        # 並行等待兩個任務
+                        for future in as_completed([transcription_future, diarization_future]):
+                            if future == transcription_future:
+                                full_text, segments, detected_language = future.result()
+                                print(f"✅ [並行] Whisper 轉錄完成 (文字長度: {len(full_text)})")
+                            elif future == diarization_future:
+                                diarization_segments = future.result()
+                                if diarization_segments:
+                                    num_speakers = len(set(s['speaker'] for s in diarization_segments))
+                                    print(f"✅ [並行] 說話者辨識完成，識別到 {num_speakers} 位說話者")
+                                else:
+                                    print(f"⚠️ [並行] 說話者辨識失敗或無結果")
+                    except Exception as e:
+                        print(f"❌ [並行] 並行執行出錯：{e}")
+                        import traceback
+                        traceback.print_exc()
+
+                # 合併結果
+                if diarization_segments and segments:
+                    # 獲取任務類型以決定處理方式
+                    task = self._get_task_sync(task_id)
+                    task_type = task.get("task_type", "paragraph") if task else "paragraph"
+
+                    num_speakers = len(set(s['speaker'] for s in diarization_segments))
+
+                    if task_type == "subtitle":
+                        # 字幕模式：將 speaker 整合到 segments，文字不變
+                        print(f"🎬 [字幕模式] 將說話者資訊整合到 segments...")
+                        print(f"🎬 [字幕模式] 轉錄 segments 數量: {len(segments)}")
+                        print(f"🎬 [字幕模式] 說話者 segments 數量: {len(diarization_segments)}")
+
+                        segments = self.whisper._merge_speaker_to_segments(
+                            segments, diarization_segments
+                        )
+                        # full_text 保持原樣（無說話者標記）
+
+                        print(f"✅ [字幕模式] 已將 {num_speakers} 位說話者資訊加入 segments")
+                        print(f"✅ [字幕模式] Segments 預覽: {segments[0] if segments else 'N/A'}")
+
+                    else:
+                        # 段落模式：合併到文字（現有行為）
+                        print(f"📝 [段落模式] 合併轉錄和說話者辨識到文字...")
+                        print(f"📝 [段落模式] 轉錄 segments 數量: {len(segments)}")
+                        print(f"📝 [段落模式] 說話者 segments 數量: {len(diarization_segments)}")
+
+                        merged_text = self.whisper._merge_transcription_with_diarization(
+                            segments, diarization_segments
+                        )
+
+                        print(f"✅ [段落模式] 合併完成，文字長度: {len(merged_text)}")
+                        print(f"✅ [段落模式] 已合併 {num_speakers} 位說話者到文字")
+                        print(f"✅ [段落模式] 合併文字預覽: {merged_text[:200]}...")
+
+                        full_text = merged_text
+
+                    self._update_progress(task_id, "語者辨識完成", {
+                        "diarization_completed": True,
+                        "num_speakers": num_speakers
+                    })
+                else:
+                    print(f"⚠️ [合併] 無法合併：diarization_segments={diarization_segments is not None}, segments={segments is not None}")
+                    self._update_progress(task_id, "語者辨識失敗，使用原始文字", {
+                        "diarization_failed": True
+                    })
             else:
-                self._update_progress(task_id, "正在轉錄音檔...")
-                full_text, segments, detected_language = self.whisper.transcribe(
+                # 只執行轉錄（無說話者辨識）
+                print(f"🎤 [_process_transcription] 開始 Whisper 轉錄 (chunking={use_chunking})")
+                full_text, segments, detected_language = self._run_transcription(
+                    task_id,
                     wav_path,
-                    language=language
+                    language,
+                    use_chunking
                 )
-            print(f"✅ [_process_transcription] Whisper 轉錄完成 (文字長度: {len(full_text)}, 語言: {detected_language})")
+
+            print(f"✅ [_process_transcription] 轉錄完成 (文字長度: {len(full_text)}, 語言: {detected_language})")
 
             # 檢查是否已取消
             if self._is_cancelled(task_id):
@@ -309,27 +412,31 @@ class TranscriptionService:
         if extra_fields:
             updates.update(extra_fields)
 
+        print(f"📡 [SSE] 更新進度: {progress_text}", flush=True)
         self.task_service.update_memory_state(task_id, updates)
 
     def _update_chunk_progress(
         self,
         task_id: str,
-        chunk_idx: int,
-        total_chunks: int
+        completed_chunks: int,
+        total_chunks: int,
+        processing_chunks: int = 0
     ) -> None:
         """更新分段轉錄進度
 
         Args:
             task_id: 任務 ID
-            chunk_idx: 當前 chunk 索引
+            completed_chunks: 已完成的 chunk 數量
             total_chunks: 總 chunk 數
+            processing_chunks: 正在處理中的 chunk 數量
         """
         self._update_progress(
             task_id,
-            f"正在轉錄第 {chunk_idx}/{total_chunks} 段...",
+            f"並行轉錄中（已完成 {completed_chunks}/{total_chunks} 段）...",
             {
                 "total_chunks": total_chunks,
-                "completed_chunks": chunk_idx - 1
+                "completed_chunks": completed_chunks,
+                "processing_chunks": processing_chunks
             }
         )
 
@@ -446,6 +553,10 @@ class TranscriptionService:
 
         print(f"📊 字數統計：{text_length} 字元，{word_count} 詞")
 
+        # 1.5. 清理記憶體狀態（任務已完成，不再需要記憶體狀態）
+        self.task_service.cleanup_task_memory(task_id)
+        print(f"🧹 已清理任務 {task_id} 的記憶體狀態", flush=True)
+
         # 2. 獲取任務信息並處理配額扣除（使用同步方法）
         try:
             task = self._get_task_sync(task_id)
@@ -526,18 +637,12 @@ class TranscriptionService:
             "progress": f"轉錄失敗：{error}"
         })
 
+        # 清理記憶體狀態（任務已失敗，不再需要記憶體狀態）
+        self.task_service.cleanup_task_memory(task_id)
+        print(f"🧹 已清理任務 {task_id} 的記憶體狀態", flush=True)
+
         if not success:
             print(f"❌ [CRITICAL] 無法將任務 {task_id} 標記為失敗！請檢查 MongoDB 連接")
-            # 嘗試使用 task_service 的內存狀態更新
-            try:
-                self.task_service.update_memory_state(task_id, {
-                    "status": "failed",
-                    "error": error,
-                    "progress": f"轉錄失敗：{error}"
-                })
-                print(f"✅ 已更新任務 {task_id} 的內存狀態")
-            except Exception as mem_err:
-                print(f"❌ 更新內存狀態也失敗：{mem_err}")
 
         # 記錄 audit log（轉錄失敗）
         try:
@@ -781,3 +886,78 @@ class TranscriptionService:
                     shutil.rmtree(temp_dir)
                 except:
                     pass
+
+    def _run_transcription(
+        self,
+        task_id: str,
+        wav_path: Path,
+        language: Optional[str],
+        use_chunking: bool
+    ) -> tuple:
+        """執行 Whisper 轉錄（可並行執行）
+
+        Args:
+            task_id: 任務 ID
+            wav_path: WAV 檔案路徑
+            language: 語言代碼
+            use_chunking: 是否使用分段模式
+
+        Returns:
+            (full_text, segments, detected_language)
+        """
+        if use_chunking:
+            self._update_progress(task_id, "正在並行分段轉錄音檔（多進程）...")
+            full_text, segments, detected_language = self.whisper.transcribe_in_chunks_parallel(
+                wav_path,
+                language=language,
+                max_workers=3,
+                progress_callback=lambda completed, total, processing=0: self._update_chunk_progress(
+                    task_id, completed, total, processing
+                ),
+                cancel_check=lambda: self._is_cancelled(task_id)
+            )
+        else:
+            self._update_progress(task_id, "正在轉錄音檔...")
+            full_text, segments, detected_language = self.whisper.transcribe(
+                wav_path,
+                language=language
+            )
+        return full_text, segments, detected_language
+
+    def _run_diarization(
+        self,
+        task_id: str,
+        wav_path: Path,
+        max_speakers: Optional[int]
+    ) -> Optional[list]:
+        """執行說話者辨識（可並行執行）
+
+        Args:
+            task_id: 任務 ID
+            wav_path: WAV 檔案路徑
+            max_speakers: 最大講者人數
+
+        Returns:
+            diarization_segments 或 None（失敗時）
+        """
+        try:
+            self._update_progress(task_id, "正在進行說話者辨識...", {
+                "diarization_started": True
+            })
+            print(f"🔊 [並行] 開始說話者辨識")
+            print(f"🔊 [並行] max_speakers 參數: {max_speakers}")
+
+            diarization_segments = self.diarization.perform_diarization(
+                wav_path,
+                max_speakers=max_speakers
+            )
+
+            return diarization_segments
+
+        except Exception as diarize_error:
+            print(f"⚠️ [並行] 說話者辨識失敗：{diarize_error}")
+            self._update_progress(task_id, f"語者辨識失敗（{str(diarize_error)[:100]}）", {
+                "diarization_failed": True,
+                "diarization_error": str(diarize_error)[:200]
+            })
+            return None

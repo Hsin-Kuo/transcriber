@@ -316,6 +316,9 @@
                       </svg>
                       {{ task.timestamps?.created_at || task.created_at }}
                     </span>
+                    <span v-if="task.task_type" class="badge-task-type" :class="`badge-${task.task_type}`">
+                      {{ task.task_type === 'subtitle' ? '字幕' : '段落' }}
+                    </span>
                     <span v-if="task.config?.diarize || task.diarize" class="badge-diarize" :title="(task.config?.max_speakers || task.max_speakers) ? `最多 ${task.config?.max_speakers || task.max_speakers} 位講者` : '自動偵測講者人數'">
                       說話者辨識{{ (task.config?.max_speakers || task.max_speakers) ? ` (≤${task.config?.max_speakers || task.max_speakers}人)` : '' }}
                     </span>
@@ -596,13 +599,7 @@
               </div>
             </div>
           </div>
-          <!-- 光暈層 -->
-          <div class="electric-glow-1"></div>
-          <div class="electric-glow-2"></div>
         </div>
-        <!-- 疊加效果 -->
-        <div class="electric-overlay"></div>
-        <div class="electric-bg-glow"></div>
       </div>
     </div>
 
@@ -2111,7 +2108,7 @@ onMounted(() => {
   gap: 12px;
   margin-bottom: 10px;
   padding-bottom: 6px;
-  border-bottom: #000000 0.5px solid;
+  /* border-bottom: #000000 0.5px solid; */
 }
 
 .task-header h3 {
@@ -2162,6 +2159,41 @@ onMounted(() => {
 .badge-diarize:hover {
   background: rgba(246, 138, 92, 0.15);
   border-color: rgba(246, 146, 92, 0.5);
+  transform: translateY(-1px);
+}
+
+/* 任務類型徽章 */
+.badge-task-type {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+/* 段落模式 */
+.badge-paragraph {
+  background: rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  color: rgba(109, 40, 217, 0.9);
+}
+
+.badge-paragraph:hover {
+  background: rgba(139, 92, 246, 0.15);
+  border-color: rgba(139, 92, 246, 0.5);
+  transform: translateY(-1px);
+}
+
+/* 字幕模式 */
+.badge-subtitle {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: rgba(5, 150, 105, 0.9);
+}
+
+.badge-subtitle:hover {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.5);
   transform: translateY(-1px);
 }
 
@@ -3474,9 +3506,9 @@ onMounted(() => {
 /* 批次編輯模式下的任務列表 - 統一列表樣式 */
 .tasks.batch-mode {
   gap: 0;
-  background: white;
-  border-radius: 12px;
-  border: 2px solid rgba(221, 132, 72, 0.15);
+  /* background: white; */
+  /* border-radius: 12px; */
+  /* border: 2px solid rgba(221, 132, 72, 0.15); */
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(221, 132, 72, 0.08);
 }

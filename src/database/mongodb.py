@@ -16,12 +16,19 @@ class MongoDB:
     async def connect(cls):
         """啟動時連接 MongoDB"""
         try:
-            cls.client = AsyncIOMotorClient(MONGODB_URL)
+            # 添加連接參數以提高可靠性
+            cls.client = AsyncIOMotorClient(
+                MONGODB_URL,
+                serverSelectionTimeoutMS=5000,
+                connectTimeoutMS=5000,
+                socketTimeoutMS=5000,
+                directConnection=True  # 直接連接，不使用副本集發現
+            )
             # 測試連接
             await cls.client.admin.command('ping')
-            print(f"✅ 已連接到 MongoDB: {MONGODB_DB_NAME}")
+            print(f"✅ 已連接到 MongoDB: {MONGODB_DB_NAME}", flush=True)
         except Exception as e:
-            print(f"❌ MongoDB 連接失敗: {e}")
+            print(f"❌ MongoDB 連接失敗: {e}", flush=True)
             raise
 
     @classmethod

@@ -7,6 +7,7 @@
       @download="downloadTask"
       @refresh="refreshTasks"
       @delete="deleteTask"
+      @cancel="cancelTask"
       @view="viewTranscript"
     />
   </div>
@@ -129,6 +130,37 @@ async function downloadTask(taskId) {
   } catch (error) {
     console.error('下載失敗:', error)
     alert('下載失敗，請稍後再試')
+  }
+}
+
+// 取消任務
+async function cancelTask(taskId) {
+  try {
+    console.log('🚫 取消任務:', taskId)
+
+    // 立即更新 UI 顯示取消中狀態
+    const task = tasks.value.find(t => t.task_id === taskId)
+    if (task) {
+      task.cancelling = true
+    }
+
+    // 調用取消 API
+    await taskService.cancel(taskId)
+
+    console.log('✅ 任務已取消:', taskId)
+
+    // 刷新任務列表以獲取最新狀態
+    await refreshTasks()
+  } catch (error) {
+    console.error('❌ 取消任務失敗:', error)
+
+    // 取消失敗，恢復 UI 狀態
+    const task = tasks.value.find(t => t.task_id === taskId)
+    if (task) {
+      task.cancelling = false
+    }
+
+    showNotification?.('取消失敗，請稍後再試', 'error')
   }
 }
 

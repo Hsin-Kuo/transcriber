@@ -5,11 +5,19 @@ from typing import Dict, Any
 from pathlib import Path
 import asyncio
 import json
+import os
 
 from ..auth.dependencies import get_current_user, get_current_user_sse
 from ..database.mongodb import get_database
 from ..database.repositories.task_repo import TaskRepository
 from ..services.task_service import TaskService
+from ..services.utils.async_utils import get_current_time
+
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
 
 
 router = APIRouter(prefix="/tasks", tags=["Tasks"])
@@ -22,10 +30,10 @@ def get_task_service(db=Depends(get_database)) -> TaskService:
         db: 資料庫實例
 
     Returns:
-        TaskService 實例
+        TaskService 單例實例（確保記憶體狀態共享）
     """
-    task_repo = TaskRepository(db)
-    return TaskService(task_repo)
+    # ✅ 返回單例而不是創建新實例
+    return get_task_service_singleton()
 
 
 @router.get("/recent")
@@ -403,8 +411,12 @@ async def task_status_events(
                 current_status = enriched_data.get("status")
                 current_progress = enriched_data.get("progress")
 
+                # 調試：輸出當前進度
+                print(f"📡 [SSE {task_id}] status={current_status}, progress={current_progress}", flush=True)
+
                 # 只在狀態或進度改變時推送
                 if current_status != previous_status or current_progress != previous_progress:
+                    print(f"📤 [SSE {task_id}] 推送更新: {current_progress}", flush=True)
                     # 序列化數據（處理 datetime 等特殊類型）
                     serialized_data = serialize_for_json(enriched_data)
                     yield f"data: {json.dumps(serialized_data)}\n\n"
@@ -777,20 +789,58 @@ async def batch_delete_tasks(
                 failed_count += 1
                 continue
 
+            # 檢查是否已被刪除
+            if task.get("deleted", False):
+                failed_count += 1
+                continue
+
             # 不允許刪除進行中的任務
             if task["status"] in ["pending", "processing"]:
                 failed_count += 1
                 continue
 
-            # 刪除檔案和記錄
+            # 物理刪除結果檔案（如果存在）
+            result_file_path = get_task_field(task, "result_file")
+            if result_file_path:
+                result_file = Path(result_file_path)
+                try:
+                    if result_file.exists():
+                        result_file.unlink()
+                        print(f"🗑️ [批次] 已刪除轉錄檔案：{result_file.name}")
+                except Exception as e:
+                    print(f"⚠️ [批次] 刪除轉錄檔案失敗：{e}")
+
+            # 物理刪除 segments 檔案（如果存在）
+            segments_file_path = get_task_field(task, "segments_file")
+            if segments_file_path:
+                segments_file = Path(segments_file_path)
+                try:
+                    if segments_file.exists():
+                        segments_file.unlink()
+                        print(f"🗑️ [批次] 已刪除 segments 檔案：{segments_file.name}")
+                except Exception as e:
+                    print(f"⚠️ [批次] 刪除 segments 檔案失敗：{e}")
+
+            # 物理刪除音檔（如果存在）
+            audio_file_path = get_task_field(task, "audio_file")
+            if audio_file_path:
+                audio_file = Path(audio_file_path)
+                try:
+                    if audio_file.exists():
+                        audio_file.unlink()
+                        print(f"🗑️ [批次] 已刪除音檔：{audio_file.name}")
+                except Exception as e:
+                    print(f"⚠️ [批次] 刪除音檔失敗：{e}")
+
+            # 清理記憶體
+            task_service.cleanup_task_memory(task_id)
+
+            # 在資料庫中標記為已刪除（軟刪除）
             from datetime import datetime
             await task_service.update_task_status(task_id, {
                 "deleted": True,
                 "deleted_at": datetime.utcnow()
             })
-
-            # 清理記憶體
-            task_service.cleanup_task_memory(task_id)
 
             deleted_count += 1
 
@@ -926,3 +976,129 @@ async def batch_remove_tags(
         "updated": updated_count,
         "total": len(task_ids)
     }
+
+
+@router.get("/system/health/processes")
+async def check_system_processes(
+    task_service: TaskService = Depends(get_task_service),
+    current_user: dict = Depends(get_current_user)
+):
+    """檢查系統進程健康狀態
+
+    檢測是否有孤立的 worker 進程，並返回詳細資訊
+
+    Args:
+        task_service: TaskService 實例
+        current_user: 當前用戶
+
+    Returns:
+        系統進程健康狀態
+    """
+    if not PSUTIL_AVAILABLE:
+        return {
+            "status": "unavailable",
+            "message": "psutil 未安裝，無法檢查進程狀態"
+        }
+
+    try:
+        current_pid = os.getpid()
+        current_process = psutil.Process(current_pid)
+
+        # 查找所有子進程
+        children = current_process.children(recursive=True)
+
+        # 找出 multiprocessing worker 進程
+        multiprocessing_workers = []
+        for child in children:
+            try:
+                cmdline = " ".join(child.cmdline())
+                if "multiprocessing" in cmdline and "spawn_main" in cmdline:
+                    worker_info = {
+                        "pid": child.pid,
+                        "cpu_percent": round(child.cpu_percent(), 1),
+                        "memory_mb": round(child.memory_info().rss / 1024 / 1024, 1),
+                        "status": child.status(),
+                        "create_time": child.create_time()
+                    }
+                    multiprocessing_workers.append(worker_info)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
+        # 查找活動任務
+        active_tasks = await task_service.task_repo.collection.find(
+            {"status": {"$in": ["pending", "processing"]}},
+            {"task_id": 1, "status": 1}
+        ).to_list(length=100)
+
+        active_task_count = len(active_tasks)
+        worker_count = len(multiprocessing_workers)
+
+        # 判斷是否有異常
+        has_orphaned = worker_count > 0 and active_task_count == 0
+        warning = None
+
+        if has_orphaned:
+            warning = f"發現 {worker_count} 個孤立 worker 進程（無活動任務）"
+        elif worker_count > active_task_count * 3:
+            warning = f"Worker 進程數量異常（{worker_count} workers vs {active_task_count} tasks）"
+
+        return {
+            "status": "healthy" if not warning else "warning",
+            "timestamp": get_current_time().isoformat(),
+            "active_tasks": active_task_count,
+            "worker_processes": worker_count,
+            "workers": multiprocessing_workers,
+            "warning": warning,
+            "process_info": {
+                "main_pid": current_pid,
+                "main_cpu_percent": round(current_process.cpu_percent(), 1),
+                "main_memory_mb": round(current_process.memory_info().rss / 1024 / 1024, 1)
+            }
+        }
+
+    except Exception as e:
+        print(f"❌ 檢查進程健康狀態失敗：{e}")
+        return {
+            "status": "error",
+            "message": f"檢查失敗: {str(e)}"
+        }
+
+
+@router.post("/system/cleanup/orphaned-processes")
+async def cleanup_orphaned_processes_endpoint(
+    task_service: TaskService = Depends(get_task_service),
+    current_user: dict = Depends(get_current_user)
+):
+    """手動清理孤立的 worker 進程
+
+    終止所有沒有對應活動任務的 worker 進程
+
+    Args:
+        task_service: TaskService 實例
+        current_user: 當前用戶
+
+    Returns:
+        清理結果
+    """
+    if not PSUTIL_AVAILABLE:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="psutil 未安裝，無法執行進程清理"
+        )
+
+    try:
+        print(f"🧹 使用者 {current_user.get('email', 'unknown')} 手動觸發孤立進程清理")
+        await task_service.cleanup_orphaned_processes()
+
+        return {
+            "status": "success",
+            "message": "孤立進程清理完成",
+            "timestamp": get_current_time().isoformat()
+        }
+
+    except Exception as e:
+        print(f"❌ 手動清理孤立進程失敗：{e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"清理失敗: {str(e)}"
+        )

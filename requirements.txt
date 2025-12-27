@@ -15,6 +15,9 @@ fastapi
 uvicorn[standard]
 python-multipart
 
+# 系統監控
+psutil
+
 # HTTP 客戶端
 requests
 

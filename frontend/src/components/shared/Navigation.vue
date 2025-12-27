@@ -257,19 +257,19 @@ watch(() => route.path, (newPath, oldPath) => {
 .navigation.collapsed {
   width: 80px;
   min-width: 80px;
-  padding: 20px 12px;
+  padding: 28px 12px;
   align-items: center;
 }
 
 /* 切換按鈕 */
 .toggle-btn {
   position: absolute;
-  top: 16px;
-  right: 12px;
+  top: 4px;
+  right: 2px;
   width: 28px;
   height: 36px;
   border: none;
-  background: var(--nav-bg);
+  background: #ffffff00;
   border-radius: 6px;
   box-shadow: var(--neu-shadow-btn-sm);
   cursor: pointer;
@@ -762,7 +762,7 @@ watch(() => route.path, (newPath, oldPath) => {
 
 .all-tasks-btn.active {
   box-shadow: var(--neu-shadow-btn-active-sm);
-  color: var(--neu-primary-dark);
+  color: var(--neu-text-lighter);
 }
 
 .recent-tasks-list {

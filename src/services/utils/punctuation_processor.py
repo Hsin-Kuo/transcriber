@@ -309,6 +309,7 @@ class PunctuationProcessor:
             user_msg = (
                 "請將以下『中文逐字稿』加上適當標點符號並合理分段。"
                 "不要省略或添加內容，不要意譯，保留固有名詞與數字。"
+                "**重要：如果文字中有說話者標籤（例如 [SPEAKER_00]、[Speaker A] 等），請完整保留這些標籤，不要修改或刪除。**"
                 f"輸出純文字即可：\n\n{text}"
             )
         elif language == "en":
@@ -316,6 +317,7 @@ class PunctuationProcessor:
             user_msg = (
                 "Please add appropriate punctuation and paragraphing to the following English transcript. "
                 "Do not omit or add content, do not paraphrase, preserve proper nouns and numbers. "
+                "**Important: If the text contains speaker labels (e.g., [SPEAKER_00], [Speaker A]), preserve them completely without modification or removal.**"
                 f"Output plain text only:\n\n{text}"
             )
         elif language == "ja":
@@ -323,6 +325,7 @@ class PunctuationProcessor:
             user_msg = (
                 "以下の日本語文字起こしに適切な句読点と段落を追加してください。"
                 "内容の省略や追加はせず、意訳せず、固有名詞と数字はそのまま保持してください。"
+                "**重要：話者ラベル（例：[SPEAKER_00]、[Speaker A]など）が含まれている場合は、完全に保持し、変更や削除をしないでください。**"
                 f"プレーンテキストのみ出力してください：\n\n{text}"
             )
         elif language == "ko":
@@ -330,6 +333,7 @@ class PunctuationProcessor:
             user_msg = (
                 "다음 한국어 전사에 적절한 구두점과 단락을 추가해주세요. "
                 "내용을 생략하거나 추가하지 말고, 의역하지 말고, 고유명사와 숫자는 그대로 유지하세요. "
+                "**중요: 화자 레이블(예: [SPEAKER_00], [Speaker A])이 포함된 경우 완전히 보존하고 수정하거나 삭제하지 마세요.**"
                 f"일반 텍스트만 출력하세요:\n\n{text}"
             )
         else:
@@ -338,6 +342,7 @@ class PunctuationProcessor:
             user_msg = (
                 f"Please add appropriate punctuation and paragraphing to the following transcript. "
                 "Do not omit or add content, do not paraphrase, preserve proper nouns and numbers. "
+                "**Important: If the text contains speaker labels (e.g., [SPEAKER_00], [Speaker A]), preserve them completely without modification or removal.**"
                 f"Output plain text only:\n\n{text}"
             )
 
@@ -365,6 +370,7 @@ class PunctuationProcessor:
             system_msg = (
                 "你是嚴謹的逐字稿潤飾助手。只做『中文標點補全與合理分段』，"
                 "不要省略或添加內容，不要意譯，非必要不要用刪節號，保留固有名詞與數字。"
+                "**重要：如果文字中有說話者標籤（例如 [SPEAKER_00]、[Speaker A] 等），請完整保留這些標籤。**"
             )
             if chunk_idx == 1:
                 user_msg = f"請為以下中文逐字稿加上適當標點並分段（這是第 1 段）：\n\n{chunk_text}"
@@ -375,7 +381,8 @@ class PunctuationProcessor:
         elif language == "en":
             system_msg = (
                 "You are a precise transcript editor. Only add punctuation and paragraphing. "
-                "Do not omit or add content, do not paraphrase, preserve proper nouns and numbers."
+                "Do not omit or add content, do not paraphrase, preserve proper nouns and numbers. "
+                "**Important: Preserve all speaker labels (e.g., [SPEAKER_00], [Speaker A]) completely.**"
             )
             if chunk_idx == 1:
                 user_msg = f"Add punctuation and paragraphing to this English transcript (part 1):\n\n{chunk_text}"
@@ -387,6 +394,7 @@ class PunctuationProcessor:
             system_msg = (
                 "あなたは正確な文字起こし編集者です。句読点と段落分けのみを行います。"
                 "内容の省略や追加はせず、意訳せず、固有名詞と数字はそのまま保持してください。"
+                "**重要：話者ラベル（例：[SPEAKER_00]、[Speaker A]）を完全に保持してください。**"
             )
             if chunk_idx == 1:
                 user_msg = f"以下の日本語文字起こしに句読点と段落を追加してください（第1部分）：\n\n{chunk_text}"
@@ -397,7 +405,8 @@ class PunctuationProcessor:
         elif language == "ko":
             system_msg = (
                 "당신은 정확한 전사 편집자입니다. 구두점과 단락 나누기만 수행합니다. "
-                "내용을 생략하거나 추가하지 말고, 의역하지 말고, 고유명사와 숫자는 그대로 유지하세요."
+                "내용을 생략하거나 추가하지 말고, 의역하지 말고, 고유명사와 숫자는 그대로 유지하세요. "
+                "**중요: 화자 레이블(예: [SPEAKER_00], [Speaker A])을 완전히 보존하세요.**"
             )
             if chunk_idx == 1:
                 user_msg = f"다음 한국어 전사에 구두점과 단락을 추가해주세요 (1부):\n\n{chunk_text}"
