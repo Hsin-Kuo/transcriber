@@ -149,7 +149,8 @@ class TranscriptionService:
 
             # 檢查是否已取消
             if self._is_cancelled(task_id):
-                self._cleanup_temp_files(task_id, wav_path)
+                self._cleanup_temp_files(task_id, wav_path, save_audio=False)  # 取消時不保存音檔
+                self.task_service.cleanup_task_memory(task_id)
                 return
 
             # 2. 並行執行轉錄和說話者辨識（如果啟用）
@@ -268,7 +269,8 @@ class TranscriptionService:
 
             # 檢查是否已取消
             if self._is_cancelled(task_id):
-                self._cleanup_temp_files(task_id, wav_path)
+                self._cleanup_temp_files(task_id, wav_path, save_audio=False)  # 取消時不保存音檔
+                self.task_service.cleanup_task_memory(task_id)
                 return
 
             # 3. 標點處理（可選）
@@ -306,7 +308,8 @@ class TranscriptionService:
 
             # 檢查是否已取消
             if self._is_cancelled(task_id):
-                self._cleanup_temp_files(task_id, wav_path)
+                self._cleanup_temp_files(task_id, wav_path, save_audio=False)  # 取消時不保存音檔
+                self.task_service.cleanup_task_memory(task_id)
                 return
 
             # 4. 儲存結果
@@ -329,12 +332,18 @@ class TranscriptionService:
             # 7. 清理超出限制的舊音檔（在新音檔保存後才執行）
             self._cleanup_old_audio_files(task_id)
 
+            # 8. 清理記憶體狀態（在所有檔案操作完成後）
+            self.task_service.cleanup_task_memory(task_id)
+            print(f"🧹 已清理任務 {task_id} 的記憶體狀態", flush=True)
+
             print(f"✅ 任務 {task_id} 完成！")
 
         except Exception as e:
             print(f"❌ 轉錄失敗：{e}")
             self._mark_failed(task_id, str(e))
-            self._cleanup_temp_files(task_id, None)
+            self._cleanup_temp_files(task_id, None, save_audio=False)  # 失敗時不保存音檔
+            self.task_service.cleanup_task_memory(task_id)
+            print(f"🧹 已清理任務 {task_id} 的記憶體狀態", flush=True)
 
     # ========== 私有輔助方法 ==========
 
@@ -553,10 +562,6 @@ class TranscriptionService:
 
         print(f"📊 字數統計：{text_length} 字元，{word_count} 詞")
 
-        # 1.5. 清理記憶體狀態（任務已完成，不再需要記憶體狀態）
-        self.task_service.cleanup_task_memory(task_id)
-        print(f"🧹 已清理任務 {task_id} 的記憶體狀態", flush=True)
-
         # 2. 獲取任務信息並處理配額扣除（使用同步方法）
         try:
             task = self._get_task_sync(task_id)
@@ -636,10 +641,6 @@ class TranscriptionService:
             "error": error,
             "progress": f"轉錄失敗：{error}"
         })
-
-        # 清理記憶體狀態（任務已失敗，不再需要記憶體狀態）
-        self.task_service.cleanup_task_memory(task_id)
-        print(f"🧹 已清理任務 {task_id} 的記憶體狀態", flush=True)
 
         if not success:
             print(f"❌ [CRITICAL] 無法將任務 {task_id} 標記為失敗！請檢查 MongoDB 連接")
@@ -821,14 +822,14 @@ class TranscriptionService:
             import traceback
             traceback.print_exc()
 
-    def _cleanup_temp_files(self, task_id: str, wav_path: Optional[Path]) -> None:
+    def _cleanup_temp_files(self, task_id: str, wav_path: Optional[Path], save_audio: bool = True) -> None:
         """清理臨時檔案
 
         ⚠️ 重要邏輯說明（請勿修改）：
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        1. 【所有音檔都會保存】
-           - 不管 keep_audio 是 True 還是 False
-           - 所有完成的轉錄都會將音檔保存到 uploads/
+        1. 【只有成功的轉錄會保存音檔】
+           - save_audio=True：保存音檔（任務成功完成）
+           - save_audio=False：不保存音檔（任務失敗或取消）
 
         2. 【keep_audio 的作用】
            - False（默認）：可以被自動清理機制刪除
@@ -843,6 +844,7 @@ class TranscriptionService:
         Args:
             task_id: 任務 ID
             wav_path: WAV 檔案路徑（可選）
+            save_audio: 是否保存音檔（True=成功完成，False=失敗/取消）
         """
         # 清理 WAV 檔案（如果是轉換生成的）
         if wav_path and wav_path.exists():
@@ -852,40 +854,46 @@ class TranscriptionService:
             except Exception as e:
                 print(f"⚠️ 清理 WAV 檔案失敗：{e}")
 
-        # 檢查是否需要保留音檔（使用同步方法）
-        task = self._get_task_sync(task_id)
-        keep_audio = task.get("keep_audio", False) if task else False  # 默認不保留
-
-        print(f"🔍 任務 {task_id} 的 keep_audio 設定: {keep_audio}")
-        if task:
-            print(f"🔍 任務數據中的 keep_audio: {task.get('keep_audio', '【不存在】')}")
-
         temp_dir = self.task_service.get_temp_dir(task_id)
         if temp_dir and temp_dir.exists():
             print(f"📁 臨時目錄: {temp_dir}")
             audio_files = list(temp_dir.glob("input.*"))
             print(f"🎵 找到的音檔: {[f.name for f in audio_files]}")
 
-            # 總是保存音檔到永久目錄（不管 keep_audio 的值）
-            # keep_audio 只影響之後的自動清理機制
-            try:
-                # 使用同步方法處理音檔保存（避免 event loop 衝突）
-                self._save_audio_file_sync(task_id, temp_dir, audio_files)
+            # 只有在任務成功完成時才保存音檔
+            if save_audio:
+                # 檢查是否需要保留音檔（使用同步方法）
+                task = self._get_task_sync(task_id)
+                keep_audio = task.get("keep_audio", False) if task else False
 
-                # 清理臨時目錄（不包含已移動的音檔）
-                shutil.rmtree(temp_dir)
+                print(f"🔍 任務 {task_id} 的 keep_audio 設定: {keep_audio}")
 
-                if keep_audio:
-                    print(f"🗑️ 已清理臨時目錄，音檔已保存並標記為受保護")
-                else:
-                    print(f"🗑️ 已清理臨時目錄，音檔已保存（可被自動清理）")
-            except Exception as e:
-                print(f"⚠️ 保存音檔失敗：{e}")
-                # 如果保存失敗，還是清理臨時目錄
+                try:
+                    # 使用同步方法處理音檔保存（避免 event loop 衝突）
+                    self._save_audio_file_sync(task_id, temp_dir, audio_files)
+
+                    # 清理臨時目錄（不包含已移動的音檔）
+                    shutil.rmtree(temp_dir)
+
+                    if keep_audio:
+                        print(f"🗑️ 已清理臨時目錄，音檔已保存並標記為受保護")
+                    else:
+                        print(f"🗑️ 已清理臨時目錄，音檔已保存（可被自動清理）")
+                except Exception as e:
+                    print(f"⚠️ 保存音檔失敗：{e}")
+                    # 如果保存失敗，還是清理臨時目錄
+                    try:
+                        shutil.rmtree(temp_dir)
+                    except:
+                        pass
+            else:
+                # 任務失敗或取消，直接刪除臨時目錄和音檔
+                print(f"⚠️ 任務未成功完成，不保存音檔")
                 try:
                     shutil.rmtree(temp_dir)
-                except:
-                    pass
+                    print(f"🗑️ 已清理臨時目錄和音檔（任務失敗/取消）")
+                except Exception as e:
+                    print(f"⚠️ 清理臨時目錄失敗：{e}")
 
     def _run_transcription(
         self,

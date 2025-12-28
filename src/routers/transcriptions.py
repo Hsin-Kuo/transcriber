@@ -5,6 +5,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
 from pathlib import Path
 from urllib.parse import quote
+from datetime import datetime, timezone
 import tempfile
 import uuid
 import json
@@ -379,6 +380,16 @@ async def create_transcription(
             use_punctuation = punct_provider != "none"
             language_code = None if language == "auto" else language
 
+            # ✅ 關鍵修復：立即更新狀態為 processing，防止隊列處理器重複啟動
+            await task_repo.update(task_id, {
+                "status": "processing",
+                "updated_at": datetime.now(timezone.utc)
+            })
+            transcription_service.task_service.update_memory_state(task_id, {
+                "status": "processing",
+                "progress": "準備開始轉錄..."
+            })
+
             await transcription_service.start_transcription(
                 task_id=task_id,
                 audio_file_path=temp_audio,
@@ -701,11 +712,11 @@ async def update_content(
     current_user: dict = Depends(get_current_user),
     db = Depends(get_database)
 ):
-    """更新轉錄文字內容
+    """更新轉錄文字內容和 segments
 
     Args:
         task_id: 任務 ID
-        content: 新的文字內容 {"text": "..."}
+        content: 新的文字內容 {"text": "...", "segments": [...]} (segments 為可選)
         current_user: 當前用戶
         db: 資料庫實例
 
@@ -747,15 +758,36 @@ async def update_content(
 
     # 更新檔案內容
     try:
+        # 1. 更新純文字檔案
         new_text = content.get("text", "")
         with open(result_file, 'w', encoding='utf-8') as f:
             f.write(new_text)
+        print(f"✅ 已更新任務 {task_id} 的轉錄文字內容")
 
-        print(f"✅ 已更新任務 {task_id} 的轉錄內容")
+        # 2. 如果有提供 segments，也更新 segments 檔案
+        new_segments = content.get("segments")
+        if new_segments is not None:
+            segments_file_path = get_task_field(task, "segments_file")
+            if segments_file_path:
+                segments_file = Path(segments_file_path)
+                if segments_file.exists():
+                    import json
+                    with open(segments_file, 'w', encoding='utf-8') as f:
+                        json.dump(new_segments, f, ensure_ascii=False, indent=2)
+                    print(f"✅ 已更新任務 {task_id} 的 segments 檔案 ({len(new_segments)} 個 segments)")
+                else:
+                    print(f"⚠️ Segments 檔案不存在：{segments_file_path}")
+            else:
+                print(f"⚠️ 任務 {task_id} 沒有 segments_file 路徑")
+
+        response_message = "轉錄內容已更新"
+        if new_segments is not None:
+            response_message = "轉錄內容和字幕已更新"
 
         return {
-            "message": "轉錄內容已更新",
-            "task_id": task_id
+            "message": response_message,
+            "task_id": task_id,
+            "segments_updated": new_segments is not None
         }
     except Exception as e:
         raise HTTPException(

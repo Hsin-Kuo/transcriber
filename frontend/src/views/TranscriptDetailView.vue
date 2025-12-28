@@ -56,6 +56,42 @@
           </div>
         </div>
 
+        <!-- 字幕模式控制項 -->
+        <div v-if="displayMode === 'subtitle'" class="subtitle-controls">
+          <!-- 時間格式切換 -->
+          <div class="control-group">
+            <label class="control-label">時間格式</label>
+            <div class="time-format-toggle">
+              <button
+                @click="timeFormat = 'start'"
+                :class="{ active: timeFormat === 'start' }"
+                class="format-btn"
+              >起始時間</button>
+              <button
+                @click="timeFormat = 'range'"
+                :class="{ active: timeFormat === 'range' }"
+                class="format-btn"
+              >時間範圍</button>
+            </div>
+          </div>
+
+          <!-- 疏密度滑桿 -->
+          <div class="control-group">
+            <input
+              type="range"
+              v-model.number="densityThreshold"
+              min="0.0"
+              max="120.0"
+              step="1.0"
+              class="density-slider"
+            />
+            <div class="slider-labels">
+              <span>疏鬆</span>
+              <span>密集</span>
+            </div>
+          </div>
+        </div>
+
         <!-- 按鈕組 -->
         <div class="action-buttons">
           <button v-if="!isEditing" @click="startEditing" class="btn btn-action">
@@ -310,8 +346,9 @@
           <div v-else-if="transcriptError" class="error-state">
             <p>❌ {{ transcriptError }}</p>
           </div>
+          <!-- 段落模式：保持原有 textarea -->
           <div
-            v-else
+            v-else-if="displayMode === 'paragraph'"
             class="textarea-wrapper"
             :class="{ 'show-reference-line': currentTranscript.hasAudio && timecodeMarkers.length > 0 }"
           >
@@ -331,6 +368,49 @@
               :title="`點擊跳轉到 ${timecodeMarkers[activeTimecodeIndex].label}`"
             >
               <div class="timecode-label">{{ timecodeMarkers[activeTimecodeIndex].label }}</div>
+            </div>
+          </div>
+
+          <!-- 字幕模式：表格顯示 -->
+          <div v-else-if="displayMode === 'subtitle'" class="subtitle-table-container">
+            <div class="subtitle-table-wrapper">
+              <table class="subtitle-table">
+                <thead>
+                  <tr>
+                    <th class="col-time">時間</th>
+                    <th v-if="hasSpeakerInfo" class="col-speaker">講者</th>
+                    <th class="col-content">內容</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="group in groupedSegments"
+                    :key="`${densityThreshold}-${group.id}`"
+                    class="subtitle-row"
+                  >
+                    <td class="col-time">
+                      {{ formatTimestamp(group.startTime, timeFormat, group.endTime) }}
+                    </td>
+
+                    <td v-if="hasSpeakerInfo" class="col-speaker">
+                      <span class="speaker-badge">{{ group.speaker || '-' }}</span>
+                    </td>
+
+                    <td
+                      class="col-content"
+                      :contenteditable="isEditing"
+                      @blur="updateRowContent(group.id, $event)"
+                    >
+                      <span
+                        v-for="(segment, idx) in group.segments"
+                        :key="idx"
+                        :data-segment-index="idx"
+                        class="segment-span"
+                      >{{ segment.text }}</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -366,13 +446,16 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch, inject } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api, { API_BASE, TokenManager } from '../utils/api'
 import { NEW_ENDPOINTS } from '../api/endpoints'
 
 const route = useRoute()
 const router = useRouter()
+
+// 注入通知函數
+const showNotification = inject('showNotification')
 
 // 基本狀態
 const currentTranscript = ref({})
@@ -407,6 +490,19 @@ const timecodeMarkers = ref([])
 const activeTimecodeIndex = ref(-1)
 const textarea = ref(null)
 const titleInput = ref(null)
+
+// 字幕模式顯示相關
+const displayMode = computed(() => {
+  return currentTranscript.value?.task_type || 'paragraph'
+})
+const timeFormat = ref('start')       // 'start' | 'range'
+const densityThreshold = ref(3.0)     // 強制分開的間隔（秒），範圍 0.0-20.0
+
+// 檢測是否有說話者資訊
+const hasSpeakerInfo = computed(() => {
+  if (!segments.value || segments.value.length === 0) return false
+  return segments.value.some(seg => seg.speaker !== undefined && seg.speaker !== null)
+})
 
 // 圓弧進度條計算
 const arcPath = computed(() => {
@@ -463,6 +559,118 @@ const displayTime = computed(() => {
   return currentTime.value
 })
 
+// 字幕模式：合併 segments 演算法
+function mergeSegmentsByDensity(segments, thresholdSeconds, hasSpeaker) {
+  if (!segments || segments.length === 0) return []
+
+  const sortedSegments = [...segments].sort((a, b) => a.start - b.start)
+  const groups = []
+  let currentGroup = null
+  const gaps = []  // 記錄所有間隔用於調試
+
+  for (let i = 0; i < sortedSegments.length; i++) {
+    const segment = sortedSegments[i]
+
+    if (!currentGroup) {
+      currentGroup = {
+        id: `group_${i}_${segment.start}`,
+        startTime: segment.start,
+        endTime: segment.end,
+        speaker: segment.speaker || null,
+        segments: [segment],
+        combinedText: segment.text.trim(),
+        edited: false  // 標記是否被編輯過
+      }
+    } else {
+      const speakerMatch = !hasSpeaker || (segment.speaker === currentGroup.speaker)
+
+      // 計算如果加入這個 segment，group 的總時長
+      const groupDuration = segment.end - currentGroup.startTime
+      gaps.push(groupDuration)
+
+      // 疏密度邏輯：
+      // - threshold = 0：完全分開（每個 segment 一列）
+      // - threshold > 0：groupDuration >= threshold 或不同講者 → 分開
+      const shouldSplit = !speakerMatch || (thresholdSeconds === 0) || (groupDuration >= thresholdSeconds)
+
+      if (shouldSplit) {
+        // 保存當前 group，開始新 group
+        groups.push(currentGroup)
+        currentGroup = {
+          id: `group_${i}_${segment.start}`,
+          startTime: segment.start,
+          endTime: segment.end,
+          speaker: segment.speaker || null,
+          segments: [segment],
+          combinedText: segment.text.trim(),
+          edited: false  // 標記是否被編輯過
+        }
+      } else {
+        // 合併到當前 group
+        currentGroup.endTime = segment.end
+        currentGroup.segments.push(segment)
+        currentGroup.combinedText += ' ' + segment.text.trim()
+      }
+    }
+  }
+
+  // 輸出間隔統計（僅在有間隔時）
+  if (gaps.length > 0) {
+    const avgGap = (gaps.reduce((a, b) => a + b, 0) / gaps.length).toFixed(2)
+    const minGap = Math.min(...gaps).toFixed(2)
+    const maxGap = Math.max(...gaps).toFixed(2)
+
+    // 統計不同間隔範圍的數量
+    const gap0 = gaps.filter(g => g === 0).length
+    const gapLess01 = gaps.filter(g => g > 0 && g < 0.1).length
+    const gapLess1 = gaps.filter(g => g >= 0.1 && g < 1).length
+    const gapLess5 = gaps.filter(g => g >= 1 && g < 5).length
+    const gap5Plus = gaps.filter(g => g >= 5).length
+
+    console.log(`  📊 間隔統計: 平均 ${avgGap}s, 最小 ${minGap}s, 最大 ${maxGap}s | 閾值: ${thresholdSeconds}s`)
+    console.log(`  📊 間隔分布: =0 (${gap0}) | 0-0.1s (${gapLess01}) | 0.1-1s (${gapLess1}) | 1-5s (${gapLess5}) | ≥5s (${gap5Plus})`)
+  }
+
+  if (currentGroup) groups.push(currentGroup)
+  return groups
+}
+
+// 字幕模式：合併後的 segments（自動響應疏密度變化）
+const groupedSegments = computed(() => {
+  console.log(`🎯 [groupedSegments] 觸發計算 - displayMode: ${displayMode.value}, densityThreshold: ${densityThreshold.value}`)
+  if (displayMode.value !== 'subtitle') {
+    console.log(`⚠️ [groupedSegments] displayMode 不是 subtitle，返回空陣列`)
+    return []
+  }
+  const groups = mergeSegmentsByDensity(
+    segments.value,
+    densityThreshold.value,
+    hasSpeakerInfo.value
+  )
+  console.log(`🔧 疏密度: ${densityThreshold.value}s | Segments: ${segments.value?.length || 0} → Groups: ${groups.length}`)
+  return groups
+})
+
+// 時間格式化函數
+function formatTimestamp(seconds, format, endSeconds) {
+  const formatTime = (sec) => {
+    const h = Math.floor(sec / 3600)
+    const m = Math.floor((sec % 3600) / 60)
+    const s = Math.floor(sec % 60)
+
+    if (h > 0) {
+      return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    }
+    return `${m}:${String(s).padStart(2, '0')}`
+  }
+
+  if (format === 'start') {
+    return formatTime(seconds)
+  } else {
+    return `${formatTime(seconds)} - ${formatTime(endSeconds)}`
+  }
+}
+
 // 載入逐字稿的可重用函數
 async function loadTranscript(taskId) {
   if (!taskId) {
@@ -491,8 +699,11 @@ async function loadTranscript(taskId) {
       text_length: task.result?.text_length || task.text_length,
       duration_text: task.duration_text,
       hasAudio: !!(task.result?.audio_file || task.audio_file),
+      task_type: task.task_type || 'paragraph',
       content: ''
     }
+
+    console.log('📋 任務類型:', currentTranscript.value.task_type, '| 顯示模式:', displayMode.value)
 
     // 初始化音檔 URL
     if (currentTranscript.value.hasAudio) {
@@ -629,22 +840,126 @@ function startEditing() {
   originalContent.value = currentTranscript.value.content
 }
 
+// 更新字幕模式表格列內容
+function updateRowContent(groupId, event) {
+  const group = groupedSegments.value.find(g => g.id === groupId)
+  if (!group) return
+
+  // 從 contenteditable 的 td 中取得所有 segment span
+  const tdElement = event.target
+  const spanElements = tdElement.querySelectorAll('.segment-span')
+
+  let hasChanges = false
+
+  // 遍歷每個 span，更新對應的 segment
+  spanElements.forEach((span, index) => {
+    if (index < group.segments.length) {
+      const newText = span.textContent.trim()
+      const originalText = group.segments[index].text.trim()
+
+      if (newText !== originalText) {
+        group.segments[index].text = newText
+        hasChanges = true
+        console.log(`✏️ Segment ${index} 已修改: "${originalText}" → "${newText}"`)
+      }
+    }
+  })
+
+  if (hasChanges) {
+    group.edited = true
+    // 更新 combinedText 以保持一致性
+    group.combinedText = group.segments.map(s => s.text.trim()).join(' ')
+    console.log(`✅ Group ${groupId} 已標記為已編輯`)
+  }
+}
+
+// 將表格內容轉為純文字
+function convertTableToPlainText(groups) {
+  return groups.map(group => {
+    const speakerPrefix = group.speaker ? `[${group.speaker}] ` : ''
+    return `${speakerPrefix}${group.combinedText.trim()}`
+  }).join('\n\n')
+}
+
+// 將編輯後的 groups 重建回 segments
+function reconstructSegmentsFromGroups(groups) {
+  const reconstructedSegments = []
+
+  for (const group of groups) {
+    // 直接使用 group 中的 segments（已經在編輯時更新了）
+    reconstructedSegments.push(...group.segments)
+  }
+
+  console.log(`🔄 重建 segments: ${groups.length} groups → ${reconstructedSegments.length} segments`)
+  return reconstructedSegments
+}
+
 async function saveEditing() {
-  if (currentTranscript.value.content === originalContent.value) {
+  let contentToSave = ''
+  let segmentsToSave = null
+
+  // 根據模式決定儲存的內容
+  if (displayMode.value === 'paragraph') {
+    contentToSave = currentTranscript.value.content
+  } else {
+    // 字幕模式：從表格收集內容
+    contentToSave = convertTableToPlainText(groupedSegments.value)
+
+    // 重建 segments（將編輯後的內容對應回原始 segments）
+    segmentsToSave = reconstructSegmentsFromGroups(groupedSegments.value)
+
+    console.log(`💾 準備儲存：${segmentsToSave.length} 個 segments`)
+  }
+
+  if (contentToSave === originalContent.value && !segmentsToSave) {
     isEditing.value = false
     return
   }
 
   try {
-    await api.put(NEW_ENDPOINTS.transcriptions.updateContent(currentTranscript.value.task_id), {
-      text: currentTranscript.value.content
-    })
-    originalContent.value = currentTranscript.value.content
+    const payload = {
+      text: contentToSave
+    }
+
+    // 如果是字幕模式，同時發送 segments
+    if (segmentsToSave) {
+      payload.segments = segmentsToSave
+    }
+
+    await api.put(NEW_ENDPOINTS.transcriptions.updateContent(currentTranscript.value.task_id), payload)
+
+    // 更新原始內容和當前內容
+    originalContent.value = contentToSave
+    currentTranscript.value.content = contentToSave
+
+    // 如果有更新 segments，也要更新本地的 segments 資料
+    if (segmentsToSave) {
+      segments.value = segmentsToSave
+      console.log(`✅ 已更新本地 segments 資料`)
+    }
+
     isEditing.value = false
-    alert('儲存成功')
+
+    if (showNotification) {
+      showNotification({
+        title: '儲存成功',
+        message: segmentsToSave ? '逐字稿和字幕已更新' : '逐字稿已更新',
+        type: 'success'
+      })
+    } else {
+      alert('儲存成功')
+    }
   } catch (error) {
     console.error('儲存失敗:', error)
-    alert('儲存失敗')
+    if (showNotification) {
+      showNotification({
+        title: '儲存失敗',
+        message: error.message,
+        type: 'error'
+      })
+    } else {
+      alert('儲存失敗')
+    }
   }
 }
 
@@ -2101,6 +2416,230 @@ function handleKeyboardShortcuts(event) {
 
   .circular-controls-bottom {
     padding: 0 10px;
+  }
+}
+
+/* ========== 字幕模式相關樣式 ========== */
+
+/* 字幕控制項 */
+.subtitle-controls {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(163, 177, 198, 0.2);
+}
+
+.control-group {
+  margin-bottom: 16px;
+}
+
+.control-label {
+  display: block;
+  font-size: 12px;
+  color: var(--neu-text-light);
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+/* 時間格式切換 */
+.time-format-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.format-btn {
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: var(--neu-bg);
+  box-shadow: var(--neu-shadow-btn-sm);
+  color: var(--neu-text-light);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.format-btn.active {
+  color: var(--neu-primary);
+  box-shadow: var(--neu-shadow-inset);
+}
+
+.format-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--neu-shadow-btn-hover);
+}
+
+/* 疏密度滑桿 */
+.density-slider {
+  width: 100%;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--neu-bg);
+  box-shadow: var(--neu-shadow-inset);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.density-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--neu-primary);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.density-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: var(--neu-primary);
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.slider-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--neu-text-light);
+  margin-top: 4px;
+}
+
+/* 字幕表格容器 */
+.subtitle-table-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.subtitle-table-wrapper {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  border-radius: 12px;
+  background: var(--neu-bg);
+  box-shadow: var(--neu-shadow-inset);
+  padding: 12px;
+}
+
+.subtitle-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 8px;
+}
+
+.subtitle-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--neu-bg);
+  padding: 12px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--neu-text-light);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  z-index: 10;
+  border-bottom: 2px solid rgba(163, 177, 198, 0.2);
+}
+
+.subtitle-row {
+  background: var(--neu-bg);
+  transition: all 0.2s ease;
+}
+
+.subtitle-row:hover {
+  background: rgba(163, 177, 198, 0.05);
+}
+
+/* 時間欄 */
+.col-time {
+  width: 120px;
+  padding: 12px;
+  text-align: right;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  color: var(--neu-text-light);
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+/* 講者欄 */
+.col-speaker {
+  width: 100px;
+  padding: 12px;
+  text-align: center;
+  vertical-align: top;
+}
+
+.speaker-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  background: var(--neu-bg);
+  box-shadow: var(--neu-shadow-btn-sm);
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--neu-primary);
+}
+
+/* 內容欄 */
+.col-content {
+  padding: 12px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--neu-text);
+  min-height: 48px;
+  vertical-align: top;
+}
+
+.col-content[contenteditable="true"] {
+  outline: 2px solid transparent;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  cursor: text;
+}
+
+.col-content[contenteditable="true"]:focus {
+  outline: 2px solid var(--neu-primary);
+  background: rgba(163, 177, 198, 0.05);
+}
+
+/* Segment span 樣式 */
+.segment-span {
+  display: inline;
+}
+
+.segment-span:not(:last-child)::after {
+  content: ' ';
+  white-space: pre;
+}
+
+/* 響應式設計 - 字幕模式 */
+@media (max-width: 768px) {
+  .subtitle-table .col-speaker {
+    display: none;
+  }
+
+  .subtitle-table .col-time {
+    width: 90px;
+    font-size: 11px;
+  }
+
+  .subtitle-table {
+    font-size: 14px;
+  }
+
+  .subtitle-table .col-content {
+    font-size: 14px;
   }
 }
 </style>
