@@ -107,6 +107,17 @@ body.upload-page .content-wrapper {
   overflow-y: auto;
 }
 
+/* 逐字稿詳情頁面限制視窗高度 */
+body.transcript-detail-page .app-container {
+  height: 100vh;
+  overflow: hidden;
+}
+
+body.transcript-detail-page .content-wrapper {
+  height: 100%;
+  overflow: hidden;
+}
+
 @media (max-width: 768px) {
   .app-container {
     flex-direction: column;

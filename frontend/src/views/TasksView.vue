@@ -152,7 +152,7 @@ async function cancelTask(taskId) {
     // 刷新任務列表以獲取最新狀態
     await refreshTasks()
   } catch (error) {
-    console.error('❌ 取消任務失敗:', error)
+    console.error('取消任務失敗:', error)
 
     // 取消失敗，恢復 UI 狀態
     const task = tasks.value.find(t => t.task_id === taskId)
@@ -199,7 +199,7 @@ function connectTaskSSE(taskId) {
 
   const token = TokenManager.getAccessToken()
   if (!token) {
-    console.error('❌ 無法建立 SSE 連接：未登入')
+    console.error('無法建立 SSE 連接：未登入')
     return
   }
 
@@ -253,12 +253,12 @@ function connectTaskSSE(taskId) {
         }
       }
     } catch (error) {
-      console.error('❌ 解析 SSE 數據失敗:', error)
+      console.error('解析 SSE 數據失敗:', error)
     }
   }
 
   eventSource.onerror = (error) => {
-    console.error(`❌ SSE 連接錯誤: ${taskId}`, error)
+    console.error(`SSE 連接錯誤: ${taskId}`, error)
     if (eventSource.readyState === EventSource.CLOSED) {
       console.log(`🔌 SSE 連接已關閉: ${taskId}`)
       disconnectTaskSSE(taskId)

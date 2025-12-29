@@ -30,37 +30,16 @@
         </div>
 
         <!-- 元數據 -->
-        <div class="metadata-section">
-          <div v-if="currentTranscript.created_at" class="meta-item">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-              <line x1="16" y1="2" x2="16" y2="6"></line>
-              <line x1="8" y1="2" x2="8" y2="6"></line>
-              <line x1="3" y1="10" x2="21" y2="10"></line>
-            </svg>
-            {{ formatDate(currentTranscript.created_at) }}
-          </div>
-          <div v-if="currentTranscript.text_length" class="meta-item">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-              <polyline points="14 2 14 8 20 8"></polyline>
-            </svg>
-            {{ currentTranscript.text_length }} 字
-          </div>
-          <div v-if="currentTranscript.duration_text" class="meta-item">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"></circle>
-              <polyline points="12 6 12 12 16 14"></polyline>
-            </svg>
-            {{ currentTranscript.duration_text }}
-          </div>
-        </div>
+        <TranscriptMetadata
+          :created-at="currentTranscript.created_at"
+          :text-length="currentTranscript.text_length"
+          :duration-text="currentTranscript.duration_text"
+        />
 
         <!-- 字幕模式控制項 -->
         <div v-if="displayMode === 'subtitle'" class="subtitle-controls">
           <!-- 時間格式切換 -->
           <div class="control-group">
-            <label class="control-label">時間格式</label>
             <div class="time-format-toggle">
               <button
                 @click="timeFormat = 'start'"
@@ -124,638 +103,486 @@
           </button>
         </div>
 
-      <!-- 音訊播放器 -->
-      <div v-if="currentTranscript.hasAudio" class="audio-player-container">
-        <audio
-          ref="audioElement"
-          preload="metadata"
-          :src="audioUrl"
-          @error="handleAudioError"
-          @loadedmetadata="handleAudioLoaded"
-          @play="isPlaying = true"
-          @pause="isPlaying = false"
-          @ended="isPlaying = false"
-          @timeupdate="updateProgress"
-          @durationchange="updateDuration"
-          @volumechange="updateVolume"
-          @ratechange="updatePlaybackRate"
-        >
-          您的瀏覽器不支援音訊播放。
-        </audio>
-
-        <div v-if="audioError" class="audio-error">
-          <div class="error-message">⚠️ {{ audioError }}</div>
-          <button @click="reloadAudio" class="btn-retry">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
-              <path d="M21 3v5h-5"/>
-              <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
-              <path d="M3 21v-5h5"/>
-            </svg>
-            重試載入
-          </button>
-        </div>
-
-        <div class="custom-audio-player circular-player">
-          <!-- 圓形進度條 (1/3 圓弧在上方) -->
-          <div class="circular-progress-container">
-            <svg
-              class="progress-arc"
-              viewBox="0 0 200 140"
-              @mousedown="startDragArc"
-              @mousemove="dragArc"
-              @mouseup="stopDragArc"
-              @mouseleave="stopDragArc"
-            >
-              <!-- 背景弧線 -->
-              <path
-                class="arc-background"
-                :d="arcPath"
-                fill="none"
-                stroke-width="5"
-                stroke-linecap="round"
-              />
-              <!-- 進度弧線 -->
-              <path
-                class="arc-progress"
-                :d="arcPath"
-                fill="none"
-                stroke-width="5"
-                stroke-linecap="round"
-                :stroke-dasharray="arcLength"
-                :stroke-dashoffset="arcLength - (arcLength * displayProgress / 100)"
-              />
-              <!-- 進度圓點 -->
-              <circle
-                class="arc-thumb"
-                :cx="thumbPosition.x"
-                :cy="thumbPosition.y"
-                r="5"
-              />
-            </svg>
-          </div>
-
-          <!-- 中央控制區 -->
-          <div class="circular-controls-center">
-            <!-- 快退按鈕 -->
-            <button class="audio-control-btn audio-skip-btn skip-backward" @click="skipBackward" title="快退10秒">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                <path d="M3 3v5h5"/>
-              </svg>
-              <span class="control-label">10</span>
-            </button>
-
-            <!-- 播放/暫停按鈕 -->
-            <button class="audio-control-btn audio-play-btn" @click="togglePlayPause" :title="isPlaying ? '暫停' : '播放'">
-              <svg v-if="!isPlaying" width="30" height="30" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M8 5v14l11-7z"/>
-              </svg>
-              <svg v-else width="30" height="30" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
-              </svg>
-            </button>
-
-            <!-- 快進按鈕 -->
-            <button class="audio-control-btn audio-skip-btn skip-forward" @click="skipForward" title="快進10秒">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
-                <path d="M21 3v5h-5"/>
-              </svg>
-              <span class="control-label">10</span>
-            </button>
-          </div>
-
-          <!-- 時間顯示 -->
-          <div class="time-display-center">
-            {{ formatTime(displayTime) }} / {{ formatTime(duration) }}
-          </div>
-
-          <!-- 音量和控制區 -->
-          <div class="volume-and-controls">
-            <!-- 左側：快捷鍵說明 -->
-            <div class="keyboard-shortcuts-info">
-              <button class="audio-control-btn info-btn" title="鍵盤快捷鍵">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
-                </svg>
-              </button>
-              <div class="shortcuts-tooltip">
-                <div class="shortcuts-title">音檔控制快捷鍵</div>
-                <div class="shortcuts-section">
-                  <div class="shortcuts-section-title">通用（編輯時可用）</div>
-                  <div class="shortcut-item">
-                    <kbd>Alt</kbd> + <kbd>K</kbd>
-                    <span>播放/暫停</span>
-                  </div>
-                  <div class="shortcut-item">
-                    <kbd>Alt</kbd> + <kbd>J</kbd> / <kbd>←</kbd>
-                    <span>快退 10 秒</span>
-                  </div>
-                  <div class="shortcut-item">
-                    <kbd>Alt</kbd> + <kbd>L</kbd> / <kbd>→</kbd>
-                    <span>快進 10 秒</span>
-                  </div>
-                  <div class="shortcut-item">
-                    <kbd>Alt</kbd> + <kbd>,</kbd>
-                    <span>快退 5 秒</span>
-                  </div>
-                  <div class="shortcut-item">
-                    <kbd>Alt</kbd> + <kbd>.</kbd>
-                    <span>快進 5 秒</span>
-                  </div>
-                  <div class="shortcut-item">
-                    <kbd>Alt</kbd> + <kbd>M</kbd>
-                    <span>靜音/取消靜音</span>
-                  </div>
-                </div>
-                <div class="shortcuts-section">
-                  <div class="shortcuts-section-title">非編輯模式</div>
-                  <div class="shortcut-item">
-                    <kbd>Space</kbd>
-                    <span>播放/暫停</span>
-                  </div>
-                  <div class="shortcut-item">
-                    <kbd>←</kbd>
-                    <span>快退 10 秒</span>
-                  </div>
-                  <div class="shortcut-item">
-                    <kbd>→</kbd>
-                    <span>快進 10 秒</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- 中間：音量控制 -->
-            <div class="volume-control-center">
-              <!-- 靜音按鈕（音量條開頭） -->
-              <button class="audio-control-btn mute-btn-volume" @click="toggleMute" :title="isMuted ? '取消靜音' : '靜音'">
-                <svg v-if="!isMuted && volume > 0.5" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
-                </svg>
-                <svg v-else-if="!isMuted && volume > 0" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
-                </svg>
-                <svg v-else width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
-                </svg>
-              </button>
-
-              <input
-                type="range"
-                class="volume-slider-horizontal"
-                min="0"
-                max="100"
-                :value="volume * 100"
-                @input="setVolume"
-              />
-            </div>
-
-            <!-- 右側：播放速度 -->
-            <div class="speed-control">
-              <button class="audio-control-btn speed-btn" :title="`播放速度: ${playbackRate}x`">
-                <span class="speed-label">{{ playbackRate }}x</span>
-              </button>
-              <div class="speed-dropdown">
-                <button
-                  v-for="rate in [0.5, 0.75, 1, 1.25, 1.5, 2]"
-                  :key="rate"
-                  class="speed-option"
-                  :class="{ active: playbackRate === rate }"
-                  @click="setPlaybackRate(rate)"
-                >
-                  {{ rate }}x
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+        <!-- 音訊播放器組件 -->
+        <AudioPlayer
+          v-if="currentTranscript.hasAudio"
+          ref="audioPlayerRef"
+          :audio-url="audioUrl"
+          :audio-error="audioError"
+          :is-playing="isPlaying"
+          :volume="volume"
+          :is-muted="isMuted"
+          :playback-rate="playbackRate"
+          :arc-path="arcPath"
+          :arc-length="arcLength"
+          :thumb-position="thumbPosition"
+          :display-progress="displayProgress"
+          :display-time="displayTime"
+          :duration="duration"
+          @update:is-playing="isPlaying = $event"
+          @reload-audio="reloadAudio(currentTranscript.task_id)"
+          @toggle-play-pause="togglePlayPause"
+          @skip-backward="skipBackward"
+          @skip-forward="skipForward"
+          @toggle-mute="toggleMute"
+          @set-volume="setVolume"
+          @set-playback-rate="setPlaybackRate"
+          @start-drag-arc="startDragArc"
+          @drag-arc="dragArc"
+          @stop-drag-arc="stopDragArc"
+          @audio-loaded="handleAudioLoaded"
+          @audio-error="handleAudioError"
+          @update-progress="updateProgress"
+          @update-duration="updateDuration"
+          @update-volume="updateVolume"
+          @update-playback-rate="updatePlaybackRate"
+        />
       </div>
 
       <!-- 右側文字區域 -->
       <div class="right-panel card">
         <!-- 逐字稿內容區域 -->
         <div class="transcript-content-wrapper">
-          <div class="transcript-content-area">
           <div v-if="loadingTranscript" class="loading-state">
             <div class="spinner"></div>
             <p>載入逐字稿中...</p>
           </div>
           <div v-else-if="transcriptError" class="error-state">
-            <p>❌ {{ transcriptError }}</p>
+            <p>{{ transcriptError }}</p>
           </div>
           <!-- 段落模式：保持原有 textarea -->
           <div
             v-else-if="displayMode === 'paragraph'"
             class="textarea-wrapper"
-            :class="{ 'show-reference-line': currentTranscript.hasAudio && timecodeMarkers.length > 0 }"
           >
+            <!-- 編輯模式：使用 textarea -->
             <textarea
+              v-if="isEditing"
               v-model="currentTranscript.content"
-              class="transcript-textarea"
-              :readonly="!isEditing"
-              :class="{ 'editing': isEditing }"
-              ref="textarea"
-              @scroll="syncScroll"
+              class="transcript-textarea editing"
+              ref="textareaRef"
             ></textarea>
-            <!-- 固定顯示的當前 Timecode -->
-            <div
-              v-if="activeTimecodeIndex >= 0 && timecodeMarkers.length > 0 && currentTranscript.hasAudio"
-              class="timecode-fixed-display"
-              @click="seekToTime(timecodeMarkers[activeTimecodeIndex].time)"
-              :title="`點擊跳轉到 ${timecodeMarkers[activeTimecodeIndex].label}`"
-            >
-              <div class="timecode-label">{{ timecodeMarkers[activeTimecodeIndex].label }}</div>
-            </div>
-          </div>
 
-          <!-- 字幕模式：表格顯示 -->
-          <div v-else-if="displayMode === 'subtitle'" class="subtitle-table-container">
-            <div class="subtitle-table-wrapper">
-              <table class="subtitle-table">
-                <thead>
-                  <tr>
-                    <th class="col-time">時間</th>
-                    <th v-if="hasSpeakerInfo" class="col-speaker">講者</th>
-                    <th class="col-content">內容</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="group in groupedSegments"
-                    :key="`${densityThreshold}-${group.id}`"
-                    class="subtitle-row"
+            <!-- 非編輯模式：使用帶標記的 div -->
+            <div v-else class="transcript-display" ref="textareaRef">
+              <template v-for="(part, index) in getContentParts()" :key="index">
+                <span v-if="!part.isMarker" class="text-part">{{ part.text }}</span>
+                <span v-else class="marker-wrapper">
+                  <span
+                    class="segment-marker"
+                    @click="seekToTime(part.start)"
                   >
-                    <td class="col-time">
-                      {{ formatTimestamp(group.startTime, timeFormat, group.endTime) }}
-                    </td>
-
-                    <td v-if="hasSpeakerInfo" class="col-speaker">
-                      <span class="speaker-badge">{{ group.speaker || '-' }}</span>
-                    </td>
-
-                    <td
-                      class="col-content"
-                      :contenteditable="isEditing"
-                      @blur="updateRowContent(group.id, $event)"
-                    >
-                      <span
-                        v-for="(segment, idx) in group.segments"
-                        :key="idx"
-                        :data-segment-index="idx"
-                        class="segment-span"
-                      >{{ segment.text }}</span>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+                    <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor">
+                      <path d="M 4 6 L 1 2 L 7 2 Z"/>
+                    </svg>
+                    <span class="timecode-tooltip">
+                      {{ formatTime(part.start) }}
+                    </span>
+                  </span>
+                  <span class="text-part">{{ part.text }}</span>
+                </span>
+              </template>
             </div>
           </div>
-        </div>
+
+          <!-- 字幕模式：表格組件 -->
+          <SubtitleTable
+            v-else-if="displayMode === 'subtitle'"
+            :grouped-segments="groupedSegments"
+            :time-format="timeFormat"
+            :density-threshold="densityThreshold"
+            :has-speaker-info="hasSpeakerInfo"
+            :has-audio="currentTranscript.hasAudio"
+            :is-editing="isEditing"
+            :format-timestamp="formatTimestamp"
+            @seek-to-time="seekToTime"
+            @update-row-content="updateRowContent"
+          />
         </div>
 
-        <!-- 取代工具列 -->
-        <div v-if="isEditing && !loadingTranscript && !transcriptError" class="replace-toolbar">
-          <input
-            v-model="findText"
-            type="text"
-            placeholder="尋找"
-            class="replace-input"
-            @keydown.enter.prevent="replaceAll"
-          />
-          <input
-            v-model="replaceText"
-            type="text"
-            placeholder="取代為"
-            class="replace-input"
-            @keydown.enter.prevent="replaceAll"
-          />
-          <button
-            class="btn btn-primary"
-            @click="replaceAll"
-            :disabled="!findText"
-          >
-            取代全部
-          </button>
-        </div>
+        <!-- 取代工具列組件 -->
+        <ReplaceToolbar
+          v-if="isEditing && !loadingTranscript && !transcriptError"
+          v-model:find-text="findText"
+          v-model:replace-text="replaceText"
+          @replace-all="replaceAll"
+        />
       </div>
     </div>
+
+    <!-- 下載對話框組件 -->
+    <DownloadDialog
+      :show="showDownloadDialog"
+      :time-format="timeFormat"
+      :density-threshold="densityThreshold"
+      :has-speaker-info="hasSpeakerInfo"
+      v-model:selected-format="selectedDownloadFormat"
+      @close="showDownloadDialog = false"
+      @download="performDownload"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick, watch, inject } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import api, { API_BASE, TokenManager } from '../utils/api'
-import { NEW_ENDPOINTS } from '../api/endpoints'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
+
+// 子組件
+import AudioPlayer from '../components/transcript/AudioPlayer.vue'
+import SubtitleTable from '../components/transcript/SubtitleTable.vue'
+import DownloadDialog from '../components/transcript/DownloadDialog.vue'
+import ReplaceToolbar from '../components/transcript/ReplaceToolbar.vue'
+import TranscriptMetadata from '../components/transcript/TranscriptMetadata.vue'
+
+// Composables
+import { useTranscriptData } from '../composables/transcript/useTranscriptData'
+import { useAudioPlayer } from '../composables/transcript/useAudioPlayer'
+import { useSubtitleMode } from '../composables/transcript/useSubtitleMode'
+import { useTranscriptEditor } from '../composables/transcript/useTranscriptEditor'
+// import { useTimecodeMarkers } from '../composables/transcript/useTimecodeMarkers'
+import { useSegmentMarkers } from '../composables/transcript/useSegmentMarkers'
+import { useKeyboardShortcuts } from '../composables/transcript/useKeyboardShortcuts'
+import { useTranscriptDownload } from '../composables/transcript/useTranscriptDownload'
 
 const route = useRoute()
 const router = useRouter()
 
-// 注入通知函數
-const showNotification = inject('showNotification')
+// 音訊播放器組件引用
+const audioPlayerRef = ref(null)
 
-// 基本狀態
-const currentTranscript = ref({})
-const loadingTranscript = ref(false)
-const transcriptError = ref(null)
-const isEditing = ref(false)
-const isEditingTitle = ref(false)
-const editingTaskName = ref('')
-const findText = ref('')
-const replaceText = ref('')
-const originalContent = ref('')
+// ========== 數據管理 ==========
+const {
+  currentTranscript,
+  segments,
+  loadingTranscript,
+  transcriptError,
+  originalContent,
+  loadTranscript: loadTranscriptData,
+  saveTranscript,
+  updateTaskName
+} = useTranscriptData()
 
-// 音訊播放器狀態
-const audioElement = ref(null)
-const audioError = ref(null)
-const audioUrl = ref('')
-const isPlaying = ref(false)
-const progressBar = ref(null)
-const currentTime = ref(0)
-const duration = ref(0)
-const progressPercent = ref(0)
-const volume = ref(1)
-const isMuted = ref(false)
-const playbackRate = ref(1)
-const isDraggingArc = ref(false)
-const draggingPercent = ref(0)
-let rafId = null
-
-// 時間碼標記
-const segments = ref([])
-const timecodeMarkers = ref([])
-const activeTimecodeIndex = ref(-1)
-const textarea = ref(null)
-const titleInput = ref(null)
-
-// 字幕模式顯示相關
+// 顯示模式
 const displayMode = computed(() => {
   return currentTranscript.value?.task_type || 'paragraph'
 })
-const timeFormat = ref('start')       // 'start' | 'range'
-const densityThreshold = ref(3.0)     // 強制分開的間隔（秒），範圍 0.0-20.0
 
-// 檢測是否有說話者資訊
-const hasSpeakerInfo = computed(() => {
-  if (!segments.value || segments.value.length === 0) return false
-  return segments.value.some(seg => seg.speaker !== undefined && seg.speaker !== null)
-})
+// ========== 音訊播放器 ==========
+const {
+  audioElement,
+  isPlaying,
+  currentTime,
+  duration,
+  progressPercent,
+  displayProgress,
+  displayTime,
+  volume,
+  isMuted,
+  playbackRate,
+  arcPath,
+  arcLength,
+  thumbPosition,
+  audioUrl,
+  audioError,
+  getAudioUrl,
+  reloadAudio,
+  handleAudioLoaded,
+  handleAudioError,
+  updateProgress,
+  updateDuration,
+  updateVolume,
+  updatePlaybackRate,
+  togglePlayPause,
+  skipBackward,
+  skipForward,
+  seekToTime,
+  setVolume,
+  toggleMute,
+  setPlaybackRate,
+  startDragArc,
+  dragArc,
+  stopDragArc
+} = useAudioPlayer()
 
-// 圓弧進度條計算
-const arcPath = computed(() => {
-  // 1/3 圓 = 120 度
-  // 從 210 度開始到 330 度（上方居中）
-  const centerX = 100
-  const centerY = 100
-  const radius = 90  // 增大半徑從 80 到 90
-  const startAngle = 210 * (Math.PI / 180)
-  const endAngle = 330 * (Math.PI / 180)
-
-  const startX = centerX + radius * Math.cos(startAngle)
-  const startY = centerY + radius * Math.sin(startAngle)
-  const endX = centerX + radius * Math.cos(endAngle)
-  const endY = centerY + radius * Math.sin(endAngle)
-
-  return `M ${startX} ${startY} A ${radius} ${radius} 0 0 1 ${endX} ${endY}`
-})
-
-const arcLength = computed(() => {
-  // 1/3 圓的弧長 = 2πr × (120/360) = 2πr / 3
-  const radius = 90  // 增大半徑從 80 到 90
-  return (2 * Math.PI * radius) / 3
-})
-
-const thumbPosition = computed(() => {
-  // 根據進度百分比計算拇指位置
-  const centerX = 100
-  const centerY = 100
-  const radius = 90  // 增大半徑從 80 到 90
-  const startAngle = 210 * (Math.PI / 180)
-  const totalAngle = 120 * (Math.PI / 180) // 120度的弧
-  // 拖曳時使用 draggingPercent，否則使用實際進度
-  const percent = isDraggingArc.value ? draggingPercent.value : progressPercent.value
-  const currentAngle = startAngle + (totalAngle * percent / 100)
-
-  return {
-    x: centerX + radius * Math.cos(currentAngle),
-    y: centerY + radius * Math.sin(currentAngle)
-  }
-})
-
-// 顯示的進度（拖曳時使用拖曳進度，否則使用實際進度）
-const displayProgress = computed(() => {
-  return isDraggingArc.value ? draggingPercent.value : progressPercent.value
-})
-
-// 顯示的時間（拖曳時即時計算，否則使用實際時間）
-const displayTime = computed(() => {
-  if (isDraggingArc.value) {
-    // 拖曳時根據 draggingPercent 計算時間
-    return (draggingPercent.value / 100) * duration.value
-  }
-  return currentTime.value
-})
-
-// 字幕模式：合併 segments 演算法
-function mergeSegmentsByDensity(segments, thresholdSeconds, hasSpeaker) {
-  if (!segments || segments.length === 0) return []
-
-  const sortedSegments = [...segments].sort((a, b) => a.start - b.start)
-  const groups = []
-  let currentGroup = null
-  const gaps = []  // 記錄所有間隔用於調試
-
-  for (let i = 0; i < sortedSegments.length; i++) {
-    const segment = sortedSegments[i]
-
-    if (!currentGroup) {
-      currentGroup = {
-        id: `group_${i}_${segment.start}`,
-        startTime: segment.start,
-        endTime: segment.end,
-        speaker: segment.speaker || null,
-        segments: [segment],
-        combinedText: segment.text.trim(),
-        edited: false  // 標記是否被編輯過
-      }
-    } else {
-      const speakerMatch = !hasSpeaker || (segment.speaker === currentGroup.speaker)
-
-      // 計算如果加入這個 segment，group 的總時長
-      const groupDuration = segment.end - currentGroup.startTime
-      gaps.push(groupDuration)
-
-      // 疏密度邏輯：
-      // - threshold = 0：完全分開（每個 segment 一列）
-      // - threshold > 0：groupDuration >= threshold 或不同講者 → 分開
-      const shouldSplit = !speakerMatch || (thresholdSeconds === 0) || (groupDuration >= thresholdSeconds)
-
-      if (shouldSplit) {
-        // 保存當前 group，開始新 group
-        groups.push(currentGroup)
-        currentGroup = {
-          id: `group_${i}_${segment.start}`,
-          startTime: segment.start,
-          endTime: segment.end,
-          speaker: segment.speaker || null,
-          segments: [segment],
-          combinedText: segment.text.trim(),
-          edited: false  // 標記是否被編輯過
-        }
-      } else {
-        // 合併到當前 group
-        currentGroup.endTime = segment.end
-        currentGroup.segments.push(segment)
-        currentGroup.combinedText += ' ' + segment.text.trim()
-      }
+// 同步 audioElement 引用（延遲確保組件已掛載）
+onMounted(() => {
+  setTimeout(() => {
+    if (audioPlayerRef.value?.audioElement) {
+      audioElement.value = audioPlayerRef.value.audioElement
     }
-  }
-
-  // 輸出間隔統計（僅在有間隔時）
-  if (gaps.length > 0) {
-    const avgGap = (gaps.reduce((a, b) => a + b, 0) / gaps.length).toFixed(2)
-    const minGap = Math.min(...gaps).toFixed(2)
-    const maxGap = Math.max(...gaps).toFixed(2)
-
-    // 統計不同間隔範圍的數量
-    const gap0 = gaps.filter(g => g === 0).length
-    const gapLess01 = gaps.filter(g => g > 0 && g < 0.1).length
-    const gapLess1 = gaps.filter(g => g >= 0.1 && g < 1).length
-    const gapLess5 = gaps.filter(g => g >= 1 && g < 5).length
-    const gap5Plus = gaps.filter(g => g >= 5).length
-
-    console.log(`  📊 間隔統計: 平均 ${avgGap}s, 最小 ${minGap}s, 最大 ${maxGap}s | 閾值: ${thresholdSeconds}s`)
-    console.log(`  📊 間隔分布: =0 (${gap0}) | 0-0.1s (${gapLess01}) | 0.1-1s (${gapLess1}) | 1-5s (${gapLess5}) | ≥5s (${gap5Plus})`)
-  }
-
-  if (currentGroup) groups.push(currentGroup)
-  return groups
-}
-
-// 字幕模式：合併後的 segments（自動響應疏密度變化）
-const groupedSegments = computed(() => {
-  console.log(`🎯 [groupedSegments] 觸發計算 - displayMode: ${displayMode.value}, densityThreshold: ${densityThreshold.value}`)
-  if (displayMode.value !== 'subtitle') {
-    console.log(`⚠️ [groupedSegments] displayMode 不是 subtitle，返回空陣列`)
-    return []
-  }
-  const groups = mergeSegmentsByDensity(
-    segments.value,
-    densityThreshold.value,
-    hasSpeakerInfo.value
-  )
-  console.log(`🔧 疏密度: ${densityThreshold.value}s | Segments: ${segments.value?.length || 0} → Groups: ${groups.length}`)
-  return groups
+  }, 100)
 })
 
-// 時間格式化函數
-function formatTimestamp(seconds, format, endSeconds) {
-  const formatTime = (sec) => {
-    const h = Math.floor(sec / 3600)
-    const m = Math.floor((sec % 3600) / 60)
-    const s = Math.floor(sec % 60)
-
-    if (h > 0) {
-      return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-    }
-    return `${m}:${String(s).padStart(2, '0')}`
+watch(audioPlayerRef, (newRef) => {
+  if (newRef?.audioElement) {
+    audioElement.value = newRef.audioElement
   }
+}, { immediate: true })
 
-  if (format === 'start') {
-    return formatTime(seconds)
-  } else {
-    return `${formatTime(seconds)} - ${formatTime(endSeconds)}`
-  }
-}
+// ========== 字幕模式 ==========
+const {
+  timeFormat,
+  densityThreshold,
+  hasSpeakerInfo,
+  groupedSegments,
+  formatTimestamp,
+  updateRowContent,
+  convertTableToPlainText,
+  reconstructSegmentsFromGroups,
+  generateSubtitleText
+} = useSubtitleMode(segments)
 
-// 載入逐字稿的可重用函數
+// ========== 編輯管理 ==========
+const {
+  isEditing,
+  isEditingTitle,
+  editingTaskName,
+  findText,
+  replaceText,
+  hasUnsavedChanges,
+  titleInput, // 用於 template ref
+  startTitleEdit,
+  cancelTitleEdit,
+  startEditing,
+  cancelEditing,
+  finishEditing,
+  replaceAll,
+  handleBeforeUnload
+} = useTranscriptEditor(currentTranscript, originalContent, displayMode, groupedSegments, convertTableToPlainText)
+
+// ========== 時間碼標記 ==========
+// const {
+//   timecodeMarkers,
+//   activeTimecodeIndex,
+//   textarea, // 用於 template ref
+//   generateTimecodeMarkers,
+//   syncScroll
+// } = useTimecodeMarkers()
+
+// ========== Segment 標記 ==========
+const {
+  segmentMarkers,
+  textareaRef,
+  generateSegmentMarkers,
+  calculateMarkerPosition,
+  formatTime
+} = useSegmentMarkers()
+
+// ========== 下載功能 ==========
+const {
+  showDownloadDialog,
+  selectedDownloadFormat,
+  downloadParagraphMode,
+  performSubtitleDownload,
+  openDownloadDialog
+} = useTranscriptDownload()
+
+// ========== 鍵盤快捷鍵 ==========
+const hasAudio = computed(() => currentTranscript.value.hasAudio)
+useKeyboardShortcuts(
+  hasAudio,
+  audioElement,
+  isEditing,
+  isEditingTitle,
+  togglePlayPause,
+  skipBackward,
+  skipForward,
+  toggleMute
+)
+
+// ========== 頁面生命週期 ==========
+
+// 載入逐字稿的包裝函數
 async function loadTranscript(taskId) {
-  if (!taskId) {
-    transcriptError.value = '無效的任務 ID'
-    return
-  }
+  const result = await loadTranscriptData(
+    taskId,
+    getAudioUrl,
+    // (segs) => generateTimecodeMarkers(segs, currentTranscript.value.content)
+    null
+  )
 
-  loadingTranscript.value = true
-  transcriptError.value = null
-  isEditing.value = false  // 重置編輯狀態
-
-  try {
-    const taskResponse = await api.get(NEW_ENDPOINTS.tasks.list)
-    const task = taskResponse.data.tasks?.find(t => (t._id || t.task_id) === taskId)
-
-    if (!task) {
-      transcriptError.value = '找不到該任務'
-      return
-    }
-
-    currentTranscript.value = {
-      task_id: task.task_id,
-      filename: task.file?.filename || task.filename,
-      custom_name: task.custom_name,
-      created_at: task.timestamps?.completed_at || task.timestamps?.created_at,
-      text_length: task.result?.text_length || task.text_length,
-      duration_text: task.duration_text,
-      hasAudio: !!(task.result?.audio_file || task.audio_file),
-      task_type: task.task_type || 'paragraph',
-      content: ''
-    }
-
-    console.log('📋 任務類型:', currentTranscript.value.task_type, '| 顯示模式:', displayMode.value)
-
-    // 初始化音檔 URL
-    if (currentTranscript.value.hasAudio) {
-      audioUrl.value = getAudioUrl(task.task_id)
+  if (result) {
+    if (result.audioUrl) {
+      audioUrl.value = result.audioUrl
       audioError.value = null
     }
+    // if (result.timecodeMarkers) {
+    //   timecodeMarkers.value = result.timecodeMarkers
+    //   if (result.timecodeMarkers.length > 0) {
+    //     activeTimecodeIndex.value = 0
+    //   }
+    // }
 
-    // 並行獲取逐字稿和 segments
-    const [transcriptResponse, segmentsResponse] = await Promise.all([
-      api.get(NEW_ENDPOINTS.transcriptions.download(taskId), {
-        responseType: 'text'
-      }),
-      api.get(NEW_ENDPOINTS.transcriptions.segments(taskId)).catch(err => {
-        console.log('無法獲取 segments:', err)
-        return null
-      })
-    ])
-
-    currentTranscript.value.content = transcriptResponse.data
-    originalContent.value = transcriptResponse.data
-
-    // 如果有 segments 數據，生成 timecode markers
-    if (segmentsResponse && segmentsResponse.data.segments) {
-      segments.value = segmentsResponse.data.segments
-      timecodeMarkers.value = generateTimecodeMarkers(segments.value)
-      console.log('✅ 生成時間碼標記:', timecodeMarkers.value.length, '個')
-      // 初始化 activeTimecodeIndex
-      if (timecodeMarkers.value.length > 0) {
-        activeTimecodeIndex.value = 0
-        console.log('📍 初始化 activeTimecodeIndex:', activeTimecodeIndex.value, '/', timecodeMarkers.value.length)
-      }
+    // 生成segment標記（僅在段落模式下）
+    if (displayMode.value === 'paragraph' && segments.value && currentTranscript.value.content) {
+      generateSegmentMarkers(segments.value, currentTranscript.value.content)
     }
-
-    loadingTranscript.value = false
-
-    // 不需要初始化 scrollHeight，保持 textarea 固定高度可滾動
-    nextTick(() => {
-      // 確保 textarea 可以滾動
-      if (textarea.value && timecodeMarkers.value.length > 0) {
-        activeTimecodeIndex.value = 0
-      }
-    })
-  } catch (error) {
-    console.error('載入逐字稿失敗:', error)
-    transcriptError.value = '載入逐字稿失敗'
-    loadingTranscript.value = false
   }
 }
+
+// 儲存編輯的包裝函數
+async function saveEditing() {
+  let contentToSave = ''
+  let segmentsToSave = null
+
+  if (displayMode.value === 'paragraph') {
+    contentToSave = currentTranscript.value.content
+  } else {
+    contentToSave = convertTableToPlainText(groupedSegments.value)
+    segmentsToSave = reconstructSegmentsFromGroups(groupedSegments.value)
+  }
+
+  const success = await saveTranscript(contentToSave, segmentsToSave, displayMode.value)
+  
+  if (success) {
+    finishEditing()
+    
+    // 如果有更新 segments，也要更新本地的 segments 資料
+    if (segmentsToSave) {
+      segments.value = segmentsToSave
+    }
+  }
+}
+
+// 儲存任務名稱的包裝函數
+async function saveTaskName() {
+  const success = await updateTaskName(editingTaskName.value)
+  if (success || !success) {
+    // 無論成功或失敗都關閉編輯模式
+    isEditingTitle.value = false
+  }
+}
+
+// 下載逐字稿
+function downloadTranscript() {
+  if (displayMode.value === 'subtitle') {
+    openDownloadDialog()
+  } else {
+    const filename = currentTranscript.value.custom_name || currentTranscript.value.filename || 'transcript'
+    downloadParagraphMode(currentTranscript.value.content, filename)
+  }
+}
+
+// 執行下載（從對話框）
+function performDownload() {
+  const content = generateSubtitleText(groupedSegments.value, timeFormat.value)
+  const filename = currentTranscript.value.custom_name || currentTranscript.value.filename || 'transcript'
+  performSubtitleDownload(content, filename, selectedDownloadFormat.value)
+}
+
+// 返回
+function goBack() {
+  router.back()
+}
+
+// 將文字內容分割成帶有標記的片段
+function getContentParts() {
+  const content = currentTranscript.value.content || ''
+
+  if (!segmentMarkers.value || segmentMarkers.value.length === 0) {
+    // 沒有標記，返回整個文字
+    return [{ text: content, isMarker: false }]
+  }
+
+  const parts = []
+  let lastIndex = 0
+
+  // 按照文字索引排序標記
+  const sortedMarkers = [...segmentMarkers.value].sort((a, b) => a.textStartIndex - b.textStartIndex)
+
+  sortedMarkers.forEach(marker => {
+    // 添加標記之前的文字
+    if (marker.textStartIndex > lastIndex) {
+      parts.push({
+        text: content.substring(lastIndex, marker.textStartIndex),
+        isMarker: false
+      })
+    }
+
+    // 添加帶標記的文字
+    parts.push({
+      text: marker.text,
+      isMarker: true,
+      start: marker.start,
+      end: marker.end
+    })
+
+    lastIndex = marker.textEndIndex
+  })
+
+  // 添加最後剩餘的文字
+  if (lastIndex < content.length) {
+    parts.push({
+      text: content.substring(lastIndex),
+      isMarker: false
+    })
+  }
+
+  return parts
+}
+
+// 修復字幕模式編輯時的滾動問題
+function fixSubtitleScrolling() {
+  const wrapper = document.querySelector('.subtitle-table-wrapper')
+  if (!wrapper) return
+
+  const handleWheel = (e) => {
+    const delta = e.deltaY
+    wrapper.scrollTop += delta
+    e.preventDefault()
+  }
+
+  const addScrollListeners = () => {
+    const editableCells = wrapper.querySelectorAll('.col-content[contenteditable="true"]')
+    editableCells.forEach(cell => {
+      cell.addEventListener('wheel', handleWheel, { passive: false })
+    })
+  }
+
+  addScrollListeners()
+
+  const observer = new MutationObserver(() => {
+    addScrollListeners()
+  })
+
+  observer.observe(wrapper, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['contenteditable']
+  })
+}
+
+// 路由離開前的警告
+onBeforeRouteLeave((_to, _from, next) => {
+  if (hasUnsavedChanges.value) {
+    const answer = window.confirm('你有未儲存的編輯內容，確定要離開嗎？')
+    if (answer) {
+      next()
+    } else {
+      next(false)
+    }
+  } else {
+    next()
+  }
+})
 
 // 初始載入
 onMounted(() => {
+  document.body.classList.add('transcript-detail-page')
+  window.addEventListener('beforeunload', handleBeforeUnload)
   loadTranscript(route.params.taskId)
+
+  // 延遲執行以確保 DOM 已渲染
+  setTimeout(() => {
+    fixSubtitleScrolling()
+  }, 100) 
+})
+
+onUnmounted(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+  document.body.classList.remove('editing-transcript')
+  document.body.classList.remove('transcript-detail-page')
 })
 
 // 監聽路由參數變化
@@ -774,678 +601,16 @@ watch(isEditing, (editing) => {
   }
 })
 
-// 鍵盤快捷鍵
-onMounted(() => {
-  window.addEventListener('keydown', handleKeyboardShortcuts)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKeyboardShortcuts)
-  document.body.classList.remove('editing-transcript')
-})
-
-// 格式化日期
-function formatDate(dateString) {
-  if (!dateString) return ''
-  try {
-    const date = new Date(dateString)
-    return date.toLocaleString('zh-TW', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-  } catch {
-    return dateString
-  }
-}
-
-// 標題編輯
-function startTitleEdit() {
-  isEditingTitle.value = true
-  editingTaskName.value = currentTranscript.value.custom_name || currentTranscript.value.filename || ''
-  nextTick(() => {
-    if (titleInput.value) {
-      titleInput.value.focus()
-      titleInput.value.select()
+// 監聽segments和content變化，重新生成標記（僅在非編輯模式）
+watch(
+  () => [segments.value, currentTranscript.value.content, displayMode.value, isEditing.value],
+  () => {
+    if (displayMode.value === 'paragraph' && !isEditing.value && segments.value && currentTranscript.value.content) {
+      generateSegmentMarkers(segments.value, currentTranscript.value.content)
     }
-  })
-}
-
-async function saveTaskName() {
-  const newName = editingTaskName.value.trim()
-  if (newName && newName !== currentTranscript.value.custom_name) {
-    try {
-      await api.put(NEW_ENDPOINTS.transcriptions.updateMetadata(currentTranscript.value.task_id), {
-        title: newName
-      })
-      currentTranscript.value.custom_name = newName
-    } catch (error) {
-      console.error('更新任務名稱失敗:', error)
-      alert('更新任務名稱失敗')
-    }
-  }
-  isEditingTitle.value = false
-}
-
-function cancelTitleEdit() {
-  isEditingTitle.value = false
-  editingTaskName.value = ''
-}
-
-// 編輯功能
-function startEditing() {
-  isEditing.value = true
-  originalContent.value = currentTranscript.value.content
-}
-
-// 更新字幕模式表格列內容
-function updateRowContent(groupId, event) {
-  const group = groupedSegments.value.find(g => g.id === groupId)
-  if (!group) return
-
-  // 從 contenteditable 的 td 中取得所有 segment span
-  const tdElement = event.target
-  const spanElements = tdElement.querySelectorAll('.segment-span')
-
-  let hasChanges = false
-
-  // 遍歷每個 span，更新對應的 segment
-  spanElements.forEach((span, index) => {
-    if (index < group.segments.length) {
-      const newText = span.textContent.trim()
-      const originalText = group.segments[index].text.trim()
-
-      if (newText !== originalText) {
-        group.segments[index].text = newText
-        hasChanges = true
-        console.log(`✏️ Segment ${index} 已修改: "${originalText}" → "${newText}"`)
-      }
-    }
-  })
-
-  if (hasChanges) {
-    group.edited = true
-    // 更新 combinedText 以保持一致性
-    group.combinedText = group.segments.map(s => s.text.trim()).join(' ')
-    console.log(`✅ Group ${groupId} 已標記為已編輯`)
-  }
-}
-
-// 將表格內容轉為純文字
-function convertTableToPlainText(groups) {
-  return groups.map(group => {
-    const speakerPrefix = group.speaker ? `[${group.speaker}] ` : ''
-    return `${speakerPrefix}${group.combinedText.trim()}`
-  }).join('\n\n')
-}
-
-// 將編輯後的 groups 重建回 segments
-function reconstructSegmentsFromGroups(groups) {
-  const reconstructedSegments = []
-
-  for (const group of groups) {
-    // 直接使用 group 中的 segments（已經在編輯時更新了）
-    reconstructedSegments.push(...group.segments)
-  }
-
-  console.log(`🔄 重建 segments: ${groups.length} groups → ${reconstructedSegments.length} segments`)
-  return reconstructedSegments
-}
-
-async function saveEditing() {
-  let contentToSave = ''
-  let segmentsToSave = null
-
-  // 根據模式決定儲存的內容
-  if (displayMode.value === 'paragraph') {
-    contentToSave = currentTranscript.value.content
-  } else {
-    // 字幕模式：從表格收集內容
-    contentToSave = convertTableToPlainText(groupedSegments.value)
-
-    // 重建 segments（將編輯後的內容對應回原始 segments）
-    segmentsToSave = reconstructSegmentsFromGroups(groupedSegments.value)
-
-    console.log(`💾 準備儲存：${segmentsToSave.length} 個 segments`)
-  }
-
-  if (contentToSave === originalContent.value && !segmentsToSave) {
-    isEditing.value = false
-    return
-  }
-
-  try {
-    const payload = {
-      text: contentToSave
-    }
-
-    // 如果是字幕模式，同時發送 segments
-    if (segmentsToSave) {
-      payload.segments = segmentsToSave
-    }
-
-    await api.put(NEW_ENDPOINTS.transcriptions.updateContent(currentTranscript.value.task_id), payload)
-
-    // 更新原始內容和當前內容
-    originalContent.value = contentToSave
-    currentTranscript.value.content = contentToSave
-
-    // 如果有更新 segments，也要更新本地的 segments 資料
-    if (segmentsToSave) {
-      segments.value = segmentsToSave
-      console.log(`✅ 已更新本地 segments 資料`)
-    }
-
-    isEditing.value = false
-
-    if (showNotification) {
-      showNotification({
-        title: '儲存成功',
-        message: segmentsToSave ? '逐字稿和字幕已更新' : '逐字稿已更新',
-        type: 'success'
-      })
-    } else {
-      alert('儲存成功')
-    }
-  } catch (error) {
-    console.error('儲存失敗:', error)
-    if (showNotification) {
-      showNotification({
-        title: '儲存失敗',
-        message: error.message,
-        type: 'error'
-      })
-    } else {
-      alert('儲存失敗')
-    }
-  }
-}
-
-function cancelEditing() {
-  currentTranscript.value.content = originalContent.value
-  isEditing.value = false
-  findText.value = ''
-  replaceText.value = ''
-}
-
-function replaceAll() {
-  if (!findText.value) return
-  const regex = new RegExp(findText.value, 'g')
-  currentTranscript.value.content = currentTranscript.value.content.replace(regex, replaceText.value)
-}
-
-// 下載
-function downloadTranscript() {
-  const blob = new Blob([currentTranscript.value.content], { type: 'text/plain' })
-  const url = window.URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `${currentTranscript.value.custom_name || currentTranscript.value.filename || 'transcript'}.txt`
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  window.URL.revokeObjectURL(url)
-}
-
-// 返回
-function goBack() {
-  router.back()
-}
-
-// 音訊播放器功能
-function getAudioUrl(taskId) {
-  const token = TokenManager.getAccessToken()
-  if (!token) {
-    console.warn('無法獲取 access token，音檔載入失敗')
-    return ''
-  }
-  // 添加時間戳避免瀏覽器緩存
-  return `${API_BASE}${NEW_ENDPOINTS.transcriptions.audio(taskId)}?token=${encodeURIComponent(token)}&t=${Date.now()}`
-}
-
-// 重新載入音檔（當 token 刷新或需要重試時）
-function reloadAudio() {
-  if (!currentTranscript.value.task_id || !currentTranscript.value.hasAudio) return
-
-  const newUrl = getAudioUrl(currentTranscript.value.task_id)
-  if (!newUrl) {
-    audioError.value = '無法獲取授權 Token，請重新登入'
-    return
-  }
-
-  // 保存當前播放位置
-  const currentPosition = audioElement.value?.currentTime || 0
-  const wasPlaying = isPlaying.value
-
-  // 更新音檔 URL
-  audioUrl.value = newUrl
-  audioError.value = null
-
-  // 恢復播放位置和狀態
-  if (audioElement.value) {
-    audioElement.value.load()
-    audioElement.value.addEventListener('loadedmetadata', () => {
-      if (audioElement.value && currentPosition > 0) {
-        audioElement.value.currentTime = currentPosition
-      }
-      if (wasPlaying) {
-        audioElement.value?.play().catch(err => console.log('恢復播放失敗:', err))
-      }
-    }, { once: true })
-  }
-}
-
-function handleAudioLoaded() {
-  audioError.value = null
-}
-
-async function handleAudioError(event) {
-  const audio = event.target
-  if (audio.error) {
-    console.error('音檔載入錯誤:', {
-      code: audio.error.code,
-      message: audio.error.message,
-      src: audio.src
-    })
-
-    // 嘗試診斷實際的錯誤原因
-    if (audio.error.code === audio.error.MEDIA_ERR_SRC_NOT_SUPPORTED) {
-      try {
-        // 使用 fetch 檢查後端實際返回了什麼
-        const response = await fetch(audio.src)
-        const contentType = response.headers.get('content-type')
-
-        console.log('後端響應診斷:', {
-          status: response.status,
-          statusText: response.statusText,
-          contentType: contentType
-        })
-
-        if (!response.ok) {
-          // 後端返回錯誤狀態碼
-          if (response.status === 401 || response.status === 403) {
-            audioError.value = '授權已過期或無效。請點擊「重試載入」以更新授權。'
-          } else if (response.status === 404) {
-            audioError.value = '音檔不存在或已被刪除。'
-          } else {
-            const errorText = await response.text()
-            console.error('後端錯誤響應:', errorText)
-            audioError.value = `後端錯誤 (${response.status}): ${response.statusText}`
-          }
-        } else if (contentType && !contentType.includes('audio')) {
-          // 後端返回了非音檔內容
-          const responseText = await response.text()
-          console.error('後端返回了非音檔內容:', responseText.substring(0, 200))
-          audioError.value = `後端返回了無效的內容類型: ${contentType}。預期為音檔格式。`
-        } else {
-          // 其他未知原因
-          audioError.value = '音檔格式不被瀏覽器支援，或檔案已損壞。'
-        }
-      } catch (fetchError) {
-        console.error('診斷錯誤時發生問題:', fetchError)
-        const token = TokenManager.getAccessToken()
-        if (!token) {
-          audioError.value = '授權 Token 已失效，請重新登入或點擊「重試載入」。'
-        } else {
-          audioError.value = '無法存取音檔。可能原因：音檔不存在、已被刪除，或授權已過期。'
-        }
-      }
-    } else {
-      // 其他類型的錯誤
-      switch (audio.error.code) {
-        case audio.error.MEDIA_ERR_NETWORK:
-          audioError.value = '網路錯誤，無法載入音檔。請檢查網路連線或授權是否過期。'
-          break
-        case audio.error.MEDIA_ERR_DECODE:
-          audioError.value = '音檔格式錯誤或損壞，無法解碼。'
-          break
-        default:
-          audioError.value = '音檔載入失敗。請稍後再試或重新整理頁面。'
-      }
-    }
-  }
-}
-
-function togglePlayPause() {
-  if (!audioElement.value) return
-  if (audioElement.value.paused) {
-    audioElement.value.play().catch(err => {
-      console.error('播放失敗:', err)
-      audioError.value = '播放失敗'
-    })
-  } else {
-    audioElement.value.pause()
-  }
-}
-
-function skipBackward() {
-  if (audioElement.value) {
-    audioElement.value.currentTime = Math.max(0, audioElement.value.currentTime - 10)
-  }
-}
-
-function skipForward() {
-  if (audioElement.value) {
-    audioElement.value.currentTime = Math.min(
-      audioElement.value.duration || 0,
-      audioElement.value.currentTime + 10
-    )
-  }
-}
-
-function updateProgress() {
-  if (!audioElement.value) return
-  currentTime.value = audioElement.value.currentTime
-  if (duration.value > 0) {
-    progressPercent.value = (currentTime.value / duration.value) * 100
-  }
-
-  // 時間碼顯示應該由文本滾動位置決定，不是由音檔播放時間決定
-  // 音檔播放時間已經顯示在播放器的時間顯示中了
-}
-
-function updateDuration() {
-  if (!audioElement.value) return
-  duration.value = audioElement.value.duration || 0
-}
-
-function updateVolume() {
-  if (!audioElement.value) return
-  volume.value = audioElement.value.volume
-  isMuted.value = audioElement.value.muted
-}
-
-function updatePlaybackRate() {
-  if (!audioElement.value) return
-  playbackRate.value = audioElement.value.playbackRate
-}
-
-function seekTo(event) {
-  if (!audioElement.value || !progressBar.value || duration.value === 0) return
-  const rect = progressBar.value.getBoundingClientRect()
-  const clickX = event.clientX - rect.left
-  const percent = Math.max(0, Math.min(100, (clickX / rect.width) * 100))
-  const newTime = (percent / 100) * duration.value
-  audioElement.value.currentTime = newTime
-}
-
-function calculateArcProgress(event, svg) {
-  if (!svg) return null
-
-  const rect = svg.getBoundingClientRect()
-  const clickX = event.clientX - rect.left
-  const clickY = event.clientY - rect.top
-
-  // 將 SVG 座標轉換為相對於圓心的座標
-  const svgWidth = rect.width
-  const svgHeight = rect.height
-  const scaleX = 200 / svgWidth  // viewBox 是 0 0 200 140
-  const scaleY = 140 / svgHeight
-
-  const svgX = clickX * scaleX
-  const svgY = clickY * scaleY
-
-  const centerX = 100
-  const centerY = 100
-
-  // 計算點擊位置相對於圓心的角度
-  const dx = svgX - centerX
-  const dy = svgY - centerY
-  let angle = Math.atan2(dy, dx) * (180 / Math.PI)
-
-  // 將角度標準化到 0-360 範圍
-  if (angle < 0) angle += 360
-
-  // 檢查點擊是否在 210-330 度範圍內（我們的弧線範圍）
-  // 如果不在範圍內，調整到最近的邊界
-  let normalizedAngle = angle
-  if (angle >= 0 && angle < 210) {
-    // 如果在右側，判斷靠近哪一端
-    if (angle < 90) {
-      normalizedAngle = 330 // 靠近結束端
-    } else {
-      normalizedAngle = 210 // 靠近開始端
-    }
-  } else if (angle > 330) {
-    normalizedAngle = 330
-  }
-
-  // 計算在弧線上的進度百分比
-  // 210度是0%，330度是100%
-  let percent = ((normalizedAngle - 210) / 120) * 100
-  percent = Math.max(0, Math.min(100, percent))
-
-  return percent
-}
-
-function startDragArc(event) {
-  if (!audioElement.value || duration.value === 0) return
-  isDraggingArc.value = true
-
-  const percent = calculateArcProgress(event, event.currentTarget)
-  if (percent !== null) {
-    draggingPercent.value = percent
-  }
-}
-
-function dragArc(event) {
-  if (!isDraggingArc.value || !audioElement.value || duration.value === 0) return
-
-  // 先計算進度（在事件失效前）
-  const percent = calculateArcProgress(event, event.currentTarget)
-  if (percent === null) return
-
-  // 取消之前的 RAF
-  if (rafId !== null) {
-    cancelAnimationFrame(rafId)
-  }
-
-  // 使用 RAF 來優化更新
-  rafId = requestAnimationFrame(() => {
-    draggingPercent.value = percent
-  })
-}
-
-function stopDragArc() {
-  if (!isDraggingArc.value) return
-
-  isDraggingArc.value = false
-
-  // 取消任何待處理的 RAF
-  if (rafId !== null) {
-    cancelAnimationFrame(rafId)
-    rafId = null
-  }
-
-  // 釋放時才真正 seek 到目標位置
-  if (audioElement.value && duration.value > 0) {
-    const newTime = (draggingPercent.value / 100) * duration.value
-    audioElement.value.currentTime = newTime
-  }
-}
-
-function setVolume(event) {
-  if (!audioElement.value) return
-  const newVolume = parseInt(event.target.value) / 100
-  audioElement.value.volume = newVolume
-  if (newVolume > 0 && isMuted.value) {
-    audioElement.value.muted = false
-  }
-}
-
-function toggleMute() {
-  if (!audioElement.value) return
-  audioElement.value.muted = !audioElement.value.muted
-}
-
-function setPlaybackRate(rate) {
-  if (!audioElement.value) return
-  audioElement.value.playbackRate = rate
-}
-
-function formatTime(seconds) {
-  if (!seconds || isNaN(seconds)) return '0:00'
-  const hours = Math.floor(seconds / 3600)
-  const mins = Math.floor((seconds % 3600) / 60)
-  const secs = Math.floor(seconds % 60)
-  if (hours > 0) {
-    return `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-  }
-  return `${mins}:${secs.toString().padStart(2, '0')}`
-}
-
-// 時間碼標記
-function formatTimecode(seconds) {
-  const hours = Math.floor(seconds / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  const secs = Math.floor(seconds % 60)
-  if (hours > 0) {
-    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-  }
-  return `${minutes}:${secs.toString().padStart(2, '0')}`
-}
-
-function generateTimecodeMarkers(segmentList) {
-  if (!segmentList || segmentList.length === 0) return []
-  const markers = []
-  const INTERVAL = 15
-  const sortedSegments = [...segmentList].sort((a, b) => a.start - b.start)
-  const transcriptContent = currentTranscript.value.content
-  const segmentPositions = []
-  let cumulativeChars = 0
-
-  for (const segment of sortedSegments) {
-    const segmentText = segment.text.trim().replace(/\s+/g, ' ')
-    let charStart = transcriptContent.indexOf(segment.text.trim(), cumulativeChars)
-    if (charStart === -1) {
-      charStart = transcriptContent.indexOf(segmentText, cumulativeChars)
-    }
-    if (charStart !== -1) {
-      segmentPositions.push({
-        start: segment.start,
-        end: segment.end,
-        charStart: charStart,
-        charEnd: charStart + segmentText.length,
-        text: segmentText
-      })
-      cumulativeChars = charStart + segmentText.length
-    }
-  }
-
-  const totalChars = transcriptContent.length
-  const maxTime = sortedSegments[sortedSegments.length - 1].end
-  const usedSegments = new Set()
-  const targetTimes = []
-
-  for (let t = 0; t <= maxTime; t += INTERVAL) {
-    targetTimes.push(t)
-  }
-
-  for (const targetTime of targetTimes) {
-    let closestSegment = null
-    let minDistance = Infinity
-    for (const seg of segmentPositions) {
-      if (usedSegments.has(seg)) continue
-      const distance = Math.abs(seg.start - targetTime)
-      if (distance < minDistance && distance < INTERVAL * 2) {
-        minDistance = distance
-        closestSegment = seg
-      }
-    }
-    if (closestSegment) {
-      usedSegments.add(closestSegment)
-      markers.push({
-        time: closestSegment.start,
-        label: formatTimecode(closestSegment.start),
-        charPosition: closestSegment.charStart
-      })
-    }
-  }
-
-  markers.sort((a, b) => a.time - b.time)
-  for (let i = 0; i < markers.length; i++) {
-    markers[i].positionPercent = totalChars > 0 ? (markers[i].charPosition / totalChars) * 100 : 0
-  }
-
-  return markers
-}
-
-function seekToTime(time) {
-  if (audioElement.value) {
-    audioElement.value.currentTime = time
-    audioElement.value.play().catch(err => console.log('播放失敗:', err))
-  }
-}
-
-function syncScroll() {
-  if (!textarea.value || timecodeMarkers.value.length === 0) return
-
-  const scrollTop = textarea.value.scrollTop
-  const scrollHeight = textarea.value.scrollHeight
-  const clientHeight = textarea.value.clientHeight
-
-  if (scrollHeight <= clientHeight) {
-    activeTimecodeIndex.value = 0
-    return
-  }
-
-  const scrollPercent = scrollTop / (scrollHeight - clientHeight)
-  const contentLength = currentTranscript.value.content.length
-  const estimatedCharPos = Math.floor(scrollPercent * contentLength)
-
-  let closestIndex = 0
-  let minDistance = Infinity
-
-  for (let i = 0; i < timecodeMarkers.value.length; i++) {
-    const distance = Math.abs(timecodeMarkers.value[i].charPosition - estimatedCharPos)
-    if (distance < minDistance) {
-      minDistance = distance
-      closestIndex = i
-    }
-  }
-
-  if (closestIndex !== activeTimecodeIndex.value) {
-    activeTimecodeIndex.value = closestIndex
-    console.log('🕐 時間碼更新:',
-      timecodeMarkers.value[closestIndex].label,
-      `(${closestIndex + 1}/${timecodeMarkers.value.length})`,
-      `字元位置: ${estimatedCharPos}/${contentLength}`
-    )
-  }
-}
-
-// 鍵盤快捷鍵
-function handleKeyboardShortcuts(event) {
-  if (!currentTranscript.value.hasAudio || !audioElement.value) return
-  if (event.altKey && !event.ctrlKey && !event.metaKey) {
-    switch(event.key) {
-      case 'k':
-      case 'K':
-        event.preventDefault()
-        togglePlayPause()
-        break
-      case 'j':
-      case 'J':
-      case 'ArrowLeft':
-        event.preventDefault()
-        skipBackward()
-        break
-      case 'l':
-      case 'L':
-      case 'ArrowRight':
-        event.preventDefault()
-        skipForward()
-        break
-      case 'm':
-      case 'M':
-        event.preventDefault()
-        toggleMute()
-        break
-    }
-  }
-}
+  },
+  { deep: true }
+)
 </script>
 
 <style scoped>
@@ -1453,7 +618,7 @@ function handleKeyboardShortcuts(event) {
   max-width: 1400px;
   margin: 0 auto;
   padding: 20px;
-  height: 100%;
+  height: 100vh;
   box-sizing: border-box;
   overflow: hidden;
 }
@@ -1463,18 +628,17 @@ function handleKeyboardShortcuts(event) {
   display: grid;
   grid-template-columns: 320px 1fr;
   gap: 20px;
-  height: 100%;
+  height: calc(100vh - 40px);
   align-items: start;
 }
 
 /* 左側控制面板 */
 .left-panel {
-  padding: 24px;
   position: sticky;
   top: 20px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 5px;
   height: fit-content;
   max-height: calc(100vh - 40px);
   overflow-y: auto;
@@ -1482,11 +646,11 @@ function handleKeyboardShortcuts(event) {
 
 /* 右側文字區域 */
 .right-panel {
-  padding: 24px;
-  height: 100%;
+  height: calc(100vh - 40px);
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 /* 返回按鈕 */
@@ -1496,7 +660,6 @@ function handleKeyboardShortcuts(event) {
   border: none;
   background: var(--neu-bg);
   border-radius: 12px;
-  box-shadow: var(--neu-shadow-btn);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1506,12 +669,10 @@ function handleKeyboardShortcuts(event) {
 }
 
 .btn-back-icon:hover {
-  box-shadow: var(--neu-shadow-btn-hover);
   transform: translateY(-2px);
 }
 
 .btn-back-icon:active {
-  box-shadow: var(--neu-shadow-btn-active);
   transform: translateY(0);
 }
 
@@ -1531,7 +692,7 @@ function handleKeyboardShortcuts(event) {
 }
 
 .editable-title {
-  font-size: 1.25rem;
+  font-size: 1.5rem;
   font-weight: 700;
   color: var(--neu-text);
   margin: 0;
@@ -1544,884 +705,21 @@ function handleKeyboardShortcuts(event) {
 
 .editable-title:hover {
   background: rgba(163, 177, 198, 0.1);
+  color: var(--neu-primary);
 }
 
 .title-input {
   width: 100%;
   padding: 8px 12px;
-  font-size: 1.25rem;
-  font-weight: 700;
-  border: 2px solid var(--neu-primary);
-  border-radius: 8px;
-  background: var(--neu-bg);
-  color: var(--neu-text);
-  box-shadow: var(--neu-shadow-inset);
-}
-
-/* 元數據區域 */
-.metadata-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  background: var(--neu-bg);
-  border-radius: 12px;
-  box-shadow: var(--neu-shadow-inset);
-}
-
-.meta-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--neu-text);
-}
-
-.meta-item svg {
-  stroke: var(--neu-primary);
-  flex-shrink: 0;
-}
-
-/* 按鈕組 */
-.action-buttons {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: center;
-}
-
-/* 操作按鈕 - Neumorphism 風格 */
-.btn-action {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 10px 20px;
-  border: none;
-  border-radius: 12px;
-  background: var(--neu-bg);
-  color: var(--neu-primary);
-  box-shadow: var(--neu-shadow-btn);
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 600;
-  transition: all 0.3s ease;
-  width: fit-content;
-  align-self: center;
-}
-
-.btn-action:hover {
-  box-shadow: var(--neu-shadow-btn-hover);
-  color: var(--neu-primary-dark);
-  transform: translateY(-2px);
-}
-
-.btn-action:active {
-  box-shadow: var(--neu-shadow-btn-active);
-  transform: translateY(0);
-}
-
-.btn-action svg {
-  stroke: currentColor;
-  flex-shrink: 0;
-}
-
-.transcript-main {
-  padding: 32px;
-}
-
-.transcript-header {
-  margin-bottom: 24px;
-  padding-bottom: 20px;
-  border-bottom: 2px solid rgba(163, 177, 198, 0.2);
-}
-
-.header-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 20px;
-  margin-bottom: 16px;
-}
-
-.header-left {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  flex: 1;
-  min-width: 0;
-}
-
-.header-actions {
-  display: flex;
-  gap: 12px;
-  flex-shrink: 0;
-}
-
-.btn-back-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  flex-shrink: 0;
-  background: var(--neu-bg);
-  box-shadow: var(--neu-shadow-btn);
-  border: none;
-  border-radius: 12px;
-  color: var(--neu-text);
-  cursor: pointer;
-  transition: all 0.2s ease;
-  margin-top: 4px;
-}
-
-.btn-back-icon:hover {
-  box-shadow: var(--neu-shadow-btn-hover);
-  transform: translateY(-2px);
-  color: var(--neu-primary);
-}
-
-.title-section {
-  flex: 1;
-  min-width: 0;
-}
-
-.editable-title {
-  font-size: 1.75rem;
-  font-weight: 700;
-  color: var(--neu-primary);
-  margin: 0;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 8px;
-  transition: background 0.2s ease;
-}
-
-.editable-title:hover {
-  background: rgba(163, 177, 198, 0.1);
-}
-
-.title-input {
-  width: 100%;
-  font-size: 1.75rem;
-  font-weight: 700;
-  color: var(--nav-recent-bg);
-  padding: 8px 12px;
-  border: 2px solid var(--neu-primary);
-  border-radius: 8px;
-  background: var(--neu-bg);
-  outline: none;
-}
-
-.transcript-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  margin-top: 12px;
-}
-
-.meta-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.9rem;
-  color: var(--neu-text-light);
-}
-
-/* 音訊播放器樣式 */
-.audio-player-container {
-  margin-bottom: 24px;
-}
-
-.audio-error {
-  padding: 16px;
-  background: rgba(255, 235, 238, 0.9);
-  border-left: 4px solid #c62828;
-  border-radius: 8px;
-  margin-bottom: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  box-shadow: 0 2px 8px rgba(198, 40, 40, 0.1);
-}
-
-.error-message {
-  color: #c62828;
-  font-size: 0.9rem;
-  line-height: 1.5;
-}
-
-.btn-retry {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 8px 16px;
-  background: var(--neu-bg);
-  color: #c62828;
-  border: 1px solid #c62828;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 0.85rem;
-  font-weight: 600;
-  transition: all 0.2s ease;
-  align-self: flex-start;
-}
-
-.btn-retry:hover {
-  background: #c62828;
-  color: white;
-  box-shadow: 0 2px 8px rgba(198, 40, 40, 0.2);
-  transform: translateY(-1px);
-}
-
-.btn-retry:active {
-  transform: translateY(0);
-}
-
-.btn-retry svg {
-  stroke: currentColor;
-  flex-shrink: 0;
-}
-
-/* 圓形播放器 */
-.custom-audio-player.circular-player {
-  background: var(--neu-bg);
-  padding: 10px 5px 20px;
-  border-radius: 20px;
-  box-shadow: var(--neu-shadow-raised);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  max-width: 280px;
-  margin: 0 auto;
-}
-
-/* 圓形進度條容器 */
-.circular-progress-container {
-  width: 100%;
-  max-width: 280px;
-  margin: 0 auto;
-}
-
-.progress-arc {
-  width: 100%;
-  height: auto;
-  cursor: pointer;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
-  user-select: none;
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  -ms-user-select: none;
-}
-
-/* 進度條弧線樣式 */
-.arc-background {
-  stroke: #d1d9e6;
-  stroke-opacity: 0.5;
-}
-
-.arc-progress {
-  stroke: var(--neu-primary);
-  stroke-linecap: round;
-  transition: stroke-dashoffset 0.1s linear;
-}
-
-.arc-thumb {
-  fill: var(--neu-primary);
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
-  transition: cx 0.1s linear, cy 0.1s linear;
-  pointer-events: none;
-}
-
-/* 中央控制區 - 播放、快進、快退 */
-.circular-controls-center {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  margin-top: -90px;
-}
-
-/* 時間顯示 */
-.time-display-center {
-  font-size: 0.8rem;
-  color: var(--neu-text);
-  font-weight: 500;
-  text-align: center;
-  margin-top: 6px;
-}
-
-/* 音量和控制區（包含 info、音量、速度） */
-.volume-and-controls {
-  width: 100%;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  margin-top: 6px;
-  padding: 0 10px;
-}
-
-/* 音量控制區 */
-.volume-control-center {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 10px;
-  flex: 1;
-}
-
-/* 靜音按鈕（音量條開頭） */
-.mute-btn-volume {
-  width: 20px !important;
-  height: 20px !important;
-  min-width: 10px !important;
-  min-height: 10px !important;
-  padding: 0px !important;
-  margin: 0;
-  flex-shrink: 0;
-  background: transparent !important;
-  box-shadow: none !important;
-  transition: all 0.2s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: visible;
-  border-radius: 4px !important;
-}
-
-.mute-btn-volume svg {
-  display: block;
-}
-
-.mute-btn-volume:hover {
-  background: var(--neu-bg);
-  box-shadow: var(--neu-shadow-btn);
-  transform: translateY(-1px);
-}
-
-.mute-btn-volume:active {
-  box-shadow: var(--neu-shadow-btn-active);
-  transform: translateY(0);
-}
-
-.volume-slider-horizontal {
-  width: 70px;
-  height: 3px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: var(--neu-bg);
-  /* box-shadow: var(--neu-shadow-inset); */
-  border: var(--neu-primary) 1px solid;
-  border-radius: 2px;
-  outline: none;
-  cursor: pointer;
-  /* transform: translateY(-50%); */
-}
-
-.volume-slider-horizontal::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 5px;
-  height: 14px;
-  background: var(--neu-primary);
-  border-radius: 30%;
-  cursor: pointer;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-}
-
-.volume-slider-horizontal::-moz-range-thumb {
-  width: 10px;
-  height: 10px;
-  background: var(--neu-primary);
-  border-radius: 50%;
-  cursor: pointer;
-  border: none;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-}
-
-/* 底部控制區 - 快捷鍵說明和速度 */
-.circular-controls-bottom {
-  width: 100%;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 12px;
-  padding: 0 20px;
-}
-
-/* 快捷鍵說明 */
-.keyboard-shortcuts-info {
-  position: relative;
-}
-
-.info-btn {
-  width: 40px;
-  height: 40px;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-.info-btn:hover {
-  background: var(--neu-bg) !important;
-  box-shadow: var(--neu-shadow-btn) !important;
-}
-
-.shortcuts-tooltip {
-  position: absolute;
-  bottom: 100%;
-  left: 0;
-  margin-bottom: 8px;
-  background: var(--neu-bg);
-  box-shadow: var(--neu-shadow-raised);
-  border-radius: 12px;
-  padding: 12px;
-  display: none;
-  flex-direction: column;
-  gap: 8px;
-  z-index: 100;
-  min-width: 220px;
-  white-space: nowrap;
-}
-
-.shortcuts-tooltip::after {
-  content: '';
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  height: 12px;
-}
-
-.keyboard-shortcuts-info:hover .shortcuts-tooltip,
-.shortcuts-tooltip:hover {
-  display: flex;
-}
-
-.shortcuts-title {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--neu-text);
-  margin-bottom: 4px;
-}
-
-.shortcuts-section {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.shortcuts-section-title {
-  font-size: 0.7rem;
-  font-weight: 600;
-  color: var(--neu-text-light);
-  margin-top: 4px;
-  margin-bottom: 2px;
-}
-
-.shortcut-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 0.75rem;
-  color: var(--neu-text);
-}
-
-.shortcut-item kbd {
-  background: var(--neu-bg);
-  box-shadow: var(--neu-shadow-btn);
-  padding: 3px 6px;
-  border-radius: 6px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  font-family: monospace;
-  color: var(--neu-primary);
-  min-width: 28px;
-  text-align: center;
-}
-
-.shortcut-item span {
-  flex: 1;
-  color: var(--neu-text);
-  font-size: 0.75rem;
-}
-
-/* 控制按鈕 */
-.audio-control-btn {
-  background: var(--neu-bg);
-  box-shadow: var(--neu-shadow-btn);
-  border: none;
-  border-radius: 50%;
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  color: var(--neu-text);
-  transition: all 0.2s ease;
-  position: relative;
-  flex-shrink: 0;
-}
-
-.audio-control-btn:hover {
-  box-shadow: var(--neu-shadow-btn-hover);
-  transform: translateY(-2px);
-  color: var(--neu-primary);
-}
-
-.audio-control-btn:active {
-  box-shadow: var(--neu-shadow-btn-active);
-  transform: translateY(0);
-}
-
-.audio-play-btn {
-  width: 60px;
-  height: 60px;
-}
-
-.audio-skip-btn {
-  width: 46px;
-  height: 46px;
-}
-
-.control-label {
-  position: absolute;
-  font-size: 9px;
-  font-weight: 700;
-  bottom: 7px;
-  color: var(--neu-primary);
-}
-
-/* 快退按鈕的數字在左下角 */
-.skip-backward .control-label {
-  left: 9px;
-}
-
-/* 快進按鈕的數字在右下角 */
-.skip-forward .control-label {
-  right: 9px;
-}
-
-/* 速度控制 */
-.speed-control {
-  position: relative;
-}
-
-.speed-btn {
-  width: 54px;
-  height: 40px;
-  border-radius: 12px;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-.speed-btn:hover {
-  background: var(--neu-bg) !important;
-  box-shadow: var(--neu-shadow-btn) !important;
-}
-
-.speed-label {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--neu-text);
-}
-
-.speed-dropdown {
-  position: absolute;
-  bottom: 100%;
-  right: 0;
-  margin-bottom: 8px;
-  background: rgba(236, 240, 243, 0.75) !important;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1),
-              0 0 0 1px rgba(255, 255, 255, 0.2) inset !important;
-  border-radius: 12px;
-  padding: 4px;
-  display: none;
-  flex-direction: column;
-  gap: 4px;
-  z-index: 1000;
-  min-width: 70px;
-}
-
-.speed-dropdown::after {
-  content: '';
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  height: 12px;
-}
-
-.speed-control:hover .speed-dropdown,
-.speed-dropdown:hover {
-  display: flex;
-}
-
-.speed-option {
-  background: transparent;
-  box-shadow: none;
-  border: none;
-  padding: 6px 0px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--neu-text);
-  transition: all 0.2s ease;
-  text-align: center;
-}
-
-.speed-option:hover {
-  background: rgba(163, 177, 198, 0.15);
-  color: var(--neu-primary);
-}
-
-.speed-option.active {
-  background: rgba(163, 177, 198, 0.2);
-  color: var(--neu-primary);
-  font-weight: 700;
-}
-
-/* 取代工具列 */
-.replace-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 20px;
-  padding: 16px;
-  background: rgba(163, 177, 198, 0.1);
-  border-radius: 12px;
-  align-items: stretch;
-}
-
-.replace-input {
-  flex: 1;
-  min-width: 150px;
-  padding: 10px 14px;
-  border: none;
-  border-radius: 8px;
-  background: var(--neu-bg);
-  box-shadow: var(--neu-shadow-inset);
-  color: var(--neu-text);
-  font-size: 0.95rem;
-}
-
-.replace-input:focus {
-  outline: 2px solid var(--neu-primary);
-}
-
-/* 逐字稿內容 */
-.transcript-content-wrapper {
-  position: relative;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.timecode-fixed-display {
-  position: absolute;
-  top: calc(25% - 33px); /* 基準線上方，留出按鈕高度 */
-  right: 20px; /* 往左偏移，避開滾動條 */
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: rgba(255, 219, 184, 0.15); /* 更低透明度，增強玻璃感 */
-  border-radius: 8px;
-  padding: 8px 12px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08),
-              0 0 0 1px rgba(255, 255, 255, 0.15) inset; /* 內陰影增加深度 */
-  cursor: pointer;
-  transition: all 0.3s ease;
-  z-index: 100;
-  backdrop-filter: blur(5px) saturate(10%); /* 更強的毛玻璃效果 */
-  -webkit-backdrop-filter: blur(16px) saturate(200%);
-}
-
-.timecode-fixed-display:hover {
-  box-shadow: var(--neu-shadow-btn-hover);
-  transform: translateY(0%) translateX(-2px);
-}
-
-.timecode-label {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--neu-primary);
-  /* color: #f56a38; */
-}
-
-.transcript-content-area {
-  position: relative;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-.textarea-wrapper {
-  position: relative;
-  width: 100%;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-.textarea-wrapper.show-reference-line::before {
-  content: '';
-  position: absolute;
-  top: 25%;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, #ff6b35, transparent);
-  z-index: 5;
-  pointer-events: none;
-}
-
-.loading-state,
-.error-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  flex: 1;
-  color: var(--neu-text-light);
-}
-
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid rgba(163, 177, 198, 0.2);
-  border-top-color: var(--neu-primary);
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.transcript-textarea {
-  width: 100%;
-  height: 100%;
-  padding: 20px;
-  border: none;
-  border-radius: 12px;
-  background: var(--neu-bg);
-  box-shadow: var(--neu-shadow-inset);
-  color: var(--neu-text);
   font-size: 1rem;
-  line-height: 1.8;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  resize: none;
-  overflow-y: auto;
-  transition: box-shadow 0.3s ease;
+  font-weight: 400;
+  border: 2px solid var(--neu-primary);
+  border-radius: 8px;
+  background: var(--neu-bg);
+  color: var(--neu-text);
 }
 
-.transcript-textarea:focus {
-  outline: none;
-  box-shadow: var(--neu-shadow-inset-hover);
-}
-
-.transcript-textarea.editing {
-  background: var(--upload-bg);
-  box-shadow: 0 0 0 2px var(--neu-primary);
-}
-
-.transcript-textarea[readonly] {
-  cursor: default;
-}
-
-@media (max-width: 768px) {
-  .transcript-detail-container {
-    padding: 16px;
-  }
-
-  .transcript-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .left-panel {
-    position: relative;
-    top: 0;
-    max-height: none;
-  }
-
-  .transcript-main {
-    padding: 20px;
-  }
-
-  .header-top {
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  .header-left {
-    width: 100%;
-  }
-
-  .header-actions {
-    width: 100%;
-    justify-content: flex-start;
-  }
-
-  .btn-back-icon {
-    width: 36px;
-    height: 36px;
-  }
-
-  .editable-title,
-  .title-input {
-    font-size: 1.5rem;
-  }
-
-  .replace-toolbar {
-    flex-direction: column;
-  }
-
-  /* 圓形播放器在小螢幕上的調整 */
-  .custom-audio-player.circular-player {
-    max-width: 100%;
-    padding: 20px 15px 15px;
-  }
-
-  .circular-progress-container {
-    max-width: 200px;
-  }
-
-  .circular-controls-center {
-    margin-top: -30px;
-  }
-
-  .audio-play-btn {
-    width: 54px;
-    height: 54px;
-  }
-
-  .audio-skip-btn {
-    width: 42px;
-    height: 42px;
-  }
-
-  .time-display-center {
-    font-size: 0.75rem;
-  }
-
-  .volume-slider-horizontal {
-    width: 100px;
-  }
-
-  .circular-controls-bottom {
-    padding: 0 10px;
-  }
-}
-
-/* ========== 字幕模式相關樣式 ========== */
-
-/* 字幕控制項 */
+/* 字幕模式控制項 */
 .subtitle-controls {
   margin-top: 12px;
   padding-top: 12px;
@@ -2430,14 +728,6 @@ function handleKeyboardShortcuts(event) {
 
 .control-group {
   margin-bottom: 16px;
-}
-
-.control-label {
-  display: block;
-  font-size: 12px;
-  color: var(--neu-text-light);
-  margin-bottom: 8px;
-  font-weight: 600;
 }
 
 /* 時間格式切換 */
@@ -2452,7 +742,6 @@ function handleKeyboardShortcuts(event) {
   border: none;
   border-radius: 6px;
   background: var(--neu-bg);
-  box-shadow: var(--neu-shadow-btn-sm);
   color: var(--neu-text-light);
   font-size: 11px;
   font-weight: 500;
@@ -2462,12 +751,10 @@ function handleKeyboardShortcuts(event) {
 
 .format-btn.active {
   color: var(--neu-primary);
-  box-shadow: var(--neu-shadow-inset);
 }
 
 .format-btn:hover {
   transform: translateY(-1px);
-  box-shadow: var(--neu-shadow-btn-hover);
 }
 
 /* 疏密度滑桿 */
@@ -2477,7 +764,6 @@ function handleKeyboardShortcuts(event) {
   -webkit-appearance: none;
   appearance: none;
   background: var(--neu-bg);
-  box-shadow: var(--neu-shadow-inset);
   border-radius: 2px;
   outline: none;
   cursor: pointer;
@@ -2512,134 +798,264 @@ function handleKeyboardShortcuts(event) {
   margin-top: 4px;
 }
 
-/* 字幕表格容器 */
-.subtitle-table-container {
-  width: 100%;
-  height: 100%;
+/* 按鈕組 */
+.action-buttons {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
 }
 
-.subtitle-table-wrapper {
-  width: 100%;
-  height: 100%;
-  overflow-y: auto;
+/* 操作按鈕 - Neumorphism 風格 */
+.btn-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border: none;
   border-radius: 12px;
   background: var(--neu-bg);
-  box-shadow: var(--neu-shadow-inset);
-  padding: 12px;
+  color: var(--neu-primary);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  width: fit-content;
+  align-self: center;
 }
 
-.subtitle-table {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0 8px;
+.btn-action:hover {
+  color: var(--neu-primary-dark);
+  transform: translateY(-2px);
 }
 
-.subtitle-table thead th {
-  position: sticky;
-  top: 0;
-  background: var(--neu-bg);
-  padding: 12px;
-  text-align: left;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--neu-text-light);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  z-index: 10;
-  border-bottom: 2px solid rgba(163, 177, 198, 0.2);
+.btn-action:active {
+  transform: translateY(0);
 }
 
-.subtitle-row {
-  background: var(--neu-bg);
-  transition: all 0.2s ease;
+.btn-action svg {
+  stroke: currentColor;
+  flex-shrink: 0;
 }
 
-.subtitle-row:hover {
-  background: rgba(163, 177, 198, 0.05);
+/* 逐字稿內容 */
+.transcript-content-wrapper {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+  min-height: 0;
 }
 
-/* 時間欄 */
-.col-time {
-  width: 120px;
-  padding: 12px;
-  text-align: right;
-  font-family: 'Courier New', monospace;
-  font-size: 13px;
-  color: var(--neu-text-light);
-  white-space: nowrap;
-  vertical-align: top;
-}
-
-/* 講者欄 */
-.col-speaker {
-  width: 100px;
-  padding: 12px;
-  text-align: center;
-  vertical-align: top;
-}
-
-.speaker-badge {
-  display: inline-block;
-  padding: 4px 10px;
-  background: var(--neu-bg);
-  box-shadow: var(--neu-shadow-btn-sm);
+/* .timecode-fixed-display {
+  position: absolute;
+  top: calc(25% - 33px);
+  right: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 219, 184, 0.15);
   border-radius: 8px;
-  font-size: 11px;
+  padding: 8px 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08),
+              0 0 0 1px rgba(255, 255, 255, 0.15) inset;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  z-index: 100;
+  backdrop-filter: blur(5px) saturate(10%);
+  -webkit-backdrop-filter: blur(16px) saturate(200%);
+}
+
+.timecode-fixed-display:hover {
+  transform: translateY(0%) translateX(-2px);
+}
+
+.timecode-label {
+  font-size: 0.9rem;
   font-weight: 600;
   color: var(--neu-primary);
+} */
+
+.textarea-wrapper {
+  position: relative;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
-/* 內容欄 */
-.col-content {
-  padding: 12px;
-  font-size: 15px;
-  line-height: 1.6;
+/* .textarea-wrapper.show-reference-line::before {
+  content: '';
+  position: absolute;
+  top: 25%;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #ff6b35, transparent);
+  z-index: 5;
+  pointer-events: none;
+} */
+
+.loading-state,
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--neu-text-light);
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(163, 177, 198, 0.2);
+  border-top-color: var(--neu-primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.transcript-textarea {
+  width: 100%;
+  height: 100%;
+  padding: 20px;
+  border: none;
+  border-radius: 12px;
+  background: var(--neu-bg);
   color: var(--neu-text);
-  min-height: 48px;
-  vertical-align: top;
+  font-size: 1rem;
+  line-height: 1.8;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  resize: none;
+  overflow-y: auto;
+  transition: box-shadow 0.3s ease;
 }
 
-.col-content[contenteditable="true"] {
-  outline: 2px solid transparent;
-  border-radius: 6px;
-  transition: all 0.2s ease;
-  cursor: text;
+.transcript-textarea:focus {
+  outline: none;
 }
 
-.col-content[contenteditable="true"]:focus {
-  outline: 2px solid var(--neu-primary);
-  background: rgba(163, 177, 198, 0.05);
+.transcript-textarea.editing {
+  background: var(--upload-bg);
+  box-shadow: 0 0 0 2px var(--neu-primary);
 }
 
-/* Segment span 樣式 */
-.segment-span {
+.transcript-textarea[readonly] {
+  cursor: default;
+}
+
+/* 非編輯模式的文字顯示區 */
+.transcript-display {
+  width: 100%;
+  height: 100%;
+  padding: 20px;
+  border: none;
+  border-radius: 12px;
+  background: var(--neu-bg);
+  color: var(--neu-text);
+  font-size: 1rem;
+  line-height: 1.8;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  overflow-y: auto;
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  box-sizing: border-box;
+}
+
+/* 文字片段 */
+.text-part {
   display: inline;
 }
 
-.segment-span:not(:last-child)::after {
-  content: ' ';
-  white-space: pre;
+/* 標記包裝器 */
+.marker-wrapper {
+  position: relative;
+  display: inline;
 }
 
-/* 響應式設計 - 字幕模式 */
+/* Segment 標記 */
+.segment-marker {
+  position: relative;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 2px;
+  vertical-align: super;
+  cursor: pointer;
+  color: var(--neu-primary);
+  opacity: 0.4;
+  transition: all 0.2s ease;
+  font-size: 8px;
+  line-height: 1;
+}
+
+.segment-marker:hover {
+  opacity: 1;
+  transform: scale(1.3);
+  color: var(--neu-primary-dark);
+}
+
+.segment-marker svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Timecode Tooltip */
+.timecode-tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-4px);
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.85);
+  color: white;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 1000;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.segment-marker:hover .timecode-tooltip {
+  opacity: 1;
+}
+
+/* Tooltip 箭頭 */
+.timecode-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top-color: rgba(0, 0, 0, 0.85);
+}
+
 @media (max-width: 768px) {
-  .subtitle-table .col-speaker {
-    display: none;
+  .transcript-detail-container {
+    padding: 16px;
   }
 
-  .subtitle-table .col-time {
-    width: 90px;
-    font-size: 11px;
+  .transcript-layout {
+    grid-template-columns: 1fr;
   }
 
-  .subtitle-table {
-    font-size: 14px;
-  }
-
-  .subtitle-table .col-content {
-    font-size: 14px;
+  .left-panel {
+    position: relative;
+    top: 0;
+    max-height: none;
   }
 }
 </style>

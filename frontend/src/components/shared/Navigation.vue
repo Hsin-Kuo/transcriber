@@ -36,7 +36,7 @@
       </router-link>
 
       <!-- 所有任務按鈕（收合時顯示） -->
-      <router-link v-if="authStore.isAuthenticated && isCollapsed" to="/tasks" class="nav-link tasks-link" active-class="active" title="所有任務">
+      <router-link v-if="authStore.isAuthenticated && isCollapsed" to="/tasks" class="nav-link" active-class="active" title="所有任務">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
         </svg>
@@ -46,9 +46,7 @@
     <!-- 最近任務預覽（展開時顯示） -->
     <div v-if="authStore.isAuthenticated && !isCollapsed" class="recent-tasks">
       <div class="recent-tasks-header">
-        <div class="header-left">
-          <h3>近期</h3>
-        </div>
+        <h3>近期</h3>
         <router-link to="/tasks" class="all-tasks-btn" active-class="active">
           所有任務
         </router-link>
@@ -93,7 +91,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import api from '../../utils/api'
@@ -176,6 +174,18 @@ watch(() => route.path, (newPath, oldPath) => {
 </script>
 
 <style scoped>
+/* CSS 變數 */
+.navigation {
+  --texture-pattern:
+    repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(255, 255, 255, 0.018) 3px, rgba(255, 255, 255, 0.018) 4px),
+    repeating-linear-gradient(0deg, transparent, transparent 9px, rgba(255, 255, 255, 0.028) 9px, rgba(255, 255, 255, 0.028) 11px),
+    repeating-linear-gradient(0deg, transparent, transparent 19px, rgba(255, 255, 255, 0.038) 19px, rgba(255, 255, 255, 0.038) 21px),
+    repeating-linear-gradient(90deg, transparent, transparent 5px, rgba(0, 0, 0, 0.018) 5px, rgba(0, 0, 0, 0.018) 6px),
+    repeating-linear-gradient(90deg, transparent, transparent 13px, rgba(0, 0, 0, 0.028) 13px, rgba(0, 0, 0, 0.028) 15px),
+    repeating-linear-gradient(90deg, transparent, transparent 31px, rgba(0, 0, 0, 0.038) 31px, rgba(0, 0, 0, 0.038) 33px);
+  --color-divider-rgb: 163, 177, 198;
+}
+
 .navigation {
   width: 240px;
   min-width: 240px;
@@ -199,55 +209,7 @@ watch(() => route.path, (newPath, oldPath) => {
   left: 0;
   width: 100%;
   height: 100%;
-  background-image:
-    /* 垂直 - 密集細線 */
-    repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 3px,
-      rgba(255, 255, 255, 0.018) 3px,
-      rgba(255, 255, 255, 0.018) 4px
-    ),
-    /* 垂直 - 中等間距 */
-    repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 9px,
-      rgba(255, 255, 255, 0.028) 9px,
-      rgba(255, 255, 255, 0.028) 11px
-    ),
-    /* 垂直 - 稀疏粗線 */
-    repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 19px,
-      rgba(255, 255, 255, 0.038) 19px,
-      rgba(255, 255, 255, 0.038) 21px
-    ),
-    /* 水平 - 密集細線 */
-    repeating-linear-gradient(
-      90deg,
-      transparent,
-      transparent 5px,
-      rgba(0, 0, 0, 0.018) 5px,
-      rgba(0, 0, 0, 0.018) 6px
-    ),
-    /* 水平 - 中等間距 */
-    repeating-linear-gradient(
-      90deg,
-      transparent,
-      transparent 13px,
-      rgba(0, 0, 0, 0.028) 13px,
-      rgba(0, 0, 0, 0.028) 15px
-    ),
-    /* 水平 - 稀疏粗線 */
-    repeating-linear-gradient(
-      90deg,
-      transparent,
-      transparent 31px,
-      rgba(0, 0, 0, 0.038) 31px,
-      rgba(0, 0, 0, 0.038) 33px
-    );
+  background-image: var(--texture-pattern);
   pointer-events: none;
   opacity: 0.4;
   z-index: 0;
@@ -403,55 +365,7 @@ watch(() => route.path, (newPath, oldPath) => {
   left: 0;
   width: 100%;
   height: 100%;
-  background-image:
-    /* 垂直 - 密集細線 */
-    repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 1px,
-      rgba(255, 255, 255, 0.022) 1px,
-      rgba(255, 255, 255, 0.022) 2px
-    ),
-    /* 垂直 - 中等間距 */
-    repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 7px,
-      rgba(255, 255, 255, 0.032) 7px,
-      rgba(255, 255, 255, 0.032) 9px
-    ),
-    /* 垂直 - 稀疏粗線 */
-    repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 23px,
-      rgba(255, 255, 255, 0.048) 23px,
-      rgba(255, 255, 255, 0.048) 25px
-    ),
-    /* 水平 - 密集細線 */
-    repeating-linear-gradient(
-      90deg,
-      transparent,
-      transparent 3px,
-      rgba(0, 0, 0, 0.022) 3px,
-      rgba(0, 0, 0, 0.022) 4px
-    ),
-    /* 水平 - 中等間距 */
-    repeating-linear-gradient(
-      90deg,
-      transparent,
-      transparent 12px,
-      rgba(0, 0, 0, 0.032) 12px,
-      rgba(0, 0, 0, 0.032) 14px
-    ),
-    /* 水平 - 稀疏粗線 */
-    repeating-linear-gradient(
-      90deg,
-      transparent,
-      transparent 29px,
-      rgba(0, 0, 0, 0.048) 29px,
-      rgba(0, 0, 0, 0.048) 31px
-    );
+  background-image: var(--texture-pattern);
   pointer-events: none;
   opacity: 0.3;
 }
@@ -469,7 +383,7 @@ watch(() => route.path, (newPath, oldPath) => {
   padding: 20px 20px 28px 20px;
   margin: 0 -20px -28px -20px;
   background: var(--nav-recent-bg);
-  border-top: 1px solid rgba(163, 177, 198, 0.2);
+  border-top: 1px solid rgba(var(--color-divider-rgb), 0.2);
   transition: all 0.3s ease;
   position: relative;
 }
@@ -481,55 +395,7 @@ watch(() => route.path, (newPath, oldPath) => {
   left: 0;
   width: 100%;
   height: 100%;
-  background-image:
-    /* 垂直 - 密集細線 */
-    repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 2px,
-      rgba(255, 255, 255, 0.025) 2px,
-      rgba(255, 255, 255, 0.025) 4px
-    ),
-    /* 垂直 - 中等間距 */
-    repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 10px,
-      rgba(255, 255, 255, 0.04) 10px,
-      rgba(255, 255, 255, 0.04) 12px
-    ),
-    /* 垂直 - 稀疏粗線 */
-    repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 18px,
-      rgba(255, 255, 255, 0.052) 18px,
-      rgba(255, 255, 255, 0.052) 20px
-    ),
-    /* 水平 - 密集細線 */
-    repeating-linear-gradient(
-      90deg,
-      transparent,
-      transparent 6px,
-      rgba(0, 0, 0, 0.025) 6px,
-      rgba(0, 0, 0, 0.025) 7px
-    ),
-    /* 水平 - 中等間距 */
-    repeating-linear-gradient(
-      90deg,
-      transparent,
-      transparent 14px,
-      rgba(0, 0, 0, 0.04) 14px,
-      rgba(0, 0, 0, 0.04) 16px
-    ),
-    /* 水平 - 稀疏粗線 */
-    repeating-linear-gradient(
-      90deg,
-      transparent,
-      transparent 24px,
-      rgba(0, 0, 0, 0.052) 24px,
-      rgba(0, 0, 0, 0.052) 26px
-    );
+  background-image: var(--texture-pattern);
   pointer-events: none;
   opacity: 0.1;
   z-index: 0;
@@ -652,67 +518,6 @@ watch(() => route.path, (newPath, oldPath) => {
   position: relative;
 }
 
-.recent-tasks::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-image:
-    /* 垂直 - 密集細線 */
-    repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 3px,
-      rgba(255, 255, 255, 0.024) 3px,
-      rgba(255, 255, 255, 0.024) 5px
-    ),
-    /* 垂直 - 中等間距 */
-    repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 6px,
-      rgba(255, 255, 255, 0.036) 6px,
-      rgba(255, 255, 255, 0.036) 8px
-    ),
-    /* 垂直 - 稀疏粗線 */
-    repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 25px,
-      rgba(255, 255, 255, 0.046) 25px,
-      rgba(255, 255, 255, 0.046) 27px
-    ),
-    /* 水平 - 密集細線 */
-    repeating-linear-gradient(
-      90deg,
-      transparent,
-      transparent 5px,
-      rgba(0, 0, 0, 0.024) 5px,
-      rgba(0, 0, 0, 0.024) 7px
-    ),
-    /* 水平 - 中等間距 */
-    repeating-linear-gradient(
-      90deg,
-      transparent,
-      transparent 9px,
-      rgba(0, 0, 0, 0.036) 9px,
-      rgba(0, 0, 0, 0.036) 11px
-    ),
-    /* 水平 - 稀疏粗線 */
-    repeating-linear-gradient(
-      90deg,
-      transparent,
-      transparent 33px,
-      rgba(0, 0, 0, 0.046) 33px,
-      rgba(0, 0, 0, 0.046) 35px
-    );
-  pointer-events: none;
-  opacity: 0;
-  z-index: 0;
-}
-
 .recent-tasks-header {
   display: flex;
   justify-content: space-between;
@@ -723,18 +528,7 @@ watch(() => route.path, (newPath, oldPath) => {
   z-index: 1;
 }
 
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.header-left svg {
-  stroke: var(--neu-text-light);
-  flex-shrink: 0;
-}
-
-.header-left h3 {
+.recent-tasks-header h3 {
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--neu-text-lighter);
@@ -785,7 +579,7 @@ watch(() => route.path, (newPath, oldPath) => {
 }
 
 .recent-tasks-list::-webkit-scrollbar-thumb {
-  background: rgba(163, 177, 198, 0.3);
+  background: rgba(var(--color-divider-rgb), 0.3);
   border-radius: 2px;
 }
 
@@ -802,12 +596,10 @@ watch(() => route.path, (newPath, oldPath) => {
 }
 
 .recent-task-item:hover {
-  background: transparent;
   transform: translateX(2px);
 }
 
 .recent-task-item:active {
-  background: transparent;
   transform: translateX(0);
 }
 

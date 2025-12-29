@@ -1,15 +1,8 @@
 <template>
   <div class="editor-container">
-    <!-- <header class="header">
-      <h1>🎵 音訊剪輯工具</h1>
-      <p>上傳多個音檔、選取區段、剪輯合併</p>
-    </header> -->
-
     <!-- 音檔管理區 -->
     <div class="files-section electric-card">
-      <div class="electric-inner">
-        <div class="electric-border-outer">
-          <div class="electric-main files-content">
+      <div class="files-content">
             <div class="files-header">
               <h3>📁 音檔列表 ({{ uploadedFiles.length }})</h3>
               <label class="btn btn-primary">
@@ -65,10 +58,6 @@
                 </div>
               </div>
             </div>
-          </div>
-        </div>
-        <div class="electric-glow-1"></div>
-        <div class="electric-glow-2"></div>
       </div>
     </div>
 
@@ -91,9 +80,7 @@
       />
 
       <div class="editor-actions electric-card">
-        <div class="electric-inner">
-          <div class="electric-border-outer">
-            <div class="electric-main actions-content">
+        <div class="actions-content">
               <button
                 @click="clipSelectedRegions"
                 :disabled="regions.length === 0 || processing"
@@ -108,10 +95,6 @@
               >
                 添加完整檔案到列表
               </button>
-            </div>
-          </div>
-          <div class="electric-glow-1"></div>
-          <div class="electric-glow-2"></div>
         </div>
       </div>
     </div>
@@ -134,9 +117,7 @@
 
     <!-- 時間軸編輯器切換按鈕 -->
     <div v-if="clips.length > 0" class="timeline-toggle-section electric-card">
-      <div class="electric-inner">
-        <div class="electric-border-outer">
-          <div class="electric-main timeline-toggle-content">
+      <div class="timeline-toggle-content">
             <button @click="showTimeline = !showTimeline" class="btn btn-timeline">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polygon v-if="!showTimeline" points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
@@ -148,10 +129,6 @@
               {{ showTimeline ? '關閉' : '✨ 開啟' }}時間軸編輯器
             </button>
             <p class="timeline-hint">拖曳排序片段、調整音量、淡入淡出效果 </p>
-          </div>
-        </div>
-        <div class="electric-glow-1"></div>
-        <div class="electric-glow-2"></div>
       </div>
     </div>
 
@@ -427,25 +404,17 @@ function handleClipDelete(clipId) {
 </script>
 
 <style scoped>
+/* CSS 變數 */
+.editor-container {
+  --color-primary: #DD8448;
+  --color-text-muted: var(--color-text-muted);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-danger: var(--color-danger);
+  --gradient-dark: var(--gradient-dark);
+}
+
 .editor-container {
   min-height: calc(100vh - 200px);
-}
-
-.header {
-  text-align: center;
-  margin-bottom: 32px;
-}
-
-.header h1 {
-  font-size: 2.5rem;
-  margin: 0 0 12px 0;
-  color: #DD8448;
-  font-weight: 600;
-}
-
-.header p {
-  color: #888;
-  font-size: 1.1rem;
 }
 
 .files-section {
@@ -454,7 +423,7 @@ function handleClipDelete(clipId) {
 
 .files-content {
   padding: 24px;
-  background: linear-gradient(135deg, rgba(28, 28, 28, 0.95) 0%, rgba(20, 20, 20, 0.95) 100%);
+  background: var(--gradient-dark);
 }
 
 .files-header {
@@ -528,18 +497,18 @@ function handleClipDelete(clipId) {
 }
 
 .file-size {
-  color: #888;
+  color: var(--color-text-muted);
 }
 
 .file-duration {
-  color: #DD8448;
+  color: var(--color-primary);
   font-weight: 600;
 }
 
 .empty-state {
   text-align: center;
   padding: 40px 20px;
-  color: #888;
+  color: var(--color-text-muted);
 }
 
 .empty-state p {
@@ -548,7 +517,7 @@ function handleClipDelete(clipId) {
 
 .hint {
   font-size: 0.9rem;
-  color: #666;
+  color: var(--color-text-secondary);
 }
 
 .editor-workspace {
@@ -563,7 +532,7 @@ function handleClipDelete(clipId) {
   justify-content: center;
   gap: 16px;
   padding: 24px;
-  background: linear-gradient(135deg, rgba(28, 28, 28, 0.95) 0%, rgba(20, 20, 20, 0.95) 100%);
+  background: var(--gradient-dark);
 }
 
 .action-panels {
@@ -585,7 +554,7 @@ function handleClipDelete(clipId) {
 
 .timeline-toggle-content {
   padding: 24px;
-  background: linear-gradient(135deg, rgba(28, 28, 28, 0.95) 0%, rgba(20, 20, 20, 0.95) 100%);
+  background: var(--gradient-dark);
   text-align: center;
   display: flex;
   flex-direction: column;
@@ -605,7 +574,7 @@ function handleClipDelete(clipId) {
 }
 
 .timeline-hint {
-  color: #888;
+  color: var(--color-text-muted);
   font-size: 0.9rem;
   margin: 0;
 }
@@ -628,7 +597,7 @@ function handleClipDelete(clipId) {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #FF6B35 0%, #DD8448 100%);
+  background: linear-gradient(135deg, #FF6B35 0%, var(--color-primary) 100%);
   color: white;
 }
 
@@ -666,7 +635,7 @@ function handleClipDelete(clipId) {
 }
 
 .delete-btn {
-  color: #F44336;
+  color: var(--color-danger);
 }
 
 .delete-btn:hover {
@@ -691,16 +660,10 @@ function handleClipDelete(clipId) {
   width: 60px;
   height: 60px;
   border: 4px solid rgba(255, 255, 255, 0.1);
-  border-top-color: #DD8448;
+  border-top-color: var(--color-primary);
   border-radius: 50%;
   animation: spin 1s linear infinite;
   margin-bottom: 20px;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .processing-overlay p {
