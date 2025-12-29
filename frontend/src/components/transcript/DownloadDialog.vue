@@ -18,8 +18,21 @@
         <ul class="current-settings">
           <li><strong>時間格式：</strong>{{ timeFormat === 'start' ? '起始時間' : '時間範圍' }}</li>
           <li><strong>疏密度：</strong>{{ densityThreshold.toFixed(1) }}s</li>
-          <li v-if="hasSpeakerInfo"><strong>包含講者資訊</strong></li>
         </ul>
+
+        <!-- 講者資訊選項 -->
+        <div v-if="hasSpeakerInfo" class="speaker-option">
+          <label class="checkbox-label">
+            <input
+              type="checkbox"
+              :checked="includeSpeaker"
+              @change="$emit('update:includeSpeaker', $event.target.checked)"
+              class="checkbox-input"
+            />
+            <span class="checkbox-text">講者資訊</span>
+          </label>
+          <p class="option-hint">檔案會包含講者名稱</p>
+        </div>
 
         <div class="format-options">
           <label class="format-option">
@@ -33,6 +46,34 @@
             <div class="format-info">
               <span class="format-name">TXT 文字檔</span>
               <span class="format-desc">純文字格式，包含時間戳和內容</span>
+            </div>
+          </label>
+
+          <label class="format-option">
+            <input
+              type="radio"
+              :value="'srt'"
+              :checked="selectedFormat === 'srt'"
+              @change="$emit('update:selectedFormat', 'srt')"
+              name="downloadFormat"
+            />
+            <div class="format-info">
+              <span class="format-name">SRT 字幕檔</span>
+              <span class="format-desc">SubRip 字幕格式，適用於大多數播放器</span>
+            </div>
+          </label>
+
+          <label class="format-option">
+            <input
+              type="radio"
+              :value="'vtt'"
+              :checked="selectedFormat === 'vtt'"
+              @change="$emit('update:selectedFormat', 'vtt')"
+              name="downloadFormat"
+            />
+            <div class="format-info">
+              <span class="format-name">VTT 字幕檔</span>
+              <span class="format-desc">WebVTT 字幕格式，適用於網頁播放器</span>
             </div>
           </label>
         </div>
@@ -71,10 +112,14 @@ defineProps({
   selectedFormat: {
     type: String,
     default: 'txt'
+  },
+  includeSpeaker: {
+    type: Boolean,
+    default: true
   }
 })
 
-defineEmits(['close', 'download', 'update:selectedFormat'])
+defineEmits(['close', 'download', 'update:selectedFormat', 'update:includeSpeaker'])
 </script>
 
 <style scoped>
@@ -185,6 +230,42 @@ defineEmits(['close', 'download', 'update:selectedFormat'])
 .current-settings strong {
   color: var(--neu-text);
   font-weight: 600;
+}
+
+/* 講者選項 */
+.speaker-option {
+  background: rgba(163, 177, 198, 0.05);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 0 0 24px 0;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.checkbox-input {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: var(--neu-primary);
+}
+
+.checkbox-text {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--neu-text);
+}
+
+.option-hint {
+  margin: 8px 0 0 28px;
+  font-size: 13px;
+  color: var(--neu-text-light);
+  line-height: 1.4;
 }
 
 .format-options {

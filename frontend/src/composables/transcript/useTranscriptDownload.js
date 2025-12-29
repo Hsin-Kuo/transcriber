@@ -12,6 +12,7 @@ export function useTranscriptDownload() {
   // 下載對話框狀態
   const showDownloadDialog = ref(false)
   const selectedDownloadFormat = ref('txt')
+  const includeSpeaker = ref(true) // 預設包含講者資訊
 
   /**
    * 下載段落模式的逐字稿
@@ -34,16 +35,25 @@ export function useTranscriptDownload() {
    * 執行下載（字幕模式）
    * @param {String} content - 字幕內容
    * @param {String} filename - 檔案名稱
-   * @param {String} format - 下載格式
+   * @param {String} format - 下載格式 ('txt' | 'srt' | 'vtt')
    */
   function performSubtitleDownload(content, filename, format = 'txt') {
     let extension = 'txt'
+    let mimeType = 'text/plain; charset=utf-8'
 
-    if (format === 'txt') {
+    // 根據格式設定副檔名和 MIME 類型
+    if (format === 'srt') {
+      extension = 'srt'
+      mimeType = 'application/x-subrip; charset=utf-8'
+    } else if (format === 'vtt') {
+      extension = 'vtt'
+      mimeType = 'text/vtt; charset=utf-8'
+    } else {
       extension = 'txt'
+      mimeType = 'text/plain; charset=utf-8'
     }
 
-    const blob = new Blob([content], { type: 'text/plain; charset=utf-8' })
+    const blob = new Blob([content], { type: mimeType })
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
@@ -75,6 +85,7 @@ export function useTranscriptDownload() {
     // 狀態
     showDownloadDialog,
     selectedDownloadFormat,
+    includeSpeaker,
 
     // 方法
     downloadParagraphMode,

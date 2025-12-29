@@ -8,7 +8,7 @@ import { ref, computed, nextTick } from 'vue'
  * - 處理取代功能
  * - 檢查未儲存的變更
  */
-export function useTranscriptEditor(currentTranscript, originalContent, displayMode, groupedSegments, convertTableToPlainText) {
+export function useTranscriptEditor(currentTranscript, originalContent, displayMode, groupedSegments, convertTableToPlainText, speakerNames = null) {
   // 編輯狀態
   const isEditing = ref(false)
   const isEditingTitle = ref(false)
@@ -32,6 +32,7 @@ export function useTranscriptEditor(currentTranscript, originalContent, displayM
       return currentTranscript.value.content !== originalContent.value
     } else if (displayMode.value === 'subtitle') {
       // 字幕模式：比較表格內容
+      // 注意：這裡不傳 speakerNames，因為講者名稱變更不通過編輯儲存
       const currentContent = convertTableToPlainText(groupedSegments.value)
       return currentContent !== originalContent.value
     }

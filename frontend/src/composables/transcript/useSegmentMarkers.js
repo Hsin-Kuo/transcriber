@@ -1,4 +1,4 @@
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
 
 /**
  * 用於在段落模式中標記segments位置的composable
@@ -23,7 +23,6 @@ export function useSegmentMarkers() {
 
     const markers = []
     let lastSearchIndex = 0 // 上一次成功搜尋到的位置
-    let lastSuccessIndex = 0 // 上一次成功搜尋的索引
 
     segments.forEach((segment, index) => {
       const text = segment.text?.trim()
@@ -50,7 +49,6 @@ export function useSegmentMarkers() {
 
         // 更新搜尋位置
         lastSearchIndex = foundIndex + text.length
-        lastSuccessIndex = index
       } else {
         // 如果沒找到，下一個segment從上一次成功的位置重新開始搜尋
         lastSearchIndex = lastSearchIndex

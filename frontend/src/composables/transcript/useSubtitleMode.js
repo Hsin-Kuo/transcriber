@@ -175,12 +175,18 @@ export function useSubtitleMode(segments) {
   /**
    * 將表格內容轉為純文字
    * @param {Array} groups - group 列表
+   * @param {Object} speakerNames - 講者名稱對應（可選）
    * @returns {String} 純文字內容
    */
-  function convertTableToPlainText(groups) {
+  function convertTableToPlainText(groups, speakerNames = {}) {
     return groups.map(group => {
-      const speakerPrefix = group.speaker ? `[${group.speaker}] ` : ''
-      return `${speakerPrefix}${group.combinedText.trim()}`
+      if (group.speaker) {
+        const displayName = speakerNames[group.speaker] || group.speaker
+        const speakerPrefix = `[${displayName}] `
+        return `${speakerPrefix}${group.combinedText.trim()}`
+      } else {
+        return group.combinedText.trim()
+      }
     }).join('\n\n')
   }
 
@@ -201,19 +207,28 @@ export function useSubtitleMode(segments) {
   }
 
   /**
-   * 生成字幕格式的文本（用於下載）
+   * 生成字幕格式的文本（用於下載 TXT）
    * @param {Array} groups - group 列表
    * @param {String} format - 時間格式
+   * @param {Object|null} speakerNames - 講者名稱對應（{} 使用自定義名稱，null 不顯示講者）
    * @returns {String} 字幕文本
    */
-  function generateSubtitleText(groups, format) {
+  function generateSubtitleText(groups, format, speakerNames = {}) {
     if (!groups || groups.length === 0) return ''
 
     const lines = []
+    const showSpeaker = speakerNames !== null // null 表示不顯示講者資訊
 
     for (const group of groups) {
       const timestamp = formatTimestamp(group.startTime, format, group.endTime)
-      const speakerLabel = group.speaker ? `[${group.speaker}]` : ''
+
+      // 如果要顯示講者資訊，使用自定義名稱（如果有）或原始代號
+      let speakerLabel = ''
+      if (showSpeaker && group.speaker) {
+        const displayName = speakerNames[group.speaker] || group.speaker
+        speakerLabel = `[${displayName}]`
+      }
+
       const content = group.combinedText.trim()
 
       if (speakerLabel) {
@@ -222,6 +237,103 @@ export function useSubtitleMode(segments) {
         lines.push(`${timestamp} ${content}`)
       }
     }
+
+    return lines.join('\n')
+  }
+
+  /**
+   * 格式化時間為 SRT 格式 (HH:MM:SS,mmm)
+   * @param {Number} seconds - 秒數
+   * @returns {String} SRT 格式時間字串
+   */
+  function formatTimeSRT(seconds) {
+    const h = Math.floor(seconds / 3600)
+    const m = Math.floor((seconds % 3600) / 60)
+    const s = Math.floor(seconds % 60)
+    const ms = Math.floor((seconds % 1) * 1000)
+
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms).padStart(3, '0')}`
+  }
+
+  /**
+   * 格式化時間為 VTT 格式 (HH:MM:SS.mmm)
+   * @param {Number} seconds - 秒數
+   * @returns {String} VTT 格式時間字串
+   */
+  function formatTimeVTT(seconds) {
+    const h = Math.floor(seconds / 3600)
+    const m = Math.floor((seconds % 3600) / 60)
+    const s = Math.floor(seconds % 60)
+    const ms = Math.floor((seconds % 1) * 1000)
+
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`
+  }
+
+  /**
+   * 生成 SRT 字幕格式文本
+   * @param {Array} groups - group 列表
+   * @param {Object|null} speakerNames - 講者名稱對應
+   * @returns {String} SRT 格式文本
+   */
+  function generateSRTText(groups, speakerNames = {}) {
+    if (!groups || groups.length === 0) return ''
+
+    const lines = []
+    const showSpeaker = speakerNames !== null
+
+    groups.forEach((group, index) => {
+      // 序號
+      lines.push(String(index + 1))
+
+      // 時間範圍
+      const startTime = formatTimeSRT(group.startTime)
+      const endTime = formatTimeSRT(group.endTime)
+      lines.push(`${startTime} --> ${endTime}`)
+
+      // 講者 + 內容
+      let content = group.combinedText.trim()
+      if (showSpeaker && group.speaker) {
+        const displayName = speakerNames[group.speaker] || group.speaker
+        content = `[${displayName}] ${content}`
+      }
+      lines.push(content)
+
+      // 空行分隔
+      lines.push('')
+    })
+
+    return lines.join('\n')
+  }
+
+  /**
+   * 生成 VTT 字幕格式文本
+   * @param {Array} groups - group 列表
+   * @param {Object|null} speakerNames - 講者名稱對應
+   * @returns {String} VTT 格式文本
+   */
+  function generateVTTText(groups, speakerNames = {}) {
+    if (!groups || groups.length === 0) return 'WEBVTT\n\n'
+
+    const lines = ['WEBVTT', '']
+    const showSpeaker = speakerNames !== null
+
+    groups.forEach((group) => {
+      // 時間範圍
+      const startTime = formatTimeVTT(group.startTime)
+      const endTime = formatTimeVTT(group.endTime)
+      lines.push(`${startTime} --> ${endTime}`)
+
+      // 講者 + 內容
+      let content = group.combinedText.trim()
+      if (showSpeaker && group.speaker) {
+        const displayName = speakerNames[group.speaker] || group.speaker
+        content = `[${displayName}] ${content}`
+      }
+      lines.push(content)
+
+      // 空行分隔
+      lines.push('')
+    })
 
     return lines.join('\n')
   }
@@ -238,6 +350,8 @@ export function useSubtitleMode(segments) {
     updateRowContent,
     convertTableToPlainText,
     reconstructSegmentsFromGroups,
-    generateSubtitleText
+    generateSubtitleText,
+    generateSRTText,
+    generateVTTText
   }
 }

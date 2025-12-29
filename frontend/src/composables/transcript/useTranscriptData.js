@@ -17,6 +17,7 @@ export function useTranscriptData() {
   // 數據狀態
   const currentTranscript = ref({})
   const segments = ref([])
+  const speakerNames = ref({})
   const loadingTranscript = ref(false)
   const transcriptError = ref(null)
   const originalContent = ref('')
@@ -90,6 +91,12 @@ export function useTranscriptData() {
       // 如果有 segments 數據，存儲並生成時間碼標記
       if (segmentsResponse && segmentsResponse.data.segments) {
         segments.value = segmentsResponse.data.segments
+
+        // 載入講者名稱對應
+        if (segmentsResponse.data.speaker_names) {
+          speakerNames.value = segmentsResponse.data.speaker_names
+          console.log('✅ 載入講者名稱:', speakerNames.value)
+        }
 
         if (generateTimecodeMarkers) {
           result.timecodeMarkers = generateTimecodeMarkers(segments.value)
@@ -206,10 +213,42 @@ export function useTranscriptData() {
     }
   }
 
+  /**
+   * 更新講者名稱對應
+   * @param {Object} newSpeakerNames - 講者代碼與名稱的對應字典
+   * @returns {Promise<boolean>} 更新是否成功
+   */
+  async function updateSpeakerNames(newSpeakerNames) {
+    try {
+      await api.put(
+        NEW_ENDPOINTS.transcriptions.updateSpeakerNames(currentTranscript.value.task_id),
+        newSpeakerNames
+      )
+
+      speakerNames.value = newSpeakerNames
+      console.log('✅ 講者名稱已更新:', newSpeakerNames)
+      return true
+
+    } catch (error) {
+      console.error('更新講者名稱失敗:', error)
+
+      if (showNotification) {
+        showNotification({
+          title: '更新失敗',
+          message: '無法更新講者名稱',
+          type: 'error'
+        })
+      }
+
+      return false
+    }
+  }
+
   return {
     // 狀態
     currentTranscript,
     segments,
+    speakerNames,
     loadingTranscript,
     transcriptError,
     originalContent,
@@ -217,6 +256,7 @@ export function useTranscriptData() {
     // 方法
     loadTranscript,
     saveTranscript,
-    updateTaskName
+    updateTaskName,
+    updateSpeakerNames
   }
 }

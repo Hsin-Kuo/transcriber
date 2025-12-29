@@ -36,38 +36,18 @@
           :duration-text="currentTranscript.duration_text"
         />
 
-        <!-- 字幕模式控制項 -->
-        <div v-if="displayMode === 'subtitle'" class="subtitle-controls">
-          <!-- 時間格式切換 -->
+        <!-- 段落模式控制項 -->
+        <div v-if="displayMode === 'paragraph'" class="paragraph-controls">
           <div class="control-group">
-            <div class="time-format-toggle">
-              <button
-                @click="timeFormat = 'start'"
-                :class="{ active: timeFormat === 'start' }"
-                class="format-btn"
-              >起始時間</button>
-              <button
-                @click="timeFormat = 'range'"
-                :class="{ active: timeFormat === 'range' }"
-                class="format-btn"
-              >時間範圍</button>
-            </div>
-          </div>
-
-          <!-- 疏密度滑桿 -->
-          <div class="control-group">
-            <input
-              type="range"
-              v-model.number="densityThreshold"
-              min="0.0"
-              max="120.0"
-              step="1.0"
-              class="density-slider"
-            />
-            <div class="slider-labels">
-              <span>疏鬆</span>
-              <span>密集</span>
-            </div>
+            <label class="toggle-label" :class="{ 'disabled': isEditing }">
+              <input
+                type="checkbox"
+                v-model="showTimecodeMarkers"
+                class="toggle-checkbox"
+                :disabled="isEditing"
+              />
+              <span class="toggle-text">時間標記</span>
+            </label>
           </div>
         </div>
 
@@ -150,27 +130,25 @@
           <div v-else-if="transcriptError" class="error-state">
             <p>{{ transcriptError }}</p>
           </div>
-          <!-- 段落模式：保持原有 textarea -->
+          <!-- 段落模式：使用帶標記的可編輯 div -->
           <div
             v-else-if="displayMode === 'paragraph'"
             class="textarea-wrapper"
           >
-            <!-- 編輯模式：使用 textarea -->
-            <textarea
-              v-if="isEditing"
-              v-model="currentTranscript.content"
-              class="transcript-textarea editing"
+            <div
+              class="transcript-display"
+              :class="{ 'editing': isEditing }"
+              :contenteditable="isEditing"
+              :key="`transcript-${showTimecodeMarkers}-${isEditing}-${currentTranscript.content}`"
               ref="textareaRef"
-            ></textarea>
-
-            <!-- 非編輯模式：使用帶標記的 div -->
-            <div v-else class="transcript-display" ref="textareaRef">
+            >
               <template v-for="(part, index) in getContentParts()" :key="index">
                 <span v-if="!part.isMarker" class="text-part">{{ part.text }}</span>
                 <span v-else class="marker-wrapper">
                   <span
                     class="segment-marker"
-                    @click="seekToTime(part.start)"
+                    contenteditable="false"
+                    @click="handleMarkerClick(part.start)"
                   >
                     <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor">
                       <path d="M 4 6 L 1 2 L 7 2 Z"/>
@@ -189,8 +167,9 @@
           <SubtitleTable
             v-else-if="displayMode === 'subtitle'"
             :grouped-segments="groupedSegments"
-            :time-format="timeFormat"
-            :density-threshold="densityThreshold"
+            v-model:time-format="timeFormat"
+            v-model:density-threshold="densityThreshold"
+            v-model:speaker-names="speakerNames"
             :has-speaker-info="hasSpeakerInfo"
             :has-audio="currentTranscript.hasAudio"
             :is-editing="isEditing"
@@ -217,6 +196,7 @@
       :density-threshold="densityThreshold"
       :has-speaker-info="hasSpeakerInfo"
       v-model:selected-format="selectedDownloadFormat"
+      v-model:include-speaker="includeSpeaker"
       @close="showDownloadDialog = false"
       @download="performDownload"
     />
@@ -254,12 +234,14 @@ const audioPlayerRef = ref(null)
 const {
   currentTranscript,
   segments,
+  speakerNames,
   loadingTranscript,
   transcriptError,
   originalContent,
   loadTranscript: loadTranscriptData,
   saveTranscript,
-  updateTaskName
+  updateTaskName,
+  updateSpeakerNames
 } = useTranscriptData()
 
 // 顯示模式
@@ -329,7 +311,9 @@ const {
   updateRowContent,
   convertTableToPlainText,
   reconstructSegmentsFromGroups,
-  generateSubtitleText
+  generateSubtitleText,
+  generateSRTText,
+  generateVTTText
 } = useSubtitleMode(segments)
 
 // ========== 編輯管理 ==========
@@ -368,10 +352,32 @@ const {
   formatTime
 } = useSegmentMarkers()
 
+// 控制是否顯示 timecode 標記
+const showTimecodeMarkers = ref(true)
+
+// 講者名稱自動儲存（debounced）
+let speakerNamesSaveTimer = null
+watch(speakerNames, (newValue) => {
+  // 只有在字幕模式下才需要自動儲存
+  if (displayMode.value !== 'subtitle') return
+
+  // 清除之前的計時器
+  if (speakerNamesSaveTimer) {
+    clearTimeout(speakerNamesSaveTimer)
+  }
+
+  // 設定新的計時器（1秒後儲存）
+  speakerNamesSaveTimer = setTimeout(async () => {
+    console.log('🔄 自動儲存講者名稱:', newValue)
+    await updateSpeakerNames(newValue)
+  }, 1000)
+}, { deep: true })
+
 // ========== 下載功能 ==========
 const {
   showDownloadDialog,
   selectedDownloadFormat,
+  includeSpeaker,
   downloadParagraphMode,
   performSubtitleDownload,
   openDownloadDialog
@@ -426,17 +432,26 @@ async function saveEditing() {
   let segmentsToSave = null
 
   if (displayMode.value === 'paragraph') {
-    contentToSave = currentTranscript.value.content
+    // 從 contenteditable div 中提取純文字內容（排除標記元素）
+    if (textareaRef.value) {
+      contentToSave = extractTextContent(textareaRef.value)
+      // 更新到 currentTranscript
+      currentTranscript.value.content = contentToSave
+    } else {
+      contentToSave = currentTranscript.value.content
+    }
   } else {
-    contentToSave = convertTableToPlainText(groupedSegments.value)
+    // 字幕模式：只更新 segments，不更新純文字檔案
+    // contentToSave = convertTableToPlainText(groupedSegments.value, speakerNames.value)
+    contentToSave = originalContent.value // 保持原有的純文字內容不變
     segmentsToSave = reconstructSegmentsFromGroups(groupedSegments.value)
   }
 
   const success = await saveTranscript(contentToSave, segmentsToSave, displayMode.value)
-  
+
   if (success) {
     finishEditing()
-    
+
     // 如果有更新 segments，也要更新本地的 segments 資料
     if (segmentsToSave) {
       segments.value = segmentsToSave
@@ -465,9 +480,25 @@ function downloadTranscript() {
 
 // 執行下載（從對話框）
 function performDownload() {
-  const content = generateSubtitleText(groupedSegments.value, timeFormat.value)
+  // 根據用戶選擇決定是否包含講者資訊
+  // null 表示不顯示講者，{} 或 speakerNames 表示顯示講者（使用自定義名稱或原始代號）
+  const speakerNamesToUse = includeSpeaker.value ? speakerNames.value : null
   const filename = currentTranscript.value.custom_name || currentTranscript.value.filename || 'transcript'
-  performSubtitleDownload(content, filename, selectedDownloadFormat.value)
+
+  let content = ''
+  const format = selectedDownloadFormat.value
+
+  // 根據選擇的格式生成對應的內容
+  if (format === 'srt') {
+    content = generateSRTText(groupedSegments.value, speakerNamesToUse)
+  } else if (format === 'vtt') {
+    content = generateVTTText(groupedSegments.value, speakerNamesToUse)
+  } else {
+    // TXT 格式：使用用戶當前選擇的時間格式
+    content = generateSubtitleText(groupedSegments.value, timeFormat.value, speakerNamesToUse)
+  }
+
+  performSubtitleDownload(content, filename, format)
 }
 
 // 返回
@@ -475,12 +506,25 @@ function goBack() {
   router.back()
 }
 
+// 從 contenteditable div 中提取純文字內容（排除標記元素）
+function extractTextContent(element) {
+  // 克隆元素以避免修改原始 DOM
+  const clone = element.cloneNode(true)
+
+  // 移除所有的標記元素
+  const markers = clone.querySelectorAll('.segment-marker')
+  markers.forEach(marker => marker.remove())
+
+  // 提取純文字
+  return clone.innerText || ''
+}
+
 // 將文字內容分割成帶有標記的片段
 function getContentParts() {
   const content = currentTranscript.value.content || ''
 
-  if (!segmentMarkers.value || segmentMarkers.value.length === 0) {
-    // 沒有標記，返回整個文字
+  // 關閉了 timecode 標記顯示時，返回純文字
+  if (!showTimecodeMarkers.value || !segmentMarkers.value || segmentMarkers.value.length === 0) {
     return [{ text: content, isMarker: false }]
   }
 
@@ -519,6 +563,13 @@ function getContentParts() {
   }
 
   return parts
+}
+
+// 處理標記點擊
+function handleMarkerClick(startTime) {
+  if (currentTranscript.value.hasAudio) {
+    seekToTime(startTime)
+  }
 }
 
 // 修復字幕模式編輯時的滾動問題
@@ -719,8 +770,8 @@ watch(
   color: var(--neu-text);
 }
 
-/* 字幕模式控制項 */
-.subtitle-controls {
+/* 段落模式控制項 */
+.paragraph-controls {
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid rgba(163, 177, 198, 0.2);
@@ -730,72 +781,35 @@ watch(
   margin-bottom: 16px;
 }
 
-/* 時間格式切換 */
-.time-format-toggle {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-}
-
-.format-btn {
-  padding: 6px 8px;
-  border: none;
-  border-radius: 6px;
-  background: var(--neu-bg);
-  color: var(--neu-text-light);
-  font-size: 11px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.format-btn.active {
-  color: var(--neu-primary);
-}
-
-.format-btn:hover {
-  transform: translateY(-1px);
-}
-
-/* 疏密度滑桿 */
-.density-slider {
-  width: 100%;
-  height: 4px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: var(--neu-bg);
-  border-radius: 2px;
-  outline: none;
-  cursor: pointer;
-}
-
-.density-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 16px;
-  height: 16px;
-  background: var(--neu-primary);
-  border-radius: 50%;
-  cursor: pointer;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-}
-
-.density-slider::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
-  background: var(--neu-primary);
-  border-radius: 50%;
-  cursor: pointer;
-  border: none;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-}
-
-.slider-labels {
+/* Toggle 標籤 */
+.toggle-label {
   display: flex;
-  justify-content: space-between;
-  font-size: 10px;
-  color: var(--neu-text-light);
-  margin-top: 4px;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-label.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toggle-checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--neu-primary);
+}
+
+.toggle-checkbox:disabled {
+  cursor: not-allowed;
+}
+
+.toggle-text {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--neu-text);
 }
 
 /* 按鈕組 */
@@ -967,6 +981,13 @@ watch(
   white-space: pre-wrap;
   word-wrap: break-word;
   box-sizing: border-box;
+  outline: none;
+  cursor: text;
+}
+
+.transcript-display.editing {
+  background: var(--upload-bg);
+  box-shadow: 0 0 0 2px var(--neu-primary);
 }
 
 /* 文字片段 */
@@ -994,6 +1015,8 @@ watch(
   transition: all 0.2s ease;
   font-size: 8px;
   line-height: 1;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .segment-marker:hover {

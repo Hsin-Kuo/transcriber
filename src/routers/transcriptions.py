@@ -354,6 +354,9 @@ async def create_transcription(
             # True 的意思是「用戶手動勾選保留，不會被自動刪除」
             "keep_audio": False,
 
+            # 講者名稱對應（用於字幕模式）
+            "speaker_names": {},
+
             # 時間戳記
             "timestamps": {
                 "created_at": current_time,
@@ -694,9 +697,13 @@ async def get_segments(
         with open(segments_file, 'r', encoding='utf-8') as f:
             segments_data = json.load(f)
 
+        # 獲取講者名稱對應
+        speaker_names = task.get("speaker_names", {})
+
         return {
             "task_id": task_id,
-            "segments": segments_data
+            "segments": segments_data,
+            "speaker_names": speaker_names
         }
     except Exception as e:
         raise HTTPException(
@@ -856,4 +863,53 @@ async def update_metadata(
         "message": "任務名稱已更新",
         "task_id": task_id,
         "custom_name": updates.get("custom_name")
+    }
+
+
+@router.put("/{task_id}/speaker-names")
+async def update_speaker_names(
+    task_id: str,
+    speaker_names: dict,
+    current_user: dict = Depends(get_current_user),
+    db = Depends(get_database)
+):
+    """更新講者名稱對應
+
+    Args:
+        task_id: 任務 ID
+        speaker_names: 講者代碼與自定義名稱的對應字典 {"SPEAKER_00": "張三", "SPEAKER_01": "李四"}
+        current_user: 當前用戶
+        db: 資料庫實例
+
+    Returns:
+        更新結果
+
+    Raises:
+        HTTPException: 任務不存在、無權訪問或更新失敗
+    """
+    # 從資料庫獲取任務
+    task_repo = TaskRepository(db)
+    task = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
+
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="任務不存在或無權訪問"
+        )
+
+    # 更新資料庫
+    success = await task_repo.update(task_id, {"speaker_names": speaker_names})
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="更新講者名稱失敗"
+        )
+
+    print(f"✅ 已更新任務 {task_id} 的講者名稱: {speaker_names}")
+
+    return {
+        "message": "講者名稱已更新",
+        "task_id": task_id,
+        "speaker_names": speaker_names
     }
