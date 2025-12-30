@@ -15,44 +15,44 @@
               <div class="confirm-row">
                 <!-- 任務類型 -->
                 <div class="modal-section task-type-section">
-                  <label class="section-label">任務類型</label>
+                  <label class="section-label">{{ $t('transcription.taskType') }}</label>
 
                   <div class="radio-group">
                     <label class="radio-item">
                       <input type="radio" name="taskType" value="paragraph" v-model="taskType" />
-                      <span class="radio-label">段落</span>
+                      <span class="radio-label">{{ $t('transcription.paragraph') }}</span>
                     </label>
                     <label class="radio-item">
                       <input type="radio" name="taskType" value="subtitle" v-model="taskType" />
-                      <span class="radio-label">字幕</span>
+                      <span class="radio-label">{{ $t('transcription.subtitle') }}</span>
                     </label>
                   </div>
 
                   <div class="task-type-hint">
-                    <span v-if="taskType === 'paragraph'" class="hint">合併文字並添加標點符號，適合文章或筆記</span>
-                    <span v-else class="hint">保留時間軸資訊，自動停用標點符號，適合字幕製作</span>
+                    <span v-if="taskType === 'paragraph'" class="hint">{{ $t('transcription.paragraphHint') }}</span>
+                    <span v-else class="hint">{{ $t('transcription.subtitleHint') }}</span>
                   </div>
                 </div>
 
                 <!-- 檔案資訊 -->
                 <div class="modal-section file-section">
-                  <label class="section-label">檔案資訊</label>
+                  <label class="section-label">{{ $t('transcription.fileInfo') }}</label>
                   <div class="file-info">
-                    <span class="label">檔案名稱</span>
+                    <span class="label">{{ $t('transcription.fileName') }}</span>
                     <span class="value">{{ pendingFile?.name }}</span>
                   </div>
                   <div class="file-info" v-if="pendingFile">
-                    <span class="label">檔案大小</span>
+                    <span class="label">{{ $t('transcription.fileSize') }}</span>
                     <span class="value">{{ (pendingFile.size / 1024 / 1024).toFixed(2) }} MB</span>
                   </div>
                   <div class="file-note">
-                    音檔保留規則：最多可保留3個音檔，超過會從最舊的依序刪除，亦可手動勾選保留。
+                    {{ $t('transcription.audioRetentionNote') }}
                   </div>
                 </div>
 
                 <!-- 說話者辨識 -->
                 <div class="modal-section diarize-section">
-                  <label class="section-label">說話者辨識</label>
+                  <label class="section-label">{{ $t('transcription.speakerDiarization') }}</label>
 
                   <label class="toggle-item">
                     <div class="toggle-wrapper">
@@ -61,13 +61,13 @@
                         <span class="toggle-thumb"></span>
                       </span>
                     </div>
-                    <span class="toggle-label-text">啟用</span>
+                    <span class="toggle-label-text">{{ $t('transcription.enable') }}</span>
                   </label>
 
                   <div class="sub-setting" v-if="enableDiarization">
                     <label for="modal-maxSpeakers" class="sub-label">
-                      最大講者人數
-                      <span class="hint">可提高精確度，避免過度分析；留空則自動偵測。</span>
+                      {{ $t('transcription.maxSpeakers') }}
+                      <span class="hint">{{ $t('transcription.maxSpeakersHint') }}</span>
                     </label>
                     <input
                       type="number"
@@ -75,7 +75,7 @@
                       v-model.number="maxSpeakers"
                       min="2"
                       max="10"
-                      placeholder="自動偵測"
+                      :placeholder="$t('transcription.autoDetect')"
                       class="number-input"
                     />
                   </div>
@@ -83,7 +83,7 @@
 
                 <!-- 標籤 -->
                 <div class="modal-section tag-section">
-                <label class="section-label">標籤</label>
+                <label class="section-label">{{ $t('transcription.tags') }}</label>
                 <div class="tag-input-container">
                   <div class="tag-input-wrapper">
                     <input
@@ -91,7 +91,7 @@
                       v-model="tagInput"
                       @keydown.enter.prevent="addTag"
                       @keydown.comma.prevent="addTag"
-                      placeholder="輸入標籤後按 Enter 或逗號"
+                      :placeholder="$t('transcription.tagPlaceholder')"
                       class="text-input"
                     />
                     <button
@@ -100,7 +100,7 @@
                       @click="addTag"
                       :disabled="!tagInput.trim()"
                     >
-                      新增
+                      {{ $t('transcription.add') }}
                     </button>
                   </div>
 
@@ -113,7 +113,7 @@
                         type="button"
                         class="quick-tag-btn"
                         @click="addQuickTag(tag)"
-                        :title="`加入標籤：${tag}`"
+                        :title="$t('transcription.addTagTooltip', { tag })"
                       >
                         + {{ tag }}
                       </button>
@@ -131,7 +131,7 @@
                         type="button"
                         class="remove-tag"
                         @click="removeTag(index)"
-                        title="移除標籤"
+                        :title="$t('transcription.removeTagTooltip')"
                       >
                         ×
                       </button>
@@ -143,8 +143,8 @@
 
               <!-- 動作按鈕 -->
               <div class="modal-actions">
-                <button class="btn btn-primary btn-start" @click="confirmAndUpload">開始轉錄</button>
-                <button class="btn btn-secondary btn-cancel" @click="cancelUpload">取消</button>
+                <button class="btn btn-primary btn-start" @click="confirmAndUpload">{{ $t('transcription.startTranscription') }}</button>
+                <button class="btn btn-secondary btn-cancel" @click="cancelUpload">{{ $t('transcription.cancel') }}</button>
               </div>
             </div>
           </div>
@@ -161,11 +161,14 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
+import { useI18n } from 'vue-i18n'
 import ElectricBorder from '../components/shared/ElectricBorder.vue'
 import UploadZone from '../components/UploadZone.vue'
 
 // 新 API 服務層
 import { transcriptionService, taskService } from '../api/services'
+
+const { t: $t } = useI18n()
 
 const showNotification = inject('showNotification')
 const uploading = ref(false)
@@ -175,6 +178,7 @@ const maxSpeakers = ref(null)
 const pendingFile = ref(null)
 const selectedTags = ref([])
 const tagInput = ref('')
+const tasks = ref([])  // 任務列表，用於顯示快速標籤
 
 // 獲取所有唯一標籤
 const allTags = computed(() => {
@@ -224,7 +228,7 @@ async function refreshTasks() {
     const response = await taskService.list({ limit: 20 })
     tasks.value = response.tasks || response || []
   } catch (error) {
-    console.error('載入任務失敗:', error)
+    console.error($t('transcription.errorLoadTasks') + ':', error)
   }
 }
 
@@ -263,23 +267,23 @@ async function confirmAndUpload() {
     // 顯示轉錄中通知
     if (showNotification) {
       showNotification({
-        title: '轉錄中',
+        title: $t('transcription.transcribing'),
         message: `正在轉錄「${pendingFile.value.name}」`,
         type: 'processing',
         duration: 5000  // 5秒後自動關閉
       })
     }
   } catch (error) {
-    console.error('上傳失敗:', error)
+    console.error($t('transcription.errorUpload') + ':', error)
     if (showNotification) {
       showNotification({
-        title: '上傳失敗',
+        title: $t('transcription.uploadFailed'),
         message: error.response?.data?.detail || error.message,
         type: 'error',
         duration: 5000
       })
     } else {
-      alert('上傳失敗：' + (error.response?.data?.detail || error.message))
+      alert($t('transcription.uploadFailedMessage', { message: error.response?.data?.detail || error.message }))
     }
   } finally {
     uploading.value = false

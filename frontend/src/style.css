@@ -1,6 +1,6 @@
-/* CSS 變數 - Neumorphism 主題 */
+/* CSS 變數 - 主題 */
 :root {
-  /* Neumorphism 背景色 */
+  /* 背景色 */
   --neu-bg: #EFE1C6;
   --upload-bg: #F4ECD5;
   /* e0e5ec */
@@ -12,7 +12,7 @@
   --neu-primary-light: #a0917c;
   --neu-primary-dark: #a0917c;
 
-  /* Neumorphism 陰影 */
+  /*  陰影 */
   --neu-shadow-light: #ffffff;
   --neu-shadow-dark: #a3b1c6;
 
@@ -102,7 +102,7 @@
 
 body {
   font-family: 'Palatino Linotype', Palatino, 'Hoefler Text', Georgia, 'Times New Roman', serif;
-  /* Neumorphism 背景 - 使用純色 */
+  /*  背景 - 使用純色 */
   background-color: var(--neu-bg);
   min-height: 100vh;
   padding: 0;
@@ -200,7 +200,7 @@ body::before {
   border: none;
 }
 
-/* Neumorphism 卡片效果樣式 */
+/*  卡片效果樣式 */
 /* .electric-card {
   padding: 0;
   border-radius: 20px;
@@ -246,28 +246,34 @@ body::before {
 }
 
 .btn-primary {
-  background: linear-gradient(145deg, #e9eef5, #d1d9e6);
-  color: var(--neu-primary);
+  background: var(--neu-primary-dark);
+  color: white;
+  border: none;
 }
 
 .btn-primary:hover:not(:disabled) {
-  color: var(--neu-primary-dark);
+  color: white;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
 }
 
 .btn-primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
-  box-shadow: var(--neu-shadow-btn);
 }
 
 .btn-secondary {
-  background: linear-gradient(145deg, #ccd5e0, #a3b1c6);
-  color: var(--neu-bg-light);
+  background: var(--neu-bg);
+  color: var(--neu-primary-light);
+  /* border: 2px solid var(--neu-primary); */
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: linear-gradient(145deg, #b8c4d4, #8a9db5);
+  background: var(--nav-bg);
+  color: var(--nav-recent-bg);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
 }
 
 .btn-danger {

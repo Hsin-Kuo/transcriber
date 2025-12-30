@@ -3,17 +3,17 @@
     <table class="subtitle-table">
       <thead>
         <tr>
-          <th class="col-time" :class="{ 'time-start': timeFormat === 'start', 'time-range': timeFormat === 'range' }">時間</th>
-          <th v-if="hasSpeakerInfo" class="col-speaker">講者</th>
+          <th class="col-time" :class="{ 'time-start': timeFormat === 'start', 'time-range': timeFormat === 'range' }">{{ $t('subtitleTable.time') }}</th>
+          <th v-if="hasSpeakerInfo" class="col-speaker">{{ $t('subtitleTable.speaker') }}</th>
           <th class="col-content">
             <div class="content-header">
-              <span>內容</span>
+              <span>{{ $t('subtitleTable.content') }}</span>
               <div class="settings-container" ref="settingsContainerRef">
                 <button
                   @click.stop="toggleSettings"
                   class="settings-btn"
                   :class="{ active: showSettings }"
-                  title="顯示/隱藏設置"
+                  :title="$t('subtitleTable.toggleSettings')"
                 >
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                     <circle cx="8" cy="3" r="1.5"/>
@@ -26,24 +26,24 @@
                 <div v-if="showSettings" class="settings-panel">
                   <!-- 時間格式切換 -->
                   <div class="setting-group">
-                    <label class="setting-label">時間格式</label>
+                    <label class="setting-label">{{ $t('subtitleTable.timeFormat') }}</label>
                     <div class="time-format-toggle">
                       <button
                         @click="$emit('update:timeFormat', 'start')"
                         :class="{ active: timeFormat === 'start' }"
                         class="format-btn"
-                      >起始時間</button>
+                      >{{ $t('subtitleTable.startTime') }}</button>
                       <button
                         @click="$emit('update:timeFormat', 'range')"
                         :class="{ active: timeFormat === 'range' }"
                         class="format-btn"
-                      >時間範圍</button>
+                      >{{ $t('subtitleTable.timeRange') }}</button>
                     </div>
                   </div>
 
                   <!-- 疏密度滑桿 -->
                   <div class="setting-group">
-                    <label class="setting-label">內容疏密度</label>
+                    <label class="setting-label">{{ $t('subtitleTable.contentDensity') }}</label>
                     <input
                       type="range"
                       :value="densityThreshold"
@@ -54,14 +54,14 @@
                       class="density-slider"
                     />
                     <div class="slider-labels">
-                      <span>疏鬆</span>
-                      <span>密集</span>
+                      <span>{{ $t('subtitleTable.sparse') }}</span>
+                      <span>{{ $t('subtitleTable.dense') }}</span>
                     </div>
                   </div>
 
                   <!-- 講者名稱設定 -->
                   <div v-if="hasSpeakerInfo && uniqueSpeakers.length > 0" class="setting-group">
-                    <label class="setting-label">講者名稱</label>
+                    <label class="setting-label">{{ $t('subtitleTable.speakerNames') }}</label>
                     <div class="speaker-mappings">
                       <div
                         v-for="speaker in uniqueSpeakers"
@@ -73,7 +73,7 @@
                           type="text"
                           :value="speakerNames[speaker] || ''"
                           @input="updateSpeakerName(speaker, $event.target.value)"
-                          :placeholder="`講者 ${speaker.replace('SPEAKER_', '')}`"
+                          :placeholder="$t('subtitleTable.speakerPlaceholder', { number: speaker.replace('SPEAKER_', '') })"
                           class="speaker-input"
                         />
                       </div>
@@ -99,13 +99,18 @@
               'clickable': hasAudio
             }"
             @click="hasAudio && $emit('seek-to-time', group.startTime)"
-            :title="hasAudio ? '點擊跳轉到此時間' : ''"
+            :title="hasAudio ? $t('subtitleTable.clickToJumpToTime') : ''"
           >
             {{ formatTimestamp(group.startTime, timeFormat, group.endTime) }}
           </td>
 
           <td v-if="hasSpeakerInfo" class="col-speaker">
-            <span class="speaker-badge">
+            <span
+              class="speaker-badge"
+              :class="{ 'clickable': !isEditing }"
+              @click="!isEditing && openSpeakerPicker(group, $event)"
+              :title="!isEditing ? $t('subtitleTable.clickToChangeSpeaker') : ''"
+            >
               {{ getSpeakerDisplayName(group.speaker) }}
             </span>
           </td>
@@ -125,11 +130,58 @@
         </tr>
       </tbody>
     </table>
+
+    <!-- 講者選擇浮窗 -->
+    <div
+      v-if="showSpeakerPicker"
+      ref="speakerPickerRef"
+      class="speaker-picker"
+      :style="{
+        top: speakerPickerPosition.top + 'px',
+        left: speakerPickerPosition.left + 'px'
+      }"
+      @click.stop
+    >
+
+      <!-- 現有講者列表 -->
+      <div class="speaker-list">
+        <button
+          v-for="speaker in uniqueSpeakers"
+          :key="speaker"
+          class="speaker-option"
+          :class="{ 'current': currentEditingGroup?.speaker === speaker }"
+          @click="selectSpeaker(speaker)"
+        >
+          {{ getSpeakerDisplayName(speaker) }}
+        </button>
+      </div>
+
+      <!-- 新增講者 -->
+      <div class="speaker-new">
+        <input
+          v-model="newSpeakerName"
+          type="text"
+          :placeholder="$t('subtitleTable.newSpeaker')"
+          class="speaker-input"
+          @keyup.enter="addNewSpeaker"
+        />
+        <button
+          class="btn-add-speaker"
+          @click="addNewSpeaker"
+          :disabled="!newSpeakerName.trim()"
+        >
+          {{ $t('subtitleTable.add') }}
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onUnmounted, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t: $t } = useI18n()
 
 const showSettings = ref(false)
 const settingsContainerRef = ref(null)
@@ -169,7 +221,14 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['seek-to-time', 'update-row-content', 'update:timeFormat', 'update:densityThreshold', 'update:speakerNames'])
+const emit = defineEmits(['seek-to-time', 'update-row-content', 'update:timeFormat', 'update:densityThreshold', 'update:speakerNames', 'update-segment-speaker'])
+
+// 講者選擇浮窗狀態
+const showSpeakerPicker = ref(false)
+const speakerPickerPosition = ref({ top: 0, left: 0 })
+const currentEditingGroup = ref(null)
+const newSpeakerName = ref('')
+const speakerPickerRef = ref(null)
 
 // 獲取所有唯一的講者代號
 const uniqueSpeakers = computed(() => {
@@ -221,9 +280,87 @@ function toggleSettings() {
   }
 }
 
+// 開啟講者選擇浮窗
+function openSpeakerPicker(group, event) {
+  event.stopPropagation()
+
+  currentEditingGroup.value = group
+  newSpeakerName.value = ''
+
+  // 計算浮窗位置（相對於點擊的 badge）
+  const rect = event.target.getBoundingClientRect()
+  speakerPickerPosition.value = {
+    top: rect.bottom + 5,
+    left: rect.left
+  }
+
+  showSpeakerPicker.value = true
+
+  // 下一個 tick 添加點擊外部關閉的監聽器
+  nextTick(() => {
+    document.addEventListener('click', handleSpeakerPickerClickOutside)
+  })
+}
+
+// 關閉講者選擇浮窗
+function closeSpeakerPicker() {
+  showSpeakerPicker.value = false
+  currentEditingGroup.value = null
+  newSpeakerName.value = ''
+  document.removeEventListener('click', handleSpeakerPickerClickOutside)
+}
+
+// 點擊外部關閉講者選擇浮窗
+function handleSpeakerPickerClickOutside(event) {
+  if (speakerPickerRef.value && !speakerPickerRef.value.contains(event.target)) {
+    closeSpeakerPicker()
+  }
+}
+
+// 選擇現有講者
+function selectSpeaker(speakerCode) {
+  if (!currentEditingGroup.value) return
+
+  // 更新該 group 中所有 segments 的 speaker
+  emit('update-segment-speaker', {
+    groupId: currentEditingGroup.value.id,
+    newSpeaker: speakerCode
+  })
+
+  closeSpeakerPicker()
+}
+
+// 新增講者並設定名稱
+function addNewSpeaker() {
+  const name = newSpeakerName.value.trim()
+  if (!name) return
+
+  // 計算新的講者代號
+  const existingSpeakers = uniqueSpeakers.value
+  const maxNumber = existingSpeakers.reduce((max, speaker) => {
+    const match = speaker.match(/SPEAKER_(\d+)/)
+    return match ? Math.max(max, parseInt(match[1])) : max
+  }, -1)
+
+  const newSpeakerCode = `SPEAKER_${String(maxNumber + 1).padStart(2, '0')}`
+
+  // 更新講者名稱對應
+  const updatedNames = { ...props.speakerNames, [newSpeakerCode]: name }
+  emit('update:speakerNames', updatedNames)
+
+  // 更新該 group 的 speaker
+  emit('update-segment-speaker', {
+    groupId: currentEditingGroup.value.id,
+    newSpeaker: newSpeakerCode
+  })
+
+  closeSpeakerPicker()
+}
+
 // 組件卸載時清理監聽器
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+  document.removeEventListener('click', handleSpeakerPickerClickOutside)
 })
 </script>
 
@@ -239,7 +376,7 @@ onUnmounted(() => {
   top: calc(100% + 8px);
   right: 0;
   min-width: 280px;
-  background: var(--neu-bg);
+  background: var(--upload-bg);
   border-radius: 8px;
   padding: 16px;
   border: 1px solid rgba(163, 177, 198, 0.2);
@@ -288,7 +425,7 @@ onUnmounted(() => {
   padding: 8px 12px;
   border: none;
   border-radius: 6px;
-  background: var(--neu-bg);
+  background: var(--upload-bg);
   color: var(--neu-text-light);
   font-size: 12px;
   font-weight: 500;
@@ -298,7 +435,7 @@ onUnmounted(() => {
 
 .format-btn.active {
   color: var(--neu-primary);
-  background: rgba(255, 145, 77, 0.1);
+  background: var(--neu-bg);
 }
 
 .format-btn:hover {
@@ -573,6 +710,142 @@ onUnmounted(() => {
   font-size: 11px;
   font-weight: 600;
   color: var(--neu-primary);
+  transition: all 0.2s ease;
+}
+
+.speaker-badge.clickable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.speaker-badge.clickable:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transform: translateY(-1px);
+  background: rgba(255, 145, 77, 0.1);
+}
+
+/* 講者選擇浮窗 */
+.speaker-picker {
+  position: fixed;
+  background: var(--upload-bg);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  padding: 0;
+  min-width: 160px;
+  max-width: 200px;
+  z-index: 1000;
+  overflow: hidden;
+  animation: fadeInScale 0.2s ease;
+}
+
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.speaker-list {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.speaker-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 16px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+  color: var(--neu-text);
+}
+
+.speaker-option:hover {
+  background: rgba(163, 177, 198, 0.08);
+}
+
+.speaker-option.current {
+  background: var(--neu-bg);
+  color: var(--neu-primary);
+}
+
+.speaker-code {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--neu-text-light);
+}
+
+.speaker-option.current .speaker-code {
+  color: var(--neu-primary);
+}
+
+.speaker-name {
+  font-size: 13px;
+  font-weight: 500;
+  flex: 1;
+  text-align: right;
+}
+
+.speaker-new {
+  padding: 12px;
+  border-top: 1px solid rgba(163, 177, 198, 0.15);
+  background: rgba(163, 177, 198, 0.03);
+  display: flex;
+  gap: 8px;
+}
+
+.speaker-input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid rgba(163, 177, 198, 0.2);
+  border-radius: 6px;
+  background: var(--neu-bg);
+  font-size: 13px;
+  color: var(--neu-text);
+  transition: all 0.2s ease;
+}
+
+.speaker-input:focus {
+  outline: none;
+  border-color: var(--neu-primary);
+  box-shadow: 0 0 0 2px rgba(255, 145, 77, 0.1);
+}
+
+.btn-add-speaker {
+  padding: 6px 12px;
+  background: var(--neu-primary);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.btn-add-speaker:hover:not(:disabled) {
+  background: #ff8040;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(255, 145, 77, 0.3);
+}
+
+.btn-add-speaker:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* 內容欄 */

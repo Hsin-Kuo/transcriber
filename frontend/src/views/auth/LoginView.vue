@@ -1,16 +1,13 @@
 <template>
   <div class="auth-container">
-    <ElectricBorder />
-
-    <div class="auth-card electric-card">
-      <div class="electric-inner">
-        <div class="auth-content">
+    <div class="auth-card">
+      <div class="auth-content">
           <h1 class="auth-title">🎙️ 登入</h1>
           <p class="auth-subtitle">Whisper 轉錄服務</p>
 
           <form @submit.prevent="handleLogin" class="auth-form">
             <div class="form-group">
-              <label for="email">Email</label>
+              <label for="email">帳號</label>
               <input
                 type="email"
                 id="email"
@@ -36,6 +33,22 @@
 
             <div v-if="error" class="error-message">
               {{ error }}
+              <div v-if="needsVerification" class="verification-prompt">
+                <p class="verification-text">
+                  沒收到驗證郵件嗎？
+                </p>
+                <button
+                  type="button"
+                  class="btn-resend"
+                  @click="resendVerification"
+                  :disabled="resendLoading"
+                >
+                  {{ resendLoading ? '發送中...' : '重新發送驗證郵件' }}
+                </button>
+                <p v-if="resendSuccess" class="resend-success">
+                  ✓ 驗證郵件已發送，請查看您的郵箱
+                </p>
+              </div>
             </div>
 
             <button
@@ -51,7 +64,6 @@
             <p>還沒有帳號？<router-link to="/register">立即註冊</router-link></p>
           </div>
         </div>
-      </div>
     </div>
   </div>
 </template>
@@ -60,7 +72,6 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
-import ElectricBorder from '../../components/shared/ElectricBorder.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -69,10 +80,15 @@ const email = ref('')
 const password = ref('')
 const loading = ref(false)
 const error = ref('')
+const needsVerification = ref(false)
+const resendLoading = ref(false)
+const resendSuccess = ref(false)
 
 async function handleLogin() {
   loading.value = true
   error.value = ''
+  needsVerification.value = false
+  resendSuccess.value = false
 
   const result = await authStore.login(email.value, password.value)
 
@@ -82,9 +98,47 @@ async function handleLogin() {
     router.push(redirect)
   } else {
     error.value = result.error
+    // 檢查是否為 email 未驗證的錯誤
+    if (result.error && result.error.includes('驗證')) {
+      needsVerification.value = true
+    }
   }
 
   loading.value = false
+}
+
+async function resendVerification() {
+  resendLoading.value = true
+  resendSuccess.value = false
+
+  try {
+    const response = await fetch(
+      `${import.meta.env.VITE_API_URL || 'http://100.66.247.23:8000'}/auth/resend-verification`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ email: email.value })
+      }
+    )
+
+    const data = await response.json()
+
+    if (response.ok) {
+      resendSuccess.value = true
+      // 3 秒後隱藏成功訊息
+      setTimeout(() => {
+        resendSuccess.value = false
+      }, 5000)
+    } else {
+      error.value = data.detail || '發送驗證郵件失敗'
+    }
+  } catch (err) {
+    error.value = '網路錯誤，請稍後再試'
+  } finally {
+    resendLoading.value = false
+  }
 }
 </script>
 
@@ -96,12 +150,80 @@ async function handleLogin() {
   justify-content: center;
   padding: 20px;
   background: var(--neu-bg);
+  position: relative;
+}
+
+.auth-container::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image:
+    /* 垂直 - 密集細線 */
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(255, 255, 255, 0.015) 2px,
+      rgba(255, 255, 255, 0.015) 3px
+    ),
+    /* 垂直 - 中等間距 */
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 8px,
+      rgba(255, 255, 255, 0.03) 8px,
+      rgba(255, 255, 255, 0.03) 10px
+    ),
+    /* 垂直 - 稀疏粗線 */
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 21px,
+      rgba(255, 255, 255, 0.04) 21px,
+      rgba(255, 255, 255, 0.04) 23px
+    ),
+    /* 水平 - 密集細線 */
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 4px,
+      rgba(0, 0, 0, 0.015) 4px,
+      rgba(0, 0, 0, 0.015) 5px
+    ),
+    /* 水平 - 中等間距 */
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 11px,
+      rgba(0, 0, 0, 0.03) 11px,
+      rgba(0, 0, 0, 0.03) 13px
+    ),
+    /* 水平 - 稀疏粗線 */
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 27px,
+      rgba(0, 0, 0, 0.04) 27px,
+      rgba(0, 0, 0, 0.04) 29px
+    );
+  pointer-events: none;
+  opacity: 0.2;
+  z-index: 0;
 }
 
 .auth-card {
   width: 100%;
   max-width: 450px;
   margin: 0 auto;
+  background: var(--upload-bg);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(160, 145, 124, 0.2);
+  position: relative;
+  z-index: 1;
 }
 
 .auth-content {
@@ -142,70 +264,112 @@ async function handleLogin() {
 }
 
 .form-group input {
-  padding: 14px 18px;
-  border: none;
-  border-radius: 12px;
-  background: var(--neu-bg);
+  padding: 12px 16px;
+  border: 2px solid rgba(160, 145, 124, 0.3);
+  border-radius: 8px;
+  background: white;
   color: var(--neu-text);
   font-size: 1rem;
-  transition: all 0.3s ease;
-  box-shadow: var(--neu-shadow-inset);
+  transition: all 0.2s ease;
 }
 
 .form-group input:focus {
   outline: none;
-  box-shadow:
-    inset 6px 6px 10px var(--neu-shadow-dark),
-    inset -6px -6px 10px var(--neu-shadow-light),
-    0 0 0 3px rgba(108, 139, 163, 0.2);
+  border-color: var(--neu-primary);
+  box-shadow: 0 0 0 3px rgba(68, 70, 91, 0.1);
 }
 
 .form-group input:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+  background: var(--neu-bg);
 }
 
 .error-message {
-  padding: 14px;
-  background: linear-gradient(145deg, #f5c4c4, #e8a8a8);
-  border-radius: 12px;
   color: #c62828;
-  font-size: 0.9rem;
-  text-align: center;
+  font-size: 0.85rem;
+  text-align: left;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.verification-prompt {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(198, 40, 40, 0.2);
+}
+
+.verification-text {
+  margin: 0 0 12px 0;
+  font-size: 0.85rem;
+  color: #c62828;
+  font-weight: 500;
+}
+
+.btn-resend {
+  padding: 10px 20px;
+  background: white;
+  color: var(--neu-primary);
+  border: 2px solid var(--neu-primary);
+  border-radius: 8px;
+  font-size: 0.85rem;
   font-weight: 600;
-  box-shadow:
-    4px 4px 8px var(--neu-shadow-dark),
-    -4px -4px 8px var(--neu-shadow-light);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+}
+
+.btn-resend:hover:not(:disabled) {
+  background: var(--neu-primary);
+  color: white;
+}
+
+.btn-resend:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.btn-resend:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.resend-success {
+  margin: 12px 0 0 0;
+  padding: 10px;
+  background: #d4edda;
+  border-radius: 6px;
+  color: #155724;
+  font-size: 0.85rem;
+  font-weight: 600;
 }
 
 .btn-primary {
   padding: 14px 24px;
-  background: linear-gradient(145deg, #e9eef5, #d1d9e6);
-  color: var(--neu-primary);
+  background: var(--neu-primary-dark);
+  color: white;
   border: none;
-  border-radius: 12px;
+  border-radius: 8px;
   font-size: 1rem;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
   margin-top: 10px;
-  box-shadow: var(--neu-shadow-btn);
 }
 
 .btn-primary:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: var(--neu-shadow-btn-hover);
+  color: white;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
 }
 
 .btn-primary:active:not(:disabled) {
   transform: translateY(0);
-  box-shadow: var(--neu-shadow-btn-active);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .btn-primary:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
-  transform: none;
 }
 
 .auth-footer {
@@ -219,10 +383,11 @@ async function handleLogin() {
   color: var(--neu-primary);
   text-decoration: none;
   font-weight: 600;
-  transition: color 0.3s ease;
+  transition: color 0.2s ease;
 }
 
 .auth-footer a:hover {
   color: var(--neu-primary-dark);
+  text-decoration: underline;
 }
 </style>

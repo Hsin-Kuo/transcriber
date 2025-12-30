@@ -10,6 +10,7 @@ import tempfile
 import uuid
 import json
 import shutil
+import mimetypes
 
 from ..auth.dependencies import get_current_user, check_quota
 from ..database.mongodb import get_database
@@ -628,15 +629,37 @@ async def download_audio(
             detail="音檔不存在"
         )
 
-    # 獲取原始檔名
-    original_filename = get_task_field(task, "filename") or audio_file.name
+    # 使用 task_id 作為下載檔名，確保唯一性且不會重複
+    download_filename = f"{task_id}{audio_file.suffix}"
 
     # 使用 RFC 5987 編碼來支援中文檔名
-    encoded_filename = quote(original_filename, safe='')
+    encoded_filename = quote(download_filename, safe='')
+
+    # 根據檔案副檔名判斷 MIME type
+    file_suffix = audio_file.suffix.lower()
+    media_type_map = {
+        ".mp3": "audio/mpeg",
+        ".m4a": "audio/mp4",
+        ".wav": "audio/wav",
+        ".ogg": "audio/ogg",
+        ".flac": "audio/flac",
+        ".aac": "audio/aac",
+        ".wma": "audio/x-ms-wma",
+        ".opus": "audio/opus"
+    }
+    media_type = media_type_map.get(file_suffix)
+
+    # 如果映射表中沒有，嘗試使用 mimetypes 模組猜測
+    if not media_type:
+        media_type, _ = mimetypes.guess_type(str(audio_file))
+
+    # 如果還是無法判斷，使用預設的音檔類型
+    if not media_type or not media_type.startswith('audio'):
+        media_type = "audio/mpeg"
 
     return FileResponse(
         audio_file,
-        media_type="application/octet-stream",
+        media_type=media_type,
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
         }

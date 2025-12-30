@@ -1,7 +1,7 @@
 <template>
   <nav class="navigation" :class="{ collapsed: isCollapsed }">
     <!-- 收合/展開按鈕 -->
-    <button class="toggle-btn" @click="toggleCollapse" :title="isCollapsed ? '展開側欄' : '收合側欄'">
+    <button class="toggle-btn" @click="toggleCollapse" :title="isCollapsed ? $t('navigation.expandSidebar') : $t('navigation.collapseSidebar')">
       <!-- 展開時顯示《（向左，表示收合） -->
       <svg v-if="!isCollapsed" width="16" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="15 18 9 12 15 6"></polyline>
@@ -18,25 +18,25 @@
     </div>
 
     <div class="nav-links">
-      <router-link to="/" class="nav-link" active-class="active" :title="isCollapsed ? '轉錄服務' : ''">
+      <router-link to="/" class="nav-link" active-class="active" :title="isCollapsed ? $t('navigation.transcription') : ''">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
           <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
           <line x1="12" y1="19" x2="12" y2="23"></line>
           <line x1="8" y1="23" x2="16" y2="23"></line>
         </svg>
-        <span v-if="!isCollapsed">轉錄服務</span>
+        <span v-if="!isCollapsed">{{ $t('navigation.transcription') }}</span>
       </router-link>
 
-      <router-link to="/editor" class="nav-link" active-class="active" :title="isCollapsed ? '音訊剪輯' : ''">
+      <router-link to="/editor" class="nav-link" active-class="active" :title="isCollapsed ? $t('navigation.audioEditor') : ''">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
         </svg>
-        <span v-if="!isCollapsed">音訊剪輯</span>
+        <span v-if="!isCollapsed">{{ $t('navigation.audioEditor') }}</span>
       </router-link>
 
       <!-- 所有任務按鈕（收合時顯示） -->
-      <router-link v-if="authStore.isAuthenticated && isCollapsed" to="/tasks" class="nav-link" active-class="active" title="所有任務">
+      <router-link v-if="authStore.isAuthenticated && isCollapsed" to="/tasks" class="nav-link" active-class="active" :title="$t('navigation.allTasks')">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
         </svg>
@@ -46,15 +46,15 @@
     <!-- 最近任務預覽（展開時顯示） -->
     <div v-if="authStore.isAuthenticated && !isCollapsed" class="recent-tasks">
       <div class="recent-tasks-header">
-        <h3>近期</h3>
+        <h3>{{ $t('navigation.recent') }}</h3>
         <router-link to="/tasks" class="all-tasks-btn" active-class="active">
-          所有任務
+          {{ $t('navigation.allTasks') }}
         </router-link>
       </div>
 
       <div class="recent-tasks-list">
         <div v-if="recentTasks.length === 0" class="recent-task-empty">
-          暫無已完成任務
+          {{ $t('navigation.noCompletedTasks') }}
         </div>
 
         <router-link
@@ -78,13 +78,13 @@
           {{ getFirstLetter(authStore.user?.email) }}
         </div>
       </router-link>
-      <button @click="handleLogout" class="logout-btn" :title="isCollapsed ? '登出' : ''">
+      <button @click="handleLogout" class="logout-btn" :title="isCollapsed ? $t('navigation.logout') : ''">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
           <polyline points="16 17 21 12 16 7"></polyline>
           <line x1="21" y1="12" x2="9" y2="12"></line>
         </svg>
-        <span v-if="!isCollapsed">登出</span>
+        <span v-if="!isCollapsed">{{ $t('navigation.logout') }}</span>
       </button>
     </div>
   </nav>
@@ -94,7 +94,10 @@
 import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
+import { useI18n } from 'vue-i18n'
 import api from '../../utils/api'
+
+const { t: $t } = useI18n()
 
 const route = useRoute()
 const router = useRouter()
@@ -119,7 +122,7 @@ async function loadRecentTasks() {
     })
     recentTasks.value = response.data.tasks || []
   } catch (error) {
-    console.error('載入最近任務失敗:', error)
+    console.error('Failed to load recent tasks:', error)
   }
 }
 
@@ -605,7 +608,7 @@ watch(() => route.path, (newPath, oldPath) => {
 
 .task-name {
   font-size: 0.8rem;
-  font-weight: 600;
+  font-weight: 400;
   color: var(--neu-text-lighter);
   white-space: nowrap;
   overflow: hidden;

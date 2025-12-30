@@ -4,7 +4,7 @@
       :value="findText"
       @input="$emit('update:findText', $event.target.value)"
       type="text"
-      placeholder="尋找"
+      :placeholder="$t('replaceToolbar.find')"
       class="replace-input"
       @keydown.enter.prevent="$emit('replace-all')"
     />
@@ -12,7 +12,7 @@
       :value="replaceText"
       @input="$emit('update:replaceText', $event.target.value)"
       type="text"
-      placeholder="取代為"
+      :placeholder="$t('replaceToolbar.replaceWith')"
       class="replace-input"
       @keydown.enter.prevent="$emit('replace-all')"
     />
@@ -21,7 +21,7 @@
       @click="$emit('replace-all')"
       :disabled="!findText"
     >
-      取代全部
+      {{ $t('replaceToolbar.replaceAll') }}
     </button>
   </div>
 </template>
@@ -42,7 +42,7 @@ defineEmits(['update:findText', 'update:replaceText', 'replace-all'])
 </script>
 
 <style scoped>
-/* 取代工具列 */
+/* Replace toolbar */
 .replace-toolbar {
   display: flex;
   flex-wrap: wrap;

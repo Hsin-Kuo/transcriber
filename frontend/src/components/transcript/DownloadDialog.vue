@@ -2,8 +2,8 @@
   <div v-if="show" class="download-dialog-overlay" @click.self="$emit('close')">
     <div class="download-dialog">
       <div class="dialog-header">
-        <h3>選擇下載格式</h3>
-        <button @click="$emit('close')" class="btn-close" title="關閉">
+        <h3>{{ $t('downloadDialog.title') }}</h3>
+        <button @click="$emit('close')" class="btn-close" :title="$t('downloadDialog.cancel')">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"></line>
             <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -13,11 +13,11 @@
 
       <div class="dialog-body">
         <p class="dialog-description">
-          將根據目前的設定生成字幕檔案：
+          {{ $t('downloadDialog.description') }}
         </p>
         <ul class="current-settings">
-          <li><strong>時間格式：</strong>{{ timeFormat === 'start' ? '起始時間' : '時間範圍' }}</li>
-          <li><strong>疏密度：</strong>{{ densityThreshold.toFixed(1) }}s</li>
+          <li><strong>{{ $t('downloadDialog.timeFormat') }}</strong>{{ timeFormat === 'start' ? $t('subtitleTable.startTime') : $t('subtitleTable.timeRange') }}</li>
+          <li><strong>{{ $t('downloadDialog.density') }}</strong>{{ densityThreshold.toFixed(1) }}s</li>
         </ul>
 
         <!-- 講者資訊選項 -->
@@ -29,9 +29,9 @@
               @change="$emit('update:includeSpeaker', $event.target.checked)"
               class="checkbox-input"
             />
-            <span class="checkbox-text">講者資訊</span>
+            <span class="checkbox-text">{{ $t('downloadDialog.speakerInfo') }}</span>
           </label>
-          <p class="option-hint">檔案會包含講者名稱</p>
+          <p class="option-hint">{{ $t('downloadDialog.speakerHint') }}</p>
         </div>
 
         <div class="format-options">
@@ -44,8 +44,8 @@
               name="downloadFormat"
             />
             <div class="format-info">
-              <span class="format-name">TXT 文字檔</span>
-              <span class="format-desc">純文字格式，包含時間戳和內容</span>
+              <span class="format-name">{{ $t('downloadDialog.txtFormat') }}</span>
+              <span class="format-desc">{{ $t('downloadDialog.txtDesc') }}</span>
             </div>
           </label>
 
@@ -58,8 +58,8 @@
               name="downloadFormat"
             />
             <div class="format-info">
-              <span class="format-name">SRT 字幕檔</span>
-              <span class="format-desc">SubRip 字幕格式，適用於大多數播放器</span>
+              <span class="format-name">{{ $t('downloadDialog.srtFormat') }}</span>
+              <span class="format-desc">{{ $t('downloadDialog.srtDesc') }}</span>
             </div>
           </label>
 
@@ -72,8 +72,8 @@
               name="downloadFormat"
             />
             <div class="format-info">
-              <span class="format-name">VTT 字幕檔</span>
-              <span class="format-desc">WebVTT 字幕格式，適用於網頁播放器</span>
+              <span class="format-name">{{ $t('downloadDialog.vttFormat') }}</span>
+              <span class="format-desc">{{ $t('downloadDialog.vttDesc') }}</span>
             </div>
           </label>
         </div>
@@ -81,10 +81,10 @@
 
       <div class="dialog-footer">
         <button @click="$emit('close')" class="btn btn-secondary">
-          取消
+          {{ $t('downloadDialog.cancel') }}
         </button>
         <button @click="$emit('download')" class="btn btn-primary">
-          下載
+          {{ $t('downloadDialog.download') }}
         </button>
       </div>
     </div>
@@ -92,6 +92,10 @@
 </template>
 
 <script setup>
+import { useI18n } from 'vue-i18n'
+
+const { t: $t } = useI18n()
+
 defineProps({
   show: {
     type: Boolean,
@@ -170,7 +174,7 @@ defineEmits(['close', 'download', 'update:selectedFormat', 'update:includeSpeake
 
 .dialog-header {
   padding: 24px;
-  border-bottom: 1px solid rgba(163, 177, 198, 0.2);
+  border-bottom: 1px solid rgba(160, 145, 124, 0.2);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -197,7 +201,7 @@ defineEmits(['close', 'download', 'update:selectedFormat', 'update:includeSpeake
 }
 
 .btn-close:hover {
-  background: rgba(163, 177, 198, 0.1);
+  background: rgba(160, 145, 124, 0.15);
   color: var(--neu-text);
 }
 
@@ -214,7 +218,7 @@ defineEmits(['close', 'download', 'update:selectedFormat', 'update:includeSpeake
 }
 
 .current-settings {
-  background: rgba(163, 177, 198, 0.1);
+  background: rgba(160, 145, 124, 0.15);
   border-radius: 8px;
   padding: 16px;
   margin: 0 0 24px 0;
@@ -234,7 +238,7 @@ defineEmits(['close', 'download', 'update:selectedFormat', 'update:includeSpeake
 
 /* 講者選項 */
 .speaker-option {
-  background: rgba(163, 177, 198, 0.05);
+  background: rgba(160, 145, 124, 0.08);
   border-radius: 8px;
   padding: 16px;
   margin: 0 0 24px 0;
@@ -281,14 +285,14 @@ defineEmits(['close', 'download', 'update:selectedFormat', 'update:includeSpeake
   padding: 16px;
   border-radius: 12px;
   border: 2px solid transparent;
-  background: rgba(163, 177, 198, 0.05);
+  background: rgba(160, 145, 124, 0.08);
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .format-option:hover {
-  background: rgba(163, 177, 198, 0.1);
-  border-color: rgba(163, 177, 198, 0.2);
+  background: rgba(160, 145, 124, 0.15);
+  border-color: rgba(160, 145, 124, 0.3);
 }
 
 .format-option input[type="radio"] {
@@ -302,7 +306,7 @@ defineEmits(['close', 'download', 'update:selectedFormat', 'update:includeSpeake
 
 .format-option:has(input[type="radio"]:checked) {
   border-color: var(--neu-primary);
-  background: rgba(255, 145, 77, 0.05);
+  background: rgba(160, 145, 124, 0.2);
 }
 
 .format-info {
@@ -325,7 +329,7 @@ defineEmits(['close', 'download', 'update:selectedFormat', 'update:includeSpeake
 
 .dialog-footer {
   padding: 20px 24px;
-  border-top: 1px solid rgba(163, 177, 198, 0.2);
+  border-top: 1px solid rgba(160, 145, 124, 0.2);
   display: flex;
   gap: 12px;
   justify-content: flex-end;

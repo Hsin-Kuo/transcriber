@@ -790,7 +790,10 @@ class TranscriptionService:
             traceback.print_exc()
 
     def _save_audio_file_sync(self, task_id: str, temp_dir: Path, audio_files: list) -> None:
-        """同步處理音檔保存和更新（避免 event loop 衝突）"""
+        """同步處理音檔保存和更新（避免 event loop 衝突）
+
+        將音檔統一轉換為 MP3 格式以確保瀏覽器相容性
+        """
         print(f"🔧 [_save_audio_file_sync] 開始處理，audio_files 數量: {len(audio_files)}")
 
         if not audio_files:
@@ -804,17 +807,38 @@ class TranscriptionService:
 
             uploads_dir = Path("uploads")
             uploads_dir.mkdir(exist_ok=True)
-            permanent_audio = uploads_dir / f"{task_id}{original_audio.suffix}"
+
+            # 統一保存為 MP3 格式（瀏覽器相容性最好）
+            permanent_audio = uploads_dir / f"{task_id}.mp3"
             print(f"🔧 [_save_audio_file_sync] 目標路徑: {permanent_audio}")
 
-            # 移動音檔到永久目錄
-            shutil.move(str(original_audio), str(permanent_audio))
-            print(f"💾 已保存音檔：{permanent_audio}")
+            # 如果原始檔案已經是 MP3，直接移動
+            if original_audio.suffix.lower() == '.mp3':
+                shutil.move(str(original_audio), str(permanent_audio))
+                print(f"💾 已保存音檔（直接移動）：{permanent_audio}")
+            else:
+                # 使用 ffmpeg 轉換為 MP3（192kbps，品質良好且檔案大小適中）
+                print(f"🔄 [_save_audio_file_sync] 轉換音檔為 MP3 格式...")
+                result = subprocess.run([
+                    'ffmpeg', '-y', '-i', str(original_audio),
+                    '-acodec', 'libmp3lame',
+                    '-b:a', '192k',  # 192kbps 比特率
+                    '-ar', '44100',  # 44.1kHz 採樣率
+                    str(permanent_audio)
+                ], capture_output=True, text=True)
+
+                if result.returncode != 0:
+                    print(f"❌ ffmpeg 轉換失敗: {result.stderr}")
+                    raise Exception(f"音檔轉換為 MP3 失敗: {result.stderr}")
+
+                print(f"✅ 已轉換並保存音檔：{permanent_audio}")
 
             # 使用同步方法更新任務的 audio_file 路徑
+            # 保存原始檔名（但副檔名改為 .mp3）
+            original_filename = Path(original_audio.name).stem + ".mp3"
             self._update_task_sync(task_id, {
                 "result.audio_file": str(permanent_audio),
-                "result.audio_filename": original_audio.name
+                "result.audio_filename": original_filename
             })
             print(f"✅ [_save_audio_file_sync] 已更新資料庫")
         except Exception as e:

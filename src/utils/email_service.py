@@ -1,0 +1,203 @@
+"""Email 發送服務"""
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from typing import Optional
+import os
+from jinja2 import Template
+
+class EmailService:
+    """Email 發送服務類"""
+
+    def __init__(self):
+        """初始化 Email 服務配置"""
+        self.smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+        self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
+        self.smtp_user = os.getenv("SMTP_USER", "")
+        self.smtp_password = os.getenv("SMTP_PASSWORD", "")
+        self.from_email = os.getenv("FROM_EMAIL", self.smtp_user)
+        self.from_name = os.getenv("FROM_NAME", "Whisper 轉錄服務")
+        self.frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+    async def send_verification_email(
+        self,
+        to_email: str,
+        verification_token: str
+    ) -> bool:
+        """發送驗證郵件
+
+        Args:
+            to_email: 收件人 email
+            verification_token: 驗證 token
+
+        Returns:
+            是否發送成功
+        """
+        verification_url = f"{self.frontend_url}/verify-email?token={verification_token}"
+
+        # Email 模板
+        html_template = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                body {
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    line-height: 1.6;
+                    color: #333;
+                    max-width: 600px;
+                    margin: 0 auto;
+                    padding: 20px;
+                }
+                .header {
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 30px;
+                    text-align: center;
+                    border-radius: 10px 10px 0 0;
+                }
+                .content {
+                    background: #f9f9f9;
+                    padding: 30px;
+                    border-radius: 0 0 10px 10px;
+                }
+                .button {
+                    display: inline-block;
+                    padding: 15px 30px;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 5px;
+                    margin: 20px 0;
+                    font-weight: bold;
+                }
+                .footer {
+                    text-align: center;
+                    margin-top: 30px;
+                    color: #666;
+                    font-size: 12px;
+                }
+                .token-box {
+                    background: #fff;
+                    padding: 15px;
+                    border-left: 4px solid #667eea;
+                    margin: 20px 0;
+                    word-break: break-all;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>🎙️ 歡迎使用 Whisper 轉錄服務</h1>
+            </div>
+            <div class="content">
+                <h2>請驗證您的電子郵件地址</h2>
+                <p>感謝您註冊！請點擊下方按鈕驗證您的 email：</p>
+
+                <div style="text-align: center;">
+                    <a href="{{ verification_url }}" class="button">驗證 Email</a>
+                </div>
+
+                <p>或者複製以下連結到瀏覽器：</p>
+                <div class="token-box">
+                    {{ verification_url }}
+                </div>
+
+                <p><strong>注意：</strong>此驗證連結將在 24 小時後過期。</p>
+
+                <p>如果您沒有註冊此帳號，請忽略此郵件。</p>
+            </div>
+            <div class="footer">
+                <p>© 2024 Whisper 轉錄服務. All rights reserved.</p>
+            </div>
+        </body>
+        </html>
+        """
+
+        template = Template(html_template)
+        html_content = template.render(verification_url=verification_url)
+
+        # 純文字版本（備用）
+        text_content = f"""
+        歡迎使用 Whisper 轉錄服務！
+
+        請點擊以下連結驗證您的 email：
+        {verification_url}
+
+        此驗證連結將在 24 小時後過期。
+
+        如果您沒有註冊此帳號，請忽略此郵件。
+        """
+
+        return await self._send_email(
+            to_email=to_email,
+            subject="驗證您的 Email - Whisper 轉錄服務",
+            html_content=html_content,
+            text_content=text_content
+        )
+
+    async def _send_email(
+        self,
+        to_email: str,
+        subject: str,
+        html_content: str,
+        text_content: Optional[str] = None
+    ) -> bool:
+        """發送 Email
+
+        Args:
+            to_email: 收件人
+            subject: 主題
+            html_content: HTML 內容
+            text_content: 純文字內容（可選）
+
+        Returns:
+            是否發送成功
+        """
+        try:
+            # 如果沒有配置 SMTP，則只記錄日誌（開發環境）
+            if not self.smtp_user or not self.smtp_password:
+                print(f"\n{'='*60}")
+                print(f"📧 Email 發送（開發模式）")
+                print(f"{'='*60}")
+                print(f"收件人: {to_email}")
+                print(f"主題: {subject}")
+                print(f"\n{text_content if text_content else '(HTML only)'}")
+                print(f"{'='*60}\n")
+                return True
+
+            # 創建郵件
+            msg = MIMEMultipart('alternative')
+            msg['Subject'] = subject
+            msg['From'] = f"{self.from_name} <{self.from_email}>"
+            msg['To'] = to_email
+
+            # 添加內容
+            if text_content:
+                msg.attach(MIMEText(text_content, 'plain', 'utf-8'))
+            msg.attach(MIMEText(html_content, 'html', 'utf-8'))
+
+            # 發送郵件
+            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.smtp_user, self.smtp_password)
+                server.send_message(msg)
+
+            print(f"✅ Email 已發送到 {to_email}")
+            return True
+
+        except Exception as e:
+            print(f"❌ Email 發送失敗: {str(e)}")
+            return False
+
+
+# 單例
+_email_service: Optional[EmailService] = None
+
+def get_email_service() -> EmailService:
+    """獲取 Email 服務實例"""
+    global _email_service
+    if _email_service is None:
+        _email_service = EmailService()
+    return _email_service

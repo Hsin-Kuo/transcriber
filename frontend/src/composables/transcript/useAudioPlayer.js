@@ -171,6 +171,11 @@ export function useAudioPlayer() {
     const audio = event.target
     if (!audio.error) return
 
+    // 忽略空 src 的錯誤（初始化時的正常現象）
+    if (!audio.src || audio.src === window.location.href || audio.src === '') {
+      return
+    }
+
     console.error('音檔載入錯誤:', {
       code: audio.error.code,
       message: audio.error.message,
@@ -241,7 +246,14 @@ export function useAudioPlayer() {
    */
   function updateDuration() {
     if (!audioElement.value) return
-    duration.value = audioElement.value.duration || 0
+
+    const newDuration = audioElement.value.duration
+
+    // 只在 duration 是有效數字時更新
+    // 避免 NaN、Infinity 或 0 覆蓋已有的正確值
+    if (newDuration && isFinite(newDuration) && newDuration > 0) {
+      duration.value = newDuration
+    }
   }
 
   /**

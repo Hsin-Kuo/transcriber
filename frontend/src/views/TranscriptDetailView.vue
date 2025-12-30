@@ -5,7 +5,7 @@
       <!-- 左側控制面板 -->
       <div class="left-panel card">
         <!-- 返回按鈕 -->
-        <button @click="goBack" class="btn-back-icon" title="返回">
+        <button @click="goBack" class="btn-back-icon" :title="$t('transcriptDetail.goBack')">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M19 12H5M12 19l-7-7 7-7"/>
           </svg>
@@ -13,7 +13,7 @@
 
         <!-- 任務名稱 -->
         <div class="task-name-section">
-          <label class="section-label">任務名稱</label>
+          <label class="section-label">{{ $t('taskList.taskName') }}</label>
           <input
             v-if="isEditingTitle"
             ref="titleInput"
@@ -24,8 +24,8 @@
             @keyup.enter="saveTaskName"
             @keyup.esc="cancelTitleEdit"
           />
-          <h2 v-else @click="startTitleEdit" class="editable-title" title="點擊編輯名稱">
-            {{ currentTranscript.custom_name || currentTranscript.filename || '逐字稿' }}
+          <h2 v-else @click="startTitleEdit" class="editable-title" :title="$t('transcriptDetail.edit')">
+            {{ currentTranscript.custom_name || currentTranscript.filename || $t('transcriptDetail.transcript') }}
           </h2>
         </div>
 
@@ -46,7 +46,7 @@
                 class="toggle-checkbox"
                 :disabled="isEditing"
               />
-              <span class="toggle-text">時間標記</span>
+              <span class="toggle-text">{{ $t('transcriptDetail.timecodeMarkers') }}</span>
             </label>
           </div>
         </div>
@@ -58,20 +58,20 @@
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
             </svg>
-            <span>編輯</span>
+            <span>{{ $t('transcriptDetail.edit') }}</span>
           </button>
           <button v-else @click="saveEditing" class="btn btn-action">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="20 6 9 17 4 12"></polyline>
             </svg>
-            <span>儲存</span>
+            <span>{{ $t('transcriptDetail.save') }}</span>
           </button>
           <button v-if="isEditing" @click="cancelEditing" class="btn btn-action">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="18" y1="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
             </svg>
-            <span>取消</span>
+            <span>{{ $t('transcriptDetail.cancel') }}</span>
           </button>
           <button v-if="!isEditing" @click="downloadTranscript" class="btn btn-action">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -79,7 +79,7 @@
               <polyline points="7 10 12 15 17 10"></polyline>
               <line x1="12" y1="15" x2="12" y2="3"></line>
             </svg>
-            <span>下載</span>
+            <span>{{ $t('transcriptDetail.download') }}</span>
           </button>
         </div>
 
@@ -113,7 +113,7 @@
           @audio-loaded="handleAudioLoaded"
           @audio-error="handleAudioError"
           @update-progress="updateProgress"
-          @update-duration="updateDuration"
+          @update-duration="(newDuration) => { duration = newDuration }"
           @update-volume="updateVolume"
           @update-playback-rate="updatePlaybackRate"
         />
@@ -176,6 +176,7 @@
             :format-timestamp="formatTimestamp"
             @seek-to-time="seekToTime"
             @update-row-content="updateRowContent"
+            @update-segment-speaker="updateSegmentSpeaker"
           />
         </div>
 
@@ -204,8 +205,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
+import { useI18n } from 'vue-i18n'
+
+const { t: $t } = useI18n()
 
 // 子組件
 import AudioPlayer from '../components/transcript/AudioPlayer.vue'
@@ -286,20 +290,21 @@ const {
   stopDragArc
 } = useAudioPlayer()
 
-// 同步 audioElement 引用（延遲確保組件已掛載）
-onMounted(() => {
-  setTimeout(() => {
-    if (audioPlayerRef.value?.audioElement) {
-      audioElement.value = audioPlayerRef.value.audioElement
-    }
-  }, 100)
-})
-
+// 同步 audioElement 引用（用於播放控制）
 watch(audioPlayerRef, (newRef) => {
   if (newRef?.audioElement) {
     audioElement.value = newRef.audioElement
   }
 }, { immediate: true })
+
+onMounted(() => {
+  // 確保在組件掛載後設定引用
+  nextTick(() => {
+    if (audioPlayerRef.value?.audioElement) {
+      audioElement.value = audioPlayerRef.value.audioElement
+    }
+  })
+})
 
 // ========== 字幕模式 ==========
 const {
@@ -368,7 +373,7 @@ watch(speakerNames, (newValue) => {
 
   // 設定新的計時器（1秒後儲存）
   speakerNamesSaveTimer = setTimeout(async () => {
-    console.log('🔄 自動儲存講者名稱:', newValue)
+    console.log('🔄 ' + $t('transcriptDetail.autoSavingSpeaker') + ':', newValue)
     await updateSpeakerNames(newValue)
   }, 1000)
 }, { deep: true })
@@ -501,6 +506,47 @@ function performDownload() {
   performSubtitleDownload(content, filename, format)
 }
 
+// 更新 segment 的講者
+function updateSegmentSpeaker({ groupId, newSpeaker }) {
+  // 找到對應的 group
+  const group = groupedSegments.value.find(g => g.id === groupId)
+  if (!group) return
+
+  // 更新該 group 中所有 segments 的 speaker
+  group.speaker = newSpeaker
+  group.segments.forEach(segment => {
+    segment.speaker = newSpeaker
+  })
+
+  // 更新原始 segments 數據
+  segments.value = segments.value.map(seg => {
+    const groupSegment = group.segments.find(gs =>
+      gs.start === seg.start && gs.end === seg.end && gs.text === seg.text
+    )
+    if (groupSegment) {
+      return { ...seg, speaker: newSpeaker }
+    }
+    return seg
+  })
+
+  // 自動儲存到後端
+  saveSegmentsToBackend()
+}
+
+// 儲存 segments 到後端
+async function saveSegmentsToBackend() {
+  try {
+    await saveTranscript(
+      currentTranscript.value.content,
+      segments.value,
+      'subtitle'
+    )
+    console.log('✅ ' + $t('transcriptDetail.segmentsAutoSaved'))
+  } catch (error) {
+    console.error('❌ ' + $t('transcriptDetail.errorSavingSegments') + ':', error)
+  }
+}
+
 // 返回
 function goBack() {
   router.back()
@@ -607,7 +653,7 @@ function fixSubtitleScrolling() {
 // 路由離開前的警告
 onBeforeRouteLeave((_to, _from, next) => {
   if (hasUnsavedChanges.value) {
-    const answer = window.confirm('你有未儲存的編輯內容，確定要離開嗎？')
+    const answer = window.confirm($t('transcriptDetail.confirmLeave'))
     if (answer) {
       next()
     } else {

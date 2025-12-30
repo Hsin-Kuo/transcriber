@@ -1,11 +1,13 @@
 <template>
   <div class="audio-player-container">
     <audio
+      v-show="audioUrl"
       ref="audioElement"
       preload="metadata"
-      :src="audioUrl"
+      :src="audioUrl || ''"
       @error="handleAudioError"
       @loadedmetadata="handleAudioLoaded"
+      @canplay="updateDuration"
       @play="$emit('update:isPlaying', true)"
       @pause="$emit('update:isPlaying', false)"
       @ended="$emit('update:isPlaying', false)"
@@ -14,7 +16,7 @@
       @volumechange="updateVolume"
       @ratechange="updatePlaybackRate"
     >
-      您的瀏覽器不支援音訊播放。
+      {{ $t('audioPlayer.browserNotSupported') }}
     </audio>
 
     <div v-if="audioError" class="audio-error">
@@ -26,12 +28,12 @@
           <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
           <path d="M3 21v-5h5"/>
         </svg>
-        重試載入
+        {{ $t('audioPlayer.retryLoad') }}
       </button>
     </div>
 
     <div class="custom-audio-player circular-player">
-      <!-- 圓形進度條 (1/3 圓弧在上方) -->
+      <!-- Circular progress bar (1/3 arc at top) -->
       <div class="circular-progress-container">
         <svg
           class="progress-arc"
@@ -41,7 +43,7 @@
           @mouseup="stopDragArc"
           @mouseleave="stopDragArc"
         >
-          <!-- 背景弧線 -->
+          <!-- Background arc -->
           <path
             class="arc-background"
             :d="arcPath"
@@ -49,7 +51,7 @@
             stroke-width="5"
             stroke-linecap="round"
           />
-          <!-- 進度弧線 -->
+          <!-- Progress arc -->
           <path
             class="arc-progress"
             :d="arcPath"
@@ -59,7 +61,7 @@
             :stroke-dasharray="arcLength"
             :stroke-dashoffset="arcLength - (arcLength * displayProgress / 100)"
           />
-          <!-- 進度圓點 -->
+          <!-- Progress dot -->
           <circle
             class="arc-thumb"
             :cx="thumbPosition.x"
@@ -69,10 +71,10 @@
         </svg>
       </div>
 
-      <!-- 中央控制區 -->
+      <!-- Central control area -->
       <div class="circular-controls-center">
-        <!-- 快退按鈕 -->
-        <button class="audio-control-btn audio-skip-btn skip-backward" @click="$emit('skip-backward')" title="快退10秒">
+        <!-- Rewind button -->
+        <button class="audio-control-btn audio-skip-btn skip-backward" @click="$emit('skip-backward')" :title="$t('audioPlayer.rewind10s')">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
             <path d="M3 3v5h5"/>
@@ -80,8 +82,8 @@
           <span class="audio-control-label">10</span>
         </button>
 
-        <!-- 播放/暫停按鈕 -->
-        <button class="audio-control-btn audio-play-btn" @click="$emit('toggle-play-pause')" :title="isPlaying ? '暫停' : '播放'">
+        <!-- Play/Pause button -->
+        <button class="audio-control-btn audio-play-btn" @click="$emit('toggle-play-pause')" :title="isPlaying ? $t('audioPlayer.pause') : $t('audioPlayer.play')">
           <svg v-if="!isPlaying" width="30" height="30" viewBox="0 0 24 24" fill="currentColor">
             <path d="M8 5v14l11-7z"/>
           </svg>
@@ -90,8 +92,8 @@
           </svg>
         </button>
 
-        <!-- 快進按鈕 -->
-        <button class="audio-control-btn audio-skip-btn skip-forward" @click="$emit('skip-forward')" title="快進10秒">
+        <!-- Fast forward button -->
+        <button class="audio-control-btn audio-skip-btn skip-forward" @click="$emit('skip-forward')" :title="$t('audioPlayer.fastForward10s')">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
             <path d="M21 3v5h-5"/>
@@ -100,71 +102,71 @@
         </button>
       </div>
 
-      <!-- 時間顯示 -->
+      <!-- Time display -->
       <div class="time-display-center">
         {{ formatTime(displayTime) }} / {{ formatTime(duration) }}
       </div>
 
-      <!-- 音量和控制區 -->
+      <!-- Volume and controls -->
       <div class="volume-and-controls">
-        <!-- 左側：快捷鍵說明 -->
+        <!-- Left: Keyboard shortcuts info -->
         <div class="keyboard-shortcuts-info">
-          <button class="audio-control-btn info-btn" title="鍵盤快捷鍵">
+          <button class="audio-control-btn info-btn" :title="$t('audioPlayer.keyboardShortcuts')">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
             </svg>
           </button>
           <div class="shortcuts-tooltip">
-            <div class="shortcuts-title">音檔控制快捷鍵</div>
+            <div class="shortcuts-title">{{ $t('audioPlayer.audioControlShortcuts') }}</div>
             <div class="shortcuts-section">
-              <div class="shortcuts-section-title">通用（編輯時可用）</div>
+              <div class="shortcuts-section-title">{{ $t('audioPlayer.generalEditMode') }}</div>
               <div class="shortcut-item">
                 <kbd>Alt</kbd> + <kbd>K</kbd>
-                <span>播放/暫停</span>
+                <span>{{ $t('audioPlayer.playPause') }}</span>
               </div>
               <div class="shortcut-item">
                 <kbd>Alt</kbd> + <kbd>J</kbd> / <kbd>←</kbd>
-                <span>快退 10 秒</span>
+                <span>{{ $t('audioPlayer.rewind10sShortcut') }}</span>
               </div>
               <div class="shortcut-item">
                 <kbd>Alt</kbd> + <kbd>L</kbd> / <kbd>→</kbd>
-                <span>快進 10 秒</span>
+                <span>{{ $t('audioPlayer.fastForward10sShortcut') }}</span>
               </div>
               <div class="shortcut-item">
                 <kbd>Alt</kbd> + <kbd>,</kbd>
-                <span>快退 5 秒</span>
+                <span>{{ $t('audioPlayer.rewind5s') }}</span>
               </div>
               <div class="shortcut-item">
                 <kbd>Alt</kbd> + <kbd>.</kbd>
-                <span>快進 5 秒</span>
+                <span>{{ $t('audioPlayer.fastForward5s') }}</span>
               </div>
               <div class="shortcut-item">
                 <kbd>Alt</kbd> + <kbd>M</kbd>
-                <span>靜音/取消靜音</span>
+                <span>{{ $t('audioPlayer.toggleMute') }}</span>
               </div>
             </div>
             <div class="shortcuts-section">
-              <div class="shortcuts-section-title">非編輯模式</div>
+              <div class="shortcuts-section-title">{{ $t('audioPlayer.nonEditMode') }}</div>
               <div class="shortcut-item">
                 <kbd>Space</kbd>
-                <span>播放/暫停</span>
+                <span>{{ $t('audioPlayer.playPause') }}</span>
               </div>
               <div class="shortcut-item">
                 <kbd>←</kbd>
-                <span>快退 10 秒</span>
+                <span>{{ $t('audioPlayer.rewind10sShortcut') }}</span>
               </div>
               <div class="shortcut-item">
                 <kbd>→</kbd>
-                <span>快進 10 秒</span>
+                <span>{{ $t('audioPlayer.fastForward10sShortcut') }}</span>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- 中間：音量控制 -->
+        <!-- Middle: Volume control -->
         <div class="volume-control-center">
-          <!-- 靜音按鈕（音量條開頭） -->
-          <button class="audio-control-btn mute-btn-volume" @click="$emit('toggle-mute')" :title="isMuted ? '取消靜音' : '靜音'">
+          <!-- Mute button (at start of volume bar) -->
+          <button class="audio-control-btn mute-btn-volume" @click="$emit('toggle-mute')" :title="isMuted ? $t('audioPlayer.unmute') : $t('audioPlayer.mute')">
             <svg v-if="!isMuted && volume > 0.5" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
               <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
             </svg>
@@ -186,9 +188,9 @@
           />
         </div>
 
-        <!-- 右側：播放速度 -->
+        <!-- Right: Playback speed -->
         <div class="speed-control">
-          <button class="audio-control-btn speed-btn" :title="`播放速度: ${playbackRate}x`">
+          <button class="audio-control-btn speed-btn" :title="$t('audioPlayer.playbackSpeed', { rate: playbackRate })">
             <span class="speed-label">{{ playbackRate }}x</span>
           </button>
           <div class="speed-dropdown">
@@ -210,6 +212,9 @@
 
 <script setup>
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t: $t } = useI18n()
 
 const props = defineProps({
   audioUrl: String,
@@ -248,6 +253,7 @@ const emit = defineEmits([
 
 const audioElement = ref(null)
 
+
 function handleAudioLoaded() {
   emit('audio-loaded')
 }
@@ -261,7 +267,13 @@ function updateProgress() {
 }
 
 function updateDuration() {
-  emit('update-duration')
+  // 直接從 audio 元素獲取 duration 並傳遞給父組件
+  if (audioElement.value) {
+    const newDuration = audioElement.value.duration
+    if (newDuration && isFinite(newDuration) && newDuration > 0) {
+      emit('update-duration', newDuration)
+    }
+  }
 }
 
 function updateVolume() {
@@ -295,14 +307,14 @@ function formatTime(seconds) {
   return `${mins}:${secs.toString().padStart(2, '0')}`
 }
 
-// 暴露 audioElement 給父組件
+// Expose audioElement to parent component
 defineExpose({
   audioElement
 })
 </script>
 
 <style scoped>
-/* 音訊播放器樣式 */
+/* Audio player styles */
 .audio-player-container {
   margin-bottom: 24px;
 }
@@ -358,7 +370,7 @@ defineExpose({
   flex-shrink: 0;
 }
 
-/* 圓形播放器 */
+/* Circular player */
 .custom-audio-player.circular-player {
   background: var(--neu-bg);
   padding: 10px 5px 20px;
@@ -371,7 +383,7 @@ defineExpose({
   margin: 0 auto;
 }
 
-/* 圓形進度條容器 */
+/* Circular progress container */
 .circular-progress-container {
   width: 100%;
   max-width: 280px;
@@ -389,7 +401,7 @@ defineExpose({
   -ms-user-select: none;
 }
 
-/* 進度條弧線樣式 */
+/* Progress bar arc styles */
 .arc-background {
   stroke: #d1d9e6;
   stroke-opacity: 0.5;
@@ -408,7 +420,7 @@ defineExpose({
   pointer-events: none;
 }
 
-/* 中央控制區 - 播放、快進、快退 */
+/* Central control area - Play, fast forward, rewind */
 .circular-controls-center {
   display: flex;
   align-items: center;
@@ -417,7 +429,7 @@ defineExpose({
   margin-top: -90px;
 }
 
-/* 時間顯示 */
+/* Time display */
 .time-display-center {
   font-size: 0.8rem;
   color: var(--neu-text);
@@ -426,7 +438,7 @@ defineExpose({
   margin-top: 6px;
 }
 
-/* 音量和控制區（包含 info、音量、速度） */
+/* Volume and controls (includes info, volume, speed) */
 .volume-and-controls {
   width: 100%;
   display: flex;
@@ -437,7 +449,7 @@ defineExpose({
   padding: 0 10px;
 }
 
-/* 音量控制區 */
+/* Volume control area */
 .volume-control-center {
   display: flex;
   justify-content: center;
@@ -446,7 +458,7 @@ defineExpose({
   flex: 1;
 }
 
-/* 靜音按鈕（音量條開頭） */
+/* Mute button (at start of volume bar) */
 .mute-btn-volume {
   width: 20px !important;
   height: 20px !important;
@@ -511,7 +523,7 @@ defineExpose({
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
-/* 快捷鍵說明 */
+/* Keyboard shortcuts info */
 .keyboard-shortcuts-info {
   position: relative;
 }
@@ -605,7 +617,7 @@ defineExpose({
   font-size: 0.75rem;
 }
 
-/* 控制按鈕 */
+/* Control buttons */
 .audio-control-btn {
   background: var(--neu-bg);
   border: none;
@@ -649,17 +661,17 @@ defineExpose({
   color: var(--neu-primary);
 }
 
-/* 快退按鈕的數字在左下角 */
+/* Rewind button number at bottom left */
 .skip-backward .audio-control-label {
   left: 9px;
 }
 
-/* 快進按鈕的數字在右下角 */
+/* Fast forward button number at bottom right */
 .skip-forward .audio-control-label {
   right: 9px;
 }
 
-/* 速度控制 */
+/* Speed control */
 .speed-control {
   position: relative;
 }

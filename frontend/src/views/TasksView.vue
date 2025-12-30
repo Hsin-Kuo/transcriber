@@ -10,6 +10,18 @@
       @cancel="cancelTask"
       @view="viewTranscript"
     />
+
+    <!-- 字幕下載對話框 -->
+    <DownloadDialog
+      :show="showDownloadDialog"
+      :time-format="timeFormat"
+      :density-threshold="densityThreshold"
+      :has-speaker-info="hasSpeakerInfo"
+      v-model:selected-format="selectedDownloadFormat"
+      v-model:include-speaker="includeSpeaker"
+      @close="showDownloadDialog = false"
+      @download="performDownload"
+    />
   </div>
 </template>
 
@@ -17,15 +29,42 @@
 import { ref, onMounted, onUnmounted, inject } from 'vue'
 import api, { API_BASE, TokenManager } from '../utils/api'
 import TaskList from '../components/TaskList.vue'
+import DownloadDialog from '../components/transcript/DownloadDialog.vue'
 import { useRouter } from 'vue-router'
 
 // 新 API 服務層
 import { transcriptionService, taskService } from '../api/services.js'
+import { NEW_ENDPOINTS } from '../api/endpoints'
+
+// Composables
+import { useSubtitleMode } from '../composables/transcript/useSubtitleMode'
+import { useTranscriptDownload } from '../composables/transcript/useTranscriptDownload'
 
 const router = useRouter()
 const showNotification = inject('showNotification')
 const tasks = ref([])
 const eventSources = new Map() // SSE 連接管理
+
+// 字幕下載相關狀態
+const currentDownloadTask = ref(null)
+const segments = ref([])
+const speakerNames = ref({})
+const {
+  showDownloadDialog,
+  selectedDownloadFormat,
+  includeSpeaker,
+  performSubtitleDownload
+} = useTranscriptDownload()
+
+const {
+  timeFormat,
+  densityThreshold,
+  hasSpeakerInfo,
+  groupedSegments,
+  generateSubtitleText,
+  generateSRTText,
+  generateVTTText
+} = useSubtitleMode(segments)
 
 // 初始化時載入任務
 onMounted(async () => {
@@ -65,7 +104,7 @@ async function refreshTasks() {
         // 保留 SSE 更新的進度信息
         // 只有當任務仍在進行中時才保留本地進度
         if (['pending', 'processing'].includes(serverTask.status)) {
-          console.log(`🔄 刷新任務 ${serverTask.task_id}:`, {
+          console.log(`🔄 Refreshing task ${serverTask.task_id}:`, {
             本地進度: { progress: localState.progress, percentage: localState.progress_percentage },
             伺服器進度: { progress: serverTask.progress, percentage: serverTask.progress_percentage }
           })
@@ -81,9 +120,9 @@ async function refreshTasks() {
             const localProgress = localState.progress_percentage
             if (serverProgress === undefined || serverProgress === null || localProgress > serverProgress) {
               mergedTask.progress_percentage = localProgress
-              console.log(`✅ 使用本地進度: ${localProgress}%`)
+              console.log(`✅ Using local progress: ${localProgress}%`)
             } else {
-              console.log(`⚠️ 使用伺服器進度: ${serverProgress}%`)
+              console.log(`⚠️ Using server progress: ${serverProgress}%`)
             }
           }
         }
@@ -104,12 +143,23 @@ async function refreshTasks() {
       }
     })
   } catch (error) {
-    console.error('刷新任務列表失敗:', error)
+    console.error('Failed to refresh task list:', error)
   }
 }
 
 // 下載任務結果
-async function downloadTask(taskId) {
+async function downloadTask(task) {
+  // 如果是字幕類型，顯示下載對話框
+  if (task.task_type === 'subtitle') {
+    await openSubtitleDownloadDialog(task)
+  } else {
+    // 段落類型，直接下載 TXT
+    await downloadParagraphTask(task.task_id)
+  }
+}
+
+// 下載段落類型任務
+async function downloadParagraphTask(taskId) {
   try {
     // 使用新 API 服務層
     const response = await transcriptionService.download(taskId)
@@ -128,15 +178,57 @@ async function downloadTask(taskId) {
     link.remove()
     window.URL.revokeObjectURL(url)
   } catch (error) {
-    console.error('下載失敗:', error)
-    alert('下載失敗，請稍後再試')
+    console.error('Download failed:', error)
+    alert($t('tasksView.downloadFailed'))
   }
+}
+
+// 開啟字幕下載對話框
+async function openSubtitleDownloadDialog(task) {
+  try {
+    // 載入 segments 和講者名稱
+    const response = await api.get(NEW_ENDPOINTS.transcriptions.segments(task.task_id))
+    segments.value = response.data.segments || []
+    speakerNames.value = response.data.speaker_names || {}
+
+    // 儲存當前任務資訊
+    currentDownloadTask.value = task
+
+    // 顯示對話框
+    showDownloadDialog.value = true
+  } catch (error) {
+    console.error('Failed to load subtitle data:', error)
+    alert($t('tasksView.loadSubtitleFailed'))
+  }
+}
+
+// 執行字幕下載
+function performDownload() {
+  if (!currentDownloadTask.value) return
+
+  const speakerNamesToUse = includeSpeaker.value ? speakerNames.value : null
+  const filename = currentDownloadTask.value.custom_name || currentDownloadTask.value.filename || 'transcript'
+
+  let content = ''
+  const format = selectedDownloadFormat.value
+
+  // 根據選擇的格式生成對應的內容
+  if (format === 'srt') {
+    content = generateSRTText(groupedSegments.value, speakerNamesToUse)
+  } else if (format === 'vtt') {
+    content = generateVTTText(groupedSegments.value, speakerNamesToUse)
+  } else {
+    // TXT 格式：使用當前時間格式設定
+    content = generateSubtitleText(groupedSegments.value, timeFormat.value, speakerNamesToUse)
+  }
+
+  performSubtitleDownload(content, filename, format)
 }
 
 // 取消任務
 async function cancelTask(taskId) {
   try {
-    console.log('🚫 取消任務:', taskId)
+    console.log('🚫 Cancelling task:', taskId)
 
     // 立即更新 UI 顯示取消中狀態
     const task = tasks.value.find(t => t.task_id === taskId)
@@ -147,12 +239,12 @@ async function cancelTask(taskId) {
     // 調用取消 API
     await taskService.cancel(taskId)
 
-    console.log('✅ 任務已取消:', taskId)
+    console.log('✅ Task cancelled:', taskId)
 
     // 刷新任務列表以獲取最新狀態
     await refreshTasks()
   } catch (error) {
-    console.error('取消任務失敗:', error)
+    console.error('Failed to cancel task:', error)
 
     // 取消失敗，恢復 UI 狀態
     const task = tasks.value.find(t => t.task_id === taskId)
@@ -166,7 +258,7 @@ async function cancelTask(taskId) {
 
 // 刪除任務
 async function deleteTask(taskId) {
-  if (!confirm('確定要刪除這個任務嗎？')) {
+  if (!confirm($t('tasksView.confirmDeleteTask'))) {
     return
   }
 
@@ -179,8 +271,8 @@ async function deleteTask(taskId) {
       tasks.value.splice(index, 1)
     }
   } catch (error) {
-    console.error('刪除失敗:', error)
-    alert('刪除失敗，請稍後再試')
+    console.error('Delete failed:', error)
+    alert($t('tasksView.deleteFailed'))
   }
 }
 
@@ -193,13 +285,13 @@ function viewTranscript(taskId) {
 function connectTaskSSE(taskId) {
   // 如果已經有連接，不要重複建立
   if (eventSources.has(taskId)) {
-    console.log(`⏭️ 跳過 SSE 連接（已存在）: ${taskId}`)
+    console.log(`⏭️ Skipping SSE connection (already exists): ${taskId}`)
     return
   }
 
   const token = TokenManager.getAccessToken()
   if (!token) {
-    console.error('無法建立 SSE 連接：未登入')
+    console.error('Cannot establish SSE connection: Not logged in')
     return
   }
 
@@ -207,12 +299,12 @@ function connectTaskSSE(taskId) {
   const url = taskService.getEventsUrl(taskId, token)
   const eventSource = new EventSource(url)
 
-  console.log(`🔌 建立 SSE 連接: ${taskId}`)
+  console.log(`🔌 Establishing SSE connection: ${taskId}`)
 
   eventSource.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data)
-      console.log(`📊 SSE 更新 ${taskId}:`, data)
+      console.log(`📊 SSE update ${taskId}:`, data)
 
       // 找到對應的任務並更新
       const task = tasks.value.find(t => t.task_id === taskId)
@@ -226,7 +318,7 @@ function connectTaskSSE(taskId) {
         if (oldStatus !== 'completed' && data.status === 'completed') {
           if (showNotification) {
             showNotification({
-              title: '轉錄完成',
+              title: $t('tasksView.transcriptionComplete'),
               message: `「${task.custom_name || task.filename || task.file?.filename}」已完成`,
               type: 'success',
               duration: 5000
@@ -238,7 +330,7 @@ function connectTaskSSE(taskId) {
         if (oldStatus !== 'failed' && data.status === 'failed') {
           if (showNotification) {
             showNotification({
-              title: '轉錄失敗',
+              title: $t('tasksView.transcriptionFailed'),
               message: `「${task.custom_name || task.filename || task.file?.filename}」轉錄失敗`,
               type: 'error',
               duration: 5000
@@ -248,12 +340,12 @@ function connectTaskSSE(taskId) {
 
         // 如果任務已完成、失敗或取消，關閉 SSE 連接
         if (['completed', 'failed', 'cancelled'].includes(data.status)) {
-          console.log(`✅ 任務結束（${data.status}），關閉 SSE: ${taskId}`)
+          console.log(`✅ Task ended (${data.status}), closing SSE: ${taskId}`)
           disconnectTaskSSE(taskId)
         }
       }
     } catch (error) {
-      console.error('解析 SSE 數據失敗:', error)
+      console.error('Failed to parse SSE data:', error)
     }
   }
 
