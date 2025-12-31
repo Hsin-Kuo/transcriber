@@ -49,6 +49,13 @@ class DiarizationStats(BaseModel):
     duration_seconds: Optional[float] = Field(None, description="說話者辨識耗時")
 
 
+class ModelsInfo(BaseModel):
+    """使用的模型資訊"""
+    transcription: Optional[str] = Field(None, description="語音辨識模型（如 whisper-large-v3）")
+    punctuation: Optional[str] = Field(None, description="標點符號模型（如 gemini-1.5-flash）")
+    diarization: Optional[str] = Field(None, description="說話者辨識模型（如 pyannote/speaker-diarization-3.1）")
+
+
 class TaskStats(BaseModel):
     """任務統計資訊"""
     audio_duration_seconds: Optional[float] = Field(None, description="音檔實際時長（秒）")
@@ -85,6 +92,7 @@ class TaskInDB(BaseModel):
     # 結果與統計
     result: Optional[ResultFiles] = Field(None, description="結果檔案")
     stats: Optional[TaskStats] = Field(None, description="統計資訊")
+    models: Optional[ModelsInfo] = Field(None, description="使用的模型資訊")
 
     # 使用者設定與標籤
     tags: List[str] = Field(default_factory=list, description="標籤列表")

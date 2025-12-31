@@ -185,7 +185,7 @@
           v-if="isEditing && !loadingTranscript && !transcriptError"
           v-model:find-text="findText"
           v-model:replace-text="replaceText"
-          @replace-all="replaceAll"
+          @replace-all="handleReplaceAll"
         />
       </div>
     </div>
@@ -563,6 +563,28 @@ function extractTextContent(element) {
 
   // 提取純文字
   return clone.innerText || ''
+}
+
+// 處理取代全部（段落模式專用）
+function handleReplaceAll() {
+  if (displayMode.value === 'paragraph') {
+    // 1. 先從 contenteditable div 提取當前的純文字（排除標記）
+    if (textareaRef.value) {
+      const currentText = extractTextContent(textareaRef.value)
+      currentTranscript.value.content = currentText
+    }
+
+    // 2. 執行取代操作（在純文字上）
+    replaceAll()
+
+    // 3. 重新生成標記（使用取代後的內容）
+    if (segments.value && currentTranscript.value.content) {
+      generateSegmentMarkers(segments.value, currentTranscript.value.content)
+    }
+  } else {
+    // 字幕模式直接使用原本的取代邏輯
+    replaceAll()
+  }
 }
 
 // 將文字內容分割成帶有標記的片段

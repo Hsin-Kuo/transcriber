@@ -46,7 +46,7 @@ class PunctuationProcessor:
         language: str = "zh",
         chunk_size: Optional[int] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None
-    ) -> str:
+    ) -> Tuple[str, str]:
         """處理文字，添加標點符號和分段
 
         Args:
@@ -57,7 +57,7 @@ class PunctuationProcessor:
             progress_callback: 進度回調函數 callback(current_chunk, total_chunks)
 
         Returns:
-            處理後的文字
+            (處理後的文字, 使用的模型名稱) 元組
         """
         provider = provider or self.default_provider
 
@@ -77,7 +77,7 @@ class PunctuationProcessor:
         self,
         text: str,
         language: str = "zh"
-    ) -> str:
+    ) -> Tuple[str, str]:
         """使用 OpenAI 添加標點符號
 
         Args:
@@ -85,7 +85,7 @@ class PunctuationProcessor:
             language: 語言代碼
 
         Returns:
-            處理後的文字
+            (處理後的文字, 使用的模型名稱) 元組
         """
         from openai import OpenAI
 
@@ -112,7 +112,7 @@ class PunctuationProcessor:
             completion = resp.usage.completion_tokens
             print(f"📊 Token 使用: {total} (輸入: {prompt}, 輸出: {completion})")
 
-        return result
+        return result, self.openai_model
 
     def _punctuate_with_gemini(
         self,
@@ -120,7 +120,7 @@ class PunctuationProcessor:
         language: str = "zh",
         chunk_size: Optional[int] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None
-    ) -> str:
+    ) -> Tuple[str, str]:
         """使用 Google Gemini 添加標點符號（支援長文本分段處理）
 
         Args:
@@ -130,7 +130,7 @@ class PunctuationProcessor:
             progress_callback: 進度回調函數
 
         Returns:
-            處理後的文字
+            (處理後的文字, 使用的模型名稱) 元組
         """
         import google.generativeai as genai
 
@@ -145,7 +145,8 @@ class PunctuationProcessor:
         if len(text) <= chunk_size:
             system_msg, user_msg = self._get_punctuation_prompt(language, text)
             prompt = f"{system_msg}\n\n{user_msg}"
-            return self._call_gemini_with_retry(prompt)
+            result, model_used = self._call_gemini_with_retry(prompt)
+            return result, model_used
 
         # 長文本：分段處理
         print(f"📝 文字較長（{len(text)} 字），將分段處理（每段約 {chunk_size} 字）...")
@@ -155,6 +156,7 @@ class PunctuationProcessor:
         print(f"🔄 分為 {total_chunks} 段處理...")
 
         results = []
+        model_used = None
         for chunk_idx, chunk_text in enumerate(chunks, start=1):
             print(f"🎯 處理第 {chunk_idx}/{total_chunks} 段...")
 
@@ -169,17 +171,21 @@ class PunctuationProcessor:
             prompt = f"{system_msg}\n\n{user_msg}"
 
             # 調用 Gemini
-            result = self._call_gemini_with_retry(prompt)
+            result, chunk_model = self._call_gemini_with_retry(prompt)
             results.append(result)
 
+            # 記錄使用的模型（使用第一個成功的模型）
+            if model_used is None:
+                model_used = chunk_model
+
         # 合併結果
-        return "\n\n".join(results)
+        return "\n\n".join(results), model_used or self.gemini_model
 
     def _call_gemini_with_retry(
         self,
         prompt: str,
         max_retries: Optional[int] = None
-    ) -> str:
+    ) -> Tuple[str, str]:
         """調用 Gemini API，支援自動重試和模型備援
 
         Args:
@@ -187,7 +193,7 @@ class PunctuationProcessor:
             max_retries: 最大重試次數
 
         Returns:
-            處理後的文字
+            (處理後的文字, 使用的模型名稱) 元組
 
         Raises:
             RuntimeError: 所有 API Keys 和備援模型都失敗
@@ -236,7 +242,7 @@ class PunctuationProcessor:
                     completion = getattr(resp.usage_metadata, 'candidates_token_count', 0)
                     print(f"📊 Token 使用: {total} (輸入: {prompt_tokens}, 輸出: {completion})")
 
-                return result
+                return result, current_model
 
             except Exception as e:
                 last_error = e

@@ -274,13 +274,14 @@ class TranscriptionService:
                 return
 
             # 3. 標點處理（可選）
+            punctuation_model = None
             if use_punctuation:
                 self._update_progress(task_id, "正在添加標點符號...", {
                     "punctuation_started": True
                 })
 
                 try:
-                    punctuated_text = self.punctuation.process(
+                    punctuated_text, punctuation_model = self.punctuation.process(
                         full_text,
                         provider=punctuation_provider,
                         language=detected_language or language or "zh",
@@ -290,7 +291,8 @@ class TranscriptionService:
                     )
 
                     self._update_progress(task_id, "標點處理完成", {
-                        "punctuation_completed": True
+                        "punctuation_completed": True,
+                        "punctuation_model": punctuation_model
                     })
 
                     final_text = punctuated_text
@@ -323,7 +325,8 @@ class TranscriptionService:
                 result_file_path,
                 segments_file_path,
                 detected_language or language,
-                final_text  # 传递文本用于计算字数
+                final_text,  # 传递文本用于计算字数
+                punctuation_model  # 传递标点符号模型信息
             )
 
             # 6. 清理臨時檔案（包含保存音檔）
@@ -530,7 +533,8 @@ class TranscriptionService:
         result_file_path: Path,
         segments_file_path: Path,
         language: Optional[str],
-        transcription_text: str = ""
+        transcription_text: str = "",
+        punctuation_model: Optional[str] = None
     ) -> None:
         """標記任務完成
 
@@ -540,6 +544,7 @@ class TranscriptionService:
             segments_file_path: Segments 檔案路徑
             language: 偵測到的語言
             transcription_text: 轉錄文本（用於計算字數）
+            punctuation_model: 使用的標點符號模型
         """
         from src.services.utils.async_utils import run_async_in_thread
 
@@ -547,8 +552,8 @@ class TranscriptionService:
         text_length = len(transcription_text)
         word_count = len(transcription_text.split())
 
-        # 1. 使用同步方法更新任務狀態
-        self._update_task_sync(task_id, {
+        # 準備更新數據
+        update_data = {
             "status": "completed",
             "result.transcription_file": str(result_file_path),
             "result.transcription_filename": result_file_path.name,
@@ -558,7 +563,14 @@ class TranscriptionService:
             "config.language": language,
             "timestamps.completed_at": datetime.now(TZ_UTC8).strftime("%Y-%m-%d %H:%M:%S"),
             "progress": "轉錄完成"
-        })
+        }
+
+        # 如果有標點符號模型信息，保存到 models.punctuation
+        if punctuation_model:
+            update_data["models.punctuation"] = punctuation_model
+
+        # 1. 使用同步方法更新任務狀態
+        self._update_task_sync(task_id, update_data)
 
         print(f"📊 字數統計：{text_length} 字元，{word_count} 詞")
 
