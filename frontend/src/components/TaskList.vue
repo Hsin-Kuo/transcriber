@@ -463,7 +463,7 @@
                       ></div>
                     </div>
                     <p class="progress-text">
-                      <span v-if="['pending', 'processing'].includes(task.status)" class="spinner"></span>
+                      <span v-if="['pending', 'processing', 'canceling'].includes(task.status)" class="spinner"></span>
                       {{ task.progress }}
                       <span v-if="task.progress_percentage !== undefined && task.progress_percentage !== null" class="progress-percentage">
                         {{ Math.round(task.progress_percentage) }}%
@@ -731,7 +731,8 @@ function getStatusText(status) {
     processing: $t('taskList.processing'),
     completed: $t('taskList.completed'),
     failed: $t('taskList.failed'),
-    cancelled: $t('taskList.cancelled')
+    cancelled: $t('taskList.cancelled'),
+    canceling: $t('taskList.canceling')
   }
   return statusMap[status] || status
 }

@@ -291,22 +291,24 @@ export function useAudioPlayer() {
   }
 
   /**
-   * 快退 10 秒
+   * 快退指定秒數（預設 10 秒）
+   * @param {number} seconds - 要快退的秒數，預設為 10
    */
-  function skipBackward() {
+  function skipBackward(seconds = 10) {
     if (audioElement.value) {
-      audioElement.value.currentTime = Math.max(0, audioElement.value.currentTime - 10)
+      audioElement.value.currentTime = Math.max(0, audioElement.value.currentTime - seconds)
     }
   }
 
   /**
-   * 快進 10 秒
+   * 快進指定秒數（預設 10 秒）
+   * @param {number} seconds - 要快進的秒數，預設為 10
    */
-  function skipForward() {
+  function skipForward(seconds = 10) {
     if (audioElement.value) {
       audioElement.value.currentTime = Math.min(
         audioElement.value.duration || 0,
-        audioElement.value.currentTime + 10
+        audioElement.value.currentTime + seconds
       )
     }
   }

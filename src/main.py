@@ -368,26 +368,66 @@ async def get_admin_statistics():
             "tasks_with_tokens": 0
         }
 
-        # 3. 模型使用統計
-        model_pipeline = [
+        # 3. 模型使用統計（基於新的 models 欄位）
+        # 3.1 標點符號模型統計
+        punctuation_model_pipeline = [
             {
                 "$match": {
-                    "stats.token_usage.model": {"$exists": True, "$ne": None}
+                    "models.punctuation": {"$exists": True, "$ne": None}
                 }
             },
             {
                 "$group": {
-                    "_id": "$stats.token_usage.model",
-                    "count": {"$sum": 1},
-                    "total_tokens": {"$sum": "$stats.token_usage.total"}
+                    "_id": "$models.punctuation",
+                    "count": {"$sum": 1}
                 }
             },
             {
                 "$sort": {"count": -1}
             }
         ]
-        model_stats_cursor = db.tasks.aggregate(model_pipeline)
-        model_stats = await model_stats_cursor.to_list(length=None)
+        punct_model_cursor = db.tasks.aggregate(punctuation_model_pipeline)
+        punct_model_stats = await punct_model_cursor.to_list(length=None)
+
+        # 3.2 轉錄模型統計（未來使用）
+        transcription_model_pipeline = [
+            {
+                "$match": {
+                    "models.transcription": {"$exists": True, "$ne": None}
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$models.transcription",
+                    "count": {"$sum": 1}
+                }
+            },
+            {
+                "$sort": {"count": -1}
+            }
+        ]
+        trans_model_cursor = db.tasks.aggregate(transcription_model_pipeline)
+        trans_model_stats = await trans_model_cursor.to_list(length=None)
+
+        # 3.3 說話者辨識模型統計（未來使用）
+        diarization_model_pipeline = [
+            {
+                "$match": {
+                    "models.diarization": {"$exists": True, "$ne": None}
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$models.diarization",
+                    "count": {"$sum": 1}
+                }
+            },
+            {
+                "$sort": {"count": -1}
+            }
+        ]
+        diar_model_cursor = db.tasks.aggregate(diarization_model_pipeline)
+        diar_model_stats = await diar_model_cursor.to_list(length=None)
 
         # 4. 每日統計（最近 30 天）
         thirty_days_ago = (datetime.now(TZ_UTC8) - timedelta(days=30)).strftime("%Y-%m-%d")
@@ -486,14 +526,29 @@ async def get_admin_statistics():
                 "tasks_with_tokens": token_stats.get("tasks_with_tokens", 0),
                 "avg_tokens_per_task": round(token_stats.get("total_tokens", 0) / token_stats.get("tasks_with_tokens", 1), 2) if token_stats.get("tasks_with_tokens", 0) > 0 else 0
             },
-            "model_usage": [
-                {
-                    "model": stat["_id"] or "未知",
-                    "count": stat["count"],
-                    "total_tokens": stat.get("total_tokens", 0)
-                }
-                for stat in model_stats
-            ],
+            "model_usage": {
+                "punctuation": [
+                    {
+                        "model": stat["_id"] or "未知",
+                        "count": stat["count"]
+                    }
+                    for stat in punct_model_stats
+                ],
+                "transcription": [
+                    {
+                        "model": stat["_id"] or "未知",
+                        "count": stat["count"]
+                    }
+                    for stat in trans_model_stats
+                ],
+                "diarization": [
+                    {
+                        "model": stat["_id"] or "未知",
+                        "count": stat["count"]
+                    }
+                    for stat in diar_model_stats
+                ]
+            },
             "daily_stats": [
                 {
                     "date": stat["_id"],

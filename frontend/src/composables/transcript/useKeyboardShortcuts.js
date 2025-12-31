@@ -24,16 +24,13 @@ export function useKeyboardShortcuts(
     // 檢查是否有音訊
     if (!hasAudio.value || !audioElement.value) return
 
-    // 檢查是否正在編輯文字
-    const isEditingText = isEditing.value || isEditingTitle.value
+    // 檢查焦點是否在輸入框內
     const targetIsInput = event.target.tagName === 'INPUT' ||
                           event.target.tagName === 'TEXTAREA' ||
                           event.target.isContentEditable
 
-    // 如果正在編輯輸入框，不處理快捷鍵
-    if (isEditingText && targetIsInput) return
-
-    // Alt + 鍵組合（編輯和非編輯模式都可用）
+    // Alt + 鍵組合（編輯和非編輯模式都可用，即使焦點在輸入框內也可用）
+    // 因為 Alt 組合鍵不太會與正常打字衝突
     if (event.altKey && !event.ctrlKey && !event.metaKey) {
       switch(event.key) {
         case 'k':
@@ -60,27 +57,20 @@ export function useKeyboardShortcuts(
           break
         case ',':
           event.preventDefault()
-          // 快退 5 秒
-          if (audioElement.value) {
-            audioElement.value.currentTime = Math.max(0, audioElement.value.currentTime - 5)
-          }
+          skipBackward(5)
           break
         case '.':
           event.preventDefault()
-          // 快進 5 秒
-          if (audioElement.value) {
-            audioElement.value.currentTime = Math.min(
-              audioElement.value.duration || 0,
-              audioElement.value.currentTime + 5
-            )
-          }
+          skipForward(5)
           break
       }
       return
     }
 
-    // 非編輯模式下的快捷鍵（不需要 Alt）
-    if (!isEditingText && !event.altKey && !event.ctrlKey && !event.metaKey) {
+    // 非編輯模式下的單鍵快捷鍵（不需要 Alt）
+    // 如果焦點在輸入框內，不處理這些快捷鍵，避免干擾打字
+    const isEditingText = isEditing.value || isEditingTitle.value
+    if (!isEditingText && !targetIsInput && !event.altKey && !event.ctrlKey && !event.metaKey) {
       switch(event.key) {
         case ' ':  // 空白鍵：播放/暫停
         case 'k':

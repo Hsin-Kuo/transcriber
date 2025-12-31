@@ -486,10 +486,17 @@ async def cancel_task(
             detail=f"無法取消已結束的任務（當前狀態：{task['status']}）"
         )
 
-    # 標記任務為已取消（運行時狀態）
+    # 1. 立即更新資料庫狀態為「取消中」，避免刷新頁面時誤判任務仍在進行
+    await task_service.update_task_status(task_id, {
+        "status": "canceling",
+        "progress": "正在取消任務..."
+    })
+    print(f"🔄 任務 {task_id} 狀態已更新為 canceling")
+
+    # 2. 標記任務為已取消（運行時狀態）
     task_service.cancel_task(task_id)
 
-    # 立即終止 diarization 進程（如果正在運行）
+    # 3. 立即終止 diarization 進程（如果正在運行）
     diarization_process = task_service.get_diarization_process(task_id)
     if diarization_process:
         print(f"🛑 正在強制終止說話者辨識進程...")
@@ -499,7 +506,7 @@ async def cancel_task(
         except Exception as e:
             print(f"⚠️ 終止 diarization 進程失敗：{e}")
 
-    # 清理臨時目錄
+    # 4. 清理臨時目錄
     temp_dir = task_service.get_temp_dir(task_id)
     if temp_dir:
         try:
@@ -510,7 +517,7 @@ async def cancel_task(
         except Exception as e:
             print(f"⚠️ 清理臨時目錄失敗：{e}")
 
-    # 更新資料庫中的任務狀態
+    # 5. 更新資料庫中的任務狀態為「已取消」
     await task_service.update_task_status(task_id, {
         "status": "cancelled",
         "error": "用戶取消"

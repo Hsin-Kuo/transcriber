@@ -31,6 +31,7 @@ import api, { API_BASE, TokenManager } from '../utils/api'
 import TaskList from '../components/TaskList.vue'
 import DownloadDialog from '../components/transcript/DownloadDialog.vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 
 // 新 API 服務層
 import { transcriptionService, taskService } from '../api/services.js'
@@ -41,6 +42,7 @@ import { useSubtitleMode } from '../composables/transcript/useSubtitleMode'
 import { useTranscriptDownload } from '../composables/transcript/useTranscriptDownload'
 
 const router = useRouter()
+const { t } = useI18n()
 const showNotification = inject('showNotification')
 const tasks = ref([])
 const eventSources = new Map() // SSE 連接管理
@@ -179,7 +181,7 @@ async function downloadParagraphTask(taskId) {
     window.URL.revokeObjectURL(url)
   } catch (error) {
     console.error('Download failed:', error)
-    alert($t('tasksView.downloadFailed'))
+    alert(t('tasksView.downloadFailed'))
   }
 }
 
@@ -198,7 +200,7 @@ async function openSubtitleDownloadDialog(task) {
     showDownloadDialog.value = true
   } catch (error) {
     console.error('Failed to load subtitle data:', error)
-    alert($t('tasksView.loadSubtitleFailed'))
+    alert(t('tasksView.loadSubtitleFailed'))
   }
 }
 
@@ -258,7 +260,7 @@ async function cancelTask(taskId) {
 
 // 刪除任務
 async function deleteTask(taskId) {
-  if (!confirm($t('tasksView.confirmDeleteTask'))) {
+  if (!confirm(t('tasksView.confirmDeleteTask'))) {
     return
   }
 
@@ -272,7 +274,7 @@ async function deleteTask(taskId) {
     }
   } catch (error) {
     console.error('Delete failed:', error)
-    alert($t('tasksView.deleteFailed'))
+    alert(t('tasksView.deleteFailed'))
   }
 }
 
@@ -318,7 +320,7 @@ function connectTaskSSE(taskId) {
         if (oldStatus !== 'completed' && data.status === 'completed') {
           if (showNotification) {
             showNotification({
-              title: $t('tasksView.transcriptionComplete'),
+              title: t('tasksView.transcriptionComplete'),
               message: `「${task.custom_name || task.filename || task.file?.filename}」已完成`,
               type: 'success',
               duration: 5000
@@ -330,7 +332,7 @@ function connectTaskSSE(taskId) {
         if (oldStatus !== 'failed' && data.status === 'failed') {
           if (showNotification) {
             showNotification({
-              title: $t('tasksView.transcriptionFailed'),
+              title: t('tasksView.transcriptionFailed'),
               message: `「${task.custom_name || task.filename || task.file?.filename}」轉錄失敗`,
               type: 'error',
               duration: 5000

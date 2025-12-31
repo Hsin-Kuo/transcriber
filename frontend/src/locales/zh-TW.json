@@ -96,6 +96,7 @@
     "completed": "完成",
     "failed": "失敗",
     "cancelled": "已取消",
+    "canceling": "取消中",
     "download": "下載",
     "view": "查看",
     "delete": "刪除",

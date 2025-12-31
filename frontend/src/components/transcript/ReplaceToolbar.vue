@@ -6,7 +6,9 @@
       type="text"
       :placeholder="$t('replaceToolbar.find')"
       class="replace-input"
-      @keydown.enter.prevent="$emit('replace-all')"
+      @keydown.enter="handleEnter"
+      @compositionstart="isComposing = true"
+      @compositionend="isComposing = false"
     />
     <input
       :value="replaceText"
@@ -14,7 +16,9 @@
       type="text"
       :placeholder="$t('replaceToolbar.replaceWith')"
       class="replace-input"
-      @keydown.enter.prevent="$emit('replace-all')"
+      @keydown.enter="handleEnter"
+      @compositionstart="isComposing = true"
+      @compositionend="isComposing = false"
     />
     <button
       class="btn btn-primary"
@@ -27,6 +31,8 @@
 </template>
 
 <script setup>
+import { ref } from 'vue'
+
 defineProps({
   findText: {
     type: String,
@@ -38,7 +44,22 @@ defineProps({
   }
 })
 
-defineEmits(['update:findText', 'update:replaceText', 'replace-all'])
+const emit = defineEmits(['update:findText', 'update:replaceText', 'replace-all'])
+
+// 追蹤輸入法狀態
+const isComposing = ref(false)
+
+// 處理 Enter 鍵
+function handleEnter(event) {
+  // 如果正在使用輸入法選字，不觸發取代
+  if (isComposing.value) {
+    return
+  }
+
+  // 否則阻止默認行為並觸發取代
+  event.preventDefault()
+  emit('replace-all')
+}
 </script>
 
 <style scoped>

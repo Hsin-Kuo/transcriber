@@ -53,7 +53,7 @@
 
         <!-- 按鈕組 -->
         <div class="action-buttons">
-          <button v-if="!isEditing" @click="startEditing" class="btn btn-action">
+          <button v-if="!isEditing" @click="handleStartEditing" class="btn btn-action">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
@@ -66,7 +66,7 @@
             </svg>
             <span>{{ $t('transcriptDetail.save') }}</span>
           </button>
-          <button v-if="isEditing" @click="cancelEditing" class="btn btn-action">
+          <button v-if="isEditing" @click="handleCancelEditing" class="btn btn-action">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="18" y1="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -431,10 +431,64 @@ async function loadTranscript(taskId) {
   }
 }
 
+// 開始編輯的包裝函數（保存滾動位置）
+function handleStartEditing() {
+  // 保存滾動位置（段落模式）
+  let savedScrollTop = 0
+  if (displayMode.value === 'paragraph' && textareaRef.value) {
+    savedScrollTop = textareaRef.value.scrollTop
+    console.log('開始編輯 - 保存滾動位置:', savedScrollTop)
+  }
+
+  // 調用原始的 startEditing
+  startEditing()
+
+  // 恢復滾動位置
+  if (displayMode.value === 'paragraph' && savedScrollTop > 0) {
+    setTimeout(() => {
+      if (textareaRef.value) {
+        textareaRef.value.scrollTop = savedScrollTop
+        console.log('開始編輯 - 恢復滾動位置:', savedScrollTop, '實際:', textareaRef.value.scrollTop)
+      }
+    }, 100)
+  }
+}
+
+// 取消編輯的包裝函數（保存滾動位置）
+function handleCancelEditing() {
+  // 保存滾動位置（段落模式）
+  let savedScrollTop = 0
+  if (displayMode.value === 'paragraph' && textareaRef.value) {
+    savedScrollTop = textareaRef.value.scrollTop
+    console.log('取消編輯 - 保存滾動位置:', savedScrollTop)
+  }
+
+  // 調用原始的 cancelEditing
+  cancelEditing()
+
+  // 恢復滾動位置
+  if (displayMode.value === 'paragraph' && savedScrollTop > 0) {
+    setTimeout(() => {
+      if (textareaRef.value) {
+        textareaRef.value.scrollTop = savedScrollTop
+        console.log('取消編輯 - 恢復滾動位置:', savedScrollTop, '實際:', textareaRef.value.scrollTop)
+      }
+    }, 100)
+  }
+}
+
 // 儲存編輯的包裝函數
 async function saveEditing() {
   let contentToSave = ''
   let segmentsToSave = null
+
+  // 保存滾動位置（段落模式）
+  let savedScrollTop = 0
+  if (displayMode.value === 'paragraph' && textareaRef.value) {
+    // 滾動發生在 .transcript-display 元素本身
+    savedScrollTop = textareaRef.value.scrollTop
+    console.log('保存滾動位置:', savedScrollTop)
+  }
 
   if (displayMode.value === 'paragraph') {
     // 從 contenteditable div 中提取純文字內容（排除標記元素）
@@ -460,6 +514,19 @@ async function saveEditing() {
     // 如果有更新 segments，也要更新本地的 segments 資料
     if (segmentsToSave) {
       segments.value = segmentsToSave
+    }
+
+    // 恢復滾動位置（段落模式）
+    if (displayMode.value === 'paragraph' && savedScrollTop > 0) {
+      // 使用 setTimeout 給 DOM 更多時間重新渲染
+      setTimeout(() => {
+        if (textareaRef.value) {
+          textareaRef.value.scrollTop = savedScrollTop
+          console.log('恢復滾動位置:', savedScrollTop, '實際:', textareaRef.value.scrollTop)
+        } else {
+          console.log('找不到 textareaRef 元素')
+        }
+      }, 100)
     }
   }
 }
@@ -568,22 +635,69 @@ function extractTextContent(element) {
 // 處理取代全部（段落模式專用）
 function handleReplaceAll() {
   if (displayMode.value === 'paragraph') {
-    // 1. 先從 contenteditable div 提取當前的純文字（排除標記）
+    // 如果沒有輸入查找文字，直接返回
+    if (!findText.value) {
+      return
+    }
+
+    // 先從 contenteditable div 提取當前的純文字（排除標記）
     if (textareaRef.value) {
       const currentText = extractTextContent(textareaRef.value)
       currentTranscript.value.content = currentText
     }
 
-    // 2. 執行取代操作（在純文字上）
+    // 計算會取代多少處
+    const regex = new RegExp(findText.value, 'g')
+    const matches = currentTranscript.value.content.match(regex)
+    const matchCount = matches ? matches.length : 0
+
+    // 如果沒有找到，提示用戶
+    if (matchCount === 0) {
+      alert(`找不到「${findText.value}」`)
+      return
+    }
+
+    // 顯示確認對話框
+    const confirmMessage = `找到 ${matchCount} 處「${findText.value}」\n確定全部取代為「${replaceText.value}」嗎？`
+    if (!confirm(confirmMessage)) {
+      return // 用戶取消
+    }
+
+    // 保存滾動位置
+    let savedScrollTop = 0
+    if (textareaRef.value) {
+      savedScrollTop = textareaRef.value.scrollTop
+      console.log('取代全部 - 保存滾動位置:', savedScrollTop)
+    }
+
+    // 執行取代操作（在純文字上）
     replaceAll()
 
-    // 3. 重新生成標記（使用取代後的內容）
+    // 重新生成標記（使用取代後的內容）
     if (segments.value && currentTranscript.value.content) {
       generateSegmentMarkers(segments.value, currentTranscript.value.content)
     }
+
+    // 恢復滾動位置
+    if (savedScrollTop > 0) {
+      nextTick(() => {
+        if (textareaRef.value) {
+          textareaRef.value.scrollTop = savedScrollTop
+          console.log('取代全部 - 恢復滾動位置:', savedScrollTop, '實際:', textareaRef.value.scrollTop)
+        }
+      })
+    }
+
+    // 清空輸入框
+    findText.value = ''
+    replaceText.value = ''
   } else {
     // 字幕模式直接使用原本的取代邏輯
     replaceAll()
+
+    // 清空輸入框
+    findText.value = ''
+    replaceText.value = ''
   }
 }
 
@@ -695,7 +809,7 @@ onMounted(() => {
   // 延遲執行以確保 DOM 已渲染
   setTimeout(() => {
     fixSubtitleScrolling()
-  }, 100) 
+  }, 100)
 })
 
 onUnmounted(() => {

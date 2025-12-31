@@ -96,6 +96,7 @@
     "completed": "Completed",
     "failed": "Failed",
     "cancelled": "Cancelled",
+    "canceling": "Canceling",
     "download": "Download",
     "view": "View",
     "delete": "Delete",
