@@ -139,7 +139,7 @@
               class="transcript-display"
               :class="{ 'editing': isEditing }"
               :contenteditable="isEditing"
-              :key="`transcript-${showTimecodeMarkers}-${isEditing}-${currentTranscript.content}`"
+              :key="`transcript-${showTimecodeMarkers}-${isEditing}`"
               ref="textareaRef"
             >
               <template v-for="(part, index) in getContentParts()" :key="index">
@@ -153,7 +153,7 @@
                     <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor">
                       <path d="M 4 6 L 1 2 L 7 2 Z"/>
                     </svg>
-                    <span class="timecode-tooltip">
+                    <span class="timecode-tooltip"> 
                       {{ formatTime(part.start) }}
                     </span>
                   </span>
@@ -437,7 +437,6 @@ function handleStartEditing() {
   let savedScrollTop = 0
   if (displayMode.value === 'paragraph' && textareaRef.value) {
     savedScrollTop = textareaRef.value.scrollTop
-    console.log('開始編輯 - 保存滾動位置:', savedScrollTop)
   }
 
   // 調用原始的 startEditing
@@ -448,7 +447,6 @@ function handleStartEditing() {
     setTimeout(() => {
       if (textareaRef.value) {
         textareaRef.value.scrollTop = savedScrollTop
-        console.log('開始編輯 - 恢復滾動位置:', savedScrollTop, '實際:', textareaRef.value.scrollTop)
       }
     }, 100)
   }
@@ -460,7 +458,6 @@ function handleCancelEditing() {
   let savedScrollTop = 0
   if (displayMode.value === 'paragraph' && textareaRef.value) {
     savedScrollTop = textareaRef.value.scrollTop
-    console.log('取消編輯 - 保存滾動位置:', savedScrollTop)
   }
 
   // 調用原始的 cancelEditing
@@ -471,7 +468,6 @@ function handleCancelEditing() {
     setTimeout(() => {
       if (textareaRef.value) {
         textareaRef.value.scrollTop = savedScrollTop
-        console.log('取消編輯 - 恢復滾動位置:', savedScrollTop, '實際:', textareaRef.value.scrollTop)
       }
     }, 100)
   }
@@ -487,7 +483,6 @@ async function saveEditing() {
   if (displayMode.value === 'paragraph' && textareaRef.value) {
     // 滾動發生在 .transcript-display 元素本身
     savedScrollTop = textareaRef.value.scrollTop
-    console.log('保存滾動位置:', savedScrollTop)
   }
 
   if (displayMode.value === 'paragraph') {
@@ -522,9 +517,6 @@ async function saveEditing() {
       setTimeout(() => {
         if (textareaRef.value) {
           textareaRef.value.scrollTop = savedScrollTop
-          console.log('恢復滾動位置:', savedScrollTop, '實際:', textareaRef.value.scrollTop)
-        } else {
-          console.log('找不到 textareaRef 元素')
         }
       }, 100)
     }
@@ -621,15 +613,57 @@ function goBack() {
 
 // 從 contenteditable div 中提取純文字內容（排除標記元素）
 function extractTextContent(element) {
-  // 克隆元素以避免修改原始 DOM
+  // 克隆元素以避免修改原始 DOM，防止 Vue 更新時出錯
   const clone = element.cloneNode(true)
 
-  // 移除所有的標記元素
-  const markers = clone.querySelectorAll('.segment-marker')
-  markers.forEach(marker => marker.remove())
+  let text = ''
 
-  // 提取純文字
-  return clone.innerText || ''
+  function traverseNode(node) {
+    // 跳過 segment-marker 元素
+    if (node.classList && node.classList.contains('segment-marker')) {
+      return
+    }
+
+    // 處理文字節點
+    if (node.nodeType === Node.TEXT_NODE) {
+      text += node.textContent
+      return
+    }
+
+    // 處理 <br> 標籤
+    if (node.nodeName === 'BR') {
+      text += '\n'
+      return
+    }
+
+    // 處理塊級元素（div）- 在前面添加換行（如果不是第一個元素）
+    if (node.nodeName === 'DIV' && text.length > 0 && !text.endsWith('\n')) {
+      text += '\n'
+    }
+
+    // 遞歸處理子節點（使用 Array.from 避免 NodeList 被修改）
+    const children = Array.from(node.childNodes)
+    for (let child of children) {
+      traverseNode(child)
+    }
+
+    // 處理塊級元素（div）- 在後面添加換行（如果內容不為空且不是只有 br）
+    if (node.nodeName === 'DIV' && node.childNodes.length > 0) {
+      // 檢查 div 是否只包含 <br>
+      const hasOnlyBr = node.childNodes.length === 1 && node.childNodes[0].nodeName === 'BR'
+      if (!hasOnlyBr && !text.endsWith('\n')) {
+        text += '\n'
+      }
+    }
+  }
+
+  // 從克隆的根元素開始遍歷
+  const children = Array.from(clone.childNodes)
+  for (let child of children) {
+    traverseNode(child)
+  }
+
+  return text
 }
 
 // 處理取代全部（段落模式專用）
@@ -667,7 +701,6 @@ function handleReplaceAll() {
     let savedScrollTop = 0
     if (textareaRef.value) {
       savedScrollTop = textareaRef.value.scrollTop
-      console.log('取代全部 - 保存滾動位置:', savedScrollTop)
     }
 
     // 執行取代操作（在純文字上）
@@ -683,7 +716,6 @@ function handleReplaceAll() {
       nextTick(() => {
         if (textareaRef.value) {
           textareaRef.value.scrollTop = savedScrollTop
-          console.log('取代全部 - 恢復滾動位置:', savedScrollTop, '實際:', textareaRef.value.scrollTop)
         }
       })
     }
