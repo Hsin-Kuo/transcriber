@@ -15,6 +15,7 @@ export const NEW_ENDPOINTS = {
     segments: (taskId) => `/transcriptions/${taskId}/segments`,
     updateContent: (taskId) => `/transcriptions/${taskId}/content`,
     updateMetadata: (taskId) => `/transcriptions/${taskId}/metadata`,
+    updateSpeakerNames: (taskId) => `/transcriptions/${taskId}/speaker-names`,
   },
 
   // 任務管理

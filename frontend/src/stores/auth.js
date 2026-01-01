@@ -49,12 +49,13 @@ export const useAuthStore = defineStore('auth', () => {
 
     try {
       const response = await api.post('/auth/register', { email, password })
-      const { access_token, refresh_token } = response.data
-
-      TokenManager.setTokens(access_token, refresh_token)
-      await fetchCurrentUser()
-
-      return { success: true }
+      // 註冊成功，但需要驗證 email
+      // API 返回 { message, email }
+      return {
+        success: true,
+        message: response.data.message,
+        email: response.data.email
+      }
     } catch (err) {
       error.value = err.response?.data?.detail || '註冊失敗'
       return {
@@ -79,7 +80,7 @@ export const useAuthStore = defineStore('auth', () => {
 
       return { success: true }
     } catch (err) {
-      error.value = err.response?.data?.detail || '登入失敗'
+      error.value = err.response?.data?.detail || '帳號或密碼錯誤'
       return {
         success: false,
         error: error.value

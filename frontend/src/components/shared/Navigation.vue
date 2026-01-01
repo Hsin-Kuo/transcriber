@@ -1,7 +1,7 @@
 <template>
   <nav class="navigation" :class="{ collapsed: isCollapsed }">
     <!-- 收合/展開按鈕 -->
-    <button class="toggle-btn" @click="toggleCollapse" :title="isCollapsed ? '展開側欄' : '收合側欄'">
+    <button class="toggle-btn" @click="toggleCollapse" :title="isCollapsed ? $t('navigation.expandSidebar') : $t('navigation.collapseSidebar')">
       <!-- 展開時顯示《（向左，表示收合） -->
       <svg v-if="!isCollapsed" width="16" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="15 18 9 12 15 6"></polyline>
@@ -18,25 +18,25 @@
     </div>
 
     <div class="nav-links">
-      <router-link to="/" class="nav-link" active-class="active" :title="isCollapsed ? '轉錄服務' : ''">
+      <router-link to="/" class="nav-link" active-class="active" :title="isCollapsed ? $t('navigation.transcription') : ''">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
           <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
           <line x1="12" y1="19" x2="12" y2="23"></line>
           <line x1="8" y1="23" x2="16" y2="23"></line>
         </svg>
-        <span v-if="!isCollapsed">轉錄服務</span>
+        <span v-if="!isCollapsed">{{ $t('navigation.transcription') }}</span>
       </router-link>
 
-      <router-link to="/editor" class="nav-link" active-class="active" :title="isCollapsed ? '音訊剪輯' : ''">
+      <router-link to="/editor" class="nav-link" active-class="active" :title="isCollapsed ? $t('navigation.audioEditor') : ''">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
         </svg>
-        <span v-if="!isCollapsed">音訊剪輯</span>
+        <span v-if="!isCollapsed">{{ $t('navigation.audioEditor') }}</span>
       </router-link>
 
       <!-- 所有任務按鈕（收合時顯示） -->
-      <router-link v-if="authStore.isAuthenticated && isCollapsed" to="/tasks" class="nav-link tasks-link" active-class="active" title="所有任務">
+      <router-link v-if="authStore.isAuthenticated && isCollapsed" to="/tasks" class="nav-link" active-class="active" :title="$t('navigation.allTasks')">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
         </svg>
@@ -46,17 +46,15 @@
     <!-- 最近任務預覽（展開時顯示） -->
     <div v-if="authStore.isAuthenticated && !isCollapsed" class="recent-tasks">
       <div class="recent-tasks-header">
-        <div class="header-left">
-          <h3>近期</h3>
-        </div>
+        <h3>{{ $t('navigation.recent') }}</h3>
         <router-link to="/tasks" class="all-tasks-btn" active-class="active">
-          所有任務
+          {{ $t('navigation.allTasks') }}
         </router-link>
       </div>
 
       <div class="recent-tasks-list">
         <div v-if="recentTasks.length === 0" class="recent-task-empty">
-          暫無已完成任務
+          {{ $t('navigation.noCompletedTasks') }}
         </div>
 
         <router-link
@@ -80,23 +78,26 @@
           {{ getFirstLetter(authStore.user?.email) }}
         </div>
       </router-link>
-      <button @click="handleLogout" class="logout-btn" :title="isCollapsed ? '登出' : ''">
+      <button @click="handleLogout" class="logout-btn" :title="isCollapsed ? $t('navigation.logout') : ''">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
           <polyline points="16 17 21 12 16 7"></polyline>
           <line x1="21" y1="12" x2="9" y2="12"></line>
         </svg>
-        <span v-if="!isCollapsed">登出</span>
+        <span v-if="!isCollapsed">{{ $t('navigation.logout') }}</span>
       </button>
     </div>
   </nav>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
+import { useI18n } from 'vue-i18n'
 import api from '../../utils/api'
+
+const { t: $t } = useI18n()
 
 const route = useRoute()
 const router = useRouter()
@@ -121,7 +122,7 @@ async function loadRecentTasks() {
     })
     recentTasks.value = response.data.tasks || []
   } catch (error) {
-    console.error('載入最近任務失敗:', error)
+    console.error('Failed to load recent tasks:', error)
   }
 }
 
@@ -176,39 +177,64 @@ watch(() => route.path, (newPath, oldPath) => {
 </script>
 
 <style scoped>
+/* CSS 變數 */
+.navigation {
+  --texture-pattern:
+    repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(255, 255, 255, 0.018) 3px, rgba(255, 255, 255, 0.018) 4px),
+    repeating-linear-gradient(0deg, transparent, transparent 9px, rgba(255, 255, 255, 0.028) 9px, rgba(255, 255, 255, 0.028) 11px),
+    repeating-linear-gradient(0deg, transparent, transparent 19px, rgba(255, 255, 255, 0.038) 19px, rgba(255, 255, 255, 0.038) 21px),
+    repeating-linear-gradient(90deg, transparent, transparent 5px, rgba(0, 0, 0, 0.018) 5px, rgba(0, 0, 0, 0.018) 6px),
+    repeating-linear-gradient(90deg, transparent, transparent 13px, rgba(0, 0, 0, 0.028) 13px, rgba(0, 0, 0, 0.028) 15px),
+    repeating-linear-gradient(90deg, transparent, transparent 31px, rgba(0, 0, 0, 0.038) 31px, rgba(0, 0, 0, 0.038) 33px);
+  --color-divider-rgb: 163, 177, 198;
+}
+
 .navigation {
   width: 240px;
   min-width: 240px;
-  height: calc(100vh - 40px);
+  height: 100vh;
   position: sticky;
-  top: 20px;
+  top: 0;
   display: flex;
   flex-direction: column;
   gap: 24px;
   padding: 28px 20px;
-  background: var(--neu-bg);
-  border-radius: 20px;
+  background: var(--nav-bg);
+  border-radius: 0;
   box-shadow: var(--neu-shadow-raised);
   transition: all 0.3s ease;
+}
+
+.navigation::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: var(--texture-pattern);
+  pointer-events: none;
+  opacity: 0.4;
+  z-index: 0;
 }
 
 /* 收合狀態 */
 .navigation.collapsed {
   width: 80px;
   min-width: 80px;
-  padding: 20px 12px;
+  padding: 28px 12px;
   align-items: center;
 }
 
 /* 切換按鈕 */
 .toggle-btn {
   position: absolute;
-  top: 16px;
-  right: 12px;
+  top: 4px;
+  right: 2px;
   width: 28px;
   height: 36px;
   border: none;
-  background: var(--neu-bg);
+  background: #ffffff00;
   border-radius: 6px;
   box-shadow: var(--neu-shadow-btn-sm);
   cursor: pointer;
@@ -236,7 +262,17 @@ watch(() => route.path, (newPath, oldPath) => {
 
 .nav-brand {
   padding-bottom: 20px;
-  border-bottom: 1px solid rgba(163, 177, 198, 0.2);
+  position: relative;
+}
+
+.nav-brand::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 80px;
+  right: -50px;
+  height: 1px;
+  background-color: black;
 }
 
 .nav-brand h2 {
@@ -244,7 +280,7 @@ watch(() => route.path, (newPath, oldPath) => {
   margin: 0;
   font-weight: 700;
   letter-spacing: -0.5px;
-  color: var(--neu-primary);
+  color: var(--nav-text);
   text-align: center;
   transition: all 0.3s ease;
 }
@@ -271,8 +307,8 @@ watch(() => route.path, (newPath, oldPath) => {
   border-radius: 12px;
   text-decoration: none;
   font-weight: 600;
-  color: var(--neu-text);
-  background: var(--neu-bg);
+  color: var(--nav-text);
+  background: var(--nav-bg);
   box-shadow: var(--neu-shadow-btn);
   transition: all 0.3s ease;
 }
@@ -285,8 +321,8 @@ watch(() => route.path, (newPath, oldPath) => {
 
 .nav-link.active {
   box-shadow: var(--neu-shadow-btn-active);
-  color: var(--neu-primary-dark);
-  background: #dee5d2;
+  color: var(--nav-recent-text);
+  background: var(--nav-active-bg);
 }
 
 .nav-link svg {
@@ -319,6 +355,26 @@ watch(() => route.path, (newPath, oldPath) => {
 .nav-spacer {
   flex: 1;
   min-height: 20px;
+  background: var(--nav-recent-bg);
+  margin: 0 -20px -24px -20px;
+  padding-bottom: 24px;
+  position: relative;
+}
+
+.nav-spacer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: var(--texture-pattern);
+  pointer-events: none;
+  opacity: 0.3;
+}
+
+.navigation.collapsed .nav-spacer {
+  margin: 0 -12px -24px -12px;
 }
 
 .nav-user {
@@ -327,15 +383,39 @@ watch(() => route.path, (newPath, oldPath) => {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding-top: 20px;
-  border-top: 1px solid rgba(163, 177, 198, 0.2);
+  padding: 20px 20px 28px 20px;
+  margin: 0 -20px -28px -20px;
+  background: var(--nav-recent-bg);
+  border-top: 1px solid rgba(var(--color-divider-rgb), 0.2);
   transition: all 0.3s ease;
+  position: relative;
+}
+
+.nav-user::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: var(--texture-pattern);
+  pointer-events: none;
+  opacity: 0.1;
+  z-index: 0;
 }
 
 /* 收合狀態下的使用者區域 - 垂直排列 */
 .navigation.collapsed .nav-user {
   flex-direction: column;
   gap: 12px;
+  padding: 20px 12px 20px 12px;
+  margin: 0 -12px -20px -12px;
+  background: transparent;
+  border-top: none;
+}
+
+.navigation.collapsed .nav-user::before {
+  display: none;
 }
 
 .user-avatar-btn {
@@ -344,6 +424,8 @@ watch(() => route.path, (newPath, oldPath) => {
   justify-content: center;
   text-decoration: none;
   transition: transform 0.2s ease;
+  position: relative;
+  z-index: 1;
 }
 
 .user-avatar-btn:hover {
@@ -354,14 +436,14 @@ watch(() => route.path, (newPath, oldPath) => {
   width: 48px;
   height: 48px;
   border-radius: 50%;
-  background: var(--neu-bg);
+  background: var(--nav-bg);
   box-shadow: var(--neu-shadow-btn);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 1.25rem;
   font-weight: 700;
-  color: var(--neu-primary);
+  color: var(--nav-text);
   transition: all 0.3s ease;
   cursor: pointer;
 }
@@ -383,13 +465,15 @@ watch(() => route.path, (newPath, oldPath) => {
   padding: 12px 16px;
   border-radius: 12px;
   border: none;
-  background: var(--neu-bg);
+  background: var(--nav-bg);
   cursor: pointer;
   font-weight: 600;
   font-size: 0.9rem;
-  color: var(--neu-text);
+  color: var(--nav-text);
   box-shadow: var(--neu-shadow-btn);
   transition: all 0.3s ease;
+  position: relative;
+  z-index: 1;
 }
 
 .logout-btn:hover {
@@ -424,13 +508,17 @@ watch(() => route.path, (newPath, oldPath) => {
 }
 
 .recent-tasks {
-  padding: 6px 6px 0 0;
+  padding: 16px 20px 24px 20px;
   flex: 1;
   display: flex;
   flex-direction: column;
   gap: 8px;
   min-height: 0;
   overflow: hidden;
+  background: var(--nav-recent-bg);
+  margin: 0 -20px -24px -20px;
+  border-radius: 0;
+  position: relative;
 }
 
 .recent-tasks-header {
@@ -439,23 +527,14 @@ watch(() => route.path, (newPath, oldPath) => {
   align-items: center;
   padding: 0 4px;
   margin-bottom: 8px;
+  position: relative;
+  z-index: 1;
 }
 
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.header-left svg {
-  stroke: var(--neu-text-light);
-  flex-shrink: 0;
-}
-
-.header-left h3 {
+.recent-tasks-header h3 {
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--neu-text-light);
+  color: var(--neu-text-lighter);
   margin: 0;
 }
 
@@ -463,9 +542,9 @@ watch(() => route.path, (newPath, oldPath) => {
   padding: 4px 10px;
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--neu-text);
+  color: var(--neu-text-lighter);
   text-decoration: none;
-  background: var(--neu-bg);
+  background: var(--nav-recent-btn);
   box-shadow: var(--neu-shadow-btn-sm);
   border-radius: 8px;
   transition: all 0.2s ease;
@@ -480,7 +559,7 @@ watch(() => route.path, (newPath, oldPath) => {
 
 .all-tasks-btn.active {
   box-shadow: var(--neu-shadow-btn-active-sm);
-  color: var(--neu-primary-dark);
+  color: var(--neu-text-lighter);
 }
 
 .recent-tasks-list {
@@ -490,6 +569,8 @@ watch(() => route.path, (newPath, oldPath) => {
   overflow-y: auto;
   max-height: 300px;
   padding-right: 4px;
+  position: relative;
+  z-index: 1;
 }
 
 .recent-tasks-list::-webkit-scrollbar {
@@ -501,7 +582,7 @@ watch(() => route.path, (newPath, oldPath) => {
 }
 
 .recent-tasks-list::-webkit-scrollbar-thumb {
-  background: rgba(163, 177, 198, 0.3);
+  background: rgba(var(--color-divider-rgb), 0.3);
   border-radius: 2px;
 }
 
@@ -510,46 +591,29 @@ watch(() => route.path, (newPath, oldPath) => {
   flex-direction: column;
   gap: 4px;
   padding: 3px 12px;
-  /* border-radius: 10px; */
-  background: var(--neu-bg);
-  /* box-shadow: var(--neu-shadow-btn); */
+  border-radius: 8px;
+  background: transparent;
   text-decoration: none;
   transition: all 0.2s ease;
   cursor: pointer;
 }
 
 .recent-task-item:hover {
-  /* box-shadow: var(--neu-shadow-btn-hover); */
   transform: translateX(2px);
 }
 
 .recent-task-item:active {
-  box-shadow: var(--neu-shadow-btn-active);
   transform: translateX(0);
 }
 
 .task-name {
   font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--neu-text);
+  font-weight: 400;
+  color: var(--neu-text-lighter);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1.3;
-}
-
-.task-time {
-  font-size: 0.7rem;
-  color: var(--neu-text-lighter);
-  line-height: 1.2;
-}
-
-.recent-task-empty {
-  padding: 16px 12px;
-  text-align: center;
-  font-size: 0.75rem;
-  color: var(--neu-text-lighter);
-  font-style: italic;
 }
 
 @media (max-width: 768px) {

@@ -79,7 +79,7 @@ export const useAuthStore = defineStore('auth', () => {
 
       return { success: true }
     } catch (err) {
-      error.value = err.response?.data?.detail || '登入失敗'
+      error.value = err.response?.data?.detail || '帳號或密碼錯誤'
       return {
         success: false,
         error: error.value

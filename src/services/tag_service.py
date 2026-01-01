@@ -125,19 +125,15 @@ class TagService:
             await self._rename_tag_in_tasks(user_id, old_name, name)
 
         # 更新標籤
-        updates = {}
-        if name is not None:
-            updates["name"] = name
-        if color is not None:
-            updates["color"] = color
-        if description is not None:
-            updates["description"] = description
+        success = await self.tag_repo.update(
+            tag_id=tag_id,
+            user_id=user_id,
+            name=name,
+            color=color
+        )
 
-        if updates:
-            updates["updated_at"] = datetime.utcnow()
-            success = await self.tag_repo.update(tag_id, updates)
-            if success:
-                return await self.tag_repo.get_by_id(tag_id, user_id)
+        if success:
+            return await self.tag_repo.get_by_id(tag_id, user_id)
 
         return tag
 

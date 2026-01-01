@@ -37,6 +37,7 @@ MEMORY_ONLY_FIELDS: Set[str] = {
     "chunks",
     "total_chunks",
     "completed_chunks",
+    "processing_chunks",
     "chunks_created",
 
     # 時間估算

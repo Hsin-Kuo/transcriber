@@ -1,20 +1,42 @@
 <template>
   <div class="settings-container">
     <div class="settings-header">
-      <h1>使用者設定</h1>
-      <p>管理您的帳戶資訊和配額使用情況</p>
+      <h1>{{ $t('userSettings.title') }}</h1>
+      <p>{{ $t('userSettings.description') }}</p>
     </div>
 
     <!-- 使用者資訊 -->
     <div class="card user-info-card">
-      <h2>帳戶資訊</h2>
+      <h2>{{ $t('userSettings.accountInfo') }}</h2>
       <div class="info-item">
-        <span class="info-label">電子郵件</span>
+        <span class="info-label">{{ $t('userSettings.email') }}</span>
         <span class="info-value">{{ authStore.user?.email }}</span>
       </div>
       <div class="info-item">
-        <span class="info-label">帳戶類型</span>
+        <span class="info-label">{{ $t('userSettings.accountType') }}</span>
         <span class="info-value">{{ quotaTierName }}</span>
+      </div>
+    </div>
+
+    <!-- 語言設定 -->
+    <div class="card language-card">
+      <h2>{{ $t('userSettings.language') }}</h2>
+      <p class="language-description">{{ $t('userSettings.languageDescription') }}</p>
+      <div class="language-options">
+        <button
+          @click="changeLanguage('zh-TW')"
+          :class="{ active: currentLocale === 'zh-TW' }"
+          class="language-btn"
+        >
+          繁體中文
+        </button>
+        <button
+          @click="changeLanguage('en')"
+          :class="{ active: currentLocale === 'en' }"
+          class="language-btn"
+        >
+          English
+        </button>
       </div>
     </div>
 
@@ -24,14 +46,14 @@
         <div class="electric-border-outer">
           <div class="electric-main quota-content">
             <div class="quota-header">
-              <h3>配額使用情況</h3>
+              <h3>{{ $t('userSettings.quotaUsage') }}</h3>
               <span class="quota-tier">{{ quotaTierName }}</span>
             </div>
 
             <div class="quota-items">
               <div class="quota-item">
                 <div class="quota-label">
-                  <span>轉錄次數</span>
+                  <span>{{ $t('userSettings.transcriptions') }}</span>
                   <span class="quota-value">{{ authStore.usage?.transcriptions || 0 }} / {{ authStore.quota?.max_transcriptions || 0 }}</span>
                 </div>
                 <div class="quota-bar">
@@ -42,14 +64,14 @@
                   ></div>
                 </div>
                 <div class="quota-remaining">
-                  剩餘 {{ authStore.remainingQuota?.transcriptions || 0 }} 次
+                  {{ $t('userSettings.remaining') }} {{ authStore.remainingQuota?.transcriptions || 0 }}
                 </div>
               </div>
 
               <div class="quota-item">
                 <div class="quota-label">
-                  <span>轉錄時長</span>
-                  <span class="quota-value">{{ Math.round(authStore.usage?.duration_minutes || 0) }} / {{ authStore.quota?.max_duration_minutes || 0 }} 分鐘</span>
+                  <span>{{ $t('userSettings.duration') }}</span>
+                  <span class="quota-value">{{ Math.round(authStore.usage?.duration_minutes || 0) }} / {{ authStore.quota?.max_duration_minutes || 0 }} {{ $t('userSettings.minutes') }}</span>
                 </div>
                 <div class="quota-bar">
                   <div
@@ -59,13 +81,13 @@
                   ></div>
                 </div>
                 <div class="quota-remaining">
-                  剩餘 {{ Math.round(authStore.remainingQuota?.duration || 0) }} 分鐘
+                  {{ $t('userSettings.remaining') }} {{ Math.round(authStore.remainingQuota?.duration || 0) }} {{ $t('userSettings.minutes') }}
                 </div>
               </div>
 
               <div class="quota-item">
                 <div class="quota-label">
-                  <span>儲存空間</span>
+                  <span>{{ $t('userSettings.storage') }}</span>
                   <span class="quota-value">{{ formatBytes(authStore.usage?.storage_bytes || 0) }} / {{ formatBytes(authStore.quota?.max_storage_bytes || 0) }}</span>
                 </div>
                 <div class="quota-bar">
@@ -76,7 +98,7 @@
                   ></div>
                 </div>
                 <div class="quota-remaining">
-                  剩餘 {{ formatBytes(authStore.remainingQuota?.storage || 0) }}
+                  {{ $t('userSettings.remaining') }} {{ formatBytes(authStore.remainingQuota?.storage || 0) }}
                 </div>
               </div>
             </div>
@@ -90,8 +112,11 @@
 <script setup>
 import { computed } from 'vue'
 import { useAuthStore } from '../stores/auth'
+import { useI18n } from 'vue-i18n'
 
 const authStore = useAuthStore()
+const { t: $t, locale } = useI18n()
+const currentLocale = computed(() => locale.value)
 
 // 配額層級名稱
 const quotaTierName = computed(() => {
@@ -112,6 +137,12 @@ function formatBytes(bytes) {
   const sizes = ['B', 'KB', 'MB', 'GB']
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i]
+}
+
+// 切換語言
+function changeLanguage(lang) {
+  locale.value = lang
+  localStorage.setItem('locale', lang)
 }
 </script>
 
@@ -140,11 +171,13 @@ function formatBytes(bytes) {
   font-size: 1rem;
 }
 
-.user-info-card {
+.user-info-card,
+.language-card {
   margin-bottom: 24px;
 }
 
-.user-info-card h2 {
+.user-info-card h2,
+.language-card h2 {
   font-size: 1.25rem;
   color: var(--neu-primary);
   margin: 0 0 20px 0;
@@ -172,6 +205,42 @@ function formatBytes(bytes) {
 .info-value {
   font-size: 0.95rem;
   color: var(--neu-text);
+  font-weight: 600;
+}
+
+/* 語言設定樣式 */
+.language-description {
+  font-size: 0.9rem;
+  color: var(--neu-text-light);
+  margin: 0 0 16px 0;
+}
+
+.language-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.language-btn {
+  padding: 12px 20px;
+  border: none;
+  border-radius: 8px;
+  background: var(--upload-bg);
+  color: var(--neu-text);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.language-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.language-btn.active {
+  background: var(--neu-bg);
+  color: var(--neu-primary);
   font-weight: 600;
 }
 

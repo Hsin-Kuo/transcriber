@@ -1,27 +1,6 @@
 <template>
   <div class="task-list">
-    <div class="list-header">
-      <h2>Transcription Tasks</h2>
-      <div class="header-actions">
-        <button
-          class="btn btn-secondary btn-batch-edit"
-          :class="{ active: isBatchEditMode }"
-          @click="toggleBatchEditMode"
-          :title="isBatchEditMode ? '退出批次編輯' : '批次編輯'"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M9 11l3 3L22 4"></path>
-            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
-          </svg>
-          {{ isBatchEditMode ? '退出編輯' : '批次編輯' }}
-        </button>
-        <button class="btn btn-secondary btn-icon" @click="emit('refresh')" title="Refresh">
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
-          </svg>
-        </button>
-      </div>
-    </div>
+
 
     <!-- 標籤篩選區 -->
     <div v-if="allTags.length > 0" class="filter-section">
@@ -46,7 +25,7 @@
           @dragend="handleDragEnd"
         >
           <!-- 編輯模式：拖曳提示圖標 -->
-          <div v-if="isEditingFilterTags" class="drag-handle" title="拖曳調整順序">
+          <div v-if="isEditingFilterTags" class="drag-handle" :title="$t('taskList.dragToReorder')">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <line x1="8" y1="6" x2="21" y2="6"></line>
               <line x1="8" y1="12" x2="21" y2="12"></line>
@@ -55,26 +34,6 @@
               <line x1="3" y1="12" x2="3.01" y2="12"></line>
               <line x1="3" y1="18" x2="3.01" y2="18"></line>
             </svg>
-          </div>
-
-          <!-- 編輯模式：順序控制（保留作為備選） -->
-          <div v-if="false && isEditingFilterTags" class="tag-order-controls">
-            <button
-              class="btn-move-tag"
-              :disabled="index === 0"
-              @click="moveTagUp(index)"
-              title="上移"
-            >
-              ▲
-            </button>
-            <button
-              class="btn-move-tag"
-              :disabled="index === displayedTags.length - 1"
-              @click="moveTagDown(index)"
-              title="下移"
-            >
-              ▼
-            </button>
           </div>
 
           <!-- 編輯模式：可點擊編輯標籤文字 -->
@@ -102,7 +61,7 @@
               color: getTagColor(tag)
             }"
             @click="isEditingFilterTags ? startEditingFilterTag(tag) : toggleFilterTag(tag)"
-            :title="isEditingFilterTags ? '點擊編輯標籤名稱' : ''"
+            :title="isEditingFilterTags ? $t('taskList.clickToEditName') : ''"
           >
             {{ tag }}
           </button>
@@ -112,7 +71,7 @@
             <button
               :ref="el => setColorPickerButtonRef(tag, el)"
               class="btn-color-picker"
-              :title="`設定 ${tag} 的顏色`"
+              :title="$t('taskList.setTagColor', { tag })"
               @click="toggleColorPicker(tag)"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -128,7 +87,7 @@
           v-if="!isEditingFilterTags"
           class="btn-edit-filter"
           @click="startEditingFilter"
-          title="編輯標籤"
+          :title="$t('taskList.editTags')"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
@@ -139,7 +98,7 @@
           <button
             class="btn-save-filter"
             @click="saveFilterEdit"
-            title="儲存"
+            :title="$t('taskList.save')"
           >
             ✓
           </button>
@@ -148,7 +107,7 @@
           v-if="selectedFilterTags.length > 0 && !isEditingFilterTags"
           class="btn-clear-filter"
           @click="clearFilter"
-          title="清除篩選"
+          :title="$t('taskList.clearFilter')"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
@@ -156,7 +115,27 @@
         </button>
       </div>
     </div>
-
+    <div class="list-header">
+      <div class="header-actions">
+        <button
+          class="btn btn-secondary btn-batch-edit"
+          :class="{ active: isBatchEditMode }"
+          @click="toggleBatchEditMode"
+          :title="isBatchEditMode ? $t('taskList.exitBatchEdit') : $t('taskList.batchEdit')"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 11l3 3L22 4"></path>
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+          </svg>
+          {{ isBatchEditMode ? $t('taskList.exitBatchEdit') : $t('taskList.batchEdit') }}
+        </button>
+        <button class="btn btn-secondary btn-icon" @click="emit('refresh')" title="Refresh">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+          </svg>
+        </button>
+      </div>
+    </div>
     <!-- 批次編輯工具列 -->
     <div v-if="isBatchEditMode" class="batch-toolbar">
       <div class="batch-toolbar-header">
@@ -168,10 +147,10 @@
               :indeterminate="selectedTaskIds.size > 0 && selectedTaskIds.size < sortedTasks.length"
               readonly
             />
-            <span>{{ selectedTaskIds.size === sortedTasks.length && sortedTasks.length > 0 ? '取消全選' : '全選' }}</span>
+            <span>{{ selectedTaskIds.size === sortedTasks.length && sortedTasks.length > 0 ? $t('taskList.deselectAll') : $t('taskList.selectAll') }}</span>
           </button>
           <span class="batch-selection-count">
-            已選擇 {{ selectedTaskIds.size }} / {{ sortedTasks.length }} 個任務
+            {{ $t('taskList.selectedTasks', { count: selectedTaskIds.size, total: sortedTasks.length }) }}
           </span>
         </div>
 
@@ -180,13 +159,13 @@
             v-if="selectedTaskIds.size > 0"
             class="btn-batch-action btn-batch-delete"
             @click="batchDelete"
-            :title="`刪除選中的 ${selectedTaskIds.size} 個任務`"
+            :title="$t('taskList.batchDeleteTitle', { count: selectedTaskIds.size })"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="3 6 5 6 21 6"></polyline>
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
             </svg>
-            批次刪除 ({{ selectedTaskIds.size }})
+            {{ $t('taskList.batchDelete', { count: selectedTaskIds.size }) }}
           </button>
         </div>
       </div>
@@ -202,10 +181,10 @@
                 <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
                 <line x1="7" y1="7" x2="7.01" y2="7"></line>
               </svg>
-              <span class="tags-title">標籤批次編輯</span>
-              <span class="tags-stats">已加入 {{ selectedTasksTags.commonTags.length }} • 可用 {{ selectedTasksTags.candidateTags.length }}</span>
+              <span class="tags-title">{{ $t('taskList.batchTagEdit') }}</span>
+              <span class="tags-stats">{{ $t('taskList.tagsStats', { common: selectedTasksTags.commonTags.length, candidate: selectedTasksTags.candidateTags.length }) }}</span>
             </div>
-            <button class="btn-collapse" @click="isTagSectionCollapsed = !isTagSectionCollapsed" :title="isTagSectionCollapsed ? '展開' : '收合'">
+            <button class="btn-collapse" @click="isTagSectionCollapsed = !isTagSectionCollapsed" :title="isTagSectionCollapsed ? $t('taskList.expand') : $t('taskList.collapse')">
               {{ isTagSectionCollapsed ? '▼' : '▲' }}
             </button>
           </div>
@@ -224,7 +203,7 @@
                     color: getTagColor(item.tag)
                   }"
                   @click="item.isAdded ? quickBatchRemoveTag(item.tag) : quickBatchAddTag(item.tag)"
-                  :title="item.isAdded ? `點擊移除「${item.tag}」` : `點擊加入「${item.tag}」`"
+                  :title="item.isAdded ? $t('taskList.clickToRemoveTag', { tag: item.tag }) : $t('taskList.clickToAddTag', { tag: item.tag })"
                 >
                   <svg class="pill-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                     <template v-if="item.isAdded">
@@ -242,7 +221,7 @@
 
             <!-- 無標籤提示 -->
             <div v-else class="batch-tags-empty">
-              尚無可用標籤
+              {{ $t('taskList.noAvailableTags') }}
             </div>
 
             <!-- 手動輸入 -->
@@ -250,7 +229,7 @@
               <input
                 type="text"
                 v-model="batchTagInput"
-                placeholder="手動輸入新標籤（逗號分隔）"
+                :placeholder="$t('taskList.manualTagInputPlaceholder')"
                 class="manual-input-field"
                 @keydown.enter="batchAddTags"
               />
@@ -258,7 +237,7 @@
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M12 5v14M5 12h14"></path>
                 </svg>
-                加入
+                {{ $t('taskList.addButton') }}
               </button>
             </div>
           </div>
@@ -267,8 +246,7 @@
     </div>
 
     <div v-if="tasks.length === 0" class="empty-state">
-      <p>尚無轉錄任務</p>
-      <p class="text-muted">上傳音訊檔案以開始轉錄</p>
+      <p>{{ $t('taskList.noTranscriptionTasks') }}</p>
     </div>
 
     <div v-else class="tasks" :class="{ 'batch-mode': isBatchEditMode }">
@@ -277,11 +255,17 @@
         :key="task.task_id"
         class="electric-card task-wrapper"
       >
-        <div class="electric-inner">
-          <div class="electric-border-outer">
-            <div class="electric-main task-item" :class="{ 'animated': task.status === 'processing', 'batch-edit-mode': isBatchEditMode }">
+        <div
+          class="task-item"
+          :class="{
+            'animated': task.status === 'processing',
+            'batch-edit-mode': isBatchEditMode,
+            'clickable': task.status === 'completed' && !isBatchEditMode
+          }"
+          @click="task.status === 'completed' && !isBatchEditMode && emit('view', task.task_id)"
+        >
               <!-- 批次編輯選擇框 -->
-              <div v-if="isBatchEditMode" class="batch-select-checkbox">
+              <div v-if="isBatchEditMode" class="batch-select-checkbox" @click.stop>
                 <input
                   type="checkbox"
                   :checked="selectedTaskIds.has(task.task_id)"
@@ -294,34 +278,49 @@
                 <div class="task-info">
                   <div class="task-header">
                     <h3>{{ task.custom_name || task.file?.filename || task.filename || task.file }}</h3>
-                    <span :class="['badge', `badge-${task.status}`]">
-                      {{ getStatusText(task.status) }}
-                    </span>
+                    <template v-if="task.status !== 'completed'">
+                      <span class="task-divider">/</span>
+                      <span :class="['badge', `badge-${task.status}`]">
+                        {{ getStatusText(task.status) }}
+                      </span>
+                    </template>
                   </div>
 
                   <div class="task-meta">
-                    <span v-if="task.file?.size_mb || task.file_size_mb">
-                      📦 {{ task.file?.size_mb || task.file_size_mb }} MB
+                    <span v-if="getAudioDuration(task)" class="meta-item">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M9 18V5l12-2v13"></path>
+                        <circle cx="6" cy="18" r="3"></circle>
+                        <circle cx="18" cy="16" r="3"></circle>
+                      </svg>
+                      {{ getAudioDuration(task) }}
                     </span>
-                    <span v-if="task.timestamps?.created_at || task.created_at">
-                      🕒 {{ task.timestamps?.created_at || task.created_at }}
+                    <span v-if="task.timestamps?.created_at || task.created_at" class="meta-item">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polyline points="12 6 12 12 16 14"></polyline>
+                      </svg>
+                      {{ task.timestamps?.created_at || task.created_at }}
                     </span>
-                    <span v-if="task.config?.diarize || task.diarize" class="badge-diarize" :title="(task.config?.max_speakers || task.max_speakers) ? `最多 ${task.config?.max_speakers || task.max_speakers} 位講者` : '自動偵測講者人數'">
-                      說話者辨識{{ (task.config?.max_speakers || task.max_speakers) ? ` (≤${task.config?.max_speakers || task.max_speakers}人)` : '' }}
+                    <span v-if="task.task_type" class="badge-task-type" :class="`badge-${task.task_type}`">
+                      {{ task.task_type === 'subtitle' ? $t('transcription.subtitle') : $t('transcription.paragraph') }}
+                    </span>
+                    <span v-if="task.config?.diarize || task.diarize" class="badge-diarize" :title="(task.config?.max_speakers || task.max_speakers) ? $t('taskList.maxSpeakers', { count: task.config?.max_speakers || task.max_speakers }) : $t('taskList.autoDetectSpeakers')">
+                      {{ $t('taskList.diarization') }}{{ (task.config?.max_speakers || task.max_speakers) ? ` (≤${task.config?.max_speakers || task.max_speakers}人)` : '' }}
                     </span>
                   </div>
 
                   <!-- 標籤列 -->
-                  <div class="task-tags-section">
+                  <div class="task-tags-section" @click.stop>
                     <!-- 編輯模式 -->
                     <div v-if="editingTaskId === task.task_id" class="tag-edit-mode">
                       <div class="tag-edit-header">
-                        <span class="tag-edit-label">編輯標籤</span>
+                        <span class="tag-edit-label">{{ $t('taskList.editTags') }}</span>
                         <div class="tag-edit-actions">
-                          <button class="btn-tag-action btn-save" @click="saveTaskTags(task)" title="儲存">
+                          <button class="btn-tag-action btn-save" @click="saveTaskTags(task)" :title="$t('taskList.save')">
                             ✓
                           </button>
-                          <button class="btn-tag-action btn-cancel" @click="cancelTagEdit" title="取消">
+                          <button class="btn-tag-action btn-cancel" @click="cancelTagEdit" :title="$t('taskList.cancel')">
                             ✕
                           </button>
                         </div>
@@ -332,7 +331,7 @@
                           v-model="editingTagInput"
                           @keydown.enter.prevent="addEditingTag"
                           @keydown.comma.prevent="addEditingTag"
-                          placeholder="輸入標籤後按 Enter"
+                          :placeholder="$t('taskList.tagInputPlaceholder')"
                           class="tag-input-inline"
                         />
                         <button
@@ -347,7 +346,7 @@
 
                       <!-- 可快速選擇的現有標籤 -->
                       <div v-if="availableTags.length > 0" class="available-tags-section">
-                        <div class="available-tags-label">快速選擇：</div>
+                        <div class="available-tags-label">{{ $t('taskList.quickSelect') }}</div>
                         <div class="available-tags">
                           <button
                             v-for="tag in availableTags"
@@ -360,7 +359,7 @@
                               color: getTagColor(tag)
                             }"
                             @click="quickAddTag(tag)"
-                            :title="`點擊加入 ${tag}`"
+                            :title="$t('taskList.clickToAddTag', { tag })"
                           >
                             + {{ tag }}
                           </button>
@@ -388,7 +387,7 @@
                               type="button"
                               class="save-tag-text"
                               @click="saveEditingTagText(index)"
-                              title="儲存"
+                              :title="$t('taskList.save')"
                             >
                               ✓
                             </button>
@@ -396,7 +395,7 @@
                               type="button"
                               class="cancel-tag-text"
                               @click="cancelEditingTagText"
-                              title="取消"
+                              :title="$t('taskList.cancel')"
                             >
                               ✕
                             </button>
@@ -407,14 +406,14 @@
                             class="tag-badge editable"
                             :style="{ backgroundColor: getTagColor(tag) }"
                             @click="startEditingTagText(index, tag)"
-                            :title="'點擊編輯標籤'"
+                            :title="$t('taskList.clickToEdit')"
                           >
                             {{ tag }}
                             <button
                               type="button"
                               class="remove-tag-inline"
                               @click.stop="removeEditingTag(index)"
-                              title="移除"
+                              :title="$t('taskList.remove')"
                             >
                               ×
                             </button>
@@ -437,7 +436,7 @@
                         <button
                           class="btn-edit-tags"
                           @click="startEditingTags(task)"
-                          title="編輯標籤"
+                          :title="$t('taskList.editTags')"
                         >
                           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
@@ -449,9 +448,9 @@
                         v-else
                         class="btn-add-tags"
                         @click="startEditingTags(task)"
-                        title="新增標籤"
+                        :title="$t('taskList.addTag')"
                       >
-                        + 新增標籤
+                        {{ $t('taskList.addTagButton') }}
                       </button>
                     </div>
                   </div>
@@ -464,38 +463,40 @@
                       ></div>
                     </div>
                     <p class="progress-text">
-                      <span v-if="['pending', 'processing'].includes(task.status)" class="spinner"></span>
+                      <span v-if="['pending', 'processing', 'canceling'].includes(task.status)" class="spinner"></span>
                       {{ task.progress }}
                       <span v-if="task.progress_percentage !== undefined && task.progress_percentage !== null" class="progress-percentage">
                         {{ Math.round(task.progress_percentage) }}%
                       </span>
-                      <span v-if="task.estimated_completion_text && ['pending', 'processing'].includes(task.status)" class="estimate-time">
+                      <!-- 預計完成時間 - 已停用 -->
+                      <!-- <span v-if="task.estimated_completion_text && ['pending', 'processing'].includes(task.status)" class="estimate-time">
                         · 預計完成時間：{{ task.estimated_completion_text }}
-                      </span>
+                      </span> -->
                     </p>
-                    <!-- 顯示說話者辨識狀態 -->
-                    <p v-if="(task.config?.diarize || task.diarize) && getDiarizationStatusText(task)" class="diarization-status" :class="`status-${task.stats?.diarization?.status || task.diarization_status}`">
+                    <!-- 顯示說話者辨識狀態 - 已停用 -->
+                    <!-- <p v-if="(task.config?.diarize || task.diarize) && getDiarizationStatusText(task)" class="diarization-status" :class="`status-${task.stats?.diarization?.status || task.diarization_status}`">
                       {{ getDiarizationStatusText(task) }}
-                    </p>
-                    <!-- 顯示正在處理的 chunks -->
-                    <p v-if="getProcessingChunksText(task)" class="processing-chunks">
+                    </p> -->
+                    <!-- 顯示正在處理的 chunks - 已停用 -->
+                    <!-- <p v-if="getProcessingChunksText(task)" class="processing-chunks">
                       {{ getProcessingChunksText(task) }}
-                    </p>
+                    </p> -->
                   </div>
 
-                  <div v-if="task.status === 'completed' && (task.result?.text_length || task.text_length) && isTaskExpanded(task.task_id)" class="task-result">
+                  <!-- 任務完成結果 - 已停用 -->
+                  <!-- <div v-if="task.status === 'completed' && (task.result?.text_length || task.text_length) && isTaskExpanded(task.task_id)" class="task-result">
                     <div>📝 已轉錄 {{ task.result?.text_length || task.text_length }} 字</div>
                     <div v-if="task.duration_text" class="duration">
                       ⏱️ 處理時間：{{ task.duration_text }}
                     </div>
-                  </div>
+                  </div> -->
 
                   <div v-if="task.status === 'failed' && task.error" class="task-error">
-                    ❌ {{ task.error }}
+                    {{ task.error }}
                   </div>
                 </div>
 
-                <div class="task-actions">
+                <div class="task-actions" @click.stop>
                   <!-- 保留音檔開關（僅已完成且有音檔的任務） -->
                   <div v-if="task.status === 'completed' && (task.result?.audio_file || task.audio_file)" class="keep-audio-toggle" :title="getKeepAudioTooltip(task)">
                     <label class="toggle-label">
@@ -520,26 +521,16 @@
                           </svg>
                         </span>
                       </div>
-                      <span v-if="isNewestTask(task)" class="newest-badge" title="最新任務的音檔會自動保留">new</span>
+                      <span v-if="isNewestTask(task)" class="newest-badge" :title="$t('taskList.newestTaskAudioKept')">{{ $t('taskList.newestBadge') }}</span>
                     </label>
                   </div>
 
-                  <!-- 已完成任務的三聯按鈕組 -->
+                  <!-- 已完成任務的雙聯按鈕組 -->
                   <div v-if="task.status === 'completed'" class="btn-group">
                     <button
-                      class="btn btn-view btn-group-left btn-icon"
-                      @click="emit('view', task.task_id)"
-                      title="瀏覽逐字稿"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                        <circle cx="12" cy="12" r="3"></circle>
-                      </svg>
-                    </button>
-                    <button
-                      class="btn btn-download btn-group-middle btn-icon"
-                      @click="emit('download', task.task_id)"
-                      title="下載逐字稿"
+                      class="btn btn-download btn-group-left btn-icon"
+                      @click.stop="emit('download', task)"
+                      :title="$t('taskList.downloadTranscript')"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -549,8 +540,8 @@
                     </button>
                     <button
                       class="btn btn-danger btn-group-right btn-icon"
-                      @click="emit('delete', task.task_id)"
-                      title="刪除任務及檔案"
+                      @click.stop="emit('delete', task.task_id)"
+                      :title="$t('taskList.deleteTask')"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <polyline points="3 6 5 6 21 6"></polyline>
@@ -567,10 +558,10 @@
                     class="btn btn-warning"
                     @click="emit('cancel', task.task_id)"
                     :disabled="task.cancelling"
-                    title="取消正在執行的任務"
+                    :title="$t('taskList.cancelRunningTask')"
                   >
                     <span v-if="task.cancelling" class="spinner"></span>
-                    {{ task.cancelling ? '取消中...' : '取消' }}
+                    {{ task.cancelling ? $t('taskList.cancelling') : $t('taskList.cancel') }}
                   </button>
 
                   <!-- 失敗或取消任務的刪除按鈕 -->
@@ -578,21 +569,13 @@
                     v-if="['failed', 'cancelled'].includes(task.status)"
                     class="btn btn-danger"
                     @click="emit('delete', task.task_id)"
-                    title="刪除任務及檔案"
+                    :title="$t('taskList.deleteTask')"
                   >
-                    刪除
+                    {{ $t('taskList.deleteButtonText') }}
                   </button>
                 </div>
               </div>
             </div>
-          </div>
-          <!-- 光暈層 -->
-          <div class="electric-glow-1"></div>
-          <div class="electric-glow-2"></div>
-        </div>
-        <!-- 疊加效果 -->
-        <div class="electric-overlay"></div>
-        <div class="electric-bg-glow"></div>
       </div>
     </div>
 
@@ -611,7 +594,7 @@
       @click.stop
     >
       <div class="color-picker-header">
-        <span>選擇顏色</span>
+        <span>{{ $t('taskList.selectColor') }}</span>
         <button class="btn-close-picker" @click="closeColorPicker">✕</button>
       </div>
       <input
@@ -636,7 +619,10 @@
 
 <script setup>
 import { computed, ref, onMounted, watch, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import api from '../utils/api'
+
+const { t: $t } = useI18n()
 
 const props = defineProps({
   tasks: {
@@ -741,18 +727,53 @@ function isTaskExpanded(taskId) {
 
 function getStatusText(status) {
   const statusMap = {
-    pending: '等待中',
-    processing: '處理中',
-    completed: '已完成',
-    failed: '失敗',
-    cancelled: '已取消'
+    pending: $t('taskList.pending'),
+    processing: $t('taskList.processing'),
+    completed: $t('taskList.completed'),
+    failed: $t('taskList.failed'),
+    cancelled: $t('taskList.cancelled'),
+    canceling: $t('taskList.canceling')
   }
   return statusMap[status] || status
 }
 
+function getAudioDuration(task) {
+  // 優先使用新的 audio_duration_seconds 欄位（音檔實際時長）
+  const duration = task.stats?.audio_duration_seconds || task.audio_duration_seconds
+  if (!duration) {
+    return null
+  }
+
+  const minutes = Math.floor(duration / 60)
+  const seconds = Math.floor(duration % 60)
+
+  if (minutes > 0) {
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`
+  } else {
+    return `0:${seconds.toString().padStart(2, '0')}`
+  }
+}
+
+// 狀態檢查輔助函數
+function isCompleted(task) {
+  return task.status === 'completed'
+}
+
+function isProcessing(task) {
+  return task.status === 'processing'
+}
+
+function isFailed(task) {
+  return task.status === 'failed'
+}
+
+function isPending(task) {
+  return task.status === 'pending'
+}
+
 function getProgressWidth(task) {
-  if (task.status === 'completed') return '100%'
-  if (task.status === 'failed') return '100%'
+  if (isCompleted(task)) return '100%'
+  if (isFailed(task)) return '100%'
 
   // 優先使用基於時間權重的進度百分比
   if (task.progress_percentage !== undefined && task.progress_percentage !== null) {
@@ -761,75 +782,77 @@ function getProgressWidth(task) {
   }
 
   // 後備：如果有 chunk 資訊，根據完成數量計算簡單進度
-  if (task.status === 'processing' && task.total_chunks && task.completed_chunks !== undefined) {
+  if (isProcessing(task) && task.total_chunks && task.completed_chunks !== undefined) {
     const percentage = (task.completed_chunks / task.total_chunks) * 100
     return `${Math.min(Math.max(percentage, 5), 95)}%`
   }
 
   // 預設進度
-  if (task.status === 'processing') return '30%'
+  if (isProcessing(task)) return '30%'
   return '10%'
 }
 
-function getDiarizationStatusText(task) {
-  // 支援巢狀結構和扁平結構
-  const diarizationStatus = task.stats?.diarization?.status || task.diarization_status
-  if (!diarizationStatus) {
-    return null
-  }
+// 已停用 - 說話者辨識狀態文字
+// function getDiarizationStatusText(task) {
+//   // 支援巢狀結構和扁平結構
+//   const diarizationStatus = task.stats?.diarization?.status || task.diarization_status
+//   if (!diarizationStatus) {
+//     return null
+//   }
 
-  const status = diarizationStatus
-  const numSpeakers = task.stats?.diarization?.num_speakers || task.diarization_num_speakers
-  const duration = task.stats?.diarization?.duration_seconds || task.diarization_duration_seconds
+//   const status = diarizationStatus
+//   const numSpeakers = task.stats?.diarization?.num_speakers || task.diarization_num_speakers
+//   const duration = task.stats?.diarization?.duration_seconds || task.diarization_duration_seconds
 
-  if (status === 'running') {
-    return '說話者辨識進行中...'
-  } else if (status === 'completed') {
-    const parts = ['說話者辨識完成']
-    if (numSpeakers) {
-      parts.push(`識別到 ${numSpeakers} 位說話者`)
-    }
-    if (duration) {
-      const minutes = Math.floor(duration / 60)
-      const seconds = Math.floor(duration % 60)
-      if (minutes > 0) {
-        parts.push(`耗時 ${minutes}分${seconds}秒`)
-      } else {
-        parts.push(`耗時 ${seconds}秒`)
-      }
-    }
-    return parts.join(' · ')
-  } else if (status === 'failed') {
-    return '說話者辨識失敗'
-  }
+//   if (status === 'running') {
+//     return '說話者辨識進行中...'
+//   } else if (status === 'completed') {
+//     const parts = ['說話者辨識完成']
+//     if (numSpeakers) {
+//       parts.push(`識別到 ${numSpeakers} 位說話者`)
+//     }
+//     if (duration) {
+//       const minutes = Math.floor(duration / 60)
+//       const seconds = Math.floor(duration % 60)
+//       if (minutes > 0) {
+//         parts.push(`耗時 ${minutes}分${seconds}秒`)
+//       } else {
+//         parts.push(`耗時 ${seconds}秒`)
+//       }
+//     }
+//     return parts.join(' · ')
+//   } else if (status === 'failed') {
+//     return '說話者辨識失敗'
+//   }
 
-  return null
-}
+//   return null
+// }
 
-function getProcessingChunksText(task) {
-  if (!task.chunks || task.chunks.length === 0 || task.status !== 'processing') {
-    return null
-  }
+// 已停用 - 處理中的 Chunks 文字
+// function getProcessingChunksText(task) {
+//   if (!task.chunks || task.chunks.length === 0 || task.status !== 'processing') {
+//     return null
+//   }
 
-  const processingChunks = task.chunks.filter(c => c.status === 'processing').map(c => c.chunk_id)
-  const completedChunks = task.chunks.filter(c => c.status === 'completed').map(c => c.chunk_id)
+//   const processingChunks = task.chunks.filter(c => c.status === 'processing').map(c => c.chunk_id)
+//   const completedChunks = task.chunks.filter(c => c.status === 'completed').map(c => c.chunk_id)
 
-  if (processingChunks.length === 0) {
-    return null
-  }
+//   if (processingChunks.length === 0) {
+//     return null
+//   }
 
-  const parts = []
+//   const parts = []
 
-  if (completedChunks.length > 0) {
-    parts.push(`✓ 已完成：Chunk ${completedChunks.join(', ')}`)
-  }
+//   if (completedChunks.length > 0) {
+//     parts.push(`✓ 已完成：Chunk ${completedChunks.join(', ')}`)
+//   }
 
-  if (processingChunks.length > 0) {
-    parts.push(`⏳ 處理中：Chunk ${processingChunks.join(', ')}`)
-  }
+//   if (processingChunks.length > 0) {
+//     parts.push(`⏳ 處理中：Chunk ${processingChunks.join(', ')}`)
+//   }
 
-  return parts.join(' · ')
-}
+//   return parts.join(' · ')
+// }
 
 // 標籤相關功能
 async function fetchTagColors() {
@@ -848,7 +871,7 @@ async function fetchTagColors() {
     })
     tagColors.value = colors
   } catch (error) {
-    console.error('獲取標籤顏色失敗:', error)
+    console.error($t('taskList.errorFetchTagColors') + ':', error)
   }
 }
 
@@ -857,10 +880,10 @@ async function fetchTagOrder() {
     const response = await api.get('/tags/order')
     if (response.data.order && response.data.order.length > 0) {
       customTagOrder.value = response.data.order
-      console.log('✅ 已從伺服器載入標籤順序：', response.data.count, '個標籤')
+      console.log('✅ ' + $t('taskList.logLoadedTagOrder'), response.data.count, $t('taskList.logTagCount'))
     }
   } catch (error) {
-    console.error('獲取標籤順序失敗:', error)
+    console.error($t('taskList.errorFetchTagOrder') + ':', error)
   }
 }
 
@@ -945,8 +968,8 @@ async function saveTaskTags(task) {
     editingTags.value = []
     editingTagInput.value = ''
   } catch (error) {
-    console.error('更新標籤失敗:', error)
-    alert('更新標籤失敗：' + (error.response?.data?.detail || error.message))
+    console.error($t('taskList.errorUpdateTags') + ':', error)
+    alert($t('taskList.errorUpdateTagsFull', { message: error.response?.data?.detail || error.message }))
   }
 }
 
@@ -1043,7 +1066,7 @@ async function finishEditingFilterTag() {
     : allTags.value
   const otherTags = currentTags.filter(tag => tag !== oldTag)
   if (otherTags.includes(newTag)) {
-    alert(`標籤 "${newTag}" 已存在，請使用其他名稱`)
+    alert($t('taskList.errorTagExists', { tag: newTag }))
     return
   }
 
@@ -1092,13 +1115,13 @@ async function finishEditingFilterTag() {
       selectedFilterTags.value[index] = newTag
     }
 
-    console.log(`✅ 標籤 "${oldTag}" 已重命名為 "${newTag}"`)
+    console.log('✅ ' + $t('taskList.successRenameTag', { oldTag, newTag }))
 
     // 刷新任務列表以確保前後端數據同步
     emit('refresh')
   } catch (error) {
-    console.error('重命名標籤失敗:', error)
-    alert('重命名標籤失敗：' + (error.response?.data?.detail || error.message))
+    console.error($t('taskList.errorRenameTag') + ':', error)
+    alert($t('taskList.errorRenameTagFull', { message: error.response?.data?.detail || error.message }))
   } finally {
     // 釋放重命名鎖
     isRenamingTag.value = false
@@ -1129,46 +1152,24 @@ async function saveFilterEdit() {
     const tagIds = editingTagOrder.value.map(tagName => {
       const tagObj = tagsData.value.find(t => t.name === tagName)
       const tagId = tagObj ? (tagObj._id || tagObj.tag_id) : null
-      console.log(`標籤 "${tagName}" -> ID: ${tagId}`, tagObj)
+      console.log($t('taskList.logTagMapping', { name: tagName, id: tagId }), tagObj)
       return tagId
     }).filter(id => id !== null)
 
-    console.log('發送的標籤 ID 列表:', tagIds)
+    console.log($t('taskList.logSendingTagIds'), tagIds)
     console.log('tagsData:', tagsData.value)
 
     await api.put('/tags/order', {
       tag_ids: tagIds
     })
-    console.log('✅ 已儲存標籤順序到伺服器')
+    console.log('✅ ' + $t('taskList.successSaveTagOrder'))
   } catch (error) {
-    console.error('保存標籤順序失敗:', error)
-    alert('保存標籤順序失敗：' + (error.response?.data?.detail || error.message))
+    console.error($t('taskList.errorSaveTagOrder') + ':', error)
+    alert($t('taskList.errorSaveTagOrderFull', { message: error.response?.data?.detail || error.message }))
   }
 
   isEditingFilterTags.value = false
   closeColorPicker()
-}
-
-function cancelFilterEdit() {
-  isEditingFilterTags.value = false
-  editingTagOrder.value = []
-  closeColorPicker()
-}
-
-function moveTagUp(index) {
-  if (index > 0) {
-    const temp = editingTagOrder.value[index]
-    editingTagOrder.value[index] = editingTagOrder.value[index - 1]
-    editingTagOrder.value[index - 1] = temp
-  }
-}
-
-function moveTagDown(index) {
-  if (index < editingTagOrder.value.length - 1) {
-    const temp = editingTagOrder.value[index]
-    editingTagOrder.value[index] = editingTagOrder.value[index + 1]
-    editingTagOrder.value[index + 1] = temp
-  }
 }
 
 // 拖放排序功能
@@ -1265,7 +1266,7 @@ async function updateTagColor(tagName, color) {
     // 從 tagsData 中找到對應的標籤對象
     const tagObj = tagsData.value.find(t => t.name === tagName)
     if (!tagObj) {
-      throw new Error('找不到標籤信息')
+      throw new Error($t('taskList.errorTagNotFound'))
     }
 
     // 使用正確的 API 端點和標籤 ID
@@ -1280,8 +1281,8 @@ async function updateTagColor(tagName, color) {
 
     // 不自動關閉顏色選擇器，讓使用者可以連續調整多個標籤
   } catch (error) {
-    console.error('更新標籤顏色失敗:', error)
-    alert('更新標籤顏色失敗：' + (error.response?.data?.detail || error.message))
+    console.error($t('taskList.errorUpdateTagColor') + ':', error)
+    alert($t('taskList.errorUpdateTagColorFull', { message: error.response?.data?.detail || error.message }))
   }
 }
 
@@ -1406,38 +1407,45 @@ function isNewestTask(task) {
 // 獲取保留音檔勾選框的提示文字
 function getKeepAudioTooltip(task) {
   if (isNewestTask(task)) {
-    return '最新音檔會自動保留（不計入3個勾選限制）'
+    return $t('taskList.keepAudioTooltipNewest')
   }
   if (!task.keep_audio && keepAudioCount.value >= 3) {
-    return '最多只能勾選3個音檔'
+    return $t('taskList.keepAudioTooltipFull')
   }
-  return '勾選以保留此音檔（最多3個）'
+  return $t('taskList.keepAudioTooltipNormal')
 }
 
 // 切換保留音檔狀態
 async function toggleKeepAudio(task) {
-  const newValue = !task.keep_audio
+  const oldValue = task.keep_audio
+  const newValue = !oldValue
 
   // 如果要勾選，檢查是否超過限制
   if (newValue && keepAudioCount.value >= 3) {
-    alert('最多只能勾選 3 個音檔保留')
+    alert($t('taskList.errorKeepAudioLimit'))
     return
   }
+
+  // 先樂觀更新 UI（立即反映變化）
+  task.keep_audio = newValue
 
   try {
     await api.put(`/tasks/${task.task_id}/keep-audio`, {
       keep_audio: newValue
     })
 
-    // 更新本地狀態
-    task.keep_audio = newValue
-
     // 刷新任務列表
     emit('refresh')
 
   } catch (error) {
-    console.error('更新音檔保留狀態失敗:', error)
-    alert('更新失敗：' + (error.response?.data?.detail || error.message))
+    console.error($t('taskList.errorUpdateKeepAudio') + ':', error)
+
+    // 恢復舊狀態
+    task.keep_audio = oldValue
+
+    // 顯示錯誤訊息
+    const errorMessage = error.response?.data?.detail || error.message
+    alert($t('taskList.errorUpdateFailed', { message: errorMessage }))
   }
 }
 
@@ -1480,11 +1488,11 @@ function toggleSelectAll() {
 // 批次刪除
 async function batchDelete() {
   if (selectedTaskIds.value.size === 0) {
-    alert('請先選擇要刪除的任務')
+    alert($t('taskList.errorSelectTasksFirst'))
     return
   }
 
-  if (!confirm(`確定要刪除 ${selectedTaskIds.value.size} 個任務嗎？`)) {
+  if (!confirm($t('taskList.batchDeleteConfirm', { count: selectedTaskIds.value.size }))) {
     return
   }
 
@@ -1494,31 +1502,31 @@ async function batchDelete() {
       task_ids: taskIds
     })
 
-    alert(`成功刪除 ${taskIds.length} 個任務`)
+    alert($t('taskList.successDeleteTasks', { count: taskIds.length }))
     selectedTaskIds.value.clear()
     emit('refresh')
   } catch (error) {
-    console.error('批次刪除失敗:', error)
-    alert('批次刪除失敗：' + (error.response?.data?.detail || error.message))
+    console.error($t('taskList.errorBatchDelete') + ':', error)
+    alert($t('taskList.errorBatchDeleteFull', { message: error.response?.data?.detail || error.message }))
   }
 }
 
 // 批次加入標籤
 async function batchAddTags() {
   if (selectedTaskIds.value.size === 0) {
-    alert('請先選擇要加入標籤的任務')
+    alert($t('taskList.errorSelectTasksForTags'))
     return
   }
 
   if (!batchTagInput.value.trim()) {
-    alert('請輸入要加入的標籤')
+    alert($t('taskList.errorEnterTags'))
     return
   }
 
   const tags = batchTagInput.value.split(',').map(t => t.trim()).filter(t => t)
 
   if (tags.length === 0) {
-    alert('請輸入有效的標籤')
+    alert($t('taskList.errorEnterValidTags'))
     return
   }
 
@@ -1529,47 +1537,12 @@ async function batchAddTags() {
       tags: tags
     })
 
-    alert(`成功為 ${taskIds.length} 個任務加入標籤`)
+    alert($t('taskList.successAddTags', { count: taskIds.length }))
     batchTagInput.value = ''
     emit('refresh')
   } catch (error) {
-    console.error('批次加入標籤失敗:', error)
-    alert('批次加入標籤失敗：' + (error.response?.data?.detail || error.message))
-  }
-}
-
-// 批次移除標籤
-async function batchRemoveTags() {
-  if (selectedTaskIds.value.size === 0) {
-    alert('請先選擇要移除標籤的任務')
-    return
-  }
-
-  if (!batchTagInput.value.trim()) {
-    alert('請輸入要移除的標籤')
-    return
-  }
-
-  const tags = batchTagInput.value.split(',').map(t => t.trim()).filter(t => t)
-
-  if (tags.length === 0) {
-    alert('請輸入有效的標籤')
-    return
-  }
-
-  try {
-    const taskIds = Array.from(selectedTaskIds.value)
-    await api.post('/tasks/batch/tags/remove', {
-      task_ids: taskIds,
-      tags: tags
-    })
-
-    alert(`成功從 ${taskIds.length} 個任務移除標籤`)
-    batchTagInput.value = ''
-    emit('refresh')
-  } catch (error) {
-    console.error('批次移除標籤失敗:', error)
-    alert('批次移除標籤失敗：' + (error.response?.data?.detail || error.message))
+    console.error($t('taskList.errorBatchAddTags') + ':', error)
+    alert($t('taskList.errorBatchAddTagsFull', { message: error.response?.data?.detail || error.message }))
   }
 }
 
@@ -1588,8 +1561,8 @@ async function quickBatchAddTag(tag) {
 
     emit('refresh')
   } catch (error) {
-    console.error('批次加入標籤失敗:', error)
-    alert('批次加入標籤失敗：' + (error.response?.data?.detail || error.message))
+    console.error($t('taskList.errorBatchAddTags') + ':', error)
+    alert($t('taskList.errorBatchAddTagsFull', { message: error.response?.data?.detail || error.message }))
   }
 }
 
@@ -1608,8 +1581,8 @@ async function quickBatchRemoveTag(tag) {
 
     emit('refresh')
   } catch (error) {
-    console.error('批次移除標籤失敗:', error)
-    alert('批次移除標籤失敗：' + (error.response?.data?.detail || error.message))
+    console.error($t('taskList.errorBatchRemoveTags') + ':', error)
+    alert($t('taskList.errorBatchRemoveTagsFull', { message: error.response?.data?.detail || error.message }))
   }
 }
 
@@ -1620,7 +1593,27 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* CSS 變數 - 顏色定義 */
+:where(.task-list) {
+  --color-primary-rgb: 221, 132, 72;
+  --color-teal-rgb: 119, 150, 154;
+  --color-text-dark-rgb: 45, 45, 45;
+  --color-danger-rgb: 239, 68, 68;
+  --color-success-rgb: 16, 185, 129;
+}
+
+/* 通用 Hover 效果 */
+.hover-lift:hover {
+  transform: translateY(-1px);
+}
+
+.hover-lift-md:hover {
+  transform: translateY(-2px);
+}
+
 .task-list {
+  margin-top: 24px;
+  margin-left: 15px;
   margin-bottom: 20px;
 }
 
@@ -1646,10 +1639,16 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   border-radius: 8px;
+  background: transparent;
+  color: var(--nav-recent-bg);
+  box-shadow: none;
 }
 
 .btn-icon:hover {
   transform: translateY(-1px) rotate(180deg);
+  background: transparent;
+  color: var(--nav-recent-bg);
+  box-shadow: none;
 }
 
 .btn-icon svg {
@@ -1671,14 +1670,8 @@ onMounted(() => {
 
 
 .filter-icon {
-  color: rgba(119, 150, 154, 0.8);
+  color: rgba(var(--color-teal-rgb), 0.8);
   flex-shrink: 0;
-}
-
-.filter-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: rgba(45, 45, 45, 0.7);
 }
 
 .filter-header-actions {
@@ -1689,78 +1682,57 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-.btn-edit-filter {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 12px;
-  font-size: 12px;
-  font-weight: 500;
-  color: #ffffff;
-  background: rgb(119, 150, 154);
-  border: 1px solid rgb(119, 150, 154);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn-edit-filter:hover {
-  background: #336774;
-  border-color: rgba(119, 150, 154, 0.5);
-  transform: translateY(-1px);
-}
-
-.btn-save-filter {
-  padding: 4px 12px;
-  font-size: 12px;
-  font-weight: 500;
-  color: white;
-  background: #838A2D;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn-save-filter:hover {
-  background: #5B622E;
-  transform: translateY(-1px);
-}
-
-.btn-cancel-filter {
-  padding: 4px 12px;
-  font-size: 12px;
-  font-weight: 500;
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn-cancel-filter:hover {
-  background: rgba(239, 68, 68, 0.15);
-  border-color: rgba(239, 68, 68, 0.4);
-  transform: translateY(-1px);
-}
-
+/* 篩選按鈕基礎樣式 */
+.btn-edit-filter,
+.btn-save-filter,
 .btn-clear-filter {
   padding: 4px 12px;
   font-size: 12px;
   font-weight: 500;
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
+.btn-edit-filter:hover,
+.btn-save-filter:hover,
 .btn-clear-filter:hover {
-  background: rgba(239, 68, 68, 0.15);
-  border-color: rgba(239, 68, 68, 0.4);
   transform: translateY(-1px);
+}
+
+.btn-edit-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #ffffff;
+  background: rgb(119, 150, 154);
+  border: 1px solid rgb(119, 150, 154);
+}
+
+.btn-edit-filter:hover {
+  background: #336774;
+  border-color: rgba(var(--color-teal-rgb), 0.5);
+}
+
+.btn-save-filter {
+  color: white;
+  background: #838A2D;
+  border: none;
+}
+
+.btn-save-filter:hover {
+  background: #5B622E;
+}
+
+.btn-clear-filter {
+  color: #ef4444;
+  background: rgba(var(--color-danger-rgb), 0.1);
+  border: 1px solid rgba(var(--color-danger-rgb), 0.3);
+}
+
+.btn-clear-filter:hover {
+  background: rgba(var(--color-danger-rgb), 0.15);
+  border-color: rgba(var(--color-danger-rgb), 0.4);
 }
 
 .filter-tags {
@@ -1782,7 +1754,7 @@ onMounted(() => {
   background: rgba(255, 255, 255, 0.5);
   padding: 6px 8px;
   border-radius: 8px;
-  border: 1px dashed rgba(221, 132, 72, 0.2);
+  border: 1px dashed rgba(var(--color-primary-rgb), 0.2);
   cursor: move;
   transition: all 0.2s;
 }
@@ -1793,15 +1765,15 @@ onMounted(() => {
 }
 
 .filter-tag-item.drag-over {
-  background: rgba(119, 150, 154, 0.15);
-  border-color: rgba(119, 150, 154, 0.5);
+  background: rgba(var(--color-teal-rgb), 0.15);
+  border-color: rgba(var(--color-teal-rgb), 0.5);
   transform: scale(1.02);
 }
 
 .drag-handle {
   display: flex;
   align-items: center;
-  color: rgba(119, 150, 154, 0.6);
+  color: rgba(var(--color-teal-rgb), 0.6);
   cursor: move;
   padding: 2px;
 }
@@ -1810,45 +1782,12 @@ onMounted(() => {
   color: #77969A;
 }
 
-.tag-order-controls {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.btn-move-tag {
-  width: 20px;
-  height: 16px;
-  padding: 0;
-  background: rgba(119, 150, 154, 0.1);
-  border: 1px solid rgba(119, 150, 154, 0.3);
-  border-radius: 4px;
-  color: #77969A;
-  font-size: 10px;
-  cursor: pointer;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.btn-move-tag:hover:not(:disabled) {
-  background: rgba(119, 150, 154, 0.2);
-  border-color: rgba(119, 150, 154, 0.5);
-  transform: scale(1.1);
-}
-
-.btn-move-tag:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-}
-
 .filter-tag-btn {
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
   border: none;
-  border-radius: 12px;
+  border-radius: 0;
   cursor: pointer;
   transition: all 0.2s;
   background: var(--neu-bg);
@@ -1886,6 +1825,7 @@ onMounted(() => {
 .filter-tag-btn.active {
   font-weight: 600;
   box-shadow: var(--neu-shadow-btn-active);
+  border-bottom: 2px solid var(--nav-recent-bg);
 }
 
 .filter-tag-btn.active:hover:not(:disabled) {
@@ -1916,8 +1856,8 @@ onMounted(() => {
   width: 24px;
   height: 24px;
   padding: 0;
-  background: rgba(119, 150, 154, 0.1);
-  border: 1px solid rgba(119, 150, 154, 0.3);
+  background: rgba(var(--color-teal-rgb), 0.1);
+  border: 1px solid rgba(var(--color-teal-rgb), 0.3);
   border-radius: 50%;
   color: #77969A;
   cursor: pointer;
@@ -1925,15 +1865,15 @@ onMounted(() => {
 }
 
 .btn-color-picker:hover {
-  background: rgba(119, 150, 154, 0.2);
-  border-color: rgba(119, 150, 154, 0.5);
+  background: rgba(var(--color-teal-rgb), 0.2);
+  border-color: rgba(var(--color-teal-rgb), 0.5);
   transform: scale(1.1);
 }
 
 .color-picker-popup {
   position: fixed;
   background: white;
-  border: 1px solid rgba(221, 132, 72, 0.3);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.3);
   border-radius: 8px;
   padding: 12px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
@@ -1948,14 +1888,14 @@ onMounted(() => {
   margin-bottom: 10px;
   font-size: 13px;
   font-weight: 600;
-  color: rgba(45, 45, 45, 0.8);
+  color: rgba(var(--color-text-dark-rgb), 0.8);
 }
 
 .btn-close-picker {
   width: 20px;
   height: 20px;
   padding: 0;
-  background: rgba(239, 68, 68, 0.1);
+  background: rgba(var(--color-danger-rgb), 0.1);
   border: none;
   border-radius: 4px;
   color: #ef4444;
@@ -1965,13 +1905,13 @@ onMounted(() => {
 }
 
 .btn-close-picker:hover {
-  background: rgba(239, 68, 68, 0.2);
+  background: rgba(var(--color-danger-rgb), 0.2);
 }
 
 .color-input {
   width: 100%;
   height: 40px;
-  border: 1px solid rgba(221, 132, 72, 0.3);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.3);
   border-radius: 6px;
   cursor: pointer;
   margin-bottom: 10px;
@@ -2002,7 +1942,7 @@ onMounted(() => {
 .empty-state {
   text-align: center;
   padding: 60px 20px;
-  color: rgba(45, 45, 45, 0.5);
+  color: rgba(var(--color-text-dark-rgb), 0.5);
   background: rgba(255, 255, 255, 0.5);
   backdrop-filter: blur(15px);
   border-radius: 16px;
@@ -2013,11 +1953,7 @@ onMounted(() => {
   font-size: 18px;
   font-weight: 500;
   margin-bottom: 8px;
-  color: rgba(45, 45, 45, 0.7);
-}
-
-.text-muted {
-  font-size: 14px;
+  color: rgba(var(--color-text-dark-rgb), 0.7);
 }
 
 .tasks {
@@ -2035,11 +1971,28 @@ onMounted(() => {
   transition: all 0.3s;
   position: relative;
   z-index: 1;
+  background: var(--upload-bg);
+  clip-path: polygon(
+    25px 0,
+    100% 0,
+    100% calc(100% - 25px),
+    calc(100% - 25px) 100%,
+    0 100%,
+    0 25px
+  );
+}
+
+.task-item.clickable {
+  cursor: pointer;
 }
 
 .task-wrapper:hover .task-item {
-  box-shadow: 0 4px 12px rgba(221, 132, 72, 0.15);
+  box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.15);
   transform: translateY(-2px);
+}
+
+.task-wrapper:hover .task-item.clickable {
+  box-shadow: 0 6px 16px rgba(var(--color-primary-rgb), 0.2);
 }
 
 .task-main {
@@ -2057,7 +2010,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
 }
 
 .task-header h3 {
@@ -2066,53 +2020,88 @@ onMounted(() => {
   margin: 0;
 }
 
+.task-divider {
+  font-size: 14px;
+  font-weight: 300;
+  color: rgba(0, 0, 0, 0.3);
+  margin: 0 -4px;
+}
+
 .task-meta {
   display: flex;
   gap: 16px;
   font-size: 13px;
-  color: rgba(45, 45, 45, 0.6);
+  color: rgba(var(--color-text-dark-rgb), 0.6);
   margin-bottom: 12px;
   flex-wrap: wrap;
   align-items: center;
 }
 
-.badge-diarize {
+.task-meta .meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.task-meta .meta-item svg {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+/* 徽章基礎樣式 */
+.badge-task-type,
+.badge-diarize,
+.badge-paragraph,
+.badge-subtitle {
   padding: 2px 8px;
-  background: rgba(246, 156, 92, 0.1);
-  border: 1px solid rgba(246, 141, 92, 0.3);
   border-radius: 4px;
-  color: rgba(217, 108, 40, 0.9);
   font-size: 12px;
   font-weight: 500;
   transition: all 0.2s;
+  border: 1px solid;
+}
+
+.badge-task-type:hover,
+.badge-diarize:hover,
+.badge-paragraph:hover,
+.badge-subtitle:hover {
+  transform: translateY(-1px);
+}
+
+/* 分類說話者 */
+.badge-diarize {
+  background: rgba(246, 156, 92, 0.1);
+  border-color: rgba(246, 141, 92, 0.3);
+  color: rgba(217, 108, 40, 0.9);
 }
 
 .badge-diarize:hover {
   background: rgba(246, 138, 92, 0.15);
   border-color: rgba(246, 146, 92, 0.5);
-  transform: translateY(-1px);
 }
 
-/* 展開/收起按鈕 */
-.btn-toggle-details {
-  padding: 4px 10px;
-  background: rgba(221, 132, 72, 0.08);
-  border: 1px solid rgba(221, 132, 72, 0.25);
-  border-radius: 4px;
-  color: var(--electric-primary);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  white-space: nowrap;
-  margin-left: auto;
+/* 段落模式 */
+.badge-paragraph {
+  background: rgba(139, 92, 246, 0.1);
+  border-color: rgba(139, 92, 246, 0.3);
+  color: rgba(109, 40, 217, 0.9);
 }
 
-.btn-toggle-details:hover {
-  background: rgba(221, 132, 72, 0.15);
-  border-color: var(--electric-primary);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(221, 132, 72, 0.2);
+.badge-paragraph:hover {
+  background: rgba(139, 92, 246, 0.15);
+  border-color: rgba(139, 92, 246, 0.5);
+}
+
+/* 字幕模式 */
+.badge-subtitle {
+  background: rgba(var(--color-success-rgb), 0.1);
+  border-color: rgba(var(--color-success-rgb), 0.3);
+  color: rgba(5, 150, 105, 0.9);
+}
+
+.badge-subtitle:hover {
+  background: rgba(var(--color-success-rgb), 0.15);
+  border-color: rgba(var(--color-success-rgb), 0.5);
 }
 
 .task-progress {
@@ -2136,7 +2125,7 @@ onMounted(() => {
 
 .progress-text {
   font-size: 13px;
-  color: rgba(45, 45, 45, 0.8);
+  color: rgba(var(--color-text-dark-rgb), 0.8);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2159,7 +2148,7 @@ onMounted(() => {
   padding: 6px 10px;
   border-radius: 4px;
   font-weight: 500;
-  color: rgba(45, 45, 45, 0.7);
+  color: rgba(var(--color-text-dark-rgb), 0.7);
 }
 
 .diarization-status.status-running {
@@ -2168,18 +2157,18 @@ onMounted(() => {
 }
 
 .diarization-status.status-completed {
-  background: rgba(221, 132, 72, 0.12);
-  border: 1px solid rgba(221, 132, 72, 0.3);
+  background: rgba(var(--color-primary-rgb), 0.12);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.3);
 }
 
 .diarization-status.status-failed {
-  background: rgba(221, 132, 72, 0.08);
+  background: rgba(var(--color-primary-rgb), 0.08);
   border: 1px solid rgba(221, 100, 50, 0.3);
 }
 
 .processing-chunks {
   font-size: 12px;
-  color: rgba(45, 45, 45, 0.7);
+  color: rgba(var(--color-text-dark-rgb), 0.7);
   margin-top: 6px;
   padding: 6px 10px;
   background: rgba(59, 130, 246, 0.08);
@@ -2194,7 +2183,7 @@ onMounted(() => {
   border: 1px solid #89916B4d;
   border-radius: 6px;
   font-size: 14px;
-  color: rgba(45, 45, 45, 0.7);
+  color: rgba(var(--color-text-dark-rgb), 0.7);
 }
 
 .task-result .duration {
@@ -2206,8 +2195,8 @@ onMounted(() => {
 .task-error {
   margin-top: 8px;
   padding: 8px 12px;
-  background: rgba(239, 68, 68, 0.15);
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: rgba(var(--color-danger-rgb), 0.15);
+  border: 1px solid rgba(var(--color-danger-rgb), 0.3);
   border-radius: 6px;
   font-size: 14px;
   color: #f87171;
@@ -2226,7 +2215,6 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   position: relative;
-  /* margin-right: 2px; */
 }
 
 .toggle-label {
@@ -2292,7 +2280,7 @@ onMounted(() => {
 /* Checked 狀態 */
 .toggle-input:checked + .toggle-slider {
   background: linear-gradient(135deg, var(--electric-primary) 0%, #b8762d 100%);
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1), 0 0 8px rgba(221, 132, 72, 0.3);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1), 0 0 8px rgba(var(--color-primary-rgb), 0.3);
 }
 
 .toggle-input:checked + .toggle-slider:before {
@@ -2316,7 +2304,7 @@ onMounted(() => {
 }
 
 .toggle-label:hover .toggle-input:checked + .toggle-slider {
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1), 0 0 12px rgba(221, 132, 72, 0.4);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1), 0 0 12px rgba(var(--color-primary-rgb), 0.4);
 }
 
 /* 鎖頭 Icon 共用樣式 */
@@ -2440,21 +2428,9 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-/* 瀏覽按鈕 - Neumorphism 風格 */
-.btn-view {
-  background: var(--neu-bg);
-  color: #6c8ba3;
-  border: none;
-  font-weight: 500;
-}
-
-.btn-view:hover {
-  color: #4a6680;
-}
-
 .btn-download {
   background: var(--neu-bg);
-  color: #6c8ba3;
+  color: #2d2d2d;
   border: none;
   font-weight: 500;
 }
@@ -2590,7 +2566,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   padding: 4px 8px;
-  background: rgba(119, 150, 154, 0.1);
+  background: rgba(var(--color-teal-rgb), 0.1);
   border: 1px solid #77969a4d;
   border-radius: 8px;
   color: #77969A;
@@ -2600,8 +2576,8 @@ onMounted(() => {
 }
 
 .btn-edit-tags:hover {
-  background: rgba(119, 150, 154, 0.2);
-  border-color: rgba(119, 150, 154, 0.5);
+  background: rgba(var(--color-teal-rgb), 0.2);
+  border-color: rgba(var(--color-teal-rgb), 0.5);
   transform: translateY(-1px);
 }
 
@@ -2628,7 +2604,7 @@ onMounted(() => {
 /* 標籤編輯模式 */
 .tag-edit-mode {
   background: rgba(255, 255, 255, 0.5);
-  border: 1px solid rgba(221, 132, 72, 0.2);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.2);
   border-radius: 8px;
   padding: 12px;
 }
@@ -2643,7 +2619,7 @@ onMounted(() => {
 .tag-edit-label {
   font-size: 12px;
   font-weight: 600;
-  color: rgba(45, 45, 45, 0.7);
+  color: rgba(var(--color-text-dark-rgb), 0.7);
 }
 
 .tag-edit-actions {
@@ -2676,12 +2652,12 @@ onMounted(() => {
 }
 
 .btn-tag-action.btn-cancel {
-  background: rgba(239, 68, 68, 0.15);
+  background: rgba(var(--color-danger-rgb), 0.15);
   color: #ef4444;
 }
 
 .btn-tag-action.btn-cancel:hover {
-  background: rgba(239, 68, 68, 0.25);
+  background: rgba(var(--color-danger-rgb), 0.25);
   transform: translateY(-1px);
 }
 
@@ -2695,7 +2671,7 @@ onMounted(() => {
   flex: 1;
   padding: 6px 10px;
   font-size: 13px;
-  border: 1px solid rgba(221, 132, 72, 0.3);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.3);
   border-radius: 6px;
   background: white;
   color: #2d2d2d;
@@ -2705,21 +2681,21 @@ onMounted(() => {
 
 .tag-input-inline:focus {
   border-color: #77969A;
-  box-shadow: 0 0 0 2px rgba(119, 150, 154, 0.1);
+  box-shadow: 0 0 0 2px rgba(var(--color-teal-rgb), 0.1);
 }
 
 .available-tags-section {
   margin-bottom: 12px;
   padding: 10px;
-  background: rgba(119, 150, 154, 0.05);
-  border: 1px dashed rgba(119, 150, 154, 0.2);
+  background: rgba(var(--color-teal-rgb), 0.05);
+  border: 1px dashed rgba(var(--color-teal-rgb), 0.2);
   border-radius: 6px;
 }
 
 .available-tags-label {
   font-size: 11px;
   font-weight: 600;
-  color: rgba(45, 45, 45, 0.6);
+  color: rgba(var(--color-text-dark-rgb), 0.6);
   margin-bottom: 8px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -2773,7 +2749,7 @@ onMounted(() => {
 }
 
 .btn-add-tag-inline:disabled {
-  background: rgba(119, 150, 154, 0.4);
+  background: rgba(var(--color-teal-rgb), 0.4);
   cursor: not-allowed;
 }
 
@@ -2796,7 +2772,7 @@ onMounted(() => {
 }
 
 .remove-tag-inline:hover {
-  background: rgba(239, 68, 68, 0.8);
+  background: rgba(var(--color-danger-rgb), 0.8);
 }
 
 /* ==== 批次編輯模式樣式 ==== */
@@ -2815,6 +2791,15 @@ onMounted(() => {
   font-size: 14px;
   font-weight: 500;
   transition: all 0.3s ease;
+  background: transparent;
+  color: var(--nav-recent-bg);
+  box-shadow: none;
+}
+
+.btn-batch-edit:hover {
+  background: transparent;
+  color: var(--nav-recent-bg);
+  box-shadow: none;
 }
 
 .btn-batch-edit.active {
@@ -2825,17 +2810,17 @@ onMounted(() => {
 
 .btn-batch-edit.active:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(221, 132, 72, 0.3);
+  box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.3);
 }
 
 /* 批次工具列 */
 .batch-toolbar {
   margin-bottom: 20px;
   padding: 16px;
-  background: linear-gradient(135deg, rgba(221, 132, 72, 0.08) 0%, rgba(184, 118, 45, 0.05) 100%);
-  border: 2px solid rgba(221, 132, 72, 0.2);
+  background: linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.08) 0%, rgba(184, 118, 45, 0.05) 100%);
+  border: 2px solid rgba(var(--color-primary-rgb), 0.2);
   border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(221, 132, 72, 0.1);
+  box-shadow: 0 2px 8px rgba(var(--color-primary-rgb), 0.1);
 }
 
 .batch-toolbar-header {
@@ -2869,7 +2854,7 @@ onMounted(() => {
   flex-shrink: 0;
   padding: 6px 12px;
   background: white;
-  border: 1px solid rgba(221, 132, 72, 0.3);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.3);
   border-radius: 6px;
   font-size: 14px;
   font-weight: 500;
@@ -2879,7 +2864,7 @@ onMounted(() => {
 }
 
 .btn-batch-select-all:hover {
-  background: rgba(221, 132, 72, 0.1);
+  background: rgba(var(--color-primary-rgb), 0.1);
   border-color: var(--electric-primary);
 }
 
@@ -2902,179 +2887,18 @@ onMounted(() => {
   gap: 12px;
   align-items: center;
   padding-top: 12px;
-  border-top: 1px solid rgba(221, 132, 72, 0.2);
-}
-
-.batch-action-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  border-top: 1px solid rgba(var(--color-primary-rgb), 0.2);
 }
 
 /* 批次標籤管理區域 */
-.batch-tags-section {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 12px;
-  background: rgba(255, 255, 255, 0.5);
-  border: 1px solid rgba(221, 132, 72, 0.15);
-  border-radius: 8px;
-}
-
-.batch-tags-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.batch-tags-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-}
-
-.batch-tags-label .label-text {
-  font-weight: 600;
-  color: #2d2d2d;
-}
-
-.batch-tags-label .label-hint {
-  font-weight: 400;
-  color: rgba(45, 45, 45, 0.6);
-  font-size: 12px;
-}
-
-.batch-tags-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.batch-tag-btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 12px;
-  border: 2px solid;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  white-space: nowrap;
-}
-
-.batch-tag-btn .tag-action-icon {
-  flex-shrink: 0;
-}
-
-/* 已加入標籤（可移除） */
-.batch-tag-btn.common-tag {
-  color: white;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.batch-tag-btn.common-tag:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-  filter: brightness(1.1);
-}
-
-.batch-tag-btn.common-tag:active {
-  transform: translateY(0);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-/* 候選標籤（可加入） */
-.batch-tag-btn.candidate-tag {
-  background-color: white;
-}
-
-.batch-tag-btn.candidate-tag:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  filter: brightness(0.95);
-}
-
-.batch-tag-btn.candidate-tag:active {
-  transform: translateY(0);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-}
-
 .batch-tags-empty {
   padding: 16px;
   text-align: center;
-  color: rgba(45, 45, 45, 0.5);
+  color: rgba(var(--color-text-dark-rgb), 0.5);
   font-size: 13px;
-  background: rgba(221, 132, 72, 0.05);
+  background: rgba(var(--color-primary-rgb), 0.05);
   border-radius: 6px;
-  border: 1px dashed rgba(221, 132, 72, 0.2);
-}
-
-/* 手動輸入標籤 */
-.batch-manual-input {
-  padding-top: 8px;
-  border-top: 1px solid rgba(221, 132, 72, 0.15);
-}
-
-.batch-manual-input-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.batch-manual-input-field {
-  flex: 1;
-  padding: 8px 12px;
-  border: 1px solid rgba(221, 132, 72, 0.3);
-  border-radius: 6px;
-  font-size: 14px;
-  outline: none;
-  transition: all 0.2s;
-  background: white;
-}
-
-.batch-manual-input-field:focus {
-  border-color: var(--electric-primary);
-  box-shadow: 0 0 0 3px rgba(221, 132, 72, 0.1);
-}
-
-.batch-manual-input-field::placeholder {
-  color: rgba(45, 45, 45, 0.4);
-}
-
-.btn-batch-manual-add {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  background: linear-gradient(135deg, var(--electric-primary) 0%, #b8762d 100%);
-  color: white;
-  border: none;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.btn-batch-manual-add:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(221, 132, 72, 0.3);
-}
-
-.btn-batch-manual-add:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.btn-batch-manual-add:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  border: 1px dashed rgba(var(--color-primary-rgb), 0.2);
 }
 
 /* ============================================
@@ -3087,7 +2911,7 @@ onMounted(() => {
   flex-direction: column;
   gap: 0;
   background: rgba(255, 255, 255, 0.5);
-  border: 1px solid rgba(221, 132, 72, 0.15);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.15);
   border-radius: 8px;
   overflow: hidden;
   max-height: 240px;
@@ -3104,8 +2928,8 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  background: rgba(221, 132, 72, 0.08);
-  border-bottom: 1px solid rgba(221, 132, 72, 0.1);
+  background: rgba(var(--color-primary-rgb), 0.08);
+  border-bottom: 1px solid rgba(var(--color-primary-rgb), 0.1);
   gap: 12px;
 }
 
@@ -3135,7 +2959,7 @@ onMounted(() => {
 
 .tags-stats {
   font-size: 12px;
-  color: rgba(45, 45, 45, 0.6);
+  color: rgba(var(--color-text-dark-rgb), 0.6);
   white-space: nowrap;
 }
 
@@ -3143,7 +2967,7 @@ onMounted(() => {
   flex-shrink: 0;
   padding: 6px 12px;
   background: white;
-  border: 1px solid rgba(221, 132, 72, 0.3);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.3);
   border-radius: 6px;
   font-size: 12px;
   font-weight: 500;
@@ -3154,7 +2978,7 @@ onMounted(() => {
 }
 
 .btn-collapse:hover {
-  background: rgba(221, 132, 72, 0.1);
+  background: rgba(var(--color-primary-rgb), 0.1);
   border-color: var(--electric-primary);
   transform: translateY(-1px);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
@@ -3190,7 +3014,7 @@ onMounted(() => {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: rgba(45, 45, 45, 0.6);
+  color: rgba(var(--color-text-dark-rgb), 0.6);
   padding: 4px 0;
 }
 
@@ -3203,7 +3027,7 @@ onMounted(() => {
   max-height: 80px;
   padding: 4px 0;
   scrollbar-width: thin;
-  scrollbar-color: rgba(221, 132, 72, 0.3) transparent;
+  scrollbar-color: rgba(var(--color-primary-rgb), 0.3) transparent;
 }
 
 .tags-pills-list::-webkit-scrollbar {
@@ -3211,17 +3035,17 @@ onMounted(() => {
 }
 
 .tags-pills-list::-webkit-scrollbar-track {
-  background: rgba(221, 132, 72, 0.05);
+  background: rgba(var(--color-primary-rgb), 0.05);
   border-radius: 3px;
 }
 
 .tags-pills-list::-webkit-scrollbar-thumb {
-  background: rgba(221, 132, 72, 0.3);
+  background: rgba(var(--color-primary-rgb), 0.3);
   border-radius: 3px;
 }
 
 .tags-pills-list::-webkit-scrollbar-thumb:hover {
-  background: rgba(221, 132, 72, 0.5);
+  background: rgba(var(--color-primary-rgb), 0.5);
 }
 
 /* 標籤 Pill 按鈕 */
@@ -3303,13 +3127,13 @@ onMounted(() => {
   gap: 8px;
   align-items: center;
   padding-top: 12px;
-  border-top: 1px solid rgba(221, 132, 72, 0.15);
+  border-top: 1px solid rgba(var(--color-primary-rgb), 0.15);
 }
 
 .manual-input-field {
   flex: 1;
   padding: 8px 12px;
-  border: 1px solid rgba(221, 132, 72, 0.3);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.3);
   border-radius: 6px;
   font-size: 13px;
   outline: none;
@@ -3319,11 +3143,11 @@ onMounted(() => {
 
 .manual-input-field:focus {
   border-color: var(--electric-primary);
-  box-shadow: 0 0 0 3px rgba(221, 132, 72, 0.1);
+  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.1);
 }
 
 .manual-input-field::placeholder {
-  color: rgba(45, 45, 45, 0.4);
+  color: rgba(var(--color-text-dark-rgb), 0.4);
   font-size: 12px;
 }
 
@@ -3346,7 +3170,7 @@ onMounted(() => {
 
 .btn-manual-add:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(221, 132, 72, 0.3);
+  box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.3);
 }
 
 .btn-manual-add:active:not(:disabled) {
@@ -3365,7 +3189,7 @@ onMounted(() => {
   gap: 6px;
   padding: 8px 16px;
   background: white;
-  border: 1px solid rgba(221, 132, 72, 0.3);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.3);
   border-radius: 6px;
   font-size: 14px;
   font-weight: 500;
@@ -3377,7 +3201,7 @@ onMounted(() => {
 
 .btn-batch-action:hover {
   border-color: var(--electric-primary);
-  background: rgba(221, 132, 72, 0.1);
+  background: rgba(var(--color-primary-rgb), 0.1);
 }
 
 .btn-batch-delete {
@@ -3393,11 +3217,8 @@ onMounted(() => {
 /* 批次編輯模式下的任務列表 - 統一列表樣式 */
 .tasks.batch-mode {
   gap: 0;
-  background: white;
-  border-radius: 12px;
-  border: 2px solid rgba(221, 132, 72, 0.15);
   overflow: hidden;
-  box-shadow: 0 2px 8px rgba(221, 132, 72, 0.08);
+  box-shadow: 0 2px 8px rgba(var(--color-primary-rgb), 0.08);
 }
 
 .tasks.batch-mode .task-wrapper {
@@ -3408,13 +3229,13 @@ onMounted(() => {
 }
 
 .tasks.batch-mode .task-wrapper:not(:last-child) .task-item {
-  border-bottom: 1px solid rgba(221, 132, 72, 0.1);
+  border-bottom: 1px solid rgba(var(--color-primary-rgb), 0.1);
 }
 
 .tasks.batch-mode .task-wrapper:hover .task-item {
   box-shadow: none;
   transform: none;
-  background: rgba(221, 132, 72, 0.03);
+  background: rgba(var(--color-primary-rgb), 0.03);
 }
 
 /* 任務項目批次編輯模式 */
@@ -3454,7 +3275,7 @@ onMounted(() => {
   gap: 12px;
   margin-top: 0;
   font-size: 12px;
-  color: rgba(45, 45, 45, 0.6);
+  color: rgba(var(--color-text-dark-rgb), 0.6);
   flex-shrink: 0;
 }
 
@@ -3495,10 +3316,6 @@ onMounted(() => {
 .task-item.batch-edit-mode .task-result {
   display: none;
 }
-
-/* .task-item.batch-edit-mode .task-header .badge {
-  display: none;
-} */
 
 .task-item.batch-edit-mode .badge-diarize {
   display: none;
@@ -3549,14 +3366,6 @@ onMounted(() => {
     flex-direction: column;
     align-items: stretch;
     gap: 16px;
-  }
-
-  .batch-action-group {
-    width: 100%;
-  }
-
-  .batch-tags-section {
-    width: 100%;
   }
 
   .btn-batch-action {

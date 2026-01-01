@@ -81,18 +81,33 @@ class TranscriptionService:
             use_diarization: 是否使用說話者辨識
             max_speakers: 最大講者人數（2-10）
         """
+        # 如果 max_speakers 為 1，視為不需要辨識（只有一個講者無需辨識）
+        if max_speakers == 1:
+            use_diarization = False
+            print(f"ℹ️  [start_transcription] max_speakers=1，停用說話者辨識")
+
         # 在背景執行轉錄
-        self.executor.submit(
-            self._process_transcription,
-            task_id,
-            audio_file_path,
-            language,
-            use_chunking,
-            use_punctuation,
-            punctuation_provider,
-            use_diarization,
-            max_speakers
-        )
+        print(f"🚀 [start_transcription] 準備提交任務 {task_id} 到線程池")
+        print(f"🔧 [start_transcription] 線程池狀態: {self.executor._threads if hasattr(self.executor, '_threads') else 'unknown'}")
+
+        try:
+            future = self.executor.submit(
+                self._process_transcription,
+                task_id,
+                audio_file_path,
+                language,
+                use_chunking,
+                use_punctuation,
+                punctuation_provider,
+                use_diarization,
+                max_speakers
+            )
+            print(f"✅ [start_transcription] 任務 {task_id} 已成功提交到線程池")
+            print(f"🔧 [start_transcription] Future 狀態: {future}")
+        except Exception as e:
+            print(f"❌ [start_transcription] 提交任務到線程池失敗：{e}")
+            import traceback
+            traceback.print_exc()
 
     def _process_transcription(
         self,
@@ -117,65 +132,186 @@ class TranscriptionService:
             use_diarization: 是否使用說話者辨識
             max_speakers: 最大講者人數
         """
+        print(f"🎬 [_process_transcription] 開始處理任務 {task_id}")
+        print(f"🔧 [_process_transcription] 音檔路徑: {audio_file_path}")
+        print(f"🔧 [_process_transcription] 音檔是否存在: {audio_file_path.exists()}")
+
         try:
+            # 更新任務狀態為 processing
+            self.task_service.update_memory_state(task_id, {"status": "processing"})
+
             # 1. 音訊轉換（轉為 WAV 格式）
+            print(f"🔄 [_process_transcription] 開始轉換音檔格式")
             self._update_progress(task_id, "正在轉換音檔格式...", {"audio_converted": False})
             wav_path = self._convert_audio_to_wav(audio_file_path)
+            print(f"✅ [_process_transcription] 音檔轉換完成: {wav_path}")
             self._update_progress(task_id, "音檔轉換完成", {"audio_converted": True})
 
             # 檢查是否已取消
             if self._is_cancelled(task_id):
-                self._cleanup_temp_files(task_id, wav_path)
+                self._cleanup_temp_files(task_id, wav_path, save_audio=False)  # 取消時不保存音檔
+                self.task_service.cleanup_task_memory(task_id)
                 return
 
-            # 2. 執行轉錄
-            if use_chunking:
-                self._update_progress(task_id, "正在分段轉錄音檔...")
-                full_text, segments, detected_language = self.whisper.transcribe_in_chunks(
-                    wav_path,
-                    language=language,
-                    progress_callback=lambda idx, total: self._update_chunk_progress(
-                        task_id, idx, total
+            # 2. 並行執行轉錄和說話者辨識（如果啟用）
+            print(f"🎤 [_process_transcription] 開始並行處理：轉錄 + 說話者辨識")
+
+            # 準備並行任務
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            # 初始化變數
+            full_text = None
+            segments = None
+            detected_language = None
+            diarization_segments = None
+
+            if use_diarization and self.diarization:
+                # 並行模式：同時執行轉錄和說話者辨識
+                self._update_progress(task_id, "正在並行執行轉錄和說話者辨識...", {
+                    "diarization_started": True
+                })
+
+                with ThreadPoolExecutor(max_workers=2) as parallel_executor:
+                    # 提交轉錄任務
+                    transcription_future = parallel_executor.submit(
+                        self._run_transcription,
+                        task_id,
+                        wav_path,
+                        language,
+                        use_chunking
                     )
-                )
+
+                    # 提交說話者辨識任務
+                    diarization_future = parallel_executor.submit(
+                        self._run_diarization,
+                        task_id,
+                        wav_path,
+                        max_speakers
+                    )
+
+                    # 等待兩個任務完成（使用 result() 會阻塞直到完成）
+                    try:
+                        # 並行等待兩個任務
+                        for future in as_completed([transcription_future, diarization_future]):
+                            if future == transcription_future:
+                                full_text, segments, detected_language = future.result()
+                                print(f"✅ [並行] Whisper 轉錄完成 (文字長度: {len(full_text)})")
+                            elif future == diarization_future:
+                                diarization_segments = future.result()
+                                if diarization_segments:
+                                    num_speakers = len(set(s['speaker'] for s in diarization_segments))
+                                    print(f"✅ [並行] 說話者辨識完成，識別到 {num_speakers} 位說話者")
+                                else:
+                                    print(f"⚠️ [並行] 說話者辨識失敗或無結果")
+                    except Exception as e:
+                        print(f"❌ [並行] 並行執行出錯：{e}")
+                        import traceback
+                        traceback.print_exc()
+
+                # 合併結果
+                if diarization_segments and segments:
+                    # 獲取任務類型以決定處理方式
+                    task = self._get_task_sync(task_id)
+                    task_type = task.get("task_type", "paragraph") if task else "paragraph"
+
+                    num_speakers = len(set(s['speaker'] for s in diarization_segments))
+
+                    if task_type == "subtitle":
+                        # 字幕模式：將 speaker 整合到 segments，文字不變
+                        print(f"🎬 [字幕模式] 將說話者資訊整合到 segments...")
+                        print(f"🎬 [字幕模式] 轉錄 segments 數量: {len(segments)}")
+                        print(f"🎬 [字幕模式] 說話者 segments 數量: {len(diarization_segments)}")
+
+                        segments = self.whisper._merge_speaker_to_segments(
+                            segments, diarization_segments
+                        )
+                        # full_text 保持原樣（無說話者標記）
+
+                        print(f"✅ [字幕模式] 已將 {num_speakers} 位說話者資訊加入 segments")
+                        print(f"✅ [字幕模式] Segments 預覽: {segments[0] if segments else 'N/A'}")
+
+                    else:
+                        # 段落模式：合併到文字（現有行為）
+                        print(f"📝 [段落模式] 合併轉錄和說話者辨識到文字...")
+                        print(f"📝 [段落模式] 轉錄 segments 數量: {len(segments)}")
+                        print(f"📝 [段落模式] 說話者 segments 數量: {len(diarization_segments)}")
+
+                        merged_text = self.whisper._merge_transcription_with_diarization(
+                            segments, diarization_segments
+                        )
+
+                        print(f"✅ [段落模式] 合併完成，文字長度: {len(merged_text)}")
+                        print(f"✅ [段落模式] 已合併 {num_speakers} 位說話者到文字")
+                        print(f"✅ [段落模式] 合併文字預覽: {merged_text[:200]}...")
+
+                        full_text = merged_text
+
+                    self._update_progress(task_id, "語者辨識完成", {
+                        "diarization_completed": True,
+                        "num_speakers": num_speakers
+                    })
+                else:
+                    print(f"⚠️ [合併] 無法合併：diarization_segments={diarization_segments is not None}, segments={segments is not None}")
+                    self._update_progress(task_id, "語者辨識失敗，使用原始文字", {
+                        "diarization_failed": True
+                    })
             else:
-                self._update_progress(task_id, "正在轉錄音檔...")
-                full_text, segments, detected_language = self.whisper.transcribe(
+                # 只執行轉錄（無說話者辨識）
+                print(f"🎤 [_process_transcription] 開始 Whisper 轉錄 (chunking={use_chunking})")
+                full_text, segments, detected_language = self._run_transcription(
+                    task_id,
                     wav_path,
-                    language=language
+                    language,
+                    use_chunking
                 )
+
+            print(f"✅ [_process_transcription] 轉錄完成 (文字長度: {len(full_text)}, 語言: {detected_language})")
 
             # 檢查是否已取消
             if self._is_cancelled(task_id):
-                self._cleanup_temp_files(task_id, wav_path)
+                self._cleanup_temp_files(task_id, wav_path, save_audio=False)  # 取消時不保存音檔
+                self.task_service.cleanup_task_memory(task_id)
                 return
 
             # 3. 標點處理（可選）
+            punctuation_model = None
             if use_punctuation:
                 self._update_progress(task_id, "正在添加標點符號...", {
                     "punctuation_started": True
                 })
 
-                punctuated_text = self.punctuation.process(
-                    full_text,
-                    provider=punctuation_provider,
-                    language=detected_language or language or "zh",
-                    progress_callback=lambda idx, total: self._update_punctuation_progress(
-                        task_id, idx, total
+                try:
+                    punctuated_text, punctuation_model = self.punctuation.process(
+                        full_text,
+                        provider=punctuation_provider,
+                        language=detected_language or language or "zh",
+                        progress_callback=lambda idx, total: self._update_punctuation_progress(
+                            task_id, idx, total
+                        )
                     )
-                )
 
-                self._update_progress(task_id, "標點處理完成", {
-                    "punctuation_completed": True
-                })
+                    self._update_progress(task_id, "標點處理完成", {
+                        "punctuation_completed": True,
+                        "punctuation_model": punctuation_model
+                    })
 
-                final_text = punctuated_text
+                    final_text = punctuated_text
+                except Exception as punct_error:
+                    print(f"⚠️ [_process_transcription] 標點處理失敗：{punct_error}")
+                    print(f"   將使用原始轉錄文字（無標點）繼續完成任務")
+                    # 使用原始文字繼續，不中斷整個轉錄流程
+                    final_text = full_text
+                    self._update_progress(task_id, f"標點處理失敗（{str(punct_error)[:100]}），使用原始文字", {
+                        "punctuation_failed": True,
+                        "punctuation_error": str(punct_error)[:200]
+                    })
             else:
                 final_text = full_text
 
             # 檢查是否已取消
             if self._is_cancelled(task_id):
-                self._cleanup_temp_files(task_id, wav_path)
+                self._cleanup_temp_files(task_id, wav_path, save_audio=False)  # 取消時不保存音檔
+                self.task_service.cleanup_task_memory(task_id)
                 return
 
             # 4. 儲存結果
@@ -188,18 +324,29 @@ class TranscriptionService:
                 task_id,
                 result_file_path,
                 segments_file_path,
-                detected_language or language
+                detected_language or language,
+                final_text,  # 传递文本用于计算字数
+                punctuation_model  # 传递标点符号模型信息
             )
 
-            # 6. 清理臨時檔案
+            # 6. 清理臨時檔案（包含保存音檔）
             self._cleanup_temp_files(task_id, wav_path)
+
+            # 7. 清理超出限制的舊音檔（在新音檔保存後才執行）
+            self._cleanup_old_audio_files(task_id)
+
+            # 8. 清理記憶體狀態（在所有檔案操作完成後）
+            self.task_service.cleanup_task_memory(task_id)
+            print(f"🧹 已清理任務 {task_id} 的記憶體狀態", flush=True)
 
             print(f"✅ 任務 {task_id} 完成！")
 
         except Exception as e:
             print(f"❌ 轉錄失敗：{e}")
             self._mark_failed(task_id, str(e))
-            self._cleanup_temp_files(task_id, None)
+            self._cleanup_temp_files(task_id, None, save_audio=False)  # 失敗時不保存音檔
+            self.task_service.cleanup_task_memory(task_id)
+            print(f"🧹 已清理任務 {task_id} 的記憶體狀態", flush=True)
 
     # ========== 私有輔助方法 ==========
 
@@ -277,27 +424,31 @@ class TranscriptionService:
         if extra_fields:
             updates.update(extra_fields)
 
+        print(f"📡 [SSE] 更新進度: {progress_text}", flush=True)
         self.task_service.update_memory_state(task_id, updates)
 
     def _update_chunk_progress(
         self,
         task_id: str,
-        chunk_idx: int,
-        total_chunks: int
+        completed_chunks: int,
+        total_chunks: int,
+        processing_chunks: int = 0
     ) -> None:
         """更新分段轉錄進度
 
         Args:
             task_id: 任務 ID
-            chunk_idx: 當前 chunk 索引
+            completed_chunks: 已完成的 chunk 數量
             total_chunks: 總 chunk 數
+            processing_chunks: 正在處理中的 chunk 數量
         """
         self._update_progress(
             task_id,
-            f"正在轉錄第 {chunk_idx}/{total_chunks} 段...",
+            f"並行轉錄中（已完成 {completed_chunks}/{total_chunks} 段）...",
             {
                 "total_chunks": total_chunks,
-                "completed_chunks": chunk_idx - 1
+                "completed_chunks": completed_chunks,
+                "processing_chunks": processing_chunks
             }
         )
 
@@ -323,12 +474,67 @@ class TranscriptionService:
             }
         )
 
+    def _get_task_sync(self, task_id: str) -> Optional[dict]:
+        """同步獲取任務（避免 event loop 衝突）"""
+        from pymongo import MongoClient
+        import os
+
+        try:
+            # 使用與主應用相同的 MongoDB 配置
+            mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
+            db_name = os.getenv("MONGODB_DB_NAME", "transcriber")
+            client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+            db = client[db_name]
+
+            task = db.tasks.find_one({"_id": task_id})
+            client.close()
+            return task
+        except Exception as e:
+            print(f"⚠️ 同步獲取任務失敗：{e}")
+            return None
+
+    def _update_task_sync(self, task_id: str, updates: dict) -> bool:
+        """同步更新任務（避免 event loop 衝突）
+
+        Returns:
+            bool: 是否更新成功
+        """
+        from pymongo import MongoClient
+        import os
+
+        try:
+            # 創建同步的 MongoDB 客戶端，使用與主應用相同的配置
+            mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
+            db_name = os.getenv("MONGODB_DB_NAME", "transcriber")
+            client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+            db = client[db_name]
+
+            # 添加 updated_at
+            updates["updated_at"] = datetime.utcnow()
+
+            # 執行更新
+            result = db.tasks.update_one(
+                {"_id": task_id},
+                {"$set": updates}
+            )
+
+            print(f"✅ 同步更新任務 {task_id}，修改了 {result.modified_count} 條記錄")
+            client.close()
+            return result.modified_count > 0
+        except Exception as e:
+            print(f"❌ [CRITICAL] 同步更新任務失敗：{e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
     def _mark_completed(
         self,
         task_id: str,
         result_file_path: Path,
         segments_file_path: Path,
-        language: Optional[str]
+        language: Optional[str],
+        transcription_text: str = "",
+        punctuation_model: Optional[str] = None
     ) -> None:
         """標記任務完成
 
@@ -337,43 +543,99 @@ class TranscriptionService:
             result_file_path: 結果檔案路徑
             segments_file_path: Segments 檔案路徑
             language: 偵測到的語言
+            transcription_text: 轉錄文本（用於計算字數）
+            punctuation_model: 使用的標點符號模型
         """
-        # 使用 run_async_in_thread 執行異步方法
         from src.services.utils.async_utils import run_async_in_thread
-        from src.utils.audit_logger import get_audit_logger
 
-        run_async_in_thread(
-            self.task_service.update_task_status(task_id, {
-                "status": "completed",
-                "result_file": str(result_file_path),
-                "result_filename": result_file_path.name,
-                "segments_file": str(segments_file_path),
-                "detected_language": language,
-                "completed_at": datetime.now(TZ_UTC8),
-                "progress": "轉錄完成"
-            })
-        )
+        # 計算字數統計
+        text_length = len(transcription_text)
+        word_count = len(transcription_text.split())
 
-        # 記錄 audit log（轉錄完成）
+        # 準備更新數據
+        update_data = {
+            "status": "completed",
+            "result.transcription_file": str(result_file_path),
+            "result.transcription_filename": result_file_path.name,
+            "result.segments_file": str(segments_file_path),
+            "result.text_length": text_length,  # 字符數
+            "result.word_count": word_count,    # 詞數
+            "config.language": language,
+            "timestamps.completed_at": datetime.now(TZ_UTC8).strftime("%Y-%m-%d %H:%M:%S"),
+            "progress": "轉錄完成"
+        }
+
+        # 如果有標點符號模型信息，保存到 models.punctuation
+        if punctuation_model:
+            update_data["models.punctuation"] = punctuation_model
+
+        # 1. 使用同步方法更新任務狀態
+        self._update_task_sync(task_id, update_data)
+
+        print(f"📊 字數統計：{text_length} 字元，{word_count} 詞")
+
+        # 2. 獲取任務信息並處理配額扣除（使用同步方法）
         try:
-            # 獲取任務信息以取得 user_id
-            task = run_async_in_thread(self.task_service.get_task(task_id))
+            task = self._get_task_sync(task_id)
             if task:
-                user_id = task.get("user", {}).get("user_id") if isinstance(task.get("user"), dict) else None
+                # 提取用戶 ID
+                if isinstance(task.get("user"), dict):
+                    user_id = task["user"].get("user_id")
+                else:
+                    user_id = task.get("user_id")
+
+                # 扣除配額
                 if user_id:
-                    audit_logger = get_audit_logger()
-                    run_async_in_thread(
-                        audit_logger.log_background_task(
-                            log_type="transcription",
-                            action="completed",
-                            user_id=user_id,
-                            task_id=task_id,
-                            status_code=200,
-                            message=f"轉錄完成（語言：{language}）"
+                    try:
+                        audio_duration_seconds = task.get("stats", {}).get("audio_duration_seconds", 0)
+                        if audio_duration_seconds > 0:
+                            # 使用同步方式更新配額
+                            from pymongo import MongoClient
+                            from bson import ObjectId
+                            import os
+
+                            mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
+                            db_name = os.getenv("MONGODB_DB_NAME", "transcriber")
+                            client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+                            db = client[db_name]
+
+                            db.users.update_one(
+                                {"_id": ObjectId(user_id)},
+                                {
+                                    "$inc": {
+                                        "usage.transcriptions": 1,
+                                        "usage.duration_minutes": audio_duration_seconds / 60,
+                                        "usage.total_transcriptions": 1,
+                                        "usage.total_duration_minutes": audio_duration_seconds / 60
+                                    },
+                                    "$set": {
+                                        "updated_at": datetime.utcnow()
+                                    }
+                                }
+                            )
+                            client.close()
+                            print(f"✅ 已扣除配額：用戶 {user_id}，時長 {audio_duration_seconds:.2f} 秒")
+                    except Exception as quota_error:
+                        print(f"⚠️ 扣除配額失敗：{quota_error}")
+
+                    # Audit log 保持異步（較不重要，失敗也沒關係）
+                    try:
+                        from src.utils.audit_logger import get_audit_logger
+                        audit_logger = get_audit_logger()
+                        run_async_in_thread(
+                            audit_logger.log_background_task(
+                                log_type="transcription",
+                                action="completed",
+                                user_id=user_id,
+                                task_id=task_id,
+                                status_code=200,
+                                message=f"轉錄完成（語言：{language}）"
+                            )
                         )
-                    )
+                    except Exception as log_error:
+                        print(f"⚠️ 記錄 audit log 失敗：{log_error}")
         except Exception as e:
-            print(f"⚠️ 記錄 audit log 失敗：{e}")
+            print(f"⚠️ 處理任務完成後續作業失敗：{e}")
 
     def _mark_failed(self, task_id: str, error: str) -> None:
         """標記任務失敗
@@ -382,24 +644,29 @@ class TranscriptionService:
             task_id: 任務 ID
             error: 錯誤訊息
         """
-        from src.services.utils.async_utils import run_async_in_thread
-        from src.utils.audit_logger import get_audit_logger
+        print(f"❌ [_mark_failed] 標記任務 {task_id} 為失敗狀態")
+        print(f"   錯誤信息: {error}")
 
-        run_async_in_thread(
-            self.task_service.update_task_status(task_id, {
-                "status": "failed",
-                "error": error,
-                "progress": f"轉錄失敗：{error}"
-            })
-        )
+        # 使用同步方法更新任務狀態
+        success = self._update_task_sync(task_id, {
+            "status": "failed",
+            "error": error,
+            "progress": f"轉錄失敗：{error}"
+        })
+
+        if not success:
+            print(f"❌ [CRITICAL] 無法將任務 {task_id} 標記為失敗！請檢查 MongoDB 連接")
 
         # 記錄 audit log（轉錄失敗）
         try:
-            # 獲取任務信息以取得 user_id
-            task = run_async_in_thread(self.task_service.get_task(task_id))
+            # 獲取任務信息以取得 user_id（使用同步方法）
+            task = self._get_task_sync(task_id)
             if task:
                 user_id = task.get("user", {}).get("user_id") if isinstance(task.get("user"), dict) else None
                 if user_id:
+                    # Audit log 可以保持異步（較不重要）
+                    from src.services.utils.async_utils import run_async_in_thread
+                    from src.utils.audit_logger import get_audit_logger
                     audit_logger = get_audit_logger()
                     run_async_in_thread(
                         audit_logger.log_background_task(
@@ -426,12 +693,194 @@ class TranscriptionService:
         """
         return self.task_service.is_cancelled(task_id)
 
-    def _cleanup_temp_files(self, task_id: str, wav_path: Optional[Path]) -> None:
+    def _cleanup_old_audio_files(self, task_id: str) -> None:
+        """清理超出限制的舊音檔
+
+        ⚠️ 重要邏輯說明（請勿修改）：
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        【自動清理規則】
+        1. 每個用戶最多保留 4 個音檔
+        2. 超過 4 個時：
+           - 從最舊的開始刪除
+           - 跳過 keep_audio = True 的音檔（用戶手動保留）
+           - 直到剩餘 4 個或無法再刪除為止
+
+        【範例】
+        假設有 5 個音檔：
+        - 音檔1（舊）keep_audio=False → 會被刪除
+        - 音檔2      keep_audio=False → 會被刪除
+        - 音檔3      keep_audio=True  → 跳過（受保護）
+        - 音檔4      keep_audio=False → 保留
+        - 音檔5（新）keep_audio=False → 保留
+        結果：保留音檔 3, 4, 5
+
+        【重要】
+        - keep_audio 不影響音檔是否被保存
+        - 所有音檔都會被保存（見 _cleanup_temp_files）
+        - keep_audio 只影響是否可以被自動刪除
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+        Args:
+            task_id: 當前任務 ID
+        """
+        try:
+            from pymongo import MongoClient
+            import os
+
+            # 獲取當前任務的用戶 ID
+            task = self._get_task_sync(task_id)
+            if not task:
+                return
+
+            if isinstance(task.get("user"), dict):
+                user_id = task["user"].get("user_id")
+            else:
+                user_id = task.get("user_id")
+
+            if not user_id:
+                return
+
+            # 連接數據庫
+            mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
+            db_name = os.getenv("MONGODB_DB_NAME", "transcriber")
+            client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+            db = client[db_name]
+
+            # 查詢該用戶所有有音檔的任務，按創建時間排序
+            # ⚠️ 排除已刪除的任務（deleted: True），已刪除的任務不計入額度
+            tasks_with_audio = list(db.tasks.find({
+                "user.user_id": user_id,
+                "status": "completed",
+                "result.audio_file": {"$exists": True, "$ne": None},
+                "deleted": {"$ne": True}  # 排除已刪除的任務
+            }).sort("timestamps.created_at", 1))  # 1 = 升序（舊到新）
+
+            print(f"🔍 用戶 {user_id} 共有 {len(tasks_with_audio)} 個音檔")
+
+            # 如果超過 4 個，刪除最舊的（跳過勾選保留的）
+            if len(tasks_with_audio) > 4:
+                to_delete_count = len(tasks_with_audio) - 4
+                deleted_count = 0
+
+                for old_task in tasks_with_audio:
+                    if deleted_count >= to_delete_count:
+                        break
+
+                    # 跳過勾選保留的
+                    if old_task.get("keep_audio", False):
+                        print(f"⏭️  跳過任務 {old_task['_id']}（用戶已勾選保留）")
+                        continue
+
+                    # 刪除音檔
+                    audio_file_path = old_task.get("result", {}).get("audio_file")
+                    if audio_file_path:
+                        from pathlib import Path
+                        audio_file = Path(audio_file_path)
+                        if audio_file.exists():
+                            try:
+                                audio_file.unlink()
+                                print(f"🗑️ 已刪除舊音檔：{audio_file_path}")
+                                deleted_count += 1
+
+                                # 更新資料庫，清除音檔路徑
+                                db.tasks.update_one(
+                                    {"_id": old_task["_id"]},
+                                    {"$set": {
+                                        "result.audio_file": None,
+                                        "result.audio_filename": None
+                                    }}
+                                )
+                            except Exception as e:
+                                print(f"⚠️ 刪除音檔失敗：{e}")
+
+                print(f"✅ 自動清理完成，共刪除 {deleted_count} 個舊音檔")
+
+            client.close()
+        except Exception as e:
+            print(f"⚠️ 清理舊音檔時發生錯誤：{e}")
+            import traceback
+            traceback.print_exc()
+
+    def _save_audio_file_sync(self, task_id: str, temp_dir: Path, audio_files: list) -> None:
+        """同步處理音檔保存和更新（避免 event loop 衝突）
+
+        將音檔統一轉換為 MP3 格式以確保瀏覽器相容性
+        """
+        print(f"🔧 [_save_audio_file_sync] 開始處理，audio_files 數量: {len(audio_files)}")
+
+        if not audio_files:
+            print(f"⚠️ [_save_audio_file_sync] 沒有找到音檔文件")
+            return
+
+        try:
+            original_audio = audio_files[0]
+            print(f"🔧 [_save_audio_file_sync] 原始音檔: {original_audio}")
+            print(f"🔧 [_save_audio_file_sync] 音檔是否存在: {original_audio.exists()}")
+
+            uploads_dir = Path("uploads")
+            uploads_dir.mkdir(exist_ok=True)
+
+            # 統一保存為 MP3 格式（瀏覽器相容性最好）
+            permanent_audio = uploads_dir / f"{task_id}.mp3"
+            print(f"🔧 [_save_audio_file_sync] 目標路徑: {permanent_audio}")
+
+            # 如果原始檔案已經是 MP3，直接移動
+            if original_audio.suffix.lower() == '.mp3':
+                shutil.move(str(original_audio), str(permanent_audio))
+                print(f"💾 已保存音檔（直接移動）：{permanent_audio}")
+            else:
+                # 使用 ffmpeg 轉換為 MP3（192kbps，品質良好且檔案大小適中）
+                print(f"🔄 [_save_audio_file_sync] 轉換音檔為 MP3 格式...")
+                result = subprocess.run([
+                    'ffmpeg', '-y', '-i', str(original_audio),
+                    '-acodec', 'libmp3lame',
+                    '-b:a', '192k',  # 192kbps 比特率
+                    '-ar', '44100',  # 44.1kHz 採樣率
+                    str(permanent_audio)
+                ], capture_output=True, text=True)
+
+                if result.returncode != 0:
+                    print(f"❌ ffmpeg 轉換失敗: {result.stderr}")
+                    raise Exception(f"音檔轉換為 MP3 失敗: {result.stderr}")
+
+                print(f"✅ 已轉換並保存音檔：{permanent_audio}")
+
+            # 使用同步方法更新任務的 audio_file 路徑
+            # 保存原始檔名（但副檔名改為 .mp3）
+            original_filename = Path(original_audio.name).stem + ".mp3"
+            self._update_task_sync(task_id, {
+                "result.audio_file": str(permanent_audio),
+                "result.audio_filename": original_filename
+            })
+            print(f"✅ [_save_audio_file_sync] 已更新資料庫")
+        except Exception as e:
+            print(f"❌ [_save_audio_file_sync] 保存音檔時發生錯誤: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _cleanup_temp_files(self, task_id: str, wav_path: Optional[Path], save_audio: bool = True) -> None:
         """清理臨時檔案
+
+        ⚠️ 重要邏輯說明（請勿修改）：
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        1. 【只有成功的轉錄會保存音檔】
+           - save_audio=True：保存音檔（任務成功完成）
+           - save_audio=False：不保存音檔（任務失敗或取消）
+
+        2. 【keep_audio 的作用】
+           - False（默認）：可以被自動清理機制刪除
+           - True（用戶勾選）：受保護，不會被自動刪除
+
+        3. 【自動清理機制】
+           - 在轉錄完成後由 _cleanup_old_audio_files() 執行
+           - 用戶超過 4 個音檔時，從最舊的開始刪除
+           - 跳過 keep_audio = True 的音檔
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
         Args:
             task_id: 任務 ID
             wav_path: WAV 檔案路徑（可選）
+            save_audio: 是否保存音檔（True=成功完成，False=失敗/取消）
         """
         # 清理 WAV 檔案（如果是轉換生成的）
         if wav_path and wav_path.exists():
@@ -441,40 +890,31 @@ class TranscriptionService:
             except Exception as e:
                 print(f"⚠️ 清理 WAV 檔案失敗：{e}")
 
-        # 檢查是否需要保留音檔
-        from src.services.utils.async_utils import run_async_in_thread
-        task = run_async_in_thread(self.task_service.get_task(task_id))
-        keep_audio = task.get("keep_audio", False) if task else False
-
         temp_dir = self.task_service.get_temp_dir(task_id)
         if temp_dir and temp_dir.exists():
-            if keep_audio:
-                # 保留音檔：將原始音檔移動到永久儲存目錄
+            print(f"📁 臨時目錄: {temp_dir}")
+            audio_files = list(temp_dir.glob("input.*"))
+            print(f"🎵 找到的音檔: {[f.name for f in audio_files]}")
+
+            # 只有在任務成功完成時才保存音檔
+            if save_audio:
+                # 檢查是否需要保留音檔（使用同步方法）
+                task = self._get_task_sync(task_id)
+                keep_audio = task.get("keep_audio", False) if task else False
+
+                print(f"🔍 任務 {task_id} 的 keep_audio 設定: {keep_audio}")
+
                 try:
-                    uploads_dir = Path("uploads")
-                    uploads_dir.mkdir(exist_ok=True)
-
-                    # 尋找原始音檔（通常是 input.* 格式）
-                    audio_files = list(temp_dir.glob("input.*"))
-                    if audio_files:
-                        original_audio = audio_files[0]
-                        permanent_audio = uploads_dir / f"{task_id}{original_audio.suffix}"
-
-                        # 移動音檔到永久目錄
-                        shutil.move(str(original_audio), str(permanent_audio))
-                        print(f"💾 已保存音檔：{permanent_audio}")
-
-                        # 更新任務的 audio_file 路徑
-                        run_async_in_thread(
-                            self.task_service.update_task_status(task_id, {
-                                "audio_file": str(permanent_audio),
-                                "audio_filename": original_audio.name
-                            })
-                        )
+                    # 使用同步方法處理音檔保存（避免 event loop 衝突）
+                    self._save_audio_file_sync(task_id, temp_dir, audio_files)
 
                     # 清理臨時目錄（不包含已移動的音檔）
                     shutil.rmtree(temp_dir)
-                    print(f"🗑️ 已清理臨時目錄：{temp_dir.name}")
+
+                    if keep_audio:
+                        print(f"🗑️ 已清理臨時目錄，音檔已保存並標記為受保護")
+                    else:
+                        print(f"🗑️ 已清理臨時目錄，音檔已保存（可被自動清理）")
                 except Exception as e:
                     print(f"⚠️ 保存音檔失敗：{e}")
                     # 如果保存失敗，還是清理臨時目錄
@@ -483,9 +923,85 @@ class TranscriptionService:
                     except:
                         pass
             else:
-                # 不保留音檔：直接刪除臨時目錄
+                # 任務失敗或取消，直接刪除臨時目錄和音檔
+                print(f"⚠️ 任務未成功完成，不保存音檔")
                 try:
                     shutil.rmtree(temp_dir)
-                    print(f"🗑️ 已清理臨時目錄（含音檔）：{temp_dir.name}")
+                    print(f"🗑️ 已清理臨時目錄和音檔（任務失敗/取消）")
                 except Exception as e:
                     print(f"⚠️ 清理臨時目錄失敗：{e}")
+
+    def _run_transcription(
+        self,
+        task_id: str,
+        wav_path: Path,
+        language: Optional[str],
+        use_chunking: bool
+    ) -> tuple:
+        """執行 Whisper 轉錄（可並行執行）
+
+        Args:
+            task_id: 任務 ID
+            wav_path: WAV 檔案路徑
+            language: 語言代碼
+            use_chunking: 是否使用分段模式
+
+        Returns:
+            (full_text, segments, detected_language)
+        """
+        if use_chunking:
+            self._update_progress(task_id, "正在並行分段轉錄音檔（多進程）...")
+            full_text, segments, detected_language = self.whisper.transcribe_in_chunks_parallel(
+                wav_path,
+                language=language,
+                max_workers=3,
+                progress_callback=lambda completed, total, processing=0: self._update_chunk_progress(
+                    task_id, completed, total, processing
+                ),
+                cancel_check=lambda: self._is_cancelled(task_id)
+            )
+        else:
+            self._update_progress(task_id, "正在轉錄音檔...")
+            full_text, segments, detected_language = self.whisper.transcribe(
+                wav_path,
+                language=language
+            )
+        return full_text, segments, detected_language
+
+    def _run_diarization(
+        self,
+        task_id: str,
+        wav_path: Path,
+        max_speakers: Optional[int]
+    ) -> Optional[list]:
+        """執行說話者辨識（可並行執行）
+
+        Args:
+            task_id: 任務 ID
+            wav_path: WAV 檔案路徑
+            max_speakers: 最大講者人數
+
+        Returns:
+            diarization_segments 或 None（失敗時）
+        """
+        try:
+            self._update_progress(task_id, "正在進行說話者辨識...", {
+                "diarization_started": True
+            })
+            print(f"🔊 [並行] 開始說話者辨識")
+            print(f"🔊 [並行] max_speakers 參數: {max_speakers}")
+
+            diarization_segments = self.diarization.perform_diarization(
+                wav_path,
+                max_speakers=max_speakers
+            )
+
+            return diarization_segments
+
+        except Exception as diarize_error:
+            print(f"⚠️ [並行] 說話者辨識失敗：{diarize_error}")
+            self._update_progress(task_id, f"語者辨識失敗（{str(diarize_error)[:100]}）", {
+                "diarization_failed": True,
+                "diarization_error": str(diarize_error)[:200]
+            })
+            return None

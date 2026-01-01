@@ -27,6 +27,11 @@ class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
 
+class ResendVerificationRequest(BaseModel):
+    """重新發送驗證郵件請求"""
+    email: EmailStr
+
+
 class UserResponse(BaseModel):
     """用戶資訊響應"""
     id: str

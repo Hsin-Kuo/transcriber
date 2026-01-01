@@ -15,10 +15,18 @@ from datetime import datetime, timezone, timedelta
 import shutil
 import asyncio
 import gc
+import os
 
 from src.database.repositories.task_repo import TaskRepository
 from src.services.utils.async_utils import get_current_time
 from src.utils import shared_state
+
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    print("⚠️ psutil 未安裝，孤立進程清理功能不可用")
 
 # 定義只需存在記憶體中的欄位（執行期間才有用，完成後無意義）
 MEMORY_ONLY_FIELDS = {
@@ -490,8 +498,19 @@ class TaskService:
             return 100.0
 
         progress = 0.0
+
+        # 判斷是否為分段模式：優先檢查 total_chunks，其次檢查 chunks 陣列，最後檢查配置
+        total_chunks = task_data.get("total_chunks", 0)
+        completed_chunks_count = task_data.get("completed_chunks", 0)
+        processing_chunks_count = task_data.get("processing_chunks", 0)
         chunks = task_data.get("chunks", [])
-        is_chunked = len(chunks) > 0  # 是否使用分段模式
+
+        # 分段模式判斷：
+        # 1. 有 total_chunks 或 chunks 陣列不為空
+        # 2. 或者配置中啟用了分段模式（config.chunk_audio = true）
+        config = task_data.get("config", {})
+        chunk_audio = config.get("chunk_audio", False)
+        is_chunked = total_chunks > 0 or len(chunks) > 0 or chunk_audio
 
         # 1. 音訊轉檔完成：5%
         if task_data.get("audio_converted", False):
@@ -500,20 +519,35 @@ class TaskService:
         # 2. 轉錄階段
         if is_chunked:
             # 分段模式：audio_chunking(5%) + transcription(77%)
-            if task_data.get("chunks_created", False):
+
+            # 音訊切分完成（分段模式特有階段）
+            # 當開始轉錄時（有 completed_chunks 或 chunks 資訊），代表切分已完成
+            if completed_chunks_count > 0 or len(chunks) > 0 or task_data.get("chunks_created", False):
                 progress += PROGRESS_WEIGHTS["audio_chunking"]
 
             # 根據實際 chunks 數量分配轉錄進度
-            num_chunks = len(chunks)
-            if num_chunks > 0:
+            if total_chunks > 0:
+                # 使用 total_chunks 和 completed_chunks 計算（新的分段模式）
+                chunk_weight = PROGRESS_WEIGHTS["transcription"] / total_chunks
+                # 已完成的 chunk 貢獻 100% 的權重
+                progress += completed_chunks_count * chunk_weight
+                # 正在處理中的 chunk 貢獻 50% 的權重
+                progress += processing_chunks_count * (chunk_weight * 0.5)
+            elif len(chunks) > 0:
+                # 使用 chunks 陣列計算（舊的分段模式，如果有的話）
+                num_chunks = len(chunks)
                 completed_chunks = sum(1 for c in chunks if c.get("status") == "completed")
                 processing_chunks = sum(1 for c in chunks if c.get("status") == "processing")
 
-                # 每個 chunk 完成貢獻：77% / num_chunks
-                # 每個 chunk 進行中貢獻：50% 的完成權重
                 chunk_weight = PROGRESS_WEIGHTS["transcription"] / num_chunks
                 progress += completed_chunks * chunk_weight
                 progress += processing_chunks * (chunk_weight * 0.5)
+            elif task_data.get("audio_converted", False):
+                # 分段模式但還沒有 chunk 資訊（轉錄剛開始）
+                # 給予音訊切分階段的完成進度 + 轉錄開始的初始進度
+                progress += PROGRESS_WEIGHTS["audio_chunking"]
+                # 轉錄剛開始，給予 10% 的轉錄進度
+                progress += PROGRESS_WEIGHTS["transcription"] * 0.1
         else:
             # 非分段模式：transcription(82%) = audio_chunking(5%) + transcription(77%)
             # 簡單判斷：如果已經開始標點，說明轉錄完成
@@ -653,3 +687,235 @@ class TaskService:
 
         except Exception as e:
             print(f"⚠️  清理孤立任務失敗: {e}")
+
+    async def cleanup_orphaned_processes(self) -> None:
+        """清理孤立的 multiprocessing worker 進程
+
+        檢測並終止沒有對應活動任務的 worker 進程
+        """
+        if not PSUTIL_AVAILABLE:
+            return
+
+        try:
+            current_pid = os.getpid()
+            current_process = psutil.Process(current_pid)
+
+            # 查找所有子進程（包括遞歸子進程）
+            children = current_process.children(recursive=True)
+
+            if not children:
+                return
+
+            # 查找所有處於活動狀態的任務
+            active_tasks = await self.task_repo.collection.find(
+                {"status": {"$in": ["pending", "processing"]}},
+                {"task_id": 1}
+            ).to_list(length=100)
+
+            active_task_count = len(active_tasks)
+
+            # 找出 multiprocessing worker 進程
+            orphaned_workers = []
+            for child in children:
+                try:
+                    cmdline = " ".join(child.cmdline())
+                    # 檢測是否為 multiprocessing worker
+                    if "multiprocessing" in cmdline and "spawn_main" in cmdline:
+                        # 如果沒有活動任務，這些 worker 就是孤立的
+                        if active_task_count == 0:
+                            orphaned_workers.append(child)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+
+            if orphaned_workers:
+                print(f"⚠️  發現 {len(orphaned_workers)} 個孤立的 worker 進程（無活動任務）")
+
+                for worker in orphaned_workers:
+                    try:
+                        pid = worker.pid
+                        cpu_percent = worker.cpu_percent()
+                        memory_mb = worker.memory_info().rss / 1024 / 1024
+
+                        print(f"   🗑️  終止孤立 worker: PID {pid} (CPU: {cpu_percent:.1f}%, Memory: {memory_mb:.1f}MB)")
+
+                        # 先嘗試優雅終止
+                        worker.terminate()
+
+                        # 等待最多 3 秒
+                        try:
+                            worker.wait(timeout=3)
+                            print(f"   ✓ Worker {pid} 已終止")
+                        except psutil.TimeoutExpired:
+                            # 強制殺掉
+                            print(f"   ⚠️  Worker {pid} 未響應，強制終止...")
+                            worker.kill()
+                            worker.wait(timeout=1)
+                            print(f"   ✓ Worker {pid} 已強制終止")
+
+                    except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                        print(f"   ⚠️  無法終止進程 {worker.pid}: {e}")
+
+                print(f"✅ 孤立進程清理完成，共終止 {len(orphaned_workers)} 個 worker")
+
+        except Exception as e:
+            print(f"⚠️  清理孤立進程失敗: {e}")
+
+    async def periodic_orphaned_process_cleanup(self) -> None:
+        """定期清理孤立的 worker 進程（背景任務）
+
+        每 5 分鐘執行一次
+        """
+        if not PSUTIL_AVAILABLE:
+            print("⚠️  psutil 不可用，跳過孤立進程清理")
+            return
+
+        print("🚀 啟動孤立進程定期清理器...")
+
+        while True:
+            try:
+                # 每 5 分鐘執行一次
+                await asyncio.sleep(300)
+
+                print("🧹 執行定期孤立進程清理...")
+                await self.cleanup_orphaned_processes()
+
+            except Exception as e:
+                print(f"⚠️  定期孤立進程清理失敗: {e}")
+
+    # ========== 任務隊列管理 ==========
+
+    async def count_processing_tasks(self) -> int:
+        """計算當前正在處理的任務數量
+
+        Returns:
+            正在處理的任務數量
+        """
+        try:
+            count = await self.task_repo.collection.count_documents(
+                {"status": "processing"}
+            )
+            return count
+        except Exception as e:
+            print(f"⚠️  計算處理中任務數量失敗: {e}")
+            return 0
+
+    async def count_pending_tasks(self) -> int:
+        """計算當前等待中的任務數量
+
+        Returns:
+            等待中的任務數量
+        """
+        try:
+            count = await self.task_repo.collection.count_documents(
+                {"status": "pending"}
+            )
+            return count
+        except Exception as e:
+            print(f"⚠️  計算等待中任務數量失敗: {e}")
+            return 0
+
+    async def get_next_pending_task(self) -> Optional[Dict[str, Any]]:
+        """獲取下一個等待處理的任務（按創建時間排序）
+
+        Returns:
+            下一個待處理的任務，如果沒有則返回 None
+        """
+        try:
+            task = await self.task_repo.collection.find_one(
+                {"status": "pending"},
+                sort=[("timestamps.created_at", 1)]  # 按創建時間升序
+            )
+            return task
+        except Exception as e:
+            print(f"⚠️  獲取下一個待處理任務失敗: {e}")
+            return None
+
+    async def process_pending_queue(self, transcription_service, max_concurrent: int = 2):
+        """後台隊列處理器：自動處理 pending 任務
+
+        定期檢查隊列，當有空閒時自動啟動待處理任務
+
+        Args:
+            transcription_service: TranscriptionService 實例
+            max_concurrent: 最大並發數（默認 2）
+        """
+        print("🚀 啟動任務隊列處理器...")
+
+        while True:
+            try:
+                # 每 5 秒檢查一次隊列
+                await asyncio.sleep(5)
+
+                # 檢查當前處理中的任務數
+                processing_count = await self.count_processing_tasks()
+
+                # 如果有空閒，處理下一個任務
+                if processing_count < max_concurrent:
+                    pending_task = await self.get_next_pending_task()
+
+                    if pending_task:
+                        task_id = pending_task.get("task_id")
+                        print(f"📋 從隊列取出任務：{task_id}")
+
+                        # 立即將任務標記為 processing，防止被重複取出
+                        await self.task_repo.update(task_id, {
+                            "status": "processing",
+                            "updated_at": get_current_time()
+                        })
+                        print(f"🔄 任務 {task_id} 狀態已更新為 processing")
+
+                        # 獲取任務配置和文件路徑
+                        config = pending_task.get("config", {})
+                        temp_dir_path = self._temp_dirs.get(task_id)
+
+                        if not temp_dir_path or not temp_dir_path.exists():
+                            print(f"⚠️  任務 {task_id} 的臨時文件不存在，標記為失敗")
+                            await self.task_repo.update(task_id, {
+                                "status": "failed",
+                                "error": "音檔文件已遺失",
+                                "updated_at": get_current_time()
+                            })
+                            continue
+
+                        # 找到音檔文件
+                        audio_files = list(temp_dir_path.glob("input.*"))
+                        if not audio_files:
+                            print(f"⚠️  任務 {task_id} 找不到音檔文件")
+                            await self.task_repo.update(task_id, {
+                                "status": "failed",
+                                "error": "音檔文件已遺失",
+                                "updated_at": get_current_time()
+                            })
+                            continue
+
+                        audio_file_path = audio_files[0]
+
+                        # 啟動轉錄
+                        use_punctuation = config.get("punct_provider", "none") != "none"
+                        language_code = config.get("language")
+                        if language_code == "auto":
+                            language_code = None
+
+                        try:
+                            await transcription_service.start_transcription(
+                                task_id=task_id,
+                                audio_file_path=audio_file_path,
+                                language=language_code,
+                                use_chunking=config.get("chunk_audio", True),
+                                use_punctuation=use_punctuation,
+                                punctuation_provider=config.get("punct_provider", "gemini"),
+                                use_diarization=config.get("diarize", False),
+                                max_speakers=config.get("max_speakers")
+                            )
+
+                            print(f"✅ 任務 {task_id} 已從隊列啟動處理")
+                        except Exception as e:
+                            print(f"❌ 啟動任務 {task_id} 失敗: {e}")
+                            await self.task_repo.update(task_id, {
+                                "status": "failed",
+                                "error": f"啟動失敗: {str(e)}",
+                                "updated_at": get_current_time()
+                            })
+
+            except Exception as e:
+                print(f"⚠️  隊列處理器錯誤: {e}")

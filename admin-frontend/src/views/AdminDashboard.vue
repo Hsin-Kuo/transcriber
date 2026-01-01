@@ -95,32 +95,97 @@
       <!-- 模型使用統計 -->
       <div class="stat-card wide">
         <h2>🤖 模型使用統計</h2>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>模型名稱</th>
-              <th>使用次數</th>
-              <th>總 Token</th>
-              <th>佔比</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="model in stats.model_usage" :key="model.model">
-              <td>{{ model.model }}</td>
-              <td>{{ model.count }}</td>
-              <td>{{ formatNumber(model.total_tokens) }}</td>
-              <td>
-                <div class="progress-bar">
-                  <div
-                    class="progress-fill"
-                    :style="{width: `${(model.count / stats.overview.total_tasks * 100).toFixed(1)}%`}"
-                  ></div>
-                  <span class="progress-text">{{ (model.count / stats.overview.total_tasks * 100).toFixed(1) }}%</span>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+
+        <!-- 標點符號模型 -->
+        <div v-if="stats.model_usage.punctuation && stats.model_usage.punctuation.length > 0" class="model-section">
+          <h3 class="model-type-title">📝 標點符號模型</h3>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>模型名稱</th>
+                <th>使用次數</th>
+                <th>佔比</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="model in stats.model_usage.punctuation" :key="'punct-' + model.model">
+                <td>{{ model.model }}</td>
+                <td>{{ model.count }}</td>
+                <td>
+                  <div class="progress-bar">
+                    <div
+                      class="progress-fill"
+                      :style="{width: `${(model.count / stats.overview.total_tasks * 100).toFixed(1)}%`}"
+                    ></div>
+                    <span class="progress-text">{{ (model.count / stats.overview.total_tasks * 100).toFixed(1) }}%</span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 轉錄模型 -->
+        <div v-if="stats.model_usage.transcription && stats.model_usage.transcription.length > 0" class="model-section">
+          <h3 class="model-type-title">🎙️ 轉錄模型</h3>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>模型名稱</th>
+                <th>使用次數</th>
+                <th>佔比</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="model in stats.model_usage.transcription" :key="'trans-' + model.model">
+                <td>{{ model.model }}</td>
+                <td>{{ model.count }}</td>
+                <td>
+                  <div class="progress-bar">
+                    <div
+                      class="progress-fill"
+                      :style="{width: `${(model.count / stats.overview.total_tasks * 100).toFixed(1)}%`}"
+                    ></div>
+                    <span class="progress-text">{{ (model.count / stats.overview.total_tasks * 100).toFixed(1) }}%</span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 說話者辨識模型 -->
+        <div v-if="stats.model_usage.diarization && stats.model_usage.diarization.length > 0" class="model-section">
+          <h3 class="model-type-title">👥 說話者辨識模型</h3>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>模型名稱</th>
+                <th>使用次數</th>
+                <th>佔比</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="model in stats.model_usage.diarization" :key="'diar-' + model.model">
+                <td>{{ model.model }}</td>
+                <td>{{ model.count }}</td>
+                <td>
+                  <div class="progress-bar">
+                    <div
+                      class="progress-fill"
+                      :style="{width: `${(model.count / stats.overview.total_tasks * 100).toFixed(1)}%`}"
+                    ></div>
+                    <span class="progress-text">{{ (model.count / stats.overview.total_tasks * 100).toFixed(1) }}%</span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div v-if="!hasAnyModelUsage" class="no-data">
+          暫無模型使用資料
+        </div>
       </div>
 
       <!-- 標點服務使用統計 -->
@@ -200,7 +265,11 @@ const stats = ref({
     tasks_with_tokens: 0,
     avg_tokens_per_task: 0
   },
-  model_usage: [],
+  model_usage: {
+    punctuation: [],
+    transcription: [],
+    diarization: []
+  },
   daily_stats: [],
   top_users: [],
   performance: {
@@ -225,6 +294,13 @@ const estimatedCost = computed(() => {
 // 計算每日最大任務數（用於圖表縮放）
 const maxDailyTasks = computed(() => {
   return Math.max(...stats.value.daily_stats.map(d => d.tasks_count), 1)
+})
+
+// 檢查是否有任何模型使用資料
+const hasAnyModelUsage = computed(() => {
+  return (stats.value.model_usage.punctuation && stats.value.model_usage.punctuation.length > 0) ||
+         (stats.value.model_usage.transcription && stats.value.model_usage.transcription.length > 0) ||
+         (stats.value.model_usage.diarization && stats.value.model_usage.diarization.length > 0)
 })
 
 // 獲取統計資料
@@ -601,5 +677,30 @@ onMounted(() => {
   .bar-label {
     font-size: 0.6em;
   }
+}
+
+/* 模型使用統計區塊 */
+.model-section {
+  margin-bottom: 30px;
+}
+
+.model-section:last-child {
+  margin-bottom: 0;
+}
+
+.model-type-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--neu-primary);
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid rgba(163, 177, 198, 0.3);
+}
+
+.no-data {
+  text-align: center;
+  padding: 30px;
+  color: var(--neu-text-light);
+  font-style: italic;
 }
 </style>

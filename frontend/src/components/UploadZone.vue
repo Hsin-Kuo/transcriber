@@ -29,16 +29,13 @@
           d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
         />
       </svg>
-      <h3>Click to upload or drag and drop</h3>
-      <p>Support M4A, MP3, WAV, MP4 and other audio formats</p>
-      <button class="btn btn-primary" @click.stop="triggerFileInput">
-        Choose File
-      </button>
+      <h3>{{ $t('uploadZone.clickToUpload') }}</h3>
+      <p>{{ $t('uploadZone.supportedFormats') }}</p>
     </div>
 
     <div v-else class="uploading-content">
       <div class="spinner-large"></div>
-      <p>Uploading file...</p>
+      <p>{{ $t('uploadZone.uploadingFile') }}</p>
     </div>
   </div>
 </template>
@@ -68,7 +65,7 @@ function handleFileChange(event) {
   const file = event.target.files?.[0]
   if (file) {
     emit('file-selected', file)
-    event.target.value = '' // 重置 input
+    event.target.value = '' // Reset input
   }
 }
 
@@ -85,14 +82,22 @@ function handleDrop(event) {
 
 <style scoped>
 .upload-zone {
-  margin-bottom: 24px;
+  margin: 24px auto;
   padding: 60px 20px;
+  max-width: 800px;
   text-align: center;
   cursor: pointer;
   transition: all 0.3s ease;
-  background: var(--neu-bg);
-  border-radius: 20px;
-  box-shadow: var(--neu-shadow-inset);
+  background: var(--upload-bg);
+  clip-path: polygon(
+    60px 0,
+    100% 0,
+    100% calc(100% - 60px),
+    calc(100% - 60px) 100%,
+    0 100%,
+    0 60px
+  );
+  position: relative;
 }
 
 .upload-zone:hover:not(.uploading) {
@@ -121,21 +126,27 @@ function handleDrop(event) {
   width: 64px;
   height: 64px;
   margin: 0 auto 20px;
-  color: var(--neu-primary);
+  color: var(--nav-recent-bg);
   filter: drop-shadow(0 2px 8px rgba(163, 177, 198, 0.3));
+  position: relative;
+  z-index: 1;
 }
 
 .upload-content h3 {
   font-size: 20px;
-  color: var(--neu-text);
+  color: var(--nav-text);
   margin-bottom: 10px;
   font-weight: 700;
+  position: relative;
+  z-index: 1;
 }
 
 .upload-content p {
-  color: var(--neu-text-light);
+  color: var(--nav-active-bg);
   margin-bottom: 24px;
   font-size: 14px;
+  position: relative;
+  z-index: 1;
 }
 
 .uploading-content {
@@ -143,6 +154,8 @@ function handleDrop(event) {
   flex-direction: column;
   align-items: center;
   gap: 16px;
+  position: relative;
+  z-index: 1;
 }
 
 .spinner-large {

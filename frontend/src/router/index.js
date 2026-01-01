@@ -7,6 +7,7 @@ import UserSettingsView from '../views/UserSettingsView.vue'
 import TranscriptDetailView from '../views/TranscriptDetailView.vue'
 import LoginView from '../views/auth/LoginView.vue'
 import RegisterView from '../views/auth/RegisterView.vue'
+import VerifyEmailView from '../views/auth/VerifyEmailView.vue'
 
 const routes = [
   {
@@ -69,6 +70,15 @@ const routes = [
     component: RegisterView,
     meta: {
       title: '註冊',
+      guest: true
+    }
+  },
+  {
+    path: '/verify-email',
+    name: 'verifyEmail',
+    component: VerifyEmailView,
+    meta: {
+      title: 'Email 驗證',
       guest: true
     }
   }

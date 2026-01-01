@@ -26,9 +26,18 @@ else
 fi
 
 if ! ps -p $PID > /dev/null 2>&1; then
-    echo "⚠️  進程 $PID 不存在，可能已停止"
+    echo "⚠️  進程 $PID 不存在，清理 PID 檔案"
     [ -f "$PID_FILE" ] && rm "$PID_FILE"
-    exit 1
+
+    # 再次嘗試查找實際運行的進程
+    echo "🔍 查找實際運行的 uvicorn 進程..."
+    PID=$(ps aux | grep "[u]vicorn src.main:app" | awk '{print $2}' | head -1)
+
+    if [ -z "$PID" ]; then
+        echo "✅ 沒有運行中的後端服務"
+        exit 0
+    fi
+    echo "✅ 找到運行中的進程：$PID"
 fi
 
 echo "🛑 正在停止後端服務 (PID: $PID)..."

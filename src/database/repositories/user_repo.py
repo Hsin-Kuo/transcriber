@@ -28,6 +28,18 @@ class UserRepository:
         """根據 Email 獲取用戶"""
         return await self.collection.find_one({"email": email})
 
+    async def get_by_verification_token(self, token: str) -> Optional[Dict[str, Any]]:
+        """根據驗證 token 獲取用戶"""
+        return await self.collection.find_one({"verification_token": token})
+
+    async def delete(self, user_id: str) -> bool:
+        """刪除用戶"""
+        try:
+            result = await self.collection.delete_one({"_id": ObjectId(user_id)})
+            return result.deleted_count > 0
+        except:
+            return False
+
     async def update(self, user_id: str, updates: Dict[str, Any]) -> bool:
         """更新用戶資料"""
         updates["updated_at"] = datetime.utcnow()

@@ -46,7 +46,7 @@ class PunctuationProcessor:
         language: str = "zh",
         chunk_size: Optional[int] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None
-    ) -> str:
+    ) -> Tuple[str, str]:
         """處理文字，添加標點符號和分段
 
         Args:
@@ -57,7 +57,7 @@ class PunctuationProcessor:
             progress_callback: 進度回調函數 callback(current_chunk, total_chunks)
 
         Returns:
-            處理後的文字
+            (處理後的文字, 使用的模型名稱) 元組
         """
         provider = provider or self.default_provider
 
@@ -77,7 +77,7 @@ class PunctuationProcessor:
         self,
         text: str,
         language: str = "zh"
-    ) -> str:
+    ) -> Tuple[str, str]:
         """使用 OpenAI 添加標點符號
 
         Args:
@@ -85,7 +85,7 @@ class PunctuationProcessor:
             language: 語言代碼
 
         Returns:
-            處理後的文字
+            (處理後的文字, 使用的模型名稱) 元組
         """
         from openai import OpenAI
 
@@ -112,7 +112,7 @@ class PunctuationProcessor:
             completion = resp.usage.completion_tokens
             print(f"📊 Token 使用: {total} (輸入: {prompt}, 輸出: {completion})")
 
-        return result
+        return result, self.openai_model
 
     def _punctuate_with_gemini(
         self,
@@ -120,7 +120,7 @@ class PunctuationProcessor:
         language: str = "zh",
         chunk_size: Optional[int] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None
-    ) -> str:
+    ) -> Tuple[str, str]:
         """使用 Google Gemini 添加標點符號（支援長文本分段處理）
 
         Args:
@@ -130,7 +130,7 @@ class PunctuationProcessor:
             progress_callback: 進度回調函數
 
         Returns:
-            處理後的文字
+            (處理後的文字, 使用的模型名稱) 元組
         """
         import google.generativeai as genai
 
@@ -145,7 +145,8 @@ class PunctuationProcessor:
         if len(text) <= chunk_size:
             system_msg, user_msg = self._get_punctuation_prompt(language, text)
             prompt = f"{system_msg}\n\n{user_msg}"
-            return self._call_gemini_with_retry(prompt)
+            result, model_used = self._call_gemini_with_retry(prompt)
+            return result, model_used
 
         # 長文本：分段處理
         print(f"📝 文字較長（{len(text)} 字），將分段處理（每段約 {chunk_size} 字）...")
@@ -155,6 +156,7 @@ class PunctuationProcessor:
         print(f"🔄 分為 {total_chunks} 段處理...")
 
         results = []
+        model_used = None
         for chunk_idx, chunk_text in enumerate(chunks, start=1):
             print(f"🎯 處理第 {chunk_idx}/{total_chunks} 段...")
 
@@ -169,17 +171,21 @@ class PunctuationProcessor:
             prompt = f"{system_msg}\n\n{user_msg}"
 
             # 調用 Gemini
-            result = self._call_gemini_with_retry(prompt)
+            result, chunk_model = self._call_gemini_with_retry(prompt)
             results.append(result)
 
+            # 記錄使用的模型（使用第一個成功的模型）
+            if model_used is None:
+                model_used = chunk_model
+
         # 合併結果
-        return "\n\n".join(results)
+        return "\n\n".join(results), model_used or self.gemini_model
 
     def _call_gemini_with_retry(
         self,
         prompt: str,
         max_retries: Optional[int] = None
-    ) -> str:
+    ) -> Tuple[str, str]:
         """調用 Gemini API，支援自動重試和模型備援
 
         Args:
@@ -187,7 +193,7 @@ class PunctuationProcessor:
             max_retries: 最大重試次數
 
         Returns:
-            處理後的文字
+            (處理後的文字, 使用的模型名稱) 元組
 
         Raises:
             RuntimeError: 所有 API Keys 和備援模型都失敗
@@ -236,7 +242,7 @@ class PunctuationProcessor:
                     completion = getattr(resp.usage_metadata, 'candidates_token_count', 0)
                     print(f"📊 Token 使用: {total} (輸入: {prompt_tokens}, 輸出: {completion})")
 
-                return result
+                return result, current_model
 
             except Exception as e:
                 last_error = e
@@ -309,6 +315,7 @@ class PunctuationProcessor:
             user_msg = (
                 "請將以下『中文逐字稿』加上適當標點符號並合理分段。"
                 "不要省略或添加內容，不要意譯，保留固有名詞與數字。"
+                "**重要：如果文字中有說話者標籤（例如 [SPEAKER_00]、[Speaker A] 等），請完整保留這些標籤，不要修改或刪除。**"
                 f"輸出純文字即可：\n\n{text}"
             )
         elif language == "en":
@@ -316,6 +323,7 @@ class PunctuationProcessor:
             user_msg = (
                 "Please add appropriate punctuation and paragraphing to the following English transcript. "
                 "Do not omit or add content, do not paraphrase, preserve proper nouns and numbers. "
+                "**Important: If the text contains speaker labels (e.g., [SPEAKER_00], [Speaker A]), preserve them completely without modification or removal.**"
                 f"Output plain text only:\n\n{text}"
             )
         elif language == "ja":
@@ -323,6 +331,7 @@ class PunctuationProcessor:
             user_msg = (
                 "以下の日本語文字起こしに適切な句読点と段落を追加してください。"
                 "内容の省略や追加はせず、意訳せず、固有名詞と数字はそのまま保持してください。"
+                "**重要：話者ラベル（例：[SPEAKER_00]、[Speaker A]など）が含まれている場合は、完全に保持し、変更や削除をしないでください。**"
                 f"プレーンテキストのみ出力してください：\n\n{text}"
             )
         elif language == "ko":
@@ -330,6 +339,7 @@ class PunctuationProcessor:
             user_msg = (
                 "다음 한국어 전사에 적절한 구두점과 단락을 추가해주세요. "
                 "내용을 생략하거나 추가하지 말고, 의역하지 말고, 고유명사와 숫자는 그대로 유지하세요. "
+                "**중요: 화자 레이블(예: [SPEAKER_00], [Speaker A])이 포함된 경우 완전히 보존하고 수정하거나 삭제하지 마세요.**"
                 f"일반 텍스트만 출력하세요:\n\n{text}"
             )
         else:
@@ -338,6 +348,7 @@ class PunctuationProcessor:
             user_msg = (
                 f"Please add appropriate punctuation and paragraphing to the following transcript. "
                 "Do not omit or add content, do not paraphrase, preserve proper nouns and numbers. "
+                "**Important: If the text contains speaker labels (e.g., [SPEAKER_00], [Speaker A]), preserve them completely without modification or removal.**"
                 f"Output plain text only:\n\n{text}"
             )
 
@@ -365,6 +376,7 @@ class PunctuationProcessor:
             system_msg = (
                 "你是嚴謹的逐字稿潤飾助手。只做『中文標點補全與合理分段』，"
                 "不要省略或添加內容，不要意譯，非必要不要用刪節號，保留固有名詞與數字。"
+                "**重要：如果文字中有說話者標籤（例如 [SPEAKER_00]、[Speaker A] 等），請完整保留這些標籤。**"
             )
             if chunk_idx == 1:
                 user_msg = f"請為以下中文逐字稿加上適當標點並分段（這是第 1 段）：\n\n{chunk_text}"
@@ -375,7 +387,8 @@ class PunctuationProcessor:
         elif language == "en":
             system_msg = (
                 "You are a precise transcript editor. Only add punctuation and paragraphing. "
-                "Do not omit or add content, do not paraphrase, preserve proper nouns and numbers."
+                "Do not omit or add content, do not paraphrase, preserve proper nouns and numbers. "
+                "**Important: Preserve all speaker labels (e.g., [SPEAKER_00], [Speaker A]) completely.**"
             )
             if chunk_idx == 1:
                 user_msg = f"Add punctuation and paragraphing to this English transcript (part 1):\n\n{chunk_text}"
@@ -387,6 +400,7 @@ class PunctuationProcessor:
             system_msg = (
                 "あなたは正確な文字起こし編集者です。句読点と段落分けのみを行います。"
                 "内容の省略や追加はせず、意訳せず、固有名詞と数字はそのまま保持してください。"
+                "**重要：話者ラベル（例：[SPEAKER_00]、[Speaker A]）を完全に保持してください。**"
             )
             if chunk_idx == 1:
                 user_msg = f"以下の日本語文字起こしに句読点と段落を追加してください（第1部分）：\n\n{chunk_text}"
@@ -397,7 +411,8 @@ class PunctuationProcessor:
         elif language == "ko":
             system_msg = (
                 "당신은 정확한 전사 편집자입니다. 구두점과 단락 나누기만 수행합니다. "
-                "내용을 생략하거나 추가하지 말고, 의역하지 말고, 고유명사와 숫자는 그대로 유지하세요."
+                "내용을 생략하거나 추가하지 말고, 의역하지 말고, 고유명사와 숫자는 그대로 유지하세요. "
+                "**중요: 화자 레이블(예: [SPEAKER_00], [Speaker A])을 완전히 보존하세요.**"
             )
             if chunk_idx == 1:
                 user_msg = f"다음 한국어 전사에 구두점과 단락을 추가해주세요 (1부):\n\n{chunk_text}"

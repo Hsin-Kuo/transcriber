@@ -1,11 +1,13 @@
 """認證路由"""
 from fastapi import APIRouter, Depends, HTTPException, status, Request
-from datetime import datetime
+from datetime import datetime, timedelta
+import secrets
 from ..models.auth import (
     UserRegister,
     UserLogin,
     TokenResponse,
     RefreshTokenRequest,
+    ResendVerificationRequest,
     UserResponse
 )
 from ..auth.password import hash_password, verify_password
@@ -14,11 +16,12 @@ from ..auth.dependencies import get_current_user
 from ..database.mongodb import get_database
 from ..database.repositories.user_repo import UserRepository
 from ..utils.audit_logger import get_audit_logger
+from ..utils.email_service import get_email_service
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
-@router.post("/register", response_model=TokenResponse)
+@router.post("/register")
 async def register(
     user_data: UserRegister,
     db=Depends(get_database)
@@ -30,12 +33,13 @@ async def register(
         db: 資料庫實例
 
     Returns:
-        Token 響應
+        成功訊息
 
     Raises:
-        HTTPException: Email 已被註冊
+        HTTPException: Email 已被註冊或發送驗證郵件失敗
     """
     user_repo = UserRepository(db)
+    email_service = get_email_service()
 
     # 檢查 Email 是否已存在
     if await user_repo.get_by_email(user_data.email):
@@ -44,12 +48,19 @@ async def register(
             detail="Email 已被註冊"
         )
 
-    # 建立新用戶
+    # 生成驗證 token (使用 secrets 生成安全的隨機字符串)
+    verification_token = secrets.token_urlsafe(32)
+    verification_expires = datetime.utcnow() + timedelta(hours=24)
+
+    # 建立新用戶 (未激活狀態)
     user = await user_repo.create({
         "email": user_data.email,
         "password_hash": hash_password(user_data.password),
         "role": "user",
-        "is_active": True,
+        "is_active": False,  # 需要驗證 email 後才激活
+        "email_verified": False,
+        "verification_token": verification_token,
+        "verification_expires": verification_expires,
         "quota": {
             "tier": "free",
             "max_transcriptions": 10,      # 免費版: 10 次/月
@@ -73,24 +84,136 @@ async def register(
         "updated_at": datetime.utcnow()
     })
 
-    # 生成 Token
-    access_token = create_access_token({
-        "sub": str(user["_id"]),
-        "email": user["email"],
-        "role": user["role"]
-    })
-    refresh_token = create_refresh_token({
-        "sub": str(user["_id"]),
-        "email": user["email"]
-    })
+    # 發送驗證郵件
+    email_sent = await email_service.send_verification_email(
+        to_email=user_data.email,
+        verification_token=verification_token
+    )
 
-    # 存儲 Refresh Token
-    await user_repo.save_refresh_token(str(user["_id"]), refresh_token)
+    if not email_sent:
+        # 如果郵件發送失敗，刪除剛創建的用戶
+        await user_repo.delete(str(user["_id"]))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="發送驗證郵件失敗，請稍後再試"
+        )
 
     return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer"
+        "message": "註冊成功！請查看您的郵箱完成驗證",
+        "email": user_data.email
+    }
+
+
+@router.get("/verify-email")
+async def verify_email(
+    token: str,
+    db=Depends(get_database)
+):
+    """驗證 Email
+
+    Args:
+        token: 驗證 token (from URL query parameter)
+        db: 資料庫實例
+
+    Returns:
+        成功訊息
+
+    Raises:
+        HTTPException: Token 無效或已過期
+    """
+    user_repo = UserRepository(db)
+
+    # 查找具有此 verification_token 的用戶
+    user = await user_repo.get_by_verification_token(token)
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="驗證連結無效"
+        )
+
+    # 檢查 token 是否過期
+    if user.get("verification_expires") and user["verification_expires"] < datetime.utcnow():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="驗證連結已過期，請重新申請驗證郵件"
+        )
+
+    # 更新用戶狀態
+    await user_repo.update(str(user["_id"]), {
+        "is_active": True,
+        "email_verified": True,
+        "verification_token": None,  # 清除 token
+        "verification_expires": None,
+        "updated_at": datetime.utcnow()
+    })
+
+    return {
+        "message": "Email 驗證成功！您現在可以登入了",
+        "email": user["email"]
+    }
+
+
+@router.post("/resend-verification")
+async def resend_verification_email(
+    request: ResendVerificationRequest,
+    db=Depends(get_database)
+):
+    """重新發送驗證郵件
+
+    Args:
+        request: 重新發送驗證郵件請求（包含 email）
+        db: 資料庫實例
+
+    Returns:
+        成功訊息
+
+    Raises:
+        HTTPException: Email 不存在、已驗證或發送失敗
+    """
+    user_repo = UserRepository(db)
+    email_service = get_email_service()
+
+    user = await user_repo.get_by_email(request.email)
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="此 Email 尚未註冊"
+        )
+
+    if user.get("email_verified"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="此 Email 已完成驗證"
+        )
+
+    # 生成新的驗證 token
+    verification_token = secrets.token_urlsafe(32)
+    verification_expires = datetime.utcnow() + timedelta(hours=24)
+
+    # 更新用戶的驗證 token
+    await user_repo.update(str(user["_id"]), {
+        "verification_token": verification_token,
+        "verification_expires": verification_expires,
+        "updated_at": datetime.utcnow()
+    })
+
+    # 發送驗證郵件
+    email_sent = await email_service.send_verification_email(
+        to_email=request.email,
+        verification_token=verification_token
+    )
+
+    if not email_sent:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="發送驗證郵件失敗，請稍後再試"
+        )
+
+    return {
+        "message": "驗證郵件已重新發送，請查看您的郵箱",
+        "email": request.email
     }
 
 
@@ -111,7 +234,7 @@ async def login(
         Token 響應
 
     Raises:
-        HTTPException: Email 或密碼錯誤、帳號已停用
+        HTTPException: Email 或密碼錯誤、帳號已停用、Email 未驗證
     """
     audit_logger = get_audit_logger()
     user_repo = UserRepository(db)
@@ -131,6 +254,13 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Email 或密碼錯誤",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # 檢查 Email 是否已驗證
+    if not user.get("email_verified"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="請先驗證您的 Email"
         )
 
     if not user.get("is_active"):

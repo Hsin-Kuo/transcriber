@@ -5,9 +5,12 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
 from pathlib import Path
 from urllib.parse import quote
+from datetime import datetime, timezone
 import tempfile
 import uuid
 import json
+import shutil
+import mimetypes
 
 from ..auth.dependencies import get_current_user, check_quota
 from ..database.mongodb import get_database
@@ -32,6 +35,7 @@ _transcription_service: Optional[TranscriptionService] = None
 def init_transcription_service(
     whisper_model,
     task_service: TaskService,
+    model_name: str = "medium",
     diarization_pipeline=None,
     executor=None,
     output_dir: Optional[Path] = None
@@ -41,6 +45,7 @@ def init_transcription_service(
     Args:
         whisper_model: Whisper 模型實例
         task_service: TaskService 實例
+        model_name: 模型名稱（用於 ProcessPoolExecutor 中重新載入模型）
         diarization_pipeline: Diarization pipeline（可選）
         executor: 線程池執行器（可選）
         output_dir: 輸出目錄（可選）
@@ -48,7 +53,7 @@ def init_transcription_service(
     global _whisper_processor, _punctuation_processor, _diarization_processor, _transcription_service
 
     # 初始化處理器
-    _whisper_processor = WhisperProcessor(whisper_model)
+    _whisper_processor = WhisperProcessor(whisper_model, model_name)
     _punctuation_processor = PunctuationProcessor()
     _diarization_processor = DiarizationProcessor(diarization_pipeline) if diarization_pipeline else None
 
@@ -160,6 +165,7 @@ def get_task_field(task: dict, field: str):
 async def create_transcription(
     request: Request,
     file: UploadFile = File(..., description="音檔 (支援 mp3/m4a/wav/mp4 等格式)"),
+    task_type: str = Form("paragraph", description="任務類型 (paragraph/subtitle)"),
     punct_provider: str = Form("gemini", description="標點提供者 (openai/gemini/none)"),
     chunk_audio: bool = Form(True, description="是否使用分段模式"),
     chunk_minutes: int = Form(10, description="分段長度（分鐘）"),
@@ -177,6 +183,7 @@ async def create_transcription(
 
     Args:
         file: 音檔檔案
+        task_type: 任務類型 (paragraph=段落/subtitle=字幕)
         punct_provider: 標點提供者 (openai/gemini/none)
         chunk_audio: 是否使用分段模式
         chunk_minutes: 分段長度（分鐘）
@@ -193,6 +200,17 @@ async def create_transcription(
     Raises:
         HTTPException: 服務未就緒或參數錯誤
     """
+    # 驗證任務類型
+    if task_type not in ["paragraph", "subtitle"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="任務類型必須是 'paragraph' 或 'subtitle'"
+        )
+
+    # 字幕類型強制不使用標點符號
+    if task_type == "subtitle":
+        punct_provider = "none"
+        print(f"ℹ️  字幕模式：已自動停用標點符號處理")
     # 獲取服務
     try:
         transcription_service = get_transcription_service()
@@ -218,12 +236,63 @@ async def create_transcription(
 
         print(f"📁 收到檔案：{file.filename} ({len(content) / 1024 / 1024:.2f} MB)")
 
+        # 獲取音檔時長
+        from src.services.audio_service import AudioService
+        audio_service = AudioService()
+        try:
+            audio_duration_ms = audio_service.get_audio_duration(temp_audio)
+            audio_duration_seconds = audio_duration_ms / 1000.0
+            print(f"⏱️ 音檔時長：{audio_duration_seconds:.2f} 秒")
+        except Exception as e:
+            print(f"⚠️ 獲取音檔時長失敗：{e}")
+            shutil.rmtree(temp_dir)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"無法讀取音檔資訊：{str(e)}"
+            )
+
+        # 獲取完整用戶資料（包含配額）
+        from src.database.repositories.user_repo import UserRepository
+        user_repo = UserRepository(db)
+        full_user_data = await user_repo.get_by_id(str(current_user["_id"]))
+
+        if not full_user_data:
+            shutil.rmtree(temp_dir)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="無法獲取用戶資訊"
+            )
+
+        # 檢查轉錄配額
+        from src.auth.quota import QuotaManager
+        try:
+            await QuotaManager.check_transcription_quota(
+                full_user_data,
+                audio_duration_seconds
+            )
+        except HTTPException as quota_error:
+            # 清理臨時檔案
+            shutil.rmtree(temp_dir)
+            # 拋出配額不足異常
+            raise quota_error
+
         # 檢查 diarization 可用性
         if diarize and not _diarization_processor:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Speaker diarization 功能未啟用。請設定 HF_TOKEN 環境變數並重啟服務。"
             )
+
+        # 檢查當前處理中的任務數量（限流機制）
+        MAX_CONCURRENT_TASKS = 2  # 最多同時處理 2 個任務
+        processing_count = await transcription_service.task_service.count_processing_tasks()
+        pending_count = await transcription_service.task_service.count_pending_tasks()
+
+        # 判斷是否需要排隊
+        should_queue = processing_count >= MAX_CONCURRENT_TASKS
+
+        if should_queue:
+            print(f"⚠️  系統忙碌中（{processing_count} 個任務處理中，{pending_count} 個任務排隊中），新任務加入隊列")
 
         # 解析標籤
         task_tags = []
@@ -244,6 +313,9 @@ async def create_transcription(
         task_data = {
             "_id": task_id,
             "task_id": task_id,
+
+            # 任務類型（新增）
+            "task_type": task_type,
 
             # 使用者資訊
             "user": {
@@ -270,9 +342,21 @@ async def create_transcription(
             # 狀態
             "status": "pending",
 
+            # 統計資訊
+            "stats": {
+                "audio_duration_seconds": audio_duration_seconds,
+            },
+
             # 使用者設定與標籤
             "tags": task_tags,
-            "keep_audio": True,  # 默認保留音檔
+            # ⚠️ keep_audio 默認為 False
+            # 注意：False 不代表不保存音檔！所有音檔都會被保存到 uploads/
+            # False 的意思是「可以被自動清理機制刪除」
+            # True 的意思是「用戶手動勾選保留，不會被自動刪除」
+            "keep_audio": False,
+
+            # 講者名稱對應（用於字幕模式）
+            "speaker_names": {},
 
             # 時間戳記
             "timestamps": {
@@ -285,25 +369,46 @@ async def create_transcription(
         task_repo = TaskRepository(db)
         await task_repo.create(task_data)
 
+        # 初始化記憶體狀態（確保 SSE 能立即讀取到正確狀態）
+        transcription_service.task_service.update_memory_state(task_id, {
+            "status": "pending",
+            "progress": "等待處理中..."
+        })
+
         # 記錄臨時目錄
         transcription_service.task_service.set_temp_dir(task_id, temp_dir)
 
-        # 啟動轉錄（異步執行）
-        use_punctuation = punct_provider != "none"
-        language_code = None if language == "auto" else language
+        # 根據系統負載決定是否立即啟動或加入隊列
+        if not should_queue:
+            # 系統空閒，立即啟動轉錄（異步執行）
+            use_punctuation = punct_provider != "none"
+            language_code = None if language == "auto" else language
 
-        await transcription_service.start_transcription(
-            task_id=task_id,
-            audio_file_path=temp_audio,
-            language=language_code,
-            use_chunking=chunk_audio,
-            use_punctuation=use_punctuation,
-            punctuation_provider=punct_provider,
-            use_diarization=diarize,
-            max_speakers=max_speakers
-        )
+            # ✅ 關鍵修復：立即更新狀態為 processing，防止隊列處理器重複啟動
+            await task_repo.update(task_id, {
+                "status": "processing",
+                "updated_at": datetime.now(timezone.utc)
+            })
+            transcription_service.task_service.update_memory_state(task_id, {
+                "status": "processing",
+                "progress": "準備開始轉錄..."
+            })
 
-        print(f"✅ 任務 {task_id} 已建立，正在背景執行轉錄...")
+            await transcription_service.start_transcription(
+                task_id=task_id,
+                audio_file_path=temp_audio,
+                language=language_code,
+                use_chunking=chunk_audio,
+                use_punctuation=use_punctuation,
+                punctuation_provider=punct_provider,
+                use_diarization=diarize,
+                max_speakers=max_speakers
+            )
+
+            print(f"✅ 任務 {task_id} 已建立，正在背景執行轉錄...")
+        else:
+            # 系統忙碌，加入隊列（保持 pending 狀態）
+            print(f"📋 任務 {task_id} 已加入隊列，等待處理...（隊列中有 {pending_count + 1} 個任務）")
 
         # 記錄 audit log（創建轉錄任務）
         try:
@@ -328,10 +433,20 @@ async def create_transcription(
         except Exception as e:
             print(f"⚠️ 記錄 audit log 失敗：{e}")
 
+        # 返回結果（根據是否排隊調整消息）
+        if should_queue:
+            message = f"轉錄任務已加入隊列，目前有 {processing_count} 個任務處理中，{pending_count + 1} 個任務等待中"
+            queue_position = pending_count + 1
+        else:
+            message = "轉錄任務已建立，正在背景處理"
+            queue_position = 0
+
         return {
             "task_id": task_id,
             "status": "pending",
-            "message": "轉錄任務已建立，正在背景處理",
+            "message": message,
+            "queued": should_queue,
+            "queue_position": queue_position,
             "file": {
                 "filename": file.filename,
                 "size_mb": round(len(content) / 1024 / 1024, 2)
@@ -514,15 +629,37 @@ async def download_audio(
             detail="音檔不存在"
         )
 
-    # 獲取原始檔名
-    original_filename = get_task_field(task, "filename") or audio_file.name
+    # 使用 task_id 作為下載檔名，確保唯一性且不會重複
+    download_filename = f"{task_id}{audio_file.suffix}"
 
     # 使用 RFC 5987 編碼來支援中文檔名
-    encoded_filename = quote(original_filename, safe='')
+    encoded_filename = quote(download_filename, safe='')
+
+    # 根據檔案副檔名判斷 MIME type
+    file_suffix = audio_file.suffix.lower()
+    media_type_map = {
+        ".mp3": "audio/mpeg",
+        ".m4a": "audio/mp4",
+        ".wav": "audio/wav",
+        ".ogg": "audio/ogg",
+        ".flac": "audio/flac",
+        ".aac": "audio/aac",
+        ".wma": "audio/x-ms-wma",
+        ".opus": "audio/opus"
+    }
+    media_type = media_type_map.get(file_suffix)
+
+    # 如果映射表中沒有，嘗試使用 mimetypes 模組猜測
+    if not media_type:
+        media_type, _ = mimetypes.guess_type(str(audio_file))
+
+    # 如果還是無法判斷，使用預設的音檔類型
+    if not media_type or not media_type.startswith('audio'):
+        media_type = "audio/mpeg"
 
     return FileResponse(
         audio_file,
-        media_type="application/octet-stream",
+        media_type=media_type,
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
         }
@@ -583,9 +720,13 @@ async def get_segments(
         with open(segments_file, 'r', encoding='utf-8') as f:
             segments_data = json.load(f)
 
+        # 獲取講者名稱對應
+        speaker_names = task.get("speaker_names", {})
+
         return {
             "task_id": task_id,
-            "segments": segments_data
+            "segments": segments_data,
+            "speaker_names": speaker_names
         }
     except Exception as e:
         raise HTTPException(
@@ -601,11 +742,11 @@ async def update_content(
     current_user: dict = Depends(get_current_user),
     db = Depends(get_database)
 ):
-    """更新轉錄文字內容
+    """更新轉錄文字內容和 segments
 
     Args:
         task_id: 任務 ID
-        content: 新的文字內容 {"text": "..."}
+        content: 新的文字內容 {"text": "...", "segments": [...]} (segments 為可選)
         current_user: 當前用戶
         db: 資料庫實例
 
@@ -647,15 +788,36 @@ async def update_content(
 
     # 更新檔案內容
     try:
+        # 1. 更新純文字檔案
         new_text = content.get("text", "")
         with open(result_file, 'w', encoding='utf-8') as f:
             f.write(new_text)
+        print(f"✅ 已更新任務 {task_id} 的轉錄文字內容")
 
-        print(f"✅ 已更新任務 {task_id} 的轉錄內容")
+        # 2. 如果有提供 segments，也更新 segments 檔案
+        new_segments = content.get("segments")
+        if new_segments is not None:
+            segments_file_path = get_task_field(task, "segments_file")
+            if segments_file_path:
+                segments_file = Path(segments_file_path)
+                if segments_file.exists():
+                    import json
+                    with open(segments_file, 'w', encoding='utf-8') as f:
+                        json.dump(new_segments, f, ensure_ascii=False, indent=2)
+                    print(f"✅ 已更新任務 {task_id} 的 segments 檔案 ({len(new_segments)} 個 segments)")
+                else:
+                    print(f"⚠️ Segments 檔案不存在：{segments_file_path}")
+            else:
+                print(f"⚠️ 任務 {task_id} 沒有 segments_file 路徑")
+
+        response_message = "轉錄內容已更新"
+        if new_segments is not None:
+            response_message = "轉錄內容和字幕已更新"
 
         return {
-            "message": "轉錄內容已更新",
-            "task_id": task_id
+            "message": response_message,
+            "task_id": task_id,
+            "segments_updated": new_segments is not None
         }
     except Exception as e:
         raise HTTPException(
@@ -724,4 +886,53 @@ async def update_metadata(
         "message": "任務名稱已更新",
         "task_id": task_id,
         "custom_name": updates.get("custom_name")
+    }
+
+
+@router.put("/{task_id}/speaker-names")
+async def update_speaker_names(
+    task_id: str,
+    speaker_names: dict,
+    current_user: dict = Depends(get_current_user),
+    db = Depends(get_database)
+):
+    """更新講者名稱對應
+
+    Args:
+        task_id: 任務 ID
+        speaker_names: 講者代碼與自定義名稱的對應字典 {"SPEAKER_00": "張三", "SPEAKER_01": "李四"}
+        current_user: 當前用戶
+        db: 資料庫實例
+
+    Returns:
+        更新結果
+
+    Raises:
+        HTTPException: 任務不存在、無權訪問或更新失敗
+    """
+    # 從資料庫獲取任務
+    task_repo = TaskRepository(db)
+    task = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
+
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="任務不存在或無權訪問"
+        )
+
+    # 更新資料庫
+    success = await task_repo.update(task_id, {"speaker_names": speaker_names})
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="更新講者名稱失敗"
+        )
+
+    print(f"✅ 已更新任務 {task_id} 的講者名稱: {speaker_names}")
+
+    return {
+        "message": "講者名稱已更新",
+        "task_id": task_id,
+        "speaker_names": speaker_names
     }

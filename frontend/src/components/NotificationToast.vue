@@ -77,13 +77,13 @@ function removeNotification(id) {
   }
 }
 
-// 暴露方法給父組件
+// Expose methods to parent component
 defineExpose({
   addNotification,
   removeNotification
 })
 
-// 監聽全局通知事件
+// Listen to global notification events
 function handleGlobalNotification(event) {
   addNotification(event.detail)
 }
@@ -205,7 +205,7 @@ onUnmounted(() => {
   color: var(--neu-text);
 }
 
-/* 動畫 */
+/* Animation */
 .notification-enter-active,
 .notification-leave-active {
   transition: all 0.3s ease;

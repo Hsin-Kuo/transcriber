@@ -148,16 +148,13 @@ async def update_tag_order(
         # 記錄 audit log
         from ..utils.audit_logger import get_audit_logger
         audit_logger = get_audit_logger()
-        await audit_logger.log(
+        await audit_logger.log_tag_operation(
+            request=request,
+            action="reorder",
             user_id=str(current_user["_id"]),
-            log_type="tag",
-            action="update_order",
-            ip_address=request.client.host if request.client else "unknown",
-            path=str(request.url.path),
-            method=request.method,
+            tag_id=None,
             status_code=200,
-            response_message=f"更新標籤順序（{len(order_data.tag_ids)} 個標籤）",
-            user_agent=request.headers.get("user-agent", "unknown")
+            message=f"更新標籤順序（{len(order_data.tag_ids)} 個標籤）"
         )
 
         return {"message": "標籤順序已更新"}
@@ -167,16 +164,13 @@ async def update_tag_order(
         # 記錄失敗的 audit log
         from ..utils.audit_logger import get_audit_logger
         audit_logger = get_audit_logger()
-        await audit_logger.log(
+        await audit_logger.log_tag_operation(
+            request=request,
+            action="reorder",
             user_id=str(current_user["_id"]),
-            log_type="tag",
-            action="update_order",
-            ip_address=request.client.host if request.client else "unknown",
-            path=str(request.url.path),
-            method=request.method,
+            tag_id=None,
             status_code=400,
-            response_message="更新標籤順序失敗",
-            user_agent=request.headers.get("user-agent", "unknown")
+            message=f"更新標籤順序失敗: {str(e)}"
         )
 
         raise HTTPException(

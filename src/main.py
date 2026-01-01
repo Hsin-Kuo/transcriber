@@ -5,6 +5,8 @@ Whisper 轉錄服務 - 新應用入口
 
 import os
 import asyncio
+import signal
+import subprocess
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
@@ -61,7 +63,7 @@ task_repo = None
 tag_repo = None
 audit_log_repo = None
 main_loop = None
-executor = ThreadPoolExecutor(max_workers=3)
+executor = ThreadPoolExecutor(max_workers=2)  # 降低並發數避免記憶體爆炸
 
 # 檢查 Diarization 是否可用
 try:
@@ -103,6 +105,41 @@ app.include_router(tags_router.router)
 app.include_router(audio_router.router)
 
 
+# ========== 進程清理工具函數 ==========
+
+def cleanup_worker_processes():
+    """清理所有 ProcessPoolExecutor worker 進程"""
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", "multiprocessing.spawn"],
+            capture_output=True,
+            text=True
+        )
+        if result.stdout.strip():
+            pids = result.stdout.strip().split('\n')
+            print(f"🧹 清理 {len(pids)} 個 worker 進程...")
+            subprocess.run(["pkill", "-9", "-f", "multiprocessing.spawn"], check=False)
+            subprocess.run(["pkill", "-9", "-f", "multiprocessing.resource_tracker"], check=False)
+            return len(pids)
+        return 0
+    except Exception as e:
+        print(f"⚠️  清理 worker 進程時發生錯誤: {e}")
+        return 0
+
+
+def signal_handler(signum, frame):
+    """處理終止信號，確保清理所有資源"""
+    print(f"\n⚠️  收到終止信號 ({signal.Signals(signum).name})，正在清理...")
+    cleanup_worker_processes()
+    print(f"✅ 清理完成，退出程序")
+    exit(0)
+
+
+# 註冊信號處理器
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
+
+
 # ========== 啟動與關閉事件 ==========
 
 @app.on_event("startup")
@@ -110,20 +147,43 @@ async def startup_event():
     """應用啟動時的初始化"""
     global whisper_model, current_model_name, task_repo, tag_repo, audit_log_repo, main_loop, diarization_pipeline
 
-    print("🚀 啟動 Whisper 轉錄服務 v3.0.0")
-    print("=" * 50)
+    print("🚀 啟動 Whisper 轉錄服務 v3.0.0", flush=True)
+    print("=" * 50, flush=True)
+
+    # 清理殘留的 ProcessPoolExecutor worker 進程
+    print("🧹 清理殘留的 worker 進程...", flush=True)
+    try:
+        cleaned = cleanup_worker_processes()
+        if cleaned > 0:
+            print(f"   ✅ 已清理 {cleaned} 個殘留進程", flush=True)
+        else:
+            print("   ✅ 沒有發現殘留的 worker 進程", flush=True)
+    except Exception as e:
+        print(f"   ⚠️  清理進程時出錯: {e}", flush=True)
 
     # 獲取主事件循環
+    print("📡 獲取事件循環...", flush=True)
     main_loop = asyncio.get_running_loop()
+    print("✅ 事件循環已就緒", flush=True)
 
     # 1. 連接 MongoDB
-    print(f"🔌 正在連接 MongoDB...")
+    mongodb_url = os.getenv('MONGODB_URL', 'mongodb://localhost:27017')
+    mongodb_db = os.getenv('MONGODB_DB_NAME', 'whisper_transcriber')
+    print(f"🔌 正在連接 MongoDB...", flush=True)
+    print(f"   URL: {mongodb_url}", flush=True)
+    print(f"   Database: {mongodb_db}", flush=True)
     try:
-        await MongoDB.connect()
-        print(f"✅ 已連接到 MongoDB: {os.getenv('MONGODB_DB_NAME', 'whisper_transcriber')}")
+        await asyncio.wait_for(MongoDB.connect(), timeout=10.0)
+        print(f"✅ 已連接到 MongoDB: {mongodb_db}", flush=True)
+    except asyncio.TimeoutError:
+        print(f"❌ MongoDB 連接超時（10秒）", flush=True)
+        print(f"   請確保 MongoDB 正在運行：docker ps | grep mongo", flush=True)
+        print(f"   URL: {mongodb_url}", flush=True)
+        raise
     except Exception as e:
-        print(f"❌ MongoDB 連接失敗: {e}")
-        print(f"   請確保 MongoDB 正在運行並檢查 .env 配置")
+        print(f"❌ MongoDB 連接失敗: {e}", flush=True)
+        print(f"   請確保 MongoDB 正在運行並檢查 .env 配置", flush=True)
+        print(f"   URL: {mongodb_url}", flush=True)
         raise
 
     # 2. 初始化 Repositories
@@ -169,6 +229,13 @@ async def startup_event():
     # 5. 啟動定期記憶體清理
     asyncio.create_task(task_service.periodic_memory_cleanup())
 
+    # 5.1. 啟動定期孤立進程清理
+    asyncio.create_task(task_service.periodic_orphaned_process_cleanup())
+
+    # 5.5. 啟動任務隊列處理器（在 TranscriptionService 初始化後）
+    # 注意：這裡暫時先創建任務，稍後在 TranscriptionService 初始化後會實際啟動
+    queue_processor_task = None
+
     # 6. 載入 Whisper 模型
     print(f"🎙 正在載入 Whisper 模型：{DEFAULT_MODEL}...")
     print(f"🔧 配置：device=auto, compute_type=int8")
@@ -177,8 +244,8 @@ async def startup_event():
         current_model_name,
         device="auto",
         compute_type="int8",
-        cpu_threads=1,
-        num_workers=4
+        cpu_threads=2,  # 優化：配合 ProcessPoolExecutor，降低單進程並行度
+        num_workers=1   # 優化：避免進程內過度並行（外部已有 ProcessPoolExecutor）
     )
     print(f"✅ Whisper 模型載入完成！")
 
@@ -192,19 +259,26 @@ async def startup_event():
 
     # 9. 初始化 TranscriptionService
     print(f"🔧 正在初始化 TranscriptionService...")
-    transcriptions_router.init_transcription_service(
+    transcription_service = transcriptions_router.init_transcription_service(
         whisper_model=whisper_model,
         task_service=task_service,
+        model_name=current_model_name,  # 傳遞模型名稱供 ProcessPoolExecutor 使用
         diarization_pipeline=diarization_pipeline,
         executor=executor,
         output_dir=OUTPUT_DIR
     )
     print(f"✅ TranscriptionService 初始化完成")
 
+    # 10. 啟動任務隊列處理器
+    print(f"🚀 正在啟動任務隊列處理器...")
+    asyncio.create_task(task_service.process_pending_queue(transcription_service, max_concurrent=2))
+    print(f"✅ 任務隊列處理器已啟動")
+
     print("=" * 50)
     print(f"✨ 服務已就緒！")
     print(f"📚 API 文檔：http://localhost:8000/docs")
     print(f"🔗 健康檢查：http://localhost:8000/health")
+    print(f"📋 任務隊列：最多 2 個並發任務")
     print("=" * 50)
 
 
@@ -217,6 +291,11 @@ async def shutdown_event():
     if executor:
         executor.shutdown(wait=True)
         print(f"✅ 線程池已關閉")
+
+    # 清理所有 ProcessPoolExecutor worker 進程
+    cleaned = cleanup_worker_processes()
+    if cleaned > 0:
+        print(f"✅ 已清理 {cleaned} 個 worker 進程")
 
     # 斷開 MongoDB
     await MongoDB.close()
@@ -289,26 +368,66 @@ async def get_admin_statistics():
             "tasks_with_tokens": 0
         }
 
-        # 3. 模型使用統計
-        model_pipeline = [
+        # 3. 模型使用統計（基於新的 models 欄位）
+        # 3.1 標點符號模型統計
+        punctuation_model_pipeline = [
             {
                 "$match": {
-                    "stats.token_usage.model": {"$exists": True, "$ne": None}
+                    "models.punctuation": {"$exists": True, "$ne": None}
                 }
             },
             {
                 "$group": {
-                    "_id": "$stats.token_usage.model",
-                    "count": {"$sum": 1},
-                    "total_tokens": {"$sum": "$stats.token_usage.total"}
+                    "_id": "$models.punctuation",
+                    "count": {"$sum": 1}
                 }
             },
             {
                 "$sort": {"count": -1}
             }
         ]
-        model_stats_cursor = db.tasks.aggregate(model_pipeline)
-        model_stats = await model_stats_cursor.to_list(length=None)
+        punct_model_cursor = db.tasks.aggregate(punctuation_model_pipeline)
+        punct_model_stats = await punct_model_cursor.to_list(length=None)
+
+        # 3.2 轉錄模型統計（未來使用）
+        transcription_model_pipeline = [
+            {
+                "$match": {
+                    "models.transcription": {"$exists": True, "$ne": None}
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$models.transcription",
+                    "count": {"$sum": 1}
+                }
+            },
+            {
+                "$sort": {"count": -1}
+            }
+        ]
+        trans_model_cursor = db.tasks.aggregate(transcription_model_pipeline)
+        trans_model_stats = await trans_model_cursor.to_list(length=None)
+
+        # 3.3 說話者辨識模型統計（未來使用）
+        diarization_model_pipeline = [
+            {
+                "$match": {
+                    "models.diarization": {"$exists": True, "$ne": None}
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$models.diarization",
+                    "count": {"$sum": 1}
+                }
+            },
+            {
+                "$sort": {"count": -1}
+            }
+        ]
+        diar_model_cursor = db.tasks.aggregate(diarization_model_pipeline)
+        diar_model_stats = await diar_model_cursor.to_list(length=None)
 
         # 4. 每日統計（最近 30 天）
         thirty_days_ago = (datetime.now(TZ_UTC8) - timedelta(days=30)).strftime("%Y-%m-%d")
@@ -407,14 +526,29 @@ async def get_admin_statistics():
                 "tasks_with_tokens": token_stats.get("tasks_with_tokens", 0),
                 "avg_tokens_per_task": round(token_stats.get("total_tokens", 0) / token_stats.get("tasks_with_tokens", 1), 2) if token_stats.get("tasks_with_tokens", 0) > 0 else 0
             },
-            "model_usage": [
-                {
-                    "model": stat["_id"] or "未知",
-                    "count": stat["count"],
-                    "total_tokens": stat.get("total_tokens", 0)
-                }
-                for stat in model_stats
-            ],
+            "model_usage": {
+                "punctuation": [
+                    {
+                        "model": stat["_id"] or "未知",
+                        "count": stat["count"]
+                    }
+                    for stat in punct_model_stats
+                ],
+                "transcription": [
+                    {
+                        "model": stat["_id"] or "未知",
+                        "count": stat["count"]
+                    }
+                    for stat in trans_model_stats
+                ],
+                "diarization": [
+                    {
+                        "model": stat["_id"] or "未知",
+                        "count": stat["count"]
+                    }
+                    for stat in diar_model_stats
+                ]
+            },
             "daily_stats": [
                 {
                     "date": stat["_id"],
