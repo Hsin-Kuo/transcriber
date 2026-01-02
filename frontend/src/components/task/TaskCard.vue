@@ -60,25 +60,14 @@
               {{ task.task_type === 'subtitle' ? $t('transcription.subtitle') : $t('transcription.paragraph') }}
             </span>
 
-            <!-- 說話者辨識 -->
-            <span
-              v-if="task.config?.diarize || task.diarize"
-              class="badge-diarize"
-              :title="(task.config?.max_speakers || task.max_speakers)
-                ? $t('taskList.maxSpeakers', { count: task.config?.max_speakers || task.max_speakers })
-                : $t('taskList.autoDetectSpeakers')"
-            >
-              {{ $t('taskList.diarization') }}{{ (task.config?.max_speakers || task.max_speakers) ? ` (≤${task.config?.max_speakers || task.max_speakers}人)` : '' }}
-            </span>
+            <!-- 標籤區域（使用 TaskTagsSection 組件） -->
+            <TaskTagsSection
+              :task-id="task.task_id"
+              :tags="task.tags"
+              :all-tags="allTags"
+              @tags-updated="handleTagsUpdated"
+            />
           </div>
-
-          <!-- 標籤區域（使用 TaskTagsSection 組件） -->
-          <TaskTagsSection
-            :task-id="task.task_id"
-            :tags="task.tags"
-            :all-tags="allTags"
-            @tags-updated="handleTagsUpdated"
-          />
 
           <!-- 進度條（僅 pending 和 processing 狀態） -->
           <div v-if="task.progress && isTaskExpanded(task.task_id, [task])" class="task-progress">
@@ -276,7 +265,7 @@ function getKeepAudioTooltip() {
 
 .electric-card.task-wrapper {
   position: relative;
-  margin-bottom: -34px;
+  margin-bottom: -40px;
   filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.12));
 }
 
@@ -450,6 +439,18 @@ function getKeepAudioTooltip() {
   font-weight: 500;
   transition: all 0.2s;
   border: 1px solid;
+}
+
+.badge-paragraph {
+  background: #808F7C;
+  border-color: #808F7C;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.badge-subtitle {
+  background: #77969A;
+  border-color: #77969A;
+  color: rgba(255, 255, 255, 0.95);
 }
 
 .badge-diarize {
@@ -742,5 +743,9 @@ function getKeepAudioTooltip() {
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
   border-left: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.btn-group .btn {
+  box-shadow: none !important;
 }
 </style>

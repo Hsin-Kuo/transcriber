@@ -1,5 +1,5 @@
 <template>
-  <div class="task-list" :class="`task-type-${selectedTaskType}`">
+  <div class="task-list" :class="[`task-type-${selectedTaskType}`, { 'batch-edit-active': isBatchEditMode }]">
     <!-- 篩選列 -->
     <TaskFilterBar
       :all-tags="allTags"
@@ -13,28 +13,6 @@
       @tags-reordered="handleTagsReordered"
     />
 
-    <!-- 列表標題 -->
-    <div class="list-header">
-      <div class="header-actions">
-        <button
-          class="btn btn-secondary btn-batch-edit"
-          :class="{ active: isBatchEditMode }"
-          @click="toggleBatchEditMode"
-          :title="isBatchEditMode ? $t('taskList.exitBatchEdit') : $t('taskList.batchEdit')"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M9 11l3 3L22 4"></path>
-            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
-          </svg>
-          {{ isBatchEditMode ? $t('taskList.exitBatchEdit') : $t('taskList.batchEdit') }}
-        </button>
-        <button class="btn btn-secondary btn-icon" @click="emit('refresh')" title="Refresh">
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
-          </svg>
-        </button>
-      </div>
-    </div>
 
     <!-- 批次編輯工具列 -->
     <BatchEditToolbar
@@ -72,6 +50,18 @@
       >
         <span>字幕</span>
       </button>
+      <button
+        class="tab-btn tab-batch-edit"
+        :class="{ active: isBatchEditMode }"
+        @click="toggleBatchEditMode"
+        :title="isBatchEditMode ? $t('taskList.exitBatchEdit') : $t('taskList.batchEdit')"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 11l3 3L22 4"></path>
+          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+        </svg>
+        <span>{{ isBatchEditMode ? $t('taskList.exitBatchEdit') : $t('taskList.batchEdit') }}</span>
+      </button>
     </div>
 
     <!-- 任務網格 -->
@@ -81,7 +71,7 @@
       :selected-task-ids="selectedTaskIds"
       :all-tasks="tasks"
       :all-tags="allTags"
-      @view="(taskId) => emit('view', taskId)"
+      @view="handleViewTask"
       @download="(task) => emit('download', task)"
       @delete="handleDeleteTask"
       @cancel="(taskId) => emit('cancel', taskId)"
@@ -93,7 +83,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import api from '../../utils/api'
 import { useTaskTags } from '../../composables/task/useTaskTags'
@@ -115,6 +105,41 @@ const props = defineProps({
 // Emits
 const emit = defineEmits(['download', 'refresh', 'delete', 'cancel', 'view'])
 
+// SessionStorage 鍵值
+const STORAGE_KEY_FILTER_TAGS = 'taskList_filterTags'
+const STORAGE_KEY_TASK_TYPE = 'taskList_taskType'
+const STORAGE_KEY_PRESERVE_FLAG = 'taskList_preserveFilters'
+
+// 從 sessionStorage 恢復篩選狀態
+const restoreFilterState = () => {
+  try {
+    // 檢查是否應該保留篩選（這個標記會在離開任務列表頁面時設置）
+    const shouldPreserve = sessionStorage.getItem(STORAGE_KEY_PRESERVE_FLAG) === 'true'
+
+    // 清除標記
+    sessionStorage.removeItem(STORAGE_KEY_PRESERVE_FLAG)
+
+    if (shouldPreserve) {
+      // 恢復篩選狀態
+      const savedTags = sessionStorage.getItem(STORAGE_KEY_FILTER_TAGS)
+      const savedType = sessionStorage.getItem(STORAGE_KEY_TASK_TYPE)
+
+      if (savedTags) {
+        selectedFilterTags.value = JSON.parse(savedTags)
+      }
+      if (savedType) {
+        selectedTaskType.value = savedType
+      }
+    } else {
+      // 不保留，清除篩選狀態
+      sessionStorage.removeItem(STORAGE_KEY_FILTER_TAGS)
+      sessionStorage.removeItem(STORAGE_KEY_TASK_TYPE)
+    }
+  } catch (error) {
+    console.error('Failed to restore filter state:', error)
+  }
+}
+
 // State
 const selectedFilterTags = ref([])
 const selectedTaskType = ref('all') // 任務類型篩選：'all', 'paragraph', 'subtitle'
@@ -122,6 +147,23 @@ const isEditingFilterTags = ref(false)
 const customTagOrder = ref([])
 const isBatchEditMode = ref(false)
 const selectedTaskIds = ref(new Set())
+
+// 監聽篩選狀態變化，保存到 sessionStorage
+watch(selectedFilterTags, (newTags) => {
+  try {
+    sessionStorage.setItem(STORAGE_KEY_FILTER_TAGS, JSON.stringify(newTags))
+  } catch (error) {
+    console.error('Failed to save filter tags:', error)
+  }
+}, { deep: true })
+
+watch(selectedTaskType, (newType) => {
+  try {
+    sessionStorage.setItem(STORAGE_KEY_TASK_TYPE, newType)
+  } catch (error) {
+    console.error('Failed to save task type:', error)
+  }
+})
 
 // Computed
 const allTags = getAllTags(computed(() => props.tasks))
@@ -232,6 +274,16 @@ async function handleBatchTagsRemove(tags) {
 }
 
 // Methods - Task Operations
+function handleViewTask(taskId) {
+  // 設置保留標記，表示從任務列表導航到詳情頁面時應該保留篩選
+  try {
+    sessionStorage.setItem(STORAGE_KEY_PRESERVE_FLAG, 'true')
+  } catch (error) {
+    console.error('Failed to set preserve flag:', error)
+  }
+  emit('view', taskId)
+}
+
 function handleDeleteTask(taskId) {
   emit('delete', taskId)
 }
@@ -282,6 +334,7 @@ function handleTagsReordered() {
 
 // Lifecycle
 onMounted(() => {
+  restoreFilterState()
   fetchTagColors()
   fetchTagOrder()
 })
@@ -306,11 +359,16 @@ onMounted(() => {
   --nav-recent-bg: #77969A;
 }
 
+/* FilterBar 統一與上方保持距離 */
+.task-list :deep(.filter-section) {
+  margin-top: 40px;
+}
+
 /* 根據任務類型設置任務列表容器背景色 */
 .task-list.task-type-all :deep(.tasks) {
-  background-color: var(--upload-bg);;
+  background-color: var(--upload-bg);
   padding: 10px;
-  border-radius: 0 8px 8px 8px;
+  border-radius: 8px;
   position: relative;
   z-index: 5;
 }
@@ -318,7 +376,7 @@ onMounted(() => {
 .task-list.task-type-paragraph :deep(.tasks) {
   background-color: #808F7C;
   padding: 10px;
-  border-radius: 0 8px 8px 8px;
+  border-radius: 8px;
   position: relative;
   z-index: 5;
 }
@@ -326,9 +384,42 @@ onMounted(() => {
 .task-list.task-type-subtitle :deep(.tasks) {
   background-color: #77969A;
   padding: 10px;
-  border-radius: 0 8px 8px 8px;
+  border-radius: 8px;
   position: relative;
   z-index: 5;
+}
+
+/* empty-state 根據任務類型設置背景色，在頁籤之上、.tasks 之下 */
+.task-list.task-type-all :deep(.empty-state) {
+  background-color: var(--upload-bg);
+  border-radius: 8px;
+  position: relative;
+  z-index: 3;
+}
+
+.task-list.task-type-paragraph :deep(.empty-state) {
+  background-color: #808F7C;
+  border-radius: 8px;
+  position: relative;
+  z-index: 3;
+}
+
+.task-list.task-type-subtitle :deep(.empty-state) {
+  background-color: #77969A;
+  border-radius: 8px;
+  position: relative;
+  z-index: 3;
+}
+
+/* 批次編輯模式優先 - 覆蓋任務類型的背景色 */
+.task-list :deep(.tasks.batch-mode) {
+  background: var(--nav-bg) !important;
+  padding: 20px !important;
+}
+
+/* 批次編輯模式下的 empty-state 背景色 */
+.task-list.batch-edit-active :deep(.empty-state) {
+  background-color: var(--nav-bg) !important;
 }
 
 /* 任務類型篩選區 - 資料夾頁籤樣式 */
@@ -374,6 +465,22 @@ onMounted(() => {
   color: rgba(255, 255, 255, 0.95);
 }
 
+/* 批次編輯頁籤顏色 */
+.tab-btn.tab-batch-edit {
+  padding: 6px 20px 18px 20px;
+  margin-left: auto;
+  background: var(--nav-bg);
+}
+
+/* 批次編輯模式下，其他頁籤變成淺灰色 */
+.task-list.batch-edit-active .tab-btn.tab-all,
+.task-list.batch-edit-active .tab-btn.tab-paragraph,
+.task-list.batch-edit-active .tab-btn.tab-subtitle {
+  background: #e5e7eb !important;
+  color: rgba(var(--color-text-dark-rgb), 0.5) !important;
+  opacity: 0.7;
+}
+
 .tab-btn:hover:not(.active) {
   transform: translateY(-2px);
   filter: brightness(1.05);
@@ -385,18 +492,6 @@ onMounted(() => {
   z-index: 10 !important;
 }
 
-.list-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
 
 .btn {
   padding: 8px 16px;

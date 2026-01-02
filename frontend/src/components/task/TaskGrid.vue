@@ -101,16 +101,12 @@ function isNewestTask(task) {
 .empty-state {
   text-align: center;
   padding: 60px 20px;
-  color: rgba(var(--color-text-dark-rgb), 0.5);
-  background: rgba(255, 255, 255, 0.5);
-  backdrop-filter: blur(15px);
-  border-radius: 16px;
-  border: 1px dashed rgba(255, 250, 235, 0.6);
-  font-size: 15px;
+  color: rgba(var(--color-text-dark-rgb), 0.7);
+  font-size: 13px;
 }
 
 .empty-state p:first-child {
-  font-size: 18px;
+  font-size: 14px;
   font-weight: 500;
   margin-bottom: 8px;
   color: rgba(var(--color-text-dark-rgb), 0.7);
@@ -122,10 +118,17 @@ function isNewestTask(task) {
   gap: 0px;
 }
 
+.tasks :deep(.task-wrapper:last-child) {
+  margin-bottom: 0;
+}
+
 /* 批次編輯模式下的任務列表 - 保持堆疊效果 */
 .tasks.batch-mode {
   gap: 0;
   box-shadow: 0 2px 8px rgba(var(--color-primary-rgb), 0.08);
+  background: #916a2d;
+  padding: 20px;
+  border-radius: 12px;
 }
 
 .tasks.batch-mode :deep(.task-wrapper) {
@@ -134,6 +137,10 @@ function isNewestTask(task) {
   padding: 0;
   border-radius: 0;
   background: transparent;
+}
+
+.tasks.batch-mode :deep(.task-wrapper:last-child) {
+  margin-bottom: 0;
 }
 
 .tasks.batch-mode :deep(.task-wrapper:not(:last-child) .task-item) {

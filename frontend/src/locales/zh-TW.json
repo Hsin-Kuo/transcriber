@@ -106,7 +106,7 @@
     "noTranscriptionTasks": "尚無轉錄任務",
     "confirmDelete": "確定要刪除這個任務嗎？",
     "deleteButtonText": "刪除",
-    "batchEdit": "批次編輯",
+    "batchEdit": "",
     "exitBatchEdit": "退出編輯",
     "selectAll": "全選",
     "deselectAll": "取消全選",

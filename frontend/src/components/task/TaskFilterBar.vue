@@ -408,6 +408,7 @@ async function handleColorSelected({ tag, color }) {
 <style scoped>
 /* 篩選列樣式 */
 .filter-section {
+  background: transparent;
   border-radius: 12px;
   padding: 16px;
   margin-bottom: 20px;
@@ -481,6 +482,7 @@ async function handleColorSelected({ tag, color }) {
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
+  background: transparent;
   border: none;
   border-radius: 0;
   cursor: pointer;

@@ -271,8 +271,8 @@ function handleCancel() {
 <style scoped>
 /* 標籤區域 */
 .task-tags-section {
-  margin-top: 12px;
-  margin-bottom: 4px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .task-tags {
@@ -291,8 +291,8 @@ function handleCancel() {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 12px;
-  border-radius: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
   font-size: 12px;
   font-weight: 500;
   color: white;
@@ -398,10 +398,10 @@ function handleCancel() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 4px 8px;
+  padding: 2px 6px;
   background: rgba(var(--color-teal-rgb), 0.1);
   border: 1px solid #77969a4d;
-  border-radius: 8px;
+  border-radius: 4px;
   color: #77969A;
   cursor: pointer;
   transition: all 0.2s;
@@ -418,11 +418,11 @@ function handleCancel() {
 .btn-add-tags {
   display: inline-flex;
   align-items: center;
-  padding: 4px 12px;
-  background: rgba(102, 126, 234, 0.1);
-  border: 1px dashed rgba(102, 126, 234, 0.4);
-  border-radius: 8px;
-  color: #667eea;
+  padding: 2px 8px;
+  background: rgba(246, 156, 92, 0.1);
+  border: 1px dashed rgba(246, 141, 92, 0.3);
+  border-radius: 4px;
+  color: rgba(217, 108, 40, 0.9);
   cursor: pointer;
   transition: all 0.2s;
   font-size: 12px;
@@ -430,8 +430,8 @@ function handleCancel() {
 }
 
 .btn-add-tags:hover {
-  background: rgba(102, 126, 234, 0.15);
-  border-color: rgba(102, 126, 234, 0.6);
+  background: rgba(246, 156, 92, 0.15);
+  border-color: rgba(246, 141, 92, 0.5);
   transform: translateY(-1px);
 }
 
