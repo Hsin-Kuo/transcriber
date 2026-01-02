@@ -176,11 +176,11 @@ const sortedTasks = computed(() => {
     filtered = filtered.filter(task => task.task_type === selectedTaskType.value)
   }
 
-  // 標籤篩選（OR 邏輯）
+  // 標籤篩選（AND 邏輯）
   if (selectedFilterTags.value.length > 0) {
     filtered = filtered.filter(task => {
       if (!task.tags || task.tags.length === 0) return false
-      return task.tags.some(tag => selectedFilterTags.value.includes(tag))
+      return selectedFilterTags.value.every(tag => task.tags.includes(tag))
     })
   }
 
