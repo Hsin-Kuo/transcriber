@@ -445,7 +445,7 @@ onUnmounted(() => {
   font-style: italic;
 }
 
-/* Neumorphism Toggle 開關 */
+/* Toggle 開關 */
 .toggle-item {
   display: flex;
   align-items: center;

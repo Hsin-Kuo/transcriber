@@ -36,7 +36,7 @@
       </router-link>
 
       <!-- 所有任務按鈕（收合時顯示） -->
-      <router-link v-if="authStore.isAuthenticated && isCollapsed" to="/tasks" class="nav-link" active-class="active" :title="$t('navigation.allTasks')">
+      <router-link v-if="authStore.isAuthenticated && isCollapsed" to="/tasks" class="nav-link" active-class="active" :title="$t('navigation.allTasks')" @click="clearTaskFilters">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
         </svg>
@@ -47,7 +47,7 @@
     <div v-if="authStore.isAuthenticated && !isCollapsed" class="recent-tasks">
       <div class="recent-tasks-header">
         <h3>{{ $t('navigation.recent') }}</h3>
-        <router-link to="/tasks" class="all-tasks-btn" active-class="active">
+        <router-link to="/tasks" class="all-tasks-btn" active-class="active" @click="clearTaskFilters">
           {{ $t('navigation.allTasks') }}
         </router-link>
       </div>
@@ -142,6 +142,16 @@ function getFirstLetter(email) {
 async function handleLogout() {
   await authStore.logout()
   router.push('/login')
+}
+
+// 清除任務列表篩選狀態
+function clearTaskFilters() {
+  try {
+    sessionStorage.removeItem('taskList_filterTags')
+    sessionStorage.removeItem('taskList_taskType')
+  } catch (error) {
+    console.error('Failed to clear task filters:', error)
+  }
 }
 
 // 組件掛載時載入數據

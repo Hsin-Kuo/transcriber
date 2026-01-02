@@ -1035,7 +1035,7 @@ watch(
   justify-content: center;
 }
 
-/* 操作按鈕 - Neumorphism 風格 */
+/* 操作按鈕 */
 .btn-action {
   display: flex;
   align-items: center;

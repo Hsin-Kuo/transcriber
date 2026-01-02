@@ -28,7 +28,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, inject } from 'vue'
 import api, { API_BASE, TokenManager } from '../utils/api'
-import TaskList from '../components/TaskList.vue'
+import TaskList from '../components/task/TaskListContainer.vue'
 import DownloadDialog from '../components/transcript/DownloadDialog.vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'

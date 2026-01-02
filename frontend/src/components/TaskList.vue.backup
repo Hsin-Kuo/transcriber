@@ -1,9 +1,3 @@
-<!--
-  ⚠️ DEPRECATED - 此檔案已停用
-
-  This component is deprecated and should not be used.
-  Please use the new task components instead.
--->
 <template>
   <div class="task-list">
 
@@ -121,44 +115,6 @@
         </button>
       </div>
     </div>
-
-    <!-- 任務類型篩選區 -->
-    <div class="task-type-filter-section">
-      <div class="task-type-filter-label">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-          <polyline points="14 2 14 8 20 8"></polyline>
-          <line x1="16" y1="13" x2="8" y2="13"></line>
-          <line x1="16" y1="17" x2="8" y2="17"></line>
-          <polyline points="10 9 9 9 8 9"></polyline>
-        </svg>
-        <span>任務類型</span>
-      </div>
-      <div class="task-type-buttons">
-        <button
-          class="task-type-btn"
-          :class="{ active: selectedTaskType === 'all' }"
-          @click="selectedTaskType = 'all'"
-        >
-          全部
-        </button>
-        <button
-          class="task-type-btn"
-          :class="{ active: selectedTaskType === 'paragraph' }"
-          @click="selectedTaskType = 'paragraph'"
-        >
-          段落
-        </button>
-        <button
-          class="task-type-btn"
-          :class="{ active: selectedTaskType === 'subtitle' }"
-          @click="selectedTaskType = 'subtitle'"
-        >
-          字幕
-        </button>
-      </div>
-    </div>
-
     <div class="list-header">
       <div class="header-actions">
         <button
@@ -686,7 +642,6 @@ const editingTagIndex = ref(null)
 const editingTagText = ref('')
 const tagTextInput = ref(null)
 const selectedFilterTags = ref([])
-const selectedTaskType = ref('all') // 任務類型篩選：'all', 'paragraph', 'subtitle'
 const colorPickerTag = ref(null)
 const colorPickerPosition = ref({})
 const colorPickerButtons = ref({})
@@ -746,11 +701,6 @@ const displayedTags = computed(() => {
 
 const sortedTasks = computed(() => {
   let filtered = [...props.tasks]
-
-  // 任務類型篩選
-  if (selectedTaskType.value !== 'all') {
-    filtered = filtered.filter(task => task.task_type === selectedTaskType.value)
-  }
 
   // 標籤篩選（OR 邏輯：任務只要有其中一個被選中的標籤就顯示）
   if (selectedFilterTags.value.length > 0) {
@@ -1667,69 +1617,6 @@ onMounted(() => {
   margin-bottom: 20px;
 }
 
-/* 任務類型篩選區 */
-.task-type-filter-section {
-  background: var(--neu-bg);
-  border-radius: 12px;
-  padding: 14px 16px;
-  margin-bottom: 20px;
-  box-shadow: var(--neu-shadow-inset);
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.task-type-filter-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: rgba(var(--color-teal-rgb), 0.9);
-  font-weight: 500;
-  font-size: 14px;
-  flex-shrink: 0;
-}
-
-.task-type-filter-label svg {
-  color: rgba(var(--color-teal-rgb), 0.8);
-}
-
-.task-type-buttons {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.task-type-btn {
-  padding: 6px 16px;
-  font-size: 13px;
-  font-weight: 500;
-  border: none;
-  border-radius: 0;
-  cursor: pointer;
-  transition: all 0.2s;
-  background: var(--neu-bg);
-  box-shadow: var(--neu-shadow-btn);
-  color: rgba(var(--color-text-dark-rgb), 0.7);
-}
-
-.task-type-btn:hover:not(.active) {
-  box-shadow: var(--neu-shadow-btn-hover);
-  transform: translateY(-2px);
-  color: rgba(var(--color-teal-rgb), 0.9);
-}
-
-.task-type-btn.active {
-  font-weight: 600;
-  box-shadow: var(--neu-shadow-btn-active);
-  border-bottom: 2px solid var(--nav-recent-bg);
-  color: rgba(var(--color-teal-rgb), 1);
-}
-
-.task-type-btn.active:hover {
-  box-shadow: var(--neu-shadow-btn-hover);
-  transform: translateY(-2px);
-}
-
 .list-header {
   display: flex;
   justify-content: space-between;
@@ -2088,7 +1975,8 @@ onMounted(() => {
   clip-path: polygon(
     25px 0,
     100% 0,
-    100% 100%,
+    100% calc(100% - 25px),
+    calc(100% - 25px) 100%,
     0 100%,
     0 25px
   );
@@ -2479,7 +2367,7 @@ onMounted(() => {
   pointer-events: none;
 }
 
-/* 三聯按鈕組 */
+/* 三聯按鈕組  風格 */
 .btn-group {
   display: inline-flex;
   border-radius: 12px;
