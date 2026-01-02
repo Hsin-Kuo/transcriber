@@ -286,6 +286,9 @@ function getKeepAudioTooltip() {
   transition: all 0.3s;
   position: relative;
   background: var(--upload-bg);
+  background-image:
+    repeating-linear-gradient(0deg, transparent, transparent 9px, rgba(0, 0, 0, 0.015) 9px, rgba(0, 0, 0, 0.015) 10px),
+    repeating-linear-gradient(90deg, transparent, transparent 9px, rgba(0, 0, 0, 0.015) 9px, rgba(0, 0, 0, 0.015) 10px);
   clip-path: polygon(
     25px 0,
     100% 0,
