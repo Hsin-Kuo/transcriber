@@ -78,7 +78,7 @@
       <div class="circular-controls-center">
         <!-- Rewind button -->
         <button class="audio-control-btn audio-skip-btn skip-backward" @click="emit('skip-backward')" :title="$t('audioPlayer.rewind10s')">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
             <path d="M3 3v5h5"/>
           </svg>
@@ -97,7 +97,7 @@
 
         <!-- Fast forward button -->
         <button class="audio-control-btn audio-skip-btn skip-forward" @click="emit('skip-forward')" :title="$t('audioPlayer.fastForward10s')">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
             <path d="M21 3v5h-5"/>
           </svg>
@@ -145,7 +145,7 @@
           <div class="shortcuts-tooltip">
             <div class="shortcuts-title">{{ $t('audioPlayer.audioControlShortcuts') }}</div>
             <div class="shortcuts-section">
-              <div class="shortcuts-section-title">{{ $t('audioPlayer.generalEditMode') }}</div>
+              <!-- <div class="shortcuts-section-title">{{ $t('audioPlayer.generalEditMode') }}</div> -->
               <div class="shortcut-item">
                 <kbd>Alt</kbd> + <kbd>K</kbd>
                 <span>{{ $t('audioPlayer.playPause') }}</span>
@@ -533,7 +533,7 @@ defineExpose({
 .circular-progress-container {
   width: 100%;
   max-width: 280px;
-  margin: 10px auto 0 -15px;
+  margin: 10px auto 0 -5px;
 }
 
 .progress-arc {
@@ -545,7 +545,7 @@ defineExpose({
   -webkit-user-select: none;
   -moz-user-select: none;
   -ms-user-select: none;
-  transform: rotate(-45deg);
+  transform: rotate(-44deg);
   transform-origin: center;
 }
 
@@ -576,7 +576,7 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 16px;
+  gap: 10px;
   margin-top: 0px;
 }
 
@@ -634,14 +634,16 @@ defineExpose({
 
 .volume-slider-horizontal {
   width: 120px;
-  height: 3px;
+  height: 2.5px;
   -webkit-appearance: none;
   appearance: none;
   background: var(--neu-bg);
-  border: var(--neu-primary) 1px solid;
+  border: var(--neu-primary) 0.5px solid;
   border-radius: 2px;
   outline: none;
   cursor: pointer;
+  position: relative;
+  z-index: 10;
 }
 
 .volume-slider-horizontal::-webkit-slider-thumb {
@@ -670,13 +672,13 @@ defineExpose({
   position: absolute;
   top: 10px;
   right: 10px;
-  z-index: 10;
+  z-index: 100;
 }
 
 .info-btn {
   width: 40px;
   height: 20px;
-  margin-right: 20px;
+  margin-right: 30px;
   margin-top: -3px;
   background: transparent !important;
   box-shadow: none !important;
@@ -689,18 +691,19 @@ defineExpose({
 
 .shortcuts-tooltip {
   position: absolute;
-  bottom: 100%;
-  left: 0;
-  margin-bottom: 8px;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
   background: var(--neu-bg);
   border-radius: 12px;
   padding: 12px;
   display: none;
   flex-direction: column;
   gap: 8px;
-  z-index: 100;
+  z-index: 99999 !important;
   min-width: 220px;
   white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .shortcuts-tooltip::after {
@@ -779,6 +782,7 @@ defineExpose({
   transition: all 0.2s ease;
   position: relative;
   flex-shrink: 0;
+  font-family: inherit;
 }
 
 .audio-control-btn:hover {
@@ -806,6 +810,7 @@ defineExpose({
   font-weight: 700;
   bottom: 7px;
   color: var(--neu-primary);
+  font-family: inherit;
 }
 
 /* Rewind button number at bottom left */
