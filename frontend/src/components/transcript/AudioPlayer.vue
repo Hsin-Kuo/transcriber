@@ -282,13 +282,13 @@ const isDragging = ref(false)
 const svgElement = ref(null)
 const arcReference = ref(null)
 
-// 生成參考弧線路徑
+// 生成參考弧線路徑（不使用 rotate，直接計算正確角度）
 const arcReferencePath = computed(() => {
   const radius = 106
   const centerX = 100
-  const centerY = 120
-  const startAngle = 220
-  const endAngle = 320
+  const centerY = 100  // 調整中心點向上移動
+  const startAngle = 176  // 220° - 44° (移除 rotate 後的角度)
+  const endAngle = 276    // 320° - 44° (移除 rotate 後的角度)
 
   const startRad = (startAngle * Math.PI) / 180
   const endRad = (endAngle * Math.PI) / 180
@@ -303,16 +303,16 @@ const arcReferencePath = computed(() => {
   return `M ${startX} ${startY} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${endX} ${endY}`
 })
 
-// 計算刻度線位置
+// 計算刻度線位置（不使用 rotate，直接計算正確角度）
 const tickMarks = computed(() => {
   const ticks = []
   const numTicks = 90 // 刻度數量
   const radius = 106 // 弧的半徑
-  const centerX = 100 // 圓心 X
-  const centerY = 120 // 圓心 Y（調整以匹配原本的弧線）
-  const startAngle = 222 // 起始角度（度）- 左上
-  const endAngle = 318 // 結束角度（度）- 右上
-  const tickLength = 5 // 刻度長度
+  const centerX = 130 // 圓心 X
+  const centerY = 115 // 圓心 Y（調整以匹配弧線位置）
+  const startAngle = 178 // 起始角度（度）- 222° - 44°
+  const endAngle = 274   // 結束角度（度）- 318° - 44°
+  const tickLength = 5   // 刻度長度
 
   for (let i = 0; i <= numTicks; i++) {
     // 計算當前刻度的角度
@@ -533,7 +533,7 @@ defineExpose({
 .circular-progress-container {
   width: 100%;
   max-width: 280px;
-  margin: 10px auto 0 -5px;
+  margin: 0px auto 0 -5px;
 }
 
 .progress-arc {
@@ -545,8 +545,6 @@ defineExpose({
   -webkit-user-select: none;
   -moz-user-select: none;
   -ms-user-select: none;
-  transform: rotate(-44deg);
-  transform-origin: center;
 }
 
 /* Tick marks styles (手錶刻度) */
@@ -567,7 +565,7 @@ defineExpose({
   color: var(--neu-text);
   font-weight: 500;
   text-align: center;
-  margin-top: -100px;
+  margin-top: -90px;
   margin-bottom: 0px;
 }
 
@@ -830,7 +828,7 @@ defineExpose({
 
 .speed-btn {
   width: 54px;
-  height: 40px;
+  height: 25px;
   border-radius: 12px;
   background: transparent !important;
   box-shadow: none !important;
