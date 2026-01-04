@@ -427,6 +427,7 @@ onMounted(() => {
   display: flex;
   gap: 4px;
   margin-bottom: -15px;
+  margin-top: 20px;
   padding-left: 0px;
   position: relative;
   z-index: 1;

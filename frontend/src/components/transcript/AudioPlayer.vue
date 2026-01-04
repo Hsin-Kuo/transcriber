@@ -33,9 +33,20 @@
     </div>
 
     <div class="custom-audio-player circular-player">
+      <!-- Decorative element (top-left) -->
+      <!-- <div class="decorative-element"> -->
+        <!-- <svg width="24" height="24" viewBox="0 0 24 24" fill="none"> -->
+          <!-- Circle -->
+          <!-- <circle cx="8" cy="8" r="1.5" fill="none" stroke="currentColor" stroke-width="1"/> -->
+          <!-- Diagonal line (45 degrees to bottom-right) -->
+          <!-- <line x1="20" y1="7" x2="7" y2="20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/> -->
+        <!-- </svg> -->
+      <!-- </div> -->
+
       <!-- Circular progress bar (1/3 arc at top) -->
       <div class="circular-progress-container">
         <svg
+          ref="svgElement"
           class="progress-arc"
           viewBox="0 0 200 140"
           @mousedown="startDragArc"
@@ -43,39 +54,41 @@
           @mouseup="stopDragArc"
           @mouseleave="stopDragArc"
         >
-          <!-- Background arc -->
+          <!-- 不可見的參考弧線，用於計算進度 -->
           <path
-            class="arc-background"
-            :d="arcPath"
+            ref="arcReference"
+            :d="arcReferencePath"
             fill="none"
-            stroke-width="5"
-            stroke-linecap="round"
+            stroke="transparent"
+            stroke-width="20"
+            pointer-events="none"
           />
-          <!-- Progress arc -->
-          <path
-            class="arc-progress"
-            :d="arcPath"
-            fill="none"
-            stroke-width="5"
-            stroke-linecap="round"
-            :stroke-dasharray="arcLength"
-            :stroke-dashoffset="arcLength - (arcLength * displayProgress / 100)"
-          />
-          <!-- Progress dot -->
-          <circle
-            class="arc-thumb"
-            :cx="thumbPosition.x"
-            :cy="thumbPosition.y"
-            r="5"
-          />
+
+          <!-- Tick marks (手錶刻度) -->
+          <g v-for="tick in tickMarks" :key="tick.index">
+            <line
+              :x1="tick.x1"
+              :y1="tick.y1"
+              :x2="tick.x2"
+              :y2="tick.y2"
+              :class="['tick-mark', { 'tick-active': tick.progress <= displayProgress }]"
+              stroke-width="0.5"
+              stroke-linecap="round"
+            />
+          </g>
         </svg>
+      </div>
+
+      <!-- Time display -->
+      <div class="time-display-center">
+        {{ formatTime(displayTime) }} / {{ formatTime(duration) }}
       </div>
 
       <!-- Central control area -->
       <div class="circular-controls-center">
         <!-- Rewind button -->
-        <button class="audio-control-btn audio-skip-btn skip-backward" @click="$emit('skip-backward')" :title="$t('audioPlayer.rewind10s')">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <button class="audio-control-btn audio-skip-btn skip-backward" @click="emit('skip-backward')" :title="$t('audioPlayer.rewind10s')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
             <path d="M3 3v5h5"/>
           </svg>
@@ -83,7 +96,7 @@
         </button>
 
         <!-- Play/Pause button -->
-        <button class="audio-control-btn audio-play-btn" @click="$emit('toggle-play-pause')" :title="isPlaying ? $t('audioPlayer.pause') : $t('audioPlayer.play')">
+        <button class="audio-control-btn audio-play-btn" @click="emit('toggle-play-pause')" :title="isPlaying ? $t('audioPlayer.pause') : $t('audioPlayer.play')">
           <svg v-if="!isPlaying" width="30" height="30" viewBox="0 0 24 24" fill="currentColor">
             <path d="M8 5v14l11-7z"/>
           </svg>
@@ -93,8 +106,8 @@
         </button>
 
         <!-- Fast forward button -->
-        <button class="audio-control-btn audio-skip-btn skip-forward" @click="$emit('skip-forward')" :title="$t('audioPlayer.fastForward10s')">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <button class="audio-control-btn audio-skip-btn skip-forward" @click="emit('skip-forward')" :title="$t('audioPlayer.fastForward10s')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
             <path d="M21 3v5h-5"/>
           </svg>
@@ -102,24 +115,47 @@
         </button>
       </div>
 
-      <!-- Time display -->
-      <div class="time-display-center">
-        {{ formatTime(displayTime) }} / {{ formatTime(duration) }}
-      </div>
-
       <!-- Volume and controls -->
       <div class="volume-and-controls">
         <!-- Left: Keyboard shortcuts info -->
         <div class="keyboard-shortcuts-info">
           <button class="audio-control-btn info-btn" :title="$t('audioPlayer.keyboardShortcuts')">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
+            <svg width="32" height="24" viewBox="0 0 48 36" fill="currentColor">
+              <!-- Row 1: 1234 -->
+              <!-- 1: Filled -->
+              <circle cx="9" cy="8" r="2.5" fill="currentColor"/>
+              <!-- 2: Filled -->
+              <circle cx="19" cy="8" r="2.5" fill="currentColor"/>
+              <!-- 3: Filled -->
+              <circle cx="29" cy="8" r="2.5" fill="currentColor"/>
+              <!-- 4: Hollow -->
+              <circle cx="39" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
+
+              <!-- Row 2: 5678 -->
+              <!-- 5: Hollow -->
+              <circle cx="9" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
+              <!-- 6: Hollow -->
+              <circle cx="19" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
+              <!-- 7: Hollow -->
+              <circle cx="29" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
+              <!-- 8: Filled -->
+              <circle cx="39" cy="18" r="2.5" fill="currentColor"/>
+
+              <!-- Row 3: 9abc -->
+              <!-- 9: Hollow -->
+              <circle cx="9" cy="28" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
+              <!-- a: Hollow -->
+              <circle cx="19" cy="28" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
+              <!-- b: Hollow -->
+              <circle cx="29" cy="28" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
+              <!-- c: Filled -->
+              <circle cx="39" cy="28" r="2.5" fill="currentColor"/>
             </svg>
           </button>
           <div class="shortcuts-tooltip">
             <div class="shortcuts-title">{{ $t('audioPlayer.audioControlShortcuts') }}</div>
             <div class="shortcuts-section">
-              <div class="shortcuts-section-title">{{ $t('audioPlayer.generalEditMode') }}</div>
+              <!-- <div class="shortcuts-section-title">{{ $t('audioPlayer.generalEditMode') }}</div> -->
               <div class="shortcut-item">
                 <kbd>Alt</kbd> + <kbd>K</kbd>
                 <span>{{ $t('audioPlayer.playPause') }}</span>
@@ -211,7 +247,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const { t: $t } = useI18n()
@@ -252,7 +288,68 @@ const emit = defineEmits([
 ])
 
 const audioElement = ref(null)
+const isDragging = ref(false)
+const svgElement = ref(null)
+const arcReference = ref(null)
 
+// 生成參考弧線路徑（不使用 rotate，直接計算正確角度）
+const arcReferencePath = computed(() => {
+  const radius = 106
+  const centerX = 100
+  const centerY = 100  // 調整中心點向上移動
+  const startAngle = 176  // 220° - 44° (移除 rotate 後的角度)
+  const endAngle = 276    // 320° - 44° (移除 rotate 後的角度)
+
+  const startRad = (startAngle * Math.PI) / 180
+  const endRad = (endAngle * Math.PI) / 180
+
+  const startX = centerX + radius * Math.cos(startRad)
+  const startY = centerY + radius * Math.sin(startRad)
+  const endX = centerX + radius * Math.cos(endRad)
+  const endY = centerY + radius * Math.sin(endRad)
+
+  // 創建弧線路徑
+  const largeArcFlag = endAngle - startAngle > 180 ? 1 : 0
+  return `M ${startX} ${startY} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${endX} ${endY}`
+})
+
+// 計算刻度線位置（不使用 rotate，直接計算正確角度）
+const tickMarks = computed(() => {
+  const ticks = []
+  const numTicks = 90 // 刻度數量
+  const radius = 106 // 弧的半徑
+  const centerX = 130 // 圓心 X
+  const centerY = 115 // 圓心 Y（調整以匹配弧線位置）
+  const startAngle = 178 // 起始角度（度）- 222° - 44°
+  const endAngle = 274   // 結束角度（度）- 318° - 44°
+  const tickLength = 5   // 刻度長度
+
+  for (let i = 0; i <= numTicks; i++) {
+    // 計算當前刻度的角度
+    const progress = i / numTicks
+    const angle = startAngle + (endAngle - startAngle) * progress
+    const radian = (angle * Math.PI) / 180
+
+    // 計算刻度線的起點（弧線上）
+    const x1 = centerX + radius * Math.cos(radian)
+    const y1 = centerY + radius * Math.sin(radian)
+
+    // 計算刻度線的終點（向外延伸）
+    const x2 = centerX + (radius + tickLength) * Math.cos(radian)
+    const y2 = centerY + (radius + tickLength) * Math.sin(radian)
+
+    ticks.push({
+      index: i,
+      progress: (i / numTicks) * 100, // 轉換為 0-100 的百分比
+      x1,
+      y1,
+      x2,
+      y2
+    })
+  }
+
+  return ticks
+})
 
 function handleAudioLoaded() {
   emit('audio-loaded')
@@ -285,15 +382,73 @@ function updatePlaybackRate() {
 }
 
 function startDragArc(event) {
-  emit('start-drag-arc', event)
+  isDragging.value = true
+  handleDrag(event)
 }
 
 function dragArc(event) {
-  emit('drag-arc', event)
+  if (!isDragging.value) return
+  handleDrag(event)
 }
 
 function stopDragArc() {
-  emit('stop-drag-arc')
+  isDragging.value = false
+}
+
+function handleDrag(event) {
+  if (!audioElement.value || !props.duration || !arcReference.value) return
+
+  const svg = svgElement.value
+  if (!svg) return
+
+  // 創建 SVG 點
+  const pt = svg.createSVGPoint()
+  pt.x = event.clientX
+  pt.y = event.clientY
+
+  // 轉換到 SVG 座標系統
+  const svgP = pt.matrixTransform(svg.getScreenCTM().inverse())
+
+  // 獲取弧線路徑
+  const path = arcReference.value
+  const pathLength = path.getTotalLength()
+
+  // 找到滑鼠點擊位置在弧線上最近的點
+  let minDistance = Infinity
+  let closestPoint = 0
+
+  // 採樣路徑上的點，找到最接近滑鼠的點
+  const sampleCount = 100
+  for (let i = 0; i <= sampleCount; i++) {
+    const length = (i / sampleCount) * pathLength
+    const point = path.getPointAtLength(length)
+    const distance = Math.sqrt(
+      Math.pow(point.x - svgP.x, 2) + Math.pow(point.y - svgP.y, 2)
+    )
+
+    if (distance < minDistance) {
+      minDistance = distance
+      closestPoint = length
+    }
+  }
+
+  // 計算進度百分比
+  const progress = (closestPoint / pathLength) * 100
+
+  console.log('Path-based calculation:', {
+    mousePos: { x: svgP.x, y: svgP.y },
+    closestPoint,
+    pathLength,
+    progress,
+    minDistance
+  })
+
+  // 計算對應的時間並跳轉
+  const newTime = (progress / 100) * props.duration
+  if (audioElement.value) {
+    audioElement.value.currentTime = newTime
+    console.log('Seeking to:', newTime, 'seconds')
+  }
 }
 
 function formatTime(seconds) {
@@ -373,21 +528,22 @@ defineExpose({
 /* Circular player */
 .custom-audio-player.circular-player {
   background: var(--neu-bg);
-  padding: 10px 5px 20px;
+  padding: 10px 5px 0px;
   border-radius: 20px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 0px;
   max-width: 280px;
   margin: 0 auto;
+  position: relative;
 }
 
 /* Circular progress container */
 .circular-progress-container {
   width: 100%;
   max-width: 280px;
-  margin: 0 auto;
+  margin: 0px auto 0 -5px;
 }
 
 .progress-arc {
@@ -401,32 +557,16 @@ defineExpose({
   -ms-user-select: none;
 }
 
-/* Progress bar arc styles */
-.arc-background {
-  stroke: #d1d9e6;
+/* Tick marks styles (手錶刻度) */
+.tick-mark {
+  stroke: var(--nav-active-bg);
   stroke-opacity: 0.5;
+  transition: stroke 0.2s ease;
 }
 
-.arc-progress {
-  stroke: var(--neu-primary);
-  stroke-linecap: round;
-  transition: stroke-dashoffset 0.1s linear;
-}
-
-.arc-thumb {
-  fill: var(--neu-primary);
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
-  transition: cx 0.1s linear, cy 0.1s linear;
-  pointer-events: none;
-}
-
-/* Central control area - Play, fast forward, rewind */
-.circular-controls-center {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  margin-top: -90px;
+.tick-mark.tick-active {
+  stroke: var(--nav-recent-bg);
+  stroke-opacity: 1;
 }
 
 /* Time display */
@@ -435,7 +575,17 @@ defineExpose({
   color: var(--neu-text);
   font-weight: 500;
   text-align: center;
-  margin-top: 6px;
+  margin-top: -90px;
+  margin-bottom: 0px;
+}
+
+/* Central control area - Play, fast forward, rewind */
+.circular-controls-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 0px;
 }
 
 /* Volume and controls (includes info, volume, speed) */
@@ -444,9 +594,9 @@ defineExpose({
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
-  margin-top: 6px;
-  padding: 0 10px;
+  gap: 1px;
+  margin-top: 0px;
+  padding: 0 15px;
 }
 
 /* Volume control area */
@@ -491,15 +641,17 @@ defineExpose({
 }
 
 .volume-slider-horizontal {
-  width: 70px;
-  height: 3px;
+  width: 120px;
+  height: 2.5px;
   -webkit-appearance: none;
   appearance: none;
   background: var(--neu-bg);
-  border: var(--neu-primary) 1px solid;
+  border: var(--neu-primary) 0.5px solid;
   border-radius: 2px;
   outline: none;
   cursor: pointer;
+  position: relative;
+  z-index: 10;
 }
 
 .volume-slider-horizontal::-webkit-slider-thumb {
@@ -523,14 +675,29 @@ defineExpose({
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
+/* Decorative element (top-left) */
+.decorative-element {
+  position: absolute;
+  top: 5px;
+  left: 15px;
+  z-index: 5;
+  color: var(--neu-text);
+  opacity: 0.6;
+}
+
 /* Keyboard shortcuts info */
 .keyboard-shortcuts-info {
-  position: relative;
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 100;
 }
 
 .info-btn {
   width: 40px;
-  height: 40px;
+  height: 20px;
+  margin-right: 30px;
+  margin-top: -3px;
   background: transparent !important;
   box-shadow: none !important;
 }
@@ -542,18 +709,19 @@ defineExpose({
 
 .shortcuts-tooltip {
   position: absolute;
-  bottom: 100%;
-  left: 0;
-  margin-bottom: 8px;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
   background: var(--neu-bg);
   border-radius: 12px;
   padding: 12px;
   display: none;
   flex-direction: column;
   gap: 8px;
-  z-index: 100;
+  z-index: 99999 !important;
   min-width: 220px;
   white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .shortcuts-tooltip::after {
@@ -623,7 +791,7 @@ defineExpose({
   border: none;
   border-radius: 50%;
   width: 40px;
-  height: 40px;
+  height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -632,6 +800,7 @@ defineExpose({
   transition: all 0.2s ease;
   position: relative;
   flex-shrink: 0;
+  font-family: inherit;
 }
 
 .audio-control-btn:hover {
@@ -659,6 +828,7 @@ defineExpose({
   font-weight: 700;
   bottom: 7px;
   color: var(--neu-primary);
+  font-family: inherit;
 }
 
 /* Rewind button number at bottom left */
@@ -678,7 +848,7 @@ defineExpose({
 
 .speed-btn {
   width: 54px;
-  height: 40px;
+  height: 25px;
   border-radius: 12px;
   background: transparent !important;
   box-shadow: none !important;

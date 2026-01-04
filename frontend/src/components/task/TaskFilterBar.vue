@@ -411,7 +411,6 @@ async function handleColorSelected({ tag, color }) {
   background: transparent;
   border-radius: 12px;
   padding: 16px;
-  margin-bottom: 20px;
   display: flex;
   align-items: center;
   gap: 12px;
