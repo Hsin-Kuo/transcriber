@@ -33,6 +33,16 @@
     </div>
 
     <div class="custom-audio-player circular-player">
+      <!-- Decorative element (top-left) -->
+      <!-- <div class="decorative-element"> -->
+        <!-- <svg width="24" height="24" viewBox="0 0 24 24" fill="none"> -->
+          <!-- Circle -->
+          <!-- <circle cx="8" cy="8" r="1.5" fill="none" stroke="currentColor" stroke-width="1"/> -->
+          <!-- Diagonal line (45 degrees to bottom-right) -->
+          <!-- <line x1="20" y1="7" x2="7" y2="20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/> -->
+        <!-- </svg> -->
+      <!-- </div> -->
+
       <!-- Circular progress bar (1/3 arc at top) -->
       <div class="circular-progress-container">
         <svg
@@ -663,6 +673,16 @@ defineExpose({
   cursor: pointer;
   border: none;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Decorative element (top-left) */
+.decorative-element {
+  position: absolute;
+  top: 5px;
+  left: 15px;
+  z-index: 5;
+  color: var(--neu-text);
+  opacity: 0.6;
 }
 
 /* Keyboard shortcuts info */
