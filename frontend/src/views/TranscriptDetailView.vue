@@ -153,11 +153,15 @@
                     <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor">
                       <path d="M 4 6 L 1 2 L 7 2 Z"/>
                     </svg>
-                    <span class="timecode-tooltip"> 
+                    <span class="timecode-tooltip">
                       {{ formatTime(part.start) }}
                     </span>
                   </span>
-                  <span class="text-part">{{ part.text }}</span>
+                  <span
+                    class="text-part"
+                    :class="{ 'clickable': isAltPressed && currentTranscript.hasAudio }"
+                    @click="handleTextClick(part.start, $event)"
+                  >{{ part.text }}</span>
                 </span>
               </template>
             </div>
@@ -223,7 +227,6 @@ import { useTranscriptData } from '../composables/transcript/useTranscriptData'
 import { useAudioPlayer } from '../composables/transcript/useAudioPlayer'
 import { useSubtitleMode } from '../composables/transcript/useSubtitleMode'
 import { useTranscriptEditor } from '../composables/transcript/useTranscriptEditor'
-// import { useTimecodeMarkers } from '../composables/transcript/useTimecodeMarkers'
 import { useSegmentMarkers } from '../composables/transcript/useSegmentMarkers'
 import { useKeyboardShortcuts } from '../composables/transcript/useKeyboardShortcuts'
 import { useTranscriptDownload } from '../composables/transcript/useTranscriptDownload'
@@ -275,7 +278,6 @@ const {
   handleAudioLoaded,
   handleAudioError,
   updateProgress,
-  updateDuration,
   updateVolume,
   updatePlaybackRate,
   togglePlayPause,
@@ -339,26 +341,19 @@ const {
   handleBeforeUnload
 } = useTranscriptEditor(currentTranscript, originalContent, displayMode, groupedSegments, convertTableToPlainText)
 
-// ========== 時間碼標記 ==========
-// const {
-//   timecodeMarkers,
-//   activeTimecodeIndex,
-//   textarea, // 用於 template ref
-//   generateTimecodeMarkers,
-//   syncScroll
-// } = useTimecodeMarkers()
-
 // ========== Segment 標記 ==========
 const {
   segmentMarkers,
   textareaRef,
   generateSegmentMarkers,
-  calculateMarkerPosition,
   formatTime
 } = useSegmentMarkers()
 
 // 控制是否顯示 timecode 標記
 const showTimecodeMarkers = ref(true)
+
+// 控制 Alt 鍵狀態（用於點擊句子跳轉）
+const isAltPressed = ref(false)
 
 // 講者名稱自動儲存（debounced）
 let speakerNamesSaveTimer = null
@@ -408,7 +403,6 @@ async function loadTranscript(taskId) {
   const result = await loadTranscriptData(
     taskId,
     getAudioUrl,
-    // (segs) => generateTimecodeMarkers(segs, currentTranscript.value.content)
     null
   )
 
@@ -417,12 +411,6 @@ async function loadTranscript(taskId) {
       audioUrl.value = result.audioUrl
       audioError.value = null
     }
-    // if (result.timecodeMarkers) {
-    //   timecodeMarkers.value = result.timecodeMarkers
-    //   if (result.timecodeMarkers.length > 0) {
-    //     activeTimecodeIndex.value = 0
-    //   }
-    // }
 
     // 生成segment標記（僅在段落模式下）
     if (displayMode.value === 'paragraph' && segments.value && currentTranscript.value.content) {
@@ -525,11 +513,9 @@ async function saveEditing() {
 
 // 儲存任務名稱的包裝函數
 async function saveTaskName() {
-  const success = await updateTaskName(editingTaskName.value)
-  if (success || !success) {
-    // 無論成功或失敗都關閉編輯模式
-    isEditingTitle.value = false
-  }
+  await updateTaskName(editingTaskName.value)
+  // 無論成功或失敗都關閉編輯模式
+  isEditingTitle.value = false
 }
 
 // 下載逐字稿
@@ -786,6 +772,36 @@ function handleMarkerClick(startTime) {
   }
 }
 
+// 處理文字點擊（當 Alt 鍵按下時）
+function handleTextClick(startTime, event) {
+  // Alt 鍵按下 + 有音訊時才跳轉
+  if (isAltPressed.value && currentTranscript.value.hasAudio) {
+    // 在編輯模式下，阻止預設行為以避免游標移動
+    if (isEditing.value && event) {
+      event.preventDefault()
+    }
+    seekToTime(startTime)
+  }
+}
+
+// 鍵盤事件處理
+function handleKeyDown(e) {
+  if (e.altKey) {
+    isAltPressed.value = true
+  }
+}
+
+function handleKeyUp(e) {
+  if (!e.altKey) {
+    isAltPressed.value = false
+  }
+}
+
+// 處理視窗失焦（確保 Alt 鍵狀態重置）
+function handleBlur() {
+  isAltPressed.value = false
+}
+
 // 修復字幕模式編輯時的滾動問題
 function fixSubtitleScrolling() {
   const wrapper = document.querySelector('.subtitle-table-wrapper')
@@ -836,6 +852,11 @@ onBeforeRouteLeave((_to, _from, next) => {
 onMounted(() => {
   document.body.classList.add('transcript-detail-page')
   window.addEventListener('beforeunload', handleBeforeUnload)
+  // 註冊 Alt 鍵監聽
+  window.addEventListener('keydown', handleKeyDown)
+  window.addEventListener('keyup', handleKeyUp)
+  window.addEventListener('blur', handleBlur)
+
   loadTranscript(route.params.taskId)
 
   // 延遲執行以確保 DOM 已渲染
@@ -846,6 +867,11 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
+  // 移除 Alt 鍵監聽
+  window.removeEventListener('keydown', handleKeyDown)
+  window.removeEventListener('keyup', handleKeyUp)
+  window.removeEventListener('blur', handleBlur)
+
   document.body.classList.remove('editing-transcript')
   document.body.classList.remove('transcript-detail-page')
 })
@@ -1078,53 +1104,12 @@ watch(
   min-height: 0;
 }
 
-/* .timecode-fixed-display {
-  position: absolute;
-  top: calc(25% - 33px);
-  right: 20px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: rgba(255, 219, 184, 0.15);
-  border-radius: 8px;
-  padding: 8px 12px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08),
-              0 0 0 1px rgba(255, 255, 255, 0.15) inset;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  z-index: 100;
-  backdrop-filter: blur(5px) saturate(10%);
-  -webkit-backdrop-filter: blur(16px) saturate(200%);
-}
-
-.timecode-fixed-display:hover {
-  transform: translateY(0%) translateX(-2px);
-}
-
-.timecode-label {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--neu-primary);
-} */
-
 .textarea-wrapper {
   position: relative;
   width: 100%;
   flex: 1;
   min-height: 0;
 }
-
-/* .textarea-wrapper.show-reference-line::before {
-  content: '';
-  position: absolute;
-  top: 25%;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, #ff6b35, transparent);
-  z-index: 5;
-  pointer-events: none;
-} */
 
 .loading-state,
 .error-state {
@@ -1147,35 +1132,6 @@ watch(
 
 @keyframes spin {
   to { transform: rotate(360deg); }
-}
-
-.transcript-textarea {
-  width: 100%;
-  height: 100%;
-  padding: 20px;
-  border: none;
-  border-radius: 12px;
-  background: var(--neu-bg);
-  color: var(--neu-text);
-  font-size: 1rem;
-  line-height: 1.8;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  resize: none;
-  overflow-y: auto;
-  transition: box-shadow 0.3s ease;
-}
-
-.transcript-textarea:focus {
-  outline: none;
-}
-
-.transcript-textarea.editing {
-  background: var(--upload-bg);
-  box-shadow: 0 0 0 2px var(--neu-primary);
-}
-
-.transcript-textarea[readonly] {
-  cursor: default;
 }
 
 /* 非編輯模式的文字顯示區 */
@@ -1207,6 +1163,19 @@ watch(
 /* 文字片段 */
 .text-part {
   display: inline;
+}
+
+/* Alt 鍵按下時的可點擊文字樣式 */
+.text-part.clickable {
+  background-color: rgba(196, 140, 226, 0.175);
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  border-radius: 3px;
+  padding: 1px 3px;
+}
+
+.text-part.clickable:hover {
+  background-color: rgba(163, 177, 198, 0.25);
 }
 
 /* 標記包裝器 */

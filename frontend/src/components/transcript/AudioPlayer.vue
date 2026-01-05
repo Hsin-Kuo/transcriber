@@ -295,10 +295,10 @@ const arcReference = ref(null)
 // 生成參考弧線路徑（不使用 rotate，直接計算正確角度）
 const arcReferencePath = computed(() => {
   const radius = 106
-  const centerX = 100
-  const centerY = 100  // 調整中心點向上移動
-  const startAngle = 176  // 220° - 44° (移除 rotate 後的角度)
-  const endAngle = 276    // 320° - 44° (移除 rotate 後的角度)
+  const centerX = 130  // 與 tickMarks 一致
+  const centerY = 115  // 與 tickMarks 一致
+  const startAngle = 178  // 與 tickMarks 一致
+  const endAngle = 274    // 與 tickMarks 一致
 
   const startRad = (startAngle * Math.PI) / 180
   const endRad = (endAngle * Math.PI) / 180
