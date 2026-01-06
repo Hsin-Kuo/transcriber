@@ -57,7 +57,7 @@
 
             <!-- 任務類型 -->
             <span v-if="task.task_type" class="badge-task-type" :class="`badge-${task.task_type}`">
-              {{ task.task_type === 'subtitle' ? $t('transcription.subtitle') : $t('transcription.paragraph') }}
+              {{ task.task_type === 'subtitle' ? $t('taskList.subtitle') : $t('taskList.paragraph') }}
             </span>
 
             <!-- 標籤區域（使用 TaskTagsSection 組件） -->

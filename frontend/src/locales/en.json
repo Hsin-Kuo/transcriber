@@ -87,6 +87,9 @@
     "transcriptionFailed": "Transcription Failed"
   },
   "taskList": {
+    "all": "All",
+    "paragraph": "Doc",
+    "subtitle": "Subs",
     "taskName": "Task Name",
     "status": "Status",
     "type": "Type",
