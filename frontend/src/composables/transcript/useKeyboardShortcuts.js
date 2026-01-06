@@ -15,7 +15,9 @@ export function useKeyboardShortcuts(
   togglePlayPause,
   skipBackward,
   skipForward,
-  toggleMute
+  toggleMute,
+  setPlaybackRate,
+  playbackRate
 ) {
   /**
    * 鍵盤快捷鍵處理函數
@@ -33,22 +35,31 @@ export function useKeyboardShortcuts(
     // 因為 Alt 組合鍵不太會與正常打字衝突
     if (event.altKey && !event.ctrlKey && !event.metaKey) {
       switch(event.key) {
-        case 'k':
-        case 'K':
+        case ' ':  // Alt + 空白鍵：播放/暫停
           event.preventDefault()
           togglePlayPause()
           break
-        case 'j':
-        case 'J':
         case 'ArrowLeft':
           event.preventDefault()
           skipBackward()
           break
-        case 'l':
-        case 'L':
         case 'ArrowRight':
           event.preventDefault()
           skipForward()
+          break
+        case 'ArrowUp':  // Alt + 上鍵：加速播放（+0.25x）
+          event.preventDefault()
+          if (setPlaybackRate && playbackRate) {
+            const newRate = Math.min(2, playbackRate.value + 0.25)
+            setPlaybackRate(newRate)
+          }
+          break
+        case 'ArrowDown':  // Alt + 下鍵：減速播放（-0.25x）
+          event.preventDefault()
+          if (setPlaybackRate && playbackRate) {
+            const newRate = Math.max(0.25, playbackRate.value - 0.25)
+            setPlaybackRate(newRate)
+          }
           break
         case 'm':
         case 'M':

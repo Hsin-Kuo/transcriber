@@ -1,4 +1,5 @@
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { API_BASE, TokenManager } from '../../utils/api'
 import { NEW_ENDPOINTS } from '../../api/endpoints'
 
@@ -12,6 +13,9 @@ import { NEW_ENDPOINTS } from '../../api/endpoints'
  * - 處理音訊載入錯誤
  */
 export function useAudioPlayer() {
+  // i18n
+  const { t } = useI18n()
+
   // 音訊元素引用
   const audioElement = ref(null)
 
@@ -106,7 +110,7 @@ export function useAudioPlayer() {
   function getAudioUrl(taskId) {
     const token = TokenManager.getAccessToken()
     if (!token) {
-      console.warn('無法獲取 access token，音檔載入失敗')
+      console.warn(t('audioPlayer.cannotGetAccessToken'))
       return ''
     }
     return `${API_BASE}${NEW_ENDPOINTS.transcriptions.audio(taskId)}?token=${encodeURIComponent(token)}&t=${Date.now()}`
@@ -124,34 +128,63 @@ export function useAudioPlayer() {
   /**
    * 重新載入音檔
    */
-  function reloadAudio(taskId) {
+  async function reloadAudio(taskId) {
     if (!taskId) return
-
-    const newUrl = getAudioUrl(taskId)
-    if (!newUrl) {
-      audioError.value = '無法獲取授權 Token，請重新登入'
-      return
-    }
 
     // 保存當前播放位置
     const currentPosition = audioElement.value?.currentTime || 0
     const wasPlaying = isPlaying.value
 
-    // 更新音檔 URL
-    audioUrl.value = newUrl
-    audioError.value = null
+    try {
+      // 先嘗試刷新 token（透過發送一個測試請求觸發 token 刷新機制）
+      const refreshToken = TokenManager.getRefreshToken()
+      if (refreshToken) {
+        try {
+          // 使用 refresh token 獲取新的 access token
+          const response = await fetch(`${API_BASE}/auth/refresh`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ refresh_token: refreshToken })
+          })
 
-    // 恢復播放位置和狀態
-    if (audioElement.value) {
-      audioElement.value.load()
-      audioElement.value.addEventListener('loadedmetadata', () => {
-        if (audioElement.value && currentPosition > 0) {
-          audioElement.value.currentTime = currentPosition
+          if (response.ok) {
+            const data = await response.json()
+            TokenManager.setTokens(data.access_token, data.refresh_token)
+            console.log(t('audioPlayer.tokenRefreshed'))
+          }
+        } catch (refreshError) {
+          console.warn(t('audioPlayer.tokenRefreshFailed'), refreshError)
         }
-        if (wasPlaying) {
-          audioElement.value?.play().catch(err => console.log('恢復播放失敗:', err))
-        }
-      }, { once: true })
+      }
+
+      // 生成新的音檔 URL
+      const newUrl = getAudioUrl(taskId)
+      if (!newUrl) {
+        audioError.value = t('audioPlayer.cannotGetAuthToken')
+        return
+      }
+
+      // 更新音檔 URL
+      audioUrl.value = newUrl
+      audioError.value = null
+
+      // 恢復播放位置和狀態
+      if (audioElement.value) {
+        audioElement.value.load()
+        audioElement.value.addEventListener('loadedmetadata', () => {
+          if (audioElement.value && currentPosition > 0) {
+            audioElement.value.currentTime = currentPosition
+          }
+          if (wasPlaying) {
+            audioElement.value?.play().catch(err => console.log(t('audioPlayer.resumePlaybackFailed'), err))
+          }
+        }, { once: true })
+      }
+    } catch (error) {
+      console.error(t('audioPlayer.reloadFailed'), error)
+      audioError.value = t('audioPlayer.reloadFailed')
     }
   }
 
@@ -196,36 +229,36 @@ export function useAudioPlayer() {
 
         if (!response.ok) {
           if (response.status === 401 || response.status === 403) {
-            audioError.value = '授權已過期或無效。請點擊「重試載入」以更新授權。'
+            audioError.value = t('audioPlayer.authExpired')
           } else if (response.status === 404) {
-            audioError.value = '音檔不存在或已被刪除。'
+            audioError.value = t('audioPlayer.audioNotFound')
           } else {
-            audioError.value = `後端錯誤 (${response.status}): ${response.statusText}`
+            audioError.value = t('audioPlayer.backendError', { status: response.status, statusText: response.statusText })
           }
         } else if (contentType && !contentType.includes('audio')) {
-          audioError.value = `後端返回了無效的內容類型: ${contentType}。預期為音檔格式。`
+          audioError.value = t('audioPlayer.invalidContentType', { contentType })
         } else {
-          audioError.value = '音檔格式不被瀏覽器支援，或檔案已損壞。'
+          audioError.value = t('audioPlayer.audioFormatNotSupported')
         }
       } catch (fetchError) {
         console.error('診斷錯誤時發生問題:', fetchError)
         const token = TokenManager.getAccessToken()
         if (!token) {
-          audioError.value = '授權 Token 已失效，請重新登入或點擊「重試載入」。'
+          audioError.value = t('audioPlayer.authTokenExpired')
         } else {
-          audioError.value = '無法存取音檔。可能原因：音檔不存在、已被刪除，或授權已過期。'
+          audioError.value = t('audioPlayer.cannotAccessAudio')
         }
       }
     } else {
       switch (audio.error.code) {
         case audio.error.MEDIA_ERR_NETWORK:
-          audioError.value = '網路錯誤，無法載入音檔。請檢查網路連線或授權是否過期。'
+          audioError.value = t('audioPlayer.networkError')
           break
         case audio.error.MEDIA_ERR_DECODE:
-          audioError.value = '音檔格式錯誤或損壞，無法解碼。'
+          audioError.value = t('audioPlayer.audioDecodeError')
           break
         default:
-          audioError.value = '音檔載入失敗。請稍後再試或重新整理頁面。'
+          audioError.value = t('audioPlayer.audioLoadFailed')
       }
     }
   }
@@ -282,8 +315,8 @@ export function useAudioPlayer() {
     if (!audioElement.value) return
     if (audioElement.value.paused) {
       audioElement.value.play().catch(err => {
-        console.error('播放失敗:', err)
-        audioError.value = '播放失敗'
+        console.error(t('audioPlayer.playbackFailed'), err)
+        audioError.value = t('audioPlayer.playbackFailed')
       })
     } else {
       audioElement.value.pause()
@@ -319,7 +352,7 @@ export function useAudioPlayer() {
   function seekToTime(time) {
     if (audioElement.value) {
       audioElement.value.currentTime = time
-      audioElement.value.play().catch(err => console.log('播放失敗:', err))
+      audioElement.value.play().catch(err => console.log(t('audioPlayer.playbackFailed'), err))
     }
   }
 

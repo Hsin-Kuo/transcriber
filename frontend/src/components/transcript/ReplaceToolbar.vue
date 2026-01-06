@@ -2,7 +2,7 @@
   <div class="replace-toolbar">
     <input
       :value="findText"
-      @input="$emit('update:findText', $event.target.value)"
+      @input="$emit('update:find-text', $event.target.value)"
       type="text"
       :placeholder="$t('replaceToolbar.find')"
       class="replace-input"
@@ -12,7 +12,7 @@
     />
     <input
       :value="replaceText"
-      @input="$emit('update:replaceText', $event.target.value)"
+      @input="$emit('update:replace-text', $event.target.value)"
       type="text"
       :placeholder="$t('replaceToolbar.replaceWith')"
       class="replace-input"
@@ -44,7 +44,7 @@ defineProps({
   }
 })
 
-const emit = defineEmits(['update:findText', 'update:replaceText', 'replace-all'])
+const emit = defineEmits(['update:find-text', 'update:replace-text', 'replace-all'])
 
 // 追蹤輸入法狀態
 const isComposing = ref(false)

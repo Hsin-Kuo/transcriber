@@ -1,4 +1,5 @@
 import { ref, inject } from 'vue'
+import { useI18n } from 'vue-i18n'
 import api from '../../utils/api'
 import { NEW_ENDPOINTS } from '../../api/endpoints'
 
@@ -11,6 +12,9 @@ import { NEW_ENDPOINTS } from '../../api/endpoints'
  * - 更新任務名稱
  */
 export function useTranscriptData() {
+  // i18n
+  const { t } = useI18n()
+
   // 注入全局通知函數
   const showNotification = inject('showNotification', null)
 
@@ -31,7 +35,7 @@ export function useTranscriptData() {
    */
   async function loadTranscript(taskId, getAudioUrl, generateTimecodeMarkers) {
     if (!taskId) {
-      transcriptError.value = '無效的任務 ID'
+      transcriptError.value = t('transcriptData.invalidTaskId')
       return null
     }
 
@@ -44,7 +48,7 @@ export function useTranscriptData() {
       const task = taskResponse.data.tasks?.find(t => (t._id || t.task_id) === taskId)
 
       if (!task) {
-        transcriptError.value = '找不到該任務'
+        transcriptError.value = t('transcriptData.taskNotFound')
         return null
       }
 
@@ -109,7 +113,7 @@ export function useTranscriptData() {
 
     } catch (error) {
       console.error('載入逐字稿失敗:', error)
-      transcriptError.value = '載入逐字稿失敗'
+      transcriptError.value = t('transcriptData.loadTranscriptFailed')
       loadingTranscript.value = false
       return null
     }
@@ -154,8 +158,8 @@ export function useTranscriptData() {
       // 顯示成功通知
       if (showNotification) {
         showNotification({
-          title: '儲存成功',
-          message: segments ? '逐字稿和字幕已更新' : '逐字稿已更新',
+          title: t('transcriptData.saveSuccess'),
+          message: segments ? t('transcriptData.transcriptAndSubtitleUpdated') : t('transcriptData.transcriptUpdated'),
           type: 'success'
         })
       }
@@ -167,8 +171,8 @@ export function useTranscriptData() {
 
       if (showNotification) {
         showNotification({
-          title: '儲存失敗',
-          message: error.message || '發生未知錯誤',
+          title: t('transcriptData.saveFailed'),
+          message: error.message || t('transcriptData.unknownError'),
           type: 'error'
         })
       }
@@ -203,8 +207,8 @@ export function useTranscriptData() {
 
       if (showNotification) {
         showNotification({
-          title: '更新失敗',
-          message: '無法更新任務名稱',
+          title: t('transcriptData.updateFailed'),
+          message: t('transcriptData.cannotUpdateTaskName'),
           type: 'error'
         })
       }
@@ -234,8 +238,8 @@ export function useTranscriptData() {
 
       if (showNotification) {
         showNotification({
-          title: '更新失敗',
-          message: '無法更新講者名稱',
+          title: t('transcriptData.updateFailed'),
+          message: t('transcriptData.cannotUpdateSpeakerNames'),
           type: 'error'
         })
       }
