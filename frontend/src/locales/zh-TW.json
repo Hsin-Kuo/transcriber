@@ -237,7 +237,26 @@
     "nonEditMode": "非編輯模式",
     "unmute": "取消靜音",
     "mute": "靜音",
-    "playbackSpeed": "播放速度: {rate}x"
+    "playbackSpeed": "播放速度: {rate}x",
+    "speedUp": "加速 (+0.25x)",
+    "speedDown": "減速 (-0.25x)",
+    "cannotGetAccessToken": "無法獲取 access token，音檔載入失敗",
+    "cannotGetAuthToken": "無法獲取授權 Token，請重新登入",
+    "tokenRefreshed": "Token 已刷新",
+    "tokenRefreshFailed": "Token 刷新失敗，嘗試使用現有 token",
+    "reloadFailed": "重新載入失敗，請稍後再試",
+    "resumePlaybackFailed": "恢復播放失敗",
+    "authExpired": "授權已過期或無效。請點擊「重試載入」以更新授權。",
+    "audioNotFound": "音檔不存在或已被刪除。",
+    "backendError": "後端錯誤 ({status}): {statusText}",
+    "invalidContentType": "後端返回了無效的內容類型: {contentType}。預期為音檔格式。",
+    "audioFormatNotSupported": "音檔格式不被瀏覽器支援，或檔案已損壞。",
+    "authTokenExpired": "授權 Token 已失效，請重新登入或點擊「重試載入」。",
+    "cannotAccessAudio": "無法存取音檔。可能原因：音檔不存在、已被刪除，或授權已過期。",
+    "networkError": "網路錯誤，無法載入音檔。請檢查網路連線或授權是否過期。",
+    "audioDecodeError": "音檔格式錯誤或損壞，無法解碼。",
+    "audioLoadFailed": "音檔載入失敗。請稍後再試或重新整理頁面。",
+    "playbackFailed": "播放失敗"
   },
   "replaceToolbar": {
     "find": "尋找",
@@ -246,5 +265,18 @@
   },
   "transcriptMetadata": {
     "characters": "字"
+  },
+  "transcriptData": {
+    "invalidTaskId": "無效的任務 ID",
+    "taskNotFound": "找不到該任務",
+    "loadTranscriptFailed": "載入逐字稿失敗",
+    "saveSuccess": "儲存成功",
+    "transcriptAndSubtitleUpdated": "逐字稿和字幕已更新",
+    "transcriptUpdated": "逐字稿已更新",
+    "saveFailed": "儲存失敗",
+    "unknownError": "發生未知錯誤",
+    "updateFailed": "更新失敗",
+    "cannotUpdateTaskName": "無法更新任務名稱",
+    "cannotUpdateSpeakerNames": "無法更新講者名稱"
   }
 }

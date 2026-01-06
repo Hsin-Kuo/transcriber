@@ -1,4 +1,4 @@
-ㄎ# Whisper Transcriber
+# Whisper Transcriber
 
 > AI-powered Chinese audio transcription system with automatic punctuation
 

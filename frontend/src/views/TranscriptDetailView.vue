@@ -139,13 +139,14 @@
               class="transcript-display"
               :class="{ 'editing': isEditing }"
               :contenteditable="isEditing"
-              :key="`transcript-${showTimecodeMarkers}-${isEditing}`"
+              :key="`transcript-${showTimecodeMarkers}-${isEditing}-${contentVersion}`"
               ref="textareaRef"
+              @keydown="handleContentEditableKeyDown"
             >
               <template v-for="(part, index) in getContentParts()" :key="index">
                 <span v-if="!part.isMarker" class="text-part">{{ part.text }}</span>
-                <span v-else class="marker-wrapper">
-                  <span
+                <span v-else class="marker-wrapper"><span
+                    v-if="showTimecodeMarkers"
                     class="segment-marker"
                     contenteditable="false"
                     @click="handleMarkerClick(part.start)"
@@ -156,12 +157,13 @@
                     <span class="timecode-tooltip">
                       {{ formatTime(part.start) }}
                     </span>
-                  </span>
-                  <span
+                  </span><span
                     class="text-part"
                     :class="{ 'clickable': isAltPressed && currentTranscript.hasAudio }"
                     @click="handleTextClick(part.start, $event)"
-                  >{{ part.text }}</span>
+                  >{{ part.text }}<span v-if="isAltPressed && currentTranscript.hasAudio" class="text-timecode-tooltip">
+                      {{ formatTime(part.start) }}
+                    </span></span>
                 </span>
               </template>
             </div>
@@ -260,9 +262,7 @@ const displayMode = computed(() => {
 const {
   audioElement,
   isPlaying,
-  currentTime,
   duration,
-  progressPercent,
   displayProgress,
   displayTime,
   volume,
@@ -330,7 +330,6 @@ const {
   editingTaskName,
   findText,
   replaceText,
-  hasUnsavedChanges,
   titleInput, // 用於 template ref
   startTitleEdit,
   cancelTitleEdit,
@@ -340,6 +339,24 @@ const {
   replaceAll,
   handleBeforeUnload
 } = useTranscriptEditor(currentTranscript, originalContent, displayMode, groupedSegments, convertTableToPlainText)
+
+// 重新定義 hasUnsavedChanges，檢查實際的 DOM 內容
+const hasUnsavedChanges = computed(() => {
+  if (!isEditing.value) return false
+
+  if (displayMode.value === 'paragraph') {
+    // 段落模式：從 contenteditable div 提取實際內容並比較
+    if (!textareaRef.value) return false
+    const currentContent = extractTextContent(textareaRef.value)
+    return currentContent !== originalContent.value
+  } else if (displayMode.value === 'subtitle') {
+    // 字幕模式：比較表格內容
+    const currentContent = convertTableToPlainText(groupedSegments.value)
+    return currentContent !== originalContent.value
+  }
+
+  return false
+})
 
 // ========== Segment 標記 ==========
 const {
@@ -352,8 +369,14 @@ const {
 // 控制是否顯示 timecode 標記
 const showTimecodeMarkers = ref(true)
 
+// 保存編輯前的 timecode markers 狀態
+const savedTimecodeMarkersState = ref(true)
+
 // 控制 Alt 鍵狀態（用於點擊句子跳轉）
 const isAltPressed = ref(false)
+
+// 內容版本號（用於強制重新渲染 contenteditable）
+const contentVersion = ref(0)
 
 // 講者名稱自動儲存（debounced）
 let speakerNamesSaveTimer = null
@@ -393,7 +416,9 @@ useKeyboardShortcuts(
   togglePlayPause,
   skipBackward,
   skipForward,
-  toggleMute
+  toggleMute,
+  setPlaybackRate,
+  playbackRate
 )
 
 // ========== 頁面生命週期 ==========
@@ -427,6 +452,12 @@ function handleStartEditing() {
     savedScrollTop = textareaRef.value.scrollTop
   }
 
+  // 保存 timecode markers 狀態，並在編輯模式下關閉（避免 IME 輸入問題）
+  if (displayMode.value === 'paragraph') {
+    savedTimecodeMarkersState.value = showTimecodeMarkers.value
+    showTimecodeMarkers.value = false
+  }
+
   // 調用原始的 startEditing
   startEditing()
 
@@ -450,6 +481,11 @@ function handleCancelEditing() {
 
   // 調用原始的 cancelEditing
   cancelEditing()
+
+  // 恢復 timecode markers 狀態
+  if (displayMode.value === 'paragraph') {
+    showTimecodeMarkers.value = savedTimecodeMarkersState.value
+  }
 
   // 恢復滾動位置
   if (displayMode.value === 'paragraph' && savedScrollTop > 0) {
@@ -484,7 +520,6 @@ async function saveEditing() {
     }
   } else {
     // 字幕模式：只更新 segments，不更新純文字檔案
-    // contentToSave = convertTableToPlainText(groupedSegments.value, speakerNames.value)
     contentToSave = originalContent.value // 保持原有的純文字內容不變
     segmentsToSave = reconstructSegmentsFromGroups(groupedSegments.value)
   }
@@ -497,6 +532,11 @@ async function saveEditing() {
     // 如果有更新 segments，也要更新本地的 segments 資料
     if (segmentsToSave) {
       segments.value = segmentsToSave
+    }
+
+    // 恢復 timecode markers 狀態
+    if (displayMode.value === 'paragraph') {
+      showTimecodeMarkers.value = savedTimecodeMarkersState.value
     }
 
     // 恢復滾動位置（段落模式）
@@ -605,8 +645,13 @@ function extractTextContent(element) {
   let text = ''
 
   function traverseNode(node) {
-    // 跳過 segment-marker 元素
+    // 跳過 segment-marker 元素及其內容
     if (node.classList && node.classList.contains('segment-marker')) {
+      return
+    }
+
+    // 跳過 text-timecode-tooltip 元素（Alt 模式的 tooltip）
+    if (node.classList && node.classList.contains('text-timecode-tooltip')) {
       return
     }
 
@@ -649,7 +694,8 @@ function extractTextContent(element) {
     traverseNode(child)
   }
 
-  return text
+  // 移除零寬度空格（用於修復中文輸入）
+  return text.replace(/\u200B/g, '')
 }
 
 // 處理取代全部（段落模式專用）
@@ -660,15 +706,15 @@ function handleReplaceAll() {
       return
     }
 
-    // 先從 contenteditable div 提取當前的純文字（排除標記）
+    // 從 contenteditable div 提取當前的純文字（排除標記）
+    let contentToReplace = currentTranscript.value.content
     if (textareaRef.value) {
-      const currentText = extractTextContent(textareaRef.value)
-      currentTranscript.value.content = currentText
+      contentToReplace = extractTextContent(textareaRef.value)
     }
 
     // 計算會取代多少處
     const regex = new RegExp(findText.value, 'g')
-    const matches = currentTranscript.value.content.match(regex)
+    const matches = contentToReplace.match(regex)
     const matchCount = matches ? matches.length : 0
 
     // 如果沒有找到，提示用戶
@@ -689,8 +735,15 @@ function handleReplaceAll() {
       savedScrollTop = textareaRef.value.scrollTop
     }
 
-    // 執行取代操作（在純文字上）
-    replaceAll()
+    // ✅ 只更新一次: 先執行替換,再賦值
+    const replacedContent = contentToReplace.replace(regex, replaceText.value)
+    currentTranscript.value.content = replacedContent  // 只觸發一次 reactive 更新
+
+    // 清空舊標記，避免混合新舊索引
+    segmentMarkers.value = []
+
+    // 增加版本號，強制 Vue 重新渲染 contenteditable（避免舊內容殘留）
+    contentVersion.value++
 
     // 重新生成標記（使用取代後的內容）
     if (segments.value && currentTranscript.value.content) {
@@ -723,8 +776,8 @@ function handleReplaceAll() {
 function getContentParts() {
   const content = currentTranscript.value.content || ''
 
-  // 關閉了 timecode 標記顯示時，返回純文字
-  if (!showTimecodeMarkers.value || !segmentMarkers.value || segmentMarkers.value.length === 0) {
+  // 如果沒有 segment 資料,返回純文字
+  if (!segmentMarkers.value || segmentMarkers.value.length === 0) {
     return [{ text: content, isMarker: false }]
   }
 
@@ -744,6 +797,7 @@ function getContentParts() {
     }
 
     // 添加帶標記的文字
+    // isMarker: true 表示這是一個 segment,不論是否顯示標記
     parts.push({
       text: marker.text,
       isMarker: true,
@@ -770,6 +824,7 @@ function handleMarkerClick(startTime) {
   if (currentTranscript.value.hasAudio) {
     seekToTime(startTime)
   }
+
 }
 
 // 處理文字點擊（當 Alt 鍵按下時）
@@ -788,6 +843,14 @@ function handleTextClick(startTime, event) {
 function handleKeyDown(e) {
   if (e.altKey) {
     isAltPressed.value = true
+
+    // 防止 Alt 組合鍵的預設瀏覽器行為（如輸入特殊字符）
+    // 只針對我們有定義快捷鍵的按鍵
+    const shortcutKeys = [' ', 'm', 'M', ',', '.', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']
+    if (shortcutKeys.includes(e.key)) {
+      e.preventDefault()
+      e.stopPropagation() // 阻止事件繼續傳播，避免 contenteditable 插入字元
+    }
   }
 }
 
@@ -800,6 +863,39 @@ function handleKeyUp(e) {
 // 處理視窗失焦（確保 Alt 鍵狀態重置）
 function handleBlur() {
   isAltPressed.value = false
+}
+
+// 處理 contenteditable 區域的按鍵事件
+function handleContentEditableKeyDown(e) {
+  if (!e.altKey) return
+
+  // Alt + Space: 播放/暫停
+  if (e.key === ' ') {
+    e.preventDefault()
+    e.stopPropagation()
+    if (hasAudio.value && audioElement.value) {
+      togglePlayPause()
+    }
+    return
+  }
+
+  // Alt + ArrowUp: 加速播放
+  if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    e.stopPropagation()
+    const newRate = Math.min(2, playbackRate.value + 0.25)
+    setPlaybackRate(newRate)
+    return
+  }
+
+  // Alt + ArrowDown: 減速播放
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    e.stopPropagation()
+    const newRate = Math.max(0.25, playbackRate.value - 0.25)
+    setPlaybackRate(newRate)
+    return
+  }
 }
 
 // 修復字幕模式編輯時的滾動問題
@@ -877,8 +973,18 @@ onUnmounted(() => {
 })
 
 // 監聽路由參數變化
-watch(() => route.params.taskId, (newTaskId) => {
-  if (newTaskId) {
+watch(() => route.params.taskId, (newTaskId, oldTaskId) => {
+  if (newTaskId && newTaskId !== oldTaskId) {
+    // 如果有未儲存的變更，先確認
+    if (hasUnsavedChanges.value) {
+      const answer = window.confirm($t('transcriptDetail.confirmLeave'))
+      if (!answer) {
+        // 使用者取消，恢復到原來的任務
+        router.replace({ name: 'transcript-detail', params: { taskId: oldTaskId } })
+        return
+      }
+    }
+    // 載入新任務
     loadTranscript(newTaskId)
   }
 })
@@ -933,6 +1039,7 @@ watch(
   height: fit-content;
   max-height: calc(100vh - 40px);
   overflow-y: auto;
+  overflow-x: visible;
 }
 
 /* 右側文字區域 */
@@ -1163,19 +1270,55 @@ watch(
 /* 文字片段 */
 .text-part {
   display: inline;
+  position: relative;
+  padding: 1px 3px; /* 預先保留空間，避免 Alt 切換時文字重排 */
+  border-radius: 3px;
+  transition: background-color 0.2s ease;
 }
 
 /* Alt 鍵按下時的可點擊文字樣式 */
 .text-part.clickable {
   background-color: rgba(196, 140, 226, 0.175);
   cursor: pointer;
-  transition: background-color 0.2s ease;
-  border-radius: 3px;
-  padding: 1px 3px;
 }
 
 .text-part.clickable:hover {
   background-color: rgba(163, 177, 198, 0.25);
+}
+
+/* 文字部分的 Timecode Tooltip */
+.text-timecode-tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-4px);
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.85);
+  color: white;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 1000;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.text-part.clickable:hover .text-timecode-tooltip {
+  opacity: 1;
+}
+
+/* Tooltip 箭頭 */
+.text-timecode-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top-color: rgba(0, 0, 0, 0.85);
 }
 
 /* 標記包裝器 */
@@ -1198,8 +1341,23 @@ watch(
   transition: all 0.2s ease;
   font-size: 8px;
   line-height: 1;
-  user-select: none;
-  -webkit-user-select: none;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+}
+
+/* 標記內所有元素都不可選中 */
+.segment-marker * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+}
+
+/* 編輯模式下標記仍可點擊 */
+.editing .segment-marker {
+  cursor: pointer;
 }
 
 .segment-marker:hover {

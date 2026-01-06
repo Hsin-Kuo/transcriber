@@ -157,16 +157,24 @@
             <div class="shortcuts-section">
               <!-- <div class="shortcuts-section-title">{{ $t('audioPlayer.generalEditMode') }}</div> -->
               <div class="shortcut-item">
-                <kbd>Alt</kbd> + <kbd>K</kbd>
+                <kbd>Alt</kbd> + <kbd>Space</kbd>
                 <span>{{ $t('audioPlayer.playPause') }}</span>
               </div>
               <div class="shortcut-item">
-                <kbd>Alt</kbd> + <kbd>J</kbd> / <kbd>←</kbd>
+                <kbd>Alt</kbd> + <kbd>←</kbd>
                 <span>{{ $t('audioPlayer.rewind10sShortcut') }}</span>
               </div>
               <div class="shortcut-item">
-                <kbd>Alt</kbd> + <kbd>L</kbd> / <kbd>→</kbd>
+                <kbd>Alt</kbd> + <kbd>→</kbd>
                 <span>{{ $t('audioPlayer.fastForward10sShortcut') }}</span>
+              </div>
+              <div class="shortcut-item">
+                <kbd>Alt</kbd> + <kbd>↑</kbd>
+                <span>{{ $t('audioPlayer.speedUp') }}</span>
+              </div>
+              <div class="shortcut-item">
+                <kbd>Alt</kbd> + <kbd>↓</kbd>
+                <span>{{ $t('audioPlayer.speedDown') }}</span>
               </div>
               <div class="shortcut-item">
                 <kbd>Alt</kbd> + <kbd>,</kbd>
@@ -179,21 +187,6 @@
               <div class="shortcut-item">
                 <kbd>Alt</kbd> + <kbd>M</kbd>
                 <span>{{ $t('audioPlayer.toggleMute') }}</span>
-              </div>
-            </div>
-            <div class="shortcuts-section">
-              <div class="shortcuts-section-title">{{ $t('audioPlayer.nonEditMode') }}</div>
-              <div class="shortcut-item">
-                <kbd>Space</kbd>
-                <span>{{ $t('audioPlayer.playPause') }}</span>
-              </div>
-              <div class="shortcut-item">
-                <kbd>←</kbd>
-                <span>{{ $t('audioPlayer.rewind10sShortcut') }}</span>
-              </div>
-              <div class="shortcut-item">
-                <kbd>→</kbd>
-                <span>{{ $t('audioPlayer.fastForward10sShortcut') }}</span>
               </div>
             </div>
           </div>
@@ -472,6 +465,7 @@ defineExpose({
 /* Audio player styles */
 .audio-player-container {
   margin-bottom: 24px;
+  overflow: visible;
 }
 
 .audio-error {
@@ -709,9 +703,9 @@ defineExpose({
 
 .shortcuts-tooltip {
   position: absolute;
-  top: 100%;
+  bottom: 100%;
   right: 0;
-  margin-top: 8px;
+  margin-bottom: 8px;
   background: var(--neu-bg);
   border-radius: 12px;
   padding: 12px;
@@ -728,9 +722,9 @@ defineExpose({
   content: '';
   position: absolute;
   top: 100%;
-  left: 0;
-  right: 0;
-  height: 12px;
+  right: 20px;
+  border: 6px solid transparent;
+  border-top-color: var(--neu-bg);
 }
 
 .keyboard-shortcuts-info:hover .shortcuts-tooltip,
