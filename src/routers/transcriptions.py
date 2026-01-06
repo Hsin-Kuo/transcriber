@@ -511,19 +511,33 @@ async def download_transcription(
             detail=f"任務尚未完成（當前狀態：{task['status']}）"
         )
 
-    result_file_path = get_task_field(task, "result_file")
-    if not result_file_path:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="結果檔案不存在"
-        )
+    # 從 transcriptions collection 讀取內容（新方式）
+    from src.database.repositories.transcription_repo import TranscriptionRepository
+    from fastapi.responses import StreamingResponse
+    from io import BytesIO
 
-    result_file = Path(result_file_path)
-    if not result_file.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="結果檔案不存在"
-        )
+    transcription_repo = TranscriptionRepository(db)
+    transcription = await transcription_repo.get_by_task_id(task_id)
+
+    if not transcription:
+        # 向後相容：嘗試從檔案讀取
+        result_file_path = get_task_field(task, "result_file")
+        if result_file_path:
+            result_file = Path(result_file_path)
+            if result_file.exists():
+                content = result_file.read_text(encoding='utf-8')
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="轉錄內容不存在"
+                )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="轉錄內容不存在"
+            )
+    else:
+        content = transcription["content"]
 
     # 使用自訂名稱作為下載檔名（如果有設定）
     download_filename = task.get("custom_name")
@@ -537,14 +551,14 @@ async def download_transcription(
         if not download_filename.endswith('.txt'):
             download_filename = download_filename + '.txt'
     else:
-        download_filename = get_task_field(task, "result_filename") or "result.txt"
+        download_filename = f"{task_id}.txt"
 
     # 使用 RFC 5987 編碼來支援中文檔名
     encoded_filename = quote(download_filename, safe='')
 
-    return FileResponse(
-        result_file,
-        media_type="text/plain",
+    return StreamingResponse(
+        BytesIO(content.encode('utf-8')),
+        media_type="text/plain; charset=utf-8",
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
         }
@@ -701,38 +715,47 @@ async def get_segments(
             detail=f"任務尚未完成（當前狀態：{task['status']}）"
         )
 
-    segments_file_path = get_task_field(task, "segments_file")
-    if not segments_file_path:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Segments 檔案不存在"
-        )
+    # 從 segments collection 讀取資料（新方式）
+    from src.database.repositories.segment_repo import SegmentRepository
 
-    segments_file = Path(segments_file_path)
-    if not segments_file.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Segments 檔案不存在"
-        )
+    segment_repo = SegmentRepository(db)
+    segment_doc = await segment_repo.get_by_task_id(task_id)
 
-    # 讀取 segments 資料
-    try:
-        with open(segments_file, 'r', encoding='utf-8') as f:
-            segments_data = json.load(f)
+    if not segment_doc:
+        # 向後相容：嘗試從檔案讀取
+        segments_file_path = get_task_field(task, "segments_file")
+        if segments_file_path:
+            segments_file = Path(segments_file_path)
+            if segments_file.exists():
+                try:
+                    with open(segments_file, 'r', encoding='utf-8') as f:
+                        segments_data = json.load(f)
+                except Exception as e:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"讀取 segments 檔案失敗：{str(e)}"
+                    )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Segments 不存在"
+                )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Segments 不存在"
+            )
+    else:
+        segments_data = segment_doc["segments"]
 
-        # 獲取講者名稱對應
-        speaker_names = task.get("speaker_names", {})
+    # 獲取講者名稱對應
+    speaker_names = task.get("speaker_names", {})
 
-        return {
-            "task_id": task_id,
-            "segments": segments_data,
-            "speaker_names": speaker_names
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"讀取 segments 檔案失敗：{str(e)}"
-        )
+    return {
+        "task_id": task_id,
+        "segments": segments_data,
+        "speaker_names": speaker_names
+    }
 
 
 @router.put("/{task_id}/content")
@@ -772,43 +795,36 @@ async def update_content(
             detail=f"只能更新已完成任務的內容（當前狀態：{task['status']}）"
         )
 
-    result_file_path = get_task_field(task, "result_file")
-    if not result_file_path:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="轉錄檔案不存在"
-        )
+    # 更新 MongoDB collections（新方式）
+    from src.database.repositories.transcription_repo import TranscriptionRepository
+    from src.database.repositories.segment_repo import SegmentRepository
 
-    result_file = Path(result_file_path)
-    if not result_file.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="轉錄檔案不存在"
-        )
-
-    # 更新檔案內容
     try:
-        # 1. 更新純文字檔案
+        # 1. 更新 transcriptions collection
         new_text = content.get("text", "")
-        with open(result_file, 'w', encoding='utf-8') as f:
-            f.write(new_text)
-        print(f"✅ 已更新任務 {task_id} 的轉錄文字內容")
+        if new_text:
+            transcription_repo = TranscriptionRepository(db)
 
-        # 2. 如果有提供 segments，也更新 segments 檔案
+            exists = await transcription_repo.exists(task_id)
+            if exists:
+                await transcription_repo.update(task_id, new_text)
+                print(f"✅ 已更新 transcriptions collection (task_id: {task_id})")
+            else:
+                await transcription_repo.create(task_id, new_text)
+                print(f"✅ 已建立 transcriptions collection (task_id: {task_id})")
+
+        # 2. 更新 segments collection
         new_segments = content.get("segments")
         if new_segments is not None:
-            segments_file_path = get_task_field(task, "segments_file")
-            if segments_file_path:
-                segments_file = Path(segments_file_path)
-                if segments_file.exists():
-                    import json
-                    with open(segments_file, 'w', encoding='utf-8') as f:
-                        json.dump(new_segments, f, ensure_ascii=False, indent=2)
-                    print(f"✅ 已更新任務 {task_id} 的 segments 檔案 ({len(new_segments)} 個 segments)")
-                else:
-                    print(f"⚠️ Segments 檔案不存在：{segments_file_path}")
+            segment_repo = SegmentRepository(db)
+
+            exists = await segment_repo.exists(task_id)
+            if exists:
+                await segment_repo.update(task_id, new_segments)
+                print(f"✅ 已更新 segments collection (task_id: {task_id}, count: {len(new_segments)})")
             else:
-                print(f"⚠️ 任務 {task_id} 沒有 segments_file 路徑")
+                await segment_repo.create(task_id, new_segments)
+                print(f"✅ 已建立 segments collection (task_id: {task_id}, count: {len(new_segments)})")
 
         response_message = "轉錄內容已更新"
         if new_segments is not None:

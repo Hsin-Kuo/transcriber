@@ -140,21 +140,21 @@
           :class="{ active: selectedTaskType === 'all' }"
           @click="selectedTaskType = 'all'"
         >
-          全部
+          {{ $t('taskList.all') }}
         </button>
         <button
           class="task-type-btn"
           :class="{ active: selectedTaskType === 'paragraph' }"
           @click="selectedTaskType = 'paragraph'"
         >
-          段落
+          {{ $t('transcription.paragraph') }}
         </button>
         <button
           class="task-type-btn"
           :class="{ active: selectedTaskType === 'subtitle' }"
           @click="selectedTaskType = 'subtitle'"
         >
-          字幕
+          {{ $t('transcription.subtitle') }}
         </button>
       </div>
     </div>

@@ -34,21 +34,21 @@
         :class="{ active: selectedTaskType === 'all' }"
         @click="selectedTaskType = 'all'"
       >
-        <span>全部</span>
+        <span>{{ $t('taskList.all') }}</span>
       </button>
       <button
         class="tab-btn tab-paragraph"
         :class="{ active: selectedTaskType === 'paragraph' }"
         @click="selectedTaskType = 'paragraph'"
       >
-        <span>段落</span>
+        <span>{{ $t('taskList.paragraph') }}</span>
       </button>
       <button
         class="tab-btn tab-subtitle"
         :class="{ active: selectedTaskType === 'subtitle' }"
         @click="selectedTaskType = 'subtitle'"
       >
-        <span>字幕</span>
+        <span>{{ $t('taskList.subtitle') }}</span>
       </button>
       <button
         class="tab-btn tab-batch-edit"

@@ -336,7 +336,6 @@ const {
   startEditing,
   cancelEditing,
   finishEditing,
-  replaceAll,
   handleBeforeUnload
 } = useTranscriptEditor(currentTranscript, originalContent, displayMode, groupedSegments, convertTableToPlainText)
 
@@ -377,6 +376,9 @@ const isAltPressed = ref(false)
 
 // 內容版本號（用於強制重新渲染 contenteditable）
 const contentVersion = ref(0)
+
+// 保存編輯前的 segments 狀態（用於取消編輯時恢復）
+const originalSegments = ref([])
 
 // 講者名稱自動儲存（debounced）
 let speakerNamesSaveTimer = null
@@ -458,6 +460,12 @@ function handleStartEditing() {
     showTimecodeMarkers.value = false
   }
 
+  // 保存原始的 segments 狀態（字幕模式下需要，以便取消時恢復）
+  if (displayMode.value === 'subtitle' && segments.value.length > 0) {
+    // 深拷貝 segments 以避免引用問題
+    originalSegments.value = JSON.parse(JSON.stringify(segments.value))
+  }
+
   // 調用原始的 startEditing
   startEditing()
 
@@ -477,6 +485,13 @@ function handleCancelEditing() {
   let savedScrollTop = 0
   if (displayMode.value === 'paragraph' && textareaRef.value) {
     savedScrollTop = textareaRef.value.scrollTop
+  }
+
+  // 恢復原始的 segments 狀態（字幕模式）
+  if (displayMode.value === 'subtitle' && originalSegments.value.length > 0) {
+    segments.value = JSON.parse(JSON.stringify(originalSegments.value))
+    // 清空備份
+    originalSegments.value = []
   }
 
   // 調用原始的 cancelEditing
@@ -532,6 +547,11 @@ async function saveEditing() {
     // 如果有更新 segments，也要更新本地的 segments 資料
     if (segmentsToSave) {
       segments.value = segmentsToSave
+    }
+
+    // 清空 segments 備份（字幕模式）
+    if (displayMode.value === 'subtitle') {
+      originalSegments.value = []
     }
 
     // 恢復 timecode markers 狀態
@@ -762,9 +782,46 @@ function handleReplaceAll() {
     // 清空輸入框
     findText.value = ''
     replaceText.value = ''
-  } else {
-    // 字幕模式直接使用原本的取代邏輯
-    replaceAll()
+  } else if (displayMode.value === 'subtitle') {
+    // 字幕模式：對 groupedSegments 中的所有 segment 文字進行取代
+
+    // 如果沒有輸入查找文字，直接返回
+    if (!findText.value) {
+      return
+    }
+
+    // 計算會取代多少處
+    const regex = new RegExp(findText.value, 'g')
+    let totalMatches = 0
+
+    // 遍歷所有 groups 和 segments 計算匹配數
+    groupedSegments.value.forEach(group => {
+      group.segments.forEach(segment => {
+        const matches = segment.text.match(regex)
+        if (matches) {
+          totalMatches += matches.length
+        }
+      })
+    })
+
+    // 如果沒有找到，提示用戶
+    if (totalMatches === 0) {
+      alert(`找不到「${findText.value}」`)
+      return
+    }
+
+    // 顯示確認對話框
+    const confirmMessage = `找到 ${totalMatches} 處「${findText.value}」\n確定全部取代為「${replaceText.value}」嗎？`
+    if (!confirm(confirmMessage)) {
+      return // 用戶取消
+    }
+
+    // 執行取代：遍歷所有 groups 和 segments
+    groupedSegments.value.forEach(group => {
+      group.segments.forEach(segment => {
+        segment.text = segment.text.replace(regex, replaceText.value)
+      })
+    })
 
     // 清空輸入框
     findText.value = ''

@@ -87,6 +87,9 @@
     "transcriptionFailed": "轉錄失敗"
   },
   "taskList": {
+    "all": "全部",
+    "paragraph": "段落",
+    "subtitle": "字幕",
     "taskName": "任務名稱",
     "status": "狀態",
     "type": "類型",
