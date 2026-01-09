@@ -88,9 +88,32 @@ async def get_recent_tasks(
     }
 
 
+@router.get("/tags")
+async def get_user_tags(
+    task_service: TaskService = Depends(get_task_service),
+    current_user: dict = Depends(get_current_user)
+):
+    """獲取使用者所有使用過的標籤
+
+    Args:
+        task_service: TaskService 實例
+        current_user: 當前用戶
+
+    Returns:
+        標籤列表
+    """
+    tags = await task_service.task_repo.get_all_user_tags(str(current_user["_id"]))
+
+    return {
+        "tags": tags
+    }
+
+
 @router.get("")
 async def get_tasks(
     status: str = None,
+    task_type: str = None,
+    tags: str = None,
     limit: int = 100,
     skip: int = 0,
     task_service: TaskService = Depends(get_task_service),
@@ -100,6 +123,8 @@ async def get_tasks(
 
     Args:
         status: 過濾狀態（可選：pending, processing, completed, failed, cancelled, active）
+        task_type: 過濾任務類型（可選：paragraph, subtitle）
+        tags: 過濾標籤（逗號分隔，例如：tag1,tag2）
         limit: 限制數量（預設 100）
         skip: 跳過數量（預設 0）
         task_service: TaskService 實例
@@ -108,6 +133,10 @@ async def get_tasks(
     Returns:
         任務列表
     """
+    # 解析標籤參數
+    tags_list = None
+    if tags:
+        tags_list = [tag.strip() for tag in tags.split(',') if tag.strip()]
     # 如果 status 是 'active'，轉換為 pending 和 processing
     if status == 'active':
         # 獲取所有任務並在記憶體中過濾
@@ -115,6 +144,8 @@ async def get_tasks(
             str(current_user["_id"]),
             skip=skip,
             limit=limit,
+            task_type=task_type,
+            tags=tags_list,
             include_deleted=False
         )
 
@@ -125,7 +156,9 @@ async def get_tasks(
             task_id = str(task.get("_id") or task.get("task_id"))
             enriched_task = await task_service.get_task(task_id, str(current_user["_id"]))
             if enriched_task and enriched_task.get("status") in ["pending", "processing"]:
-                active_tasks.append(enrich_task_data(enriched_task))
+                enriched = enrich_task_data(enriched_task)
+                filtered = filter_task_for_list(enriched)
+                active_tasks.append(filtered)
 
         return {
             "tasks": active_tasks,
@@ -140,21 +173,27 @@ async def get_tasks(
             skip=skip,
             limit=limit,
             status=status,
+            task_type=task_type,
+            tags=tags_list,
             include_deleted=False
         )
 
-        # 合併記憶體狀態
+        # 合併記憶體狀態並過濾數據
         enriched_tasks = []
         for task in tasks:
             task_id = str(task.get("_id") or task.get("task_id"))
             enriched_task = await task_service.get_task(task_id, str(current_user["_id"]))
             if enriched_task:
-                enriched_tasks.append(enrich_task_data(enriched_task))
+                enriched = enrich_task_data(enriched_task)
+                filtered = filter_task_for_list(enriched)
+                enriched_tasks.append(filtered)
 
-        # 計算總數
+        # 計算總數（包含 task_type 和 tags 篩選）
         total = await task_service.task_repo.count_by_user(
             str(current_user["_id"]),
             status=status,
+            task_type=task_type,
+            tags=tags_list,
             include_deleted=False
         )
 
@@ -272,6 +311,57 @@ def get_task_field(task: Dict[str, Any], field: str) -> Any:
             return None
 
     return value
+
+
+def filter_task_for_list(task: Dict[str, Any]) -> Dict[str, Any]:
+    """過濾任務數據，只返回前端列表需要的字段
+
+    Args:
+        task: 完整的任務數據
+
+    Returns:
+        過濾後的任務數據（只包含前端需要的字段）
+    """
+    # 只保留前端需要的字段
+    filtered = {
+        "_id": task.get("_id"),
+        "task_id": task.get("_id"),  # 保留以便向後兼容
+        "task_type": task.get("task_type"),
+        "status": task.get("status"),
+        "progress": task.get("progress"),
+        "progress_percentage": task.get("progress_percentage"),
+        "custom_name": task.get("custom_name"),
+        "tags": task.get("tags", []),
+        "keep_audio": task.get("keep_audio", False),
+        "speaker_names": task.get("speaker_names", {}),
+        "timestamps": task.get("timestamps", {}),
+    }
+
+    # file 信息
+    if task.get("file"):
+        filtered["file"] = {
+            "filename": task["file"].get("filename"),
+            "size_mb": task["file"].get("size_mb")
+        }
+
+    # result 信息（只保留前端需要的）
+    if task.get("result"):
+        filtered["result"] = {
+            "text_length": task["result"].get("text_length"),
+            "word_count": task["result"].get("word_count"),
+            "audio_file": task["result"].get("audio_file"),
+            "audio_filename": task["result"].get("audio_filename")
+        }
+
+    # error 信息（失敗時需要）
+    if task.get("error"):
+        filtered["error"] = task.get("error")
+
+    # cancelling 狀態（取消中時需要）
+    if task.get("cancelling"):
+        filtered["cancelling"] = task.get("cancelling")
+
+    return filtered
 
 
 def enrich_task_data(task: Dict[str, Any]) -> Dict[str, Any]:
@@ -632,7 +722,27 @@ async def delete_task(
     # 清理記憶體狀態
     task_service.cleanup_task_memory(task_id)
 
-    # 在資料庫中標記為已刪除（軟刪除）
+    # 物理刪除 MongoDB 中的 transcription 文檔
+    from src.database.repositories.transcription_repo import TranscriptionRepository
+    transcription_repo = TranscriptionRepository(task_service.db)
+    try:
+        deleted_transcription = await transcription_repo.delete(task_id)
+        if deleted_transcription:
+            print(f"🗑️ 已刪除 MongoDB transcription 文檔：{task_id}")
+    except Exception as e:
+        print(f"⚠️ 刪除 transcription 文檔失敗：{e}")
+
+    # 物理刪除 MongoDB 中的 segment 文檔
+    from src.database.repositories.segment_repo import SegmentRepository
+    segment_repo = SegmentRepository(task_service.db)
+    try:
+        deleted_segment = await segment_repo.delete(task_id)
+        if deleted_segment:
+            print(f"🗑️ 已刪除 MongoDB segment 文檔：{task_id}")
+    except Exception as e:
+        print(f"⚠️ 刪除 segment 文檔失敗：{e}")
+
+    # 在資料庫中標記為已刪除（軟刪除 tasks）
     from datetime import datetime
     await task_service.update_task_status(task_id, {
         "deleted": True,
@@ -842,7 +952,27 @@ async def batch_delete_tasks(
             # 清理記憶體
             task_service.cleanup_task_memory(task_id)
 
-            # 在資料庫中標記為已刪除（軟刪除）
+            # 物理刪除 MongoDB 中的 transcription 文檔
+            from src.database.repositories.transcription_repo import TranscriptionRepository
+            transcription_repo = TranscriptionRepository(task_service.db)
+            try:
+                deleted_transcription = await transcription_repo.delete(task_id)
+                if deleted_transcription:
+                    print(f"🗑️ [批次] 已刪除 MongoDB transcription 文檔：{task_id}")
+            except Exception as e:
+                print(f"⚠️ [批次] 刪除 transcription 文檔失敗：{e}")
+
+            # 物理刪除 MongoDB 中的 segment 文檔
+            from src.database.repositories.segment_repo import SegmentRepository
+            segment_repo = SegmentRepository(task_service.db)
+            try:
+                deleted_segment = await segment_repo.delete(task_id)
+                if deleted_segment:
+                    print(f"🗑️ [批次] 已刪除 MongoDB segment 文檔：{task_id}")
+            except Exception as e:
+                print(f"⚠️ [批次] 刪除 segment 文檔失敗：{e}")
+
+            # 在資料庫中標記為已刪除（軟刪除 tasks）
             from datetime import datetime
             await task_service.update_task_status(task_id, {
                 "deleted": True,

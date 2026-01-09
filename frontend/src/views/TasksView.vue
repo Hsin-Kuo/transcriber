@@ -1,14 +1,17 @@
 <template>
   <div class="tasks-container">
-
     <!-- 任務列表 -->
     <TaskList
       :tasks="tasks"
+      :current-page="currentPage"
+      :total-pages="totalPages"
       @download="downloadTask"
       @refresh="refreshTasks"
       @delete="deleteTask"
       @cancel="cancelTask"
       @view="viewTranscript"
+      @page-change="handlePageChange"
+      @filter-change="handleFilterChange"
     />
 
     <!-- 字幕下載對話框 -->
@@ -26,9 +29,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, inject } from 'vue'
-import api, { API_BASE, TokenManager } from '../utils/api'
+import { ref, onMounted, onUnmounted, inject, computed } from 'vue'
+import api, { TokenManager } from '../utils/api'
 import TaskList from '../components/task/TaskListContainer.vue'
+import RulerPagination from '../components/common/RulerPagination.vue'
 import DownloadDialog from '../components/transcript/DownloadDialog.vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -46,6 +50,18 @@ const { t } = useI18n()
 const showNotification = inject('showNotification')
 const tasks = ref([])
 const eventSources = new Map() // SSE 連接管理
+
+// 分頁相關狀態
+const currentPage = ref(1)
+const pageSize = ref(10)
+const totalTasks = ref(0)
+
+// 篩選條件
+const currentTaskType = ref(null)
+const currentTags = ref([])
+
+// 計算總頁數
+const totalPages = computed(() => Math.ceil(totalTasks.value / pageSize.value))
 
 // 字幕下載相關狀態
 const currentDownloadTask = ref(null)
@@ -76,9 +92,29 @@ onMounted(async () => {
 // 刷新任務列表
 async function refreshTasks() {
   try {
-    // 使用新 API 服務層
-    const response = await taskService.getActiveList()
-    const serverTasks = response.all_tasks || []
+    // 計算分頁參數
+    const skip = (currentPage.value - 1) * pageSize.value
+
+    // 使用新 API 服務層，帶分頁參數和篩選條件
+    const params = {
+      skip: skip,
+      limit: pageSize.value
+    }
+
+    // 如果有 task_type 篩選，加入參數
+    if (currentTaskType.value) {
+      params.task_type = currentTaskType.value
+    }
+
+    // 如果有 tags 篩選，加入參數（逗號分隔）
+    if (currentTags.value && currentTags.value.length > 0) {
+      params.tags = currentTags.value.join(',')
+    }
+
+    const response = await taskService.list(params)
+
+    const serverTasks = response.tasks || []
+    totalTasks.value = response.total || 0
 
     // 保留本地狀態（cancelling 狀態和 SSE 更新的進度信息）
     const localStates = new Map()
@@ -147,6 +183,21 @@ async function refreshTasks() {
   } catch (error) {
     console.error('Failed to refresh task list:', error)
   }
+}
+
+// 處理頁面切換
+function handlePageChange(newPage) {
+  currentPage.value = newPage
+  refreshTasks()
+}
+
+// 處理篩選條件變更
+function handleFilterChange(filter) {
+  currentTaskType.value = filter.taskType
+  currentTags.value = filter.tags
+  // 篩選條件改變時，重置到第一頁
+  currentPage.value = 1
+  refreshTasks()
 }
 
 // 下載任務結果

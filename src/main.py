@@ -49,8 +49,7 @@ from src.utils.shared_state import (
 
 # 設定
 DEFAULT_MODEL = "medium"
-OUTPUT_DIR = Path(__file__).parent.parent / "output"
-OUTPUT_DIR.mkdir(exist_ok=True)
+# OUTPUT_DIR 已移除 - 文字檔和 segments 現在存儲在 MongoDB 中
 
 # 時區設定 (UTC+8 台北時間)
 TZ_UTC8 = timezone(timedelta(hours=8))
@@ -264,8 +263,7 @@ async def startup_event():
         task_service=task_service,
         model_name=current_model_name,  # 傳遞模型名稱供 ProcessPoolExecutor 使用
         diarization_pipeline=diarization_pipeline,
-        executor=executor,
-        output_dir=OUTPUT_DIR
+        executor=executor
     )
     print(f"✅ TranscriptionService 初始化完成")
 

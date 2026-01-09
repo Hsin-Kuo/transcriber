@@ -37,8 +37,7 @@ def init_transcription_service(
     task_service: TaskService,
     model_name: str = "medium",
     diarization_pipeline=None,
-    executor=None,
-    output_dir: Optional[Path] = None
+    executor=None
 ):
     """初始化全域 TranscriptionService 單例
 
@@ -48,7 +47,6 @@ def init_transcription_service(
         model_name: 模型名稱（用於 ProcessPoolExecutor 中重新載入模型）
         diarization_pipeline: Diarization pipeline（可選）
         executor: 線程池執行器（可選）
-        output_dir: 輸出目錄（可選）
     """
     global _whisper_processor, _punctuation_processor, _diarization_processor, _transcription_service
 
@@ -63,8 +61,7 @@ def init_transcription_service(
         whisper_processor=_whisper_processor,
         punctuation_processor=_punctuation_processor,
         diarization_processor=_diarization_processor,
-        executor=executor,
-        output_dir=output_dir
+        executor=executor
     )
 
     return _transcription_service
