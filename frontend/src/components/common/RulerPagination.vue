@@ -217,7 +217,7 @@ function nextPage() {
 
 /* 結尾刻度項目 */
 .ruler-item.end {
-  width: 40px; /* 增加寬度以容納文字 */
+  width: 20px; /* 增加寬度以容納文字 */
   margin-right: 0; /* 最後一個不需要右邊距 */
 }
 
@@ -319,7 +319,7 @@ function nextPage() {
 .end-label {
   /* 結尾項目寬度40px，長刻度在0.5px處，文字居中在20px處 */
   /* 需要向左移 (20 - 0.5) = 19.5px */
-  transform: translateX(-19.5px);
+  transform: translateX(-9.5px);
 }
 
 /* 第一頁和最末頁按鈕 */
