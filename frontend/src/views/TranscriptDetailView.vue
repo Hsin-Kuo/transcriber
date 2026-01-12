@@ -1328,7 +1328,7 @@ watch(
 .text-part {
   display: inline;
   position: relative;
-  padding: 1px 3px; /* 預先保留空間，避免 Alt 切換時文字重排 */
+  padding: 1px 0px; /* 預先保留空間，避免 Alt 切換時文字重排 */
   border-radius: 3px;
   transition: background-color 0.2s ease;
 }

@@ -29,7 +29,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, inject, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, inject, computed } from 'vue'
 import api, { TokenManager } from '../utils/api'
 import TaskList from '../components/task/TaskListContainer.vue'
 import RulerPagination from '../components/common/RulerPagination.vue'
@@ -172,6 +172,17 @@ async function refreshTasks() {
       }
 
       return mergedTask
+    })
+
+    // 獲取當前頁面的任務 ID 列表
+    const currentTaskIds = new Set(tasks.value.map(task => task.task_id))
+
+    // 關閉不在當前頁面的 SSE 連接
+    eventSources.forEach((eventSource, taskId) => {
+      if (!currentTaskIds.has(taskId)) {
+        console.log(`📄 任務 ${taskId} 不在當前頁面，關閉 SSE 連接`)
+        disconnectTaskSSE(taskId)
+      }
     })
 
     // 為正在進行的任務建立 SSE 連接
@@ -417,6 +428,9 @@ function connectTaskSSE(taskId) {
 function disconnectTaskSSE(taskId) {
   const eventSource = eventSources.get(taskId)
   if (eventSource) {
+    // 在關閉前移除事件監聽器，避免觸發錯誤
+    eventSource.onmessage = null
+    eventSource.onerror = null
     eventSource.close()
     eventSources.delete(taskId)
     console.log(`🔌 關閉 SSE: ${taskId}`)
@@ -426,14 +440,18 @@ function disconnectTaskSSE(taskId) {
 // 斷開所有 SSE 連接
 function disconnectAllSSE() {
   eventSources.forEach((eventSource, taskId) => {
+    // 移除事件監聽器，避免觸發錯誤
+    eventSource.onmessage = null
+    eventSource.onerror = null
     eventSource.close()
     console.log(`🔌 關閉 SSE: ${taskId}`)
   })
   eventSources.clear()
 }
 
-// 組件卸載時斷開所有連接
-onUnmounted(() => {
+// 組件卸載前斷開所有連接
+onBeforeUnmount(() => {
+  console.log('🔌 組件即將卸載，關閉所有 SSE 連接')
   disconnectAllSSE()
 })
 </script>

@@ -310,7 +310,10 @@ class TranscriptionService:
                 self.task_service.cleanup_task_memory(task_id)
                 return
 
-            # 4. 標記完成（結果已存儲到 MongoDB）
+            # 4. 保存轉錄結果到 MongoDB
+            self._save_transcription_results(task_id, final_text, segments)
+
+            # 5. 標記完成
             self._mark_completed(
                 task_id,
                 detected_language or language,
@@ -485,6 +488,72 @@ class TranscriptionService:
             import traceback
             traceback.print_exc()
             return False
+
+    def _save_transcription_results(
+        self,
+        task_id: str,
+        transcription_text: str,
+        segments: Optional[list] = None
+    ) -> None:
+        """保存轉錄結果到 MongoDB
+
+        Args:
+            task_id: 任務 ID
+            transcription_text: 轉錄文本
+            segments: Segments 陣列（可選）
+        """
+        try:
+            from pymongo import MongoClient
+            from datetime import datetime
+            import os
+
+            # 連接 MongoDB（使用同步客戶端）
+            mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
+            db_name = os.getenv("MONGODB_DB_NAME", "transcriber")
+            client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+            db = client[db_name]
+
+            # 1. 保存轉錄文本到 transcriptions collection
+            now = datetime.utcnow()
+            transcription_doc = {
+                "_id": task_id,
+                "content": transcription_text,
+                "text_length": len(transcription_text),
+                "created_at": now,
+                "updated_at": now
+            }
+
+            # 使用 replace_one 來確保不會重複插入
+            db.transcriptions.replace_one(
+                {"_id": task_id},
+                transcription_doc,
+                upsert=True
+            )
+            print(f"✅ 已保存轉錄文本到 MongoDB (task_id: {task_id}, 長度: {len(transcription_text)})")
+
+            # 2. 保存 segments 到 segments collection（如果有）
+            if segments is not None and len(segments) > 0:
+                segment_doc = {
+                    "_id": task_id,
+                    "segments": segments,
+                    "segment_count": len(segments),
+                    "created_at": now,
+                    "updated_at": now
+                }
+
+                db.segments.replace_one(
+                    {"_id": task_id},
+                    segment_doc,
+                    upsert=True
+                )
+                print(f"✅ 已保存 segments 到 MongoDB (task_id: {task_id}, 數量: {len(segments)})")
+
+            client.close()
+
+        except Exception as e:
+            print(f"⚠️ 保存轉錄結果到 MongoDB 失敗：{e}")
+            import traceback
+            traceback.print_exc()
 
     def _mark_completed(
         self,

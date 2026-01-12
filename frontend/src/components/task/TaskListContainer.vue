@@ -51,16 +51,6 @@
         <span>{{ $t('taskList.subtitle') }}</span>
       </button>
 
-      <!-- 分頁控制 -->
-      <div class="pagination-wrapper">
-        <RulerPagination
-          v-if="totalPages > 0"
-          :current-page="currentPage"
-          :total-pages="totalPages"
-          @update:current-page="handlePageChange"
-        />
-      </div>
-
       <button
         class="tab-btn tab-batch-edit"
         :class="{ active: isBatchEditMode }"
@@ -68,11 +58,22 @@
         :title="isBatchEditMode ? $t('taskList.exitBatchEdit') : $t('taskList.batchEdit')"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M9 11l3 3L22 4"></path>
-          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
         </svg>
         <span>{{ isBatchEditMode ? $t('taskList.exitBatchEdit') : $t('taskList.batchEdit') }}</span>
       </button>
+
+      <!-- 分頁控制 -->
+      <div class="pagination-wrapper">
+        <RulerPagination
+          v-if="totalPages > 0"
+          :key="`pagination-${currentPage}-${totalPages}`"
+          :current-page="currentPage"
+          :total-pages="totalPages"
+          @update:current-page="handlePageChange"
+        />
+      </div>
     </div>
 
     <!-- 任務網格 -->
@@ -328,7 +329,19 @@ async function handleToggleKeepAudio(task) {
     // 回滾
     task.keep_audio = oldValue
     console.error('Error toggling keep audio:', error)
-    alert($t('taskList.errorToggleKeepAudio'))
+
+    // 根據後端返回的錯誤代碼顯示對應的翻譯訊息
+    const errorCode = error.response?.data?.detail?.error_code || error.response?.data?.error_code
+
+    if (errorCode === 'KEEP_AUDIO_LIMIT_EXCEEDED') {
+      alert($t('taskList.errorKeepAudioLimit'))
+    } else if (errorCode === 'TASK_NOT_FOUND') {
+      alert($t('transcriptData.taskNotFound'))
+    } else {
+      // 回退：顯示通用錯誤訊息
+      const message = error.response?.data?.detail?.message || error.response?.data?.detail || error.message
+      alert($t('taskList.errorToggleKeepAudio') + (message ? ': ' + message : ''))
+    }
   }
 }
 
@@ -479,7 +492,6 @@ onMounted(() => {
   align-items: flex-end;
   justify-content: flex-end;
   padding-bottom: 0px;
-  margin-right: 16px; /* 跟右方編輯tab拉開距離 */
 }
 
 .tab-btn {

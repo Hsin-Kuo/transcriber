@@ -1,7 +1,10 @@
 <template>
   <div class="ruler-pagination">
-    <!-- 1. 空的刻度 (起點標記) -->
+    <!-- 1. 起點標記「0」 -->
     <div class="ruler-item empty">
+      <div class="control-button start-label">
+        0
+      </div>
       <div class="ticks">
         <div class="tick tick-long"></div>
         <div class="tick tick-short"></div>
@@ -24,7 +27,7 @@
         :disabled="currentPage === 1"
         @click="goToPage(1)"
       >
-        1
+        &lt;&lt;
       </button>
       <div class="ticks">
         <div class="tick tick-long"></div>
@@ -115,7 +118,7 @@
         :disabled="currentPage === totalPages || totalPages === 0"
         @click="goToPage(totalPages)"
       >
-        {{ totalPages || '-' }}
+        &gt;&gt;
       </button>
       <div class="ticks">
         <div class="tick tick-long"></div>
@@ -133,6 +136,9 @@
 
     <!-- 結尾長刻度 -->
     <div class="ruler-item end">
+      <div class="control-button end-label">
+        {{ totalPages || '-' }}
+      </div>
       <div class="ticks">
         <div class="tick tick-long"></div>
       </div>
@@ -184,7 +190,12 @@ function nextPage() {
   margin: 0;
   padding: 0;
   padding-bottom: 18px;
+  padding-left: 20px; /* 給起點標記留出空間 */
   overflow-x: auto;
+  user-select: none; /* 禁止選取文字 */
+  -webkit-user-select: none; /* Safari */
+  -moz-user-select: none; /* Firefox */
+  -ms-user-select: none; /* IE10+/Edge */
 }
 
 /* 刻度項目容器 */
@@ -206,12 +217,14 @@ function nextPage() {
 
 /* 結尾刻度項目 */
 .ruler-item.end {
-  width: 1px;
+  width: 40px; /* 增加寬度以容納文字 */
   margin-right: 0; /* 最後一個不需要右邊距 */
 }
 
 /* 控制按鈕 */
 .control-button {
+  position: relative;
+  z-index: 10;
   width: 100%;
   height: 28px;
   display: flex;
@@ -285,6 +298,30 @@ function nextPage() {
   cursor: default;
 }
 
+/* 起點和結尾標記 */
+.start-label,
+.end-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--neu-text);
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* 起點標記特殊對齊 */
+.start-label {
+  /* 起點刻度組寬度37px，長刻度在0.5px處 */
+  /* 讓文字居中對齊長刻度，需要向左移 (37/2 - 0.5) = 18px */
+  transform: translateX(-18px);
+}
+
+/* 結尾標記特殊對齊 */
+.end-label {
+  /* 結尾項目寬度40px，長刻度在0.5px處，文字居中在20px處 */
+  /* 需要向左移 (20 - 0.5) = 19.5px */
+  transform: translateX(-19.5px);
+}
+
 /* 第一頁和最末頁按鈕 */
 .first-page,
 .last-page {
@@ -292,7 +329,7 @@ function nextPage() {
 }
 
 /* Hover 效果 */
-.control-button:hover:not(.disabled):not(.current-page) {
+.control-button:hover:not(.disabled):not(.current-page):not(.start-label):not(.end-label) {
   color: var(--neu-primary);
   background: rgba(var(--neu-primary-rgb, 59, 130, 246), 0.08);
 }
@@ -313,6 +350,7 @@ function nextPage() {
 @media (max-width: 768px) {
   .ruler-pagination {
     padding: 15px 10px;
+    padding-left: 20px; /* 給起點標記留出空間 */
   }
 
   .ruler-item {
@@ -325,8 +363,19 @@ function nextPage() {
   }
 
   .ruler-item.end {
-    width: 1px;
+    width: 40px; /* 增加寬度以容納文字 */
     margin-right: 0;
+  }
+
+  .start-label {
+    /* 手機版：向左移動18px讓「0」居中對齊長刻度 */
+    transform: translateX(-18px);
+  }
+
+  .end-label {
+    /* 手機版：結尾項目寬度40px，長刻度在0.5px處，文字居中在20px處 */
+    /* 需要向左移 (20 - 0.5) = 19.5px */
+    transform: translateX(-19.5px);
   }
 
   .control-button {

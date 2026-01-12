@@ -690,10 +690,10 @@ function getKeepAudioTooltip() {
   gap: 6px;
 }
 
-.btn:hover {
+/* .btn:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-}
+} */
 
 .btn:disabled {
   opacity: 0.5;
@@ -728,7 +728,7 @@ function getKeepAudioTooltip() {
 }
 
 .btn-warning:hover {
-  background: rgba(245, 158, 11, 0.25);
+  background: rgba(245, 158, 11, 0.35);
 }
 
 /* 按鈕組 */

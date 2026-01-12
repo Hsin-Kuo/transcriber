@@ -828,7 +828,10 @@ async def update_keep_audio(
     if not task:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="任務不存在或無權訪問"
+            detail={
+                "error_code": "TASK_NOT_FOUND",
+                "message": "任務不存在或無權訪問"
+            }
         )
 
     new_keep_audio = keep_audio_data.get("keep_audio", False)
@@ -852,7 +855,10 @@ async def update_keep_audio(
         if kept_tasks >= 3:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="最多只能保留 3 個音檔，請先取消其他音檔的保留設定"
+                detail={
+                    "error_code": "KEEP_AUDIO_LIMIT_EXCEEDED",
+                    "message": "最多只能保留 3 個音檔，請先取消其他音檔的保留設定"
+                }
             )
 
     # 更新設定

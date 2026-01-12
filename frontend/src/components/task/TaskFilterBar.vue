@@ -79,44 +79,44 @@
           </button>
         </div>
       </div>
-    </div>
 
-    <!-- 操作按鈕 -->
-    <div class="filter-header-actions">
-      <!-- 編輯按鈕 -->
-      <button
-        v-if="!isEditing"
-        class="btn-edit-filter"
-        @click="startEditing"
-        :title="$t('taskList.editTags')"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-        </svg>
-      </button>
+      <!-- 操作按鈕 -->
+      <div class="filter-header-actions">
+        <!-- 編輯按鈕 -->
+        <button
+          v-if="!isEditing"
+          class="btn-edit-filter"
+          @click="startEditing"
+          :title="$t('taskList.editTags')"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+          </svg>
+        </button>
 
-      <!-- 保存按鈕 -->
-      <button
-        v-else
-        class="btn-save-filter"
-        @click="saveEditing"
-        :title="$t('taskList.save')"
-      >
-        ✓
-      </button>
+        <!-- 保存按鈕 -->
+        <button
+          v-else
+          class="btn-save-filter"
+          @click="saveEditing"
+          :title="$t('taskList.save')"
+        >
+          ✓
+        </button>
 
-      <!-- 清除篩選按鈕 -->
-      <button
-        v-if="selectedTags.length > 0 && !isEditing"
-        class="btn-clear-filter"
-        @click="clearFilter"
-        :title="$t('taskList.clearFilter')"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
-        </svg>
-      </button>
+        <!-- 清除篩選按鈕 -->
+        <button
+          v-if="selectedTags.length > 0 && !isEditing"
+          class="btn-clear-filter"
+          @click="clearFilter"
+          :title="$t('taskList.clearFilter')"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+          </svg>
+        </button>
+      </div>
     </div>
 
     <!-- 顏色選擇器彈出窗口 -->
@@ -533,7 +533,6 @@ async function handleColorSelected({ tag, color }) {
 .filter-header-actions {
   display: flex;
   gap: 8px;
-  margin-left: auto;
 }
 
 .btn-edit-filter,
