@@ -50,6 +50,7 @@
       >
         <span>{{ $t('taskList.subtitle') }}</span>
       </button>
+
       <button
         class="tab-btn tab-batch-edit"
         :class="{ active: isBatchEditMode }"
@@ -57,11 +58,22 @@
         :title="isBatchEditMode ? $t('taskList.exitBatchEdit') : $t('taskList.batchEdit')"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M9 11l3 3L22 4"></path>
-          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
         </svg>
         <span>{{ isBatchEditMode ? $t('taskList.exitBatchEdit') : $t('taskList.batchEdit') }}</span>
       </button>
+
+      <!-- 分頁控制 -->
+      <div class="pagination-wrapper">
+        <RulerPagination
+          v-if="totalPages > 0"
+          :key="`pagination-${currentPage}-${totalPages}`"
+          :current-page="currentPage"
+          :total-pages="totalPages"
+          @update:current-page="handlePageChange"
+        />
+      </div>
     </div>
 
     <!-- 任務網格 -->
@@ -87,23 +99,38 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import api from '../../utils/api'
 import { useTaskTags } from '../../composables/task/useTaskTags'
+import { taskService } from '../../api/services.js'
 import TaskFilterBar from './TaskFilterBar.vue'
 import BatchEditToolbar from './BatchEditToolbar.vue'
 import TaskGrid from './TaskGrid.vue'
+import RulerPagination from '../common/RulerPagination.vue'
 
 const { t: $t } = useI18n()
-const { getAllTags, fetchTagColors, fetchTagOrder } = useTaskTags($t)
+const { fetchTagColors, fetchTagOrder } = useTaskTags($t)
 
 // Props
 const props = defineProps({
   tasks: {
     type: Array,
     required: true
+  },
+  currentPage: {
+    type: Number,
+    default: 1
+  },
+  totalPages: {
+    type: Number,
+    default: 0
   }
 })
 
 // Emits
-const emit = defineEmits(['download', 'refresh', 'delete', 'cancel', 'view'])
+const emit = defineEmits(['download', 'refresh', 'delete', 'cancel', 'view', 'page-change', 'filter-change'])
+
+// 處理分頁變更
+function handlePageChange(newPage) {
+  emit('page-change', newPage)
+}
 
 // SessionStorage 鍵值
 const STORAGE_KEY_FILTER_TAGS = 'taskList_filterTags'
@@ -165,24 +192,22 @@ watch(selectedTaskType, (newType) => {
   }
 })
 
+// 監聽篩選條件變化，通知父組件
+watch([selectedTaskType, selectedFilterTags], () => {
+  emit('filter-change', {
+    taskType: selectedTaskType.value === 'all' ? null : selectedTaskType.value,
+    tags: selectedFilterTags.value
+  })
+}, { deep: true })
+
 // Computed
-const allTags = getAllTags(computed(() => props.tasks))
+// 從 API 獲取的所有標籤
+const allTags = ref([])
 
 const sortedTasks = computed(() => {
+  // 後端已經處理了 task_type 和 tags 篩選
+  // 這裡只需要對前端顯示的任務進行排序
   let filtered = [...props.tasks]
-
-  // 任務類型篩選
-  if (selectedTaskType.value !== 'all') {
-    filtered = filtered.filter(task => task.task_type === selectedTaskType.value)
-  }
-
-  // 標籤篩選（AND 邏輯）
-  if (selectedFilterTags.value.length > 0) {
-    filtered = filtered.filter(task => {
-      if (!task.tags || task.tags.length === 0) return false
-      return selectedFilterTags.value.every(tag => task.tags.includes(tag))
-    })
-  }
 
   // 依狀態排序
   return filtered.sort((a, b) => {
@@ -304,7 +329,19 @@ async function handleToggleKeepAudio(task) {
     // 回滾
     task.keep_audio = oldValue
     console.error('Error toggling keep audio:', error)
-    alert($t('taskList.errorToggleKeepAudio'))
+
+    // 根據後端返回的錯誤代碼顯示對應的翻譯訊息
+    const errorCode = error.response?.data?.detail?.error_code || error.response?.data?.error_code
+
+    if (errorCode === 'KEEP_AUDIO_LIMIT_EXCEEDED') {
+      alert($t('taskList.errorKeepAudioLimit'))
+    } else if (errorCode === 'TASK_NOT_FOUND') {
+      alert($t('transcriptData.taskNotFound'))
+    } else {
+      // 回退：顯示通用錯誤訊息
+      const message = error.response?.data?.detail?.message || error.response?.data?.detail || error.message
+      alert($t('taskList.errorToggleKeepAudio') + (message ? ': ' + message : ''))
+    }
   }
 }
 
@@ -322,6 +359,8 @@ async function handleTaskTagsUpdated({ taskId, tags }) {
 function handleTagRenamed() {
   // 標籤重命名後刷新
   emit('refresh')
+  // 重新獲取標籤列表
+  fetchAllTags()
 }
 
 function handleTagColorChanged() {
@@ -332,11 +371,23 @@ function handleTagsReordered() {
   // 標籤順序變更後無需額外操作
 }
 
+// 獲取所有標籤
+async function fetchAllTags() {
+  try {
+    const response = await taskService.getAllTags()
+    allTags.value = response.tags || []
+  } catch (error) {
+    console.error('Failed to fetch tags:', error)
+    allTags.value = []
+  }
+}
+
 // Lifecycle
 onMounted(() => {
   restoreFilterState()
   fetchTagColors()
   fetchTagOrder()
+  fetchAllTags()
 })
 </script>
 
@@ -425,12 +476,22 @@ onMounted(() => {
 /* 任務類型篩選區 - 資料夾頁籤樣式 */
 .task-type-tabs {
   display: flex;
+  align-items: flex-end;
   gap: 4px;
   margin-bottom: -15px;
   margin-top: 20px;
   padding-left: 0px;
   position: relative;
   z-index: 1;
+}
+
+/* 分頁控制容器 */
+.pagination-wrapper {
+  margin-left: auto;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding-bottom: 0px;
 }
 
 .tab-btn {
@@ -469,7 +530,6 @@ onMounted(() => {
 /* 批次編輯頁籤顏色 */
 .tab-btn.tab-batch-edit {
   padding: 6px 20px 18px 20px;
-  margin-left: auto;
   background: var(--nav-bg);
 }
 

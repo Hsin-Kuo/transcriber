@@ -7,152 +7,142 @@
     <UploadZone @file-selected="handleFileUpload" :uploading="uploading" :disabled="!!pendingFile" />
 
     <!-- 確認表單（在上傳區下方） -->
-    <div v-if="pendingFile" class="confirm-section electric-card">
-        <div class="electric-inner">
-          <div class="electric-border-outer">
-            <div class="electric-main modal-body">
-              <!-- 第一排：任務類型 + 檔案資訊 + 說話者辨識 + 標籤 -->
-              <div class="confirm-row">
-                <!-- 任務類型 -->
-                <div class="modal-section task-type-section">
-                  <label class="section-label">{{ $t('transcription.taskType') }}</label>
+    <div v-if="pendingFile" class="confirm-section">
+      <div class="modal-body">
+        <!-- 第一排：任務類型 + 檔案資訊 + 說話者辨識 + 標籤 -->
+        <div class="confirm-row">
+          <!-- 任務類型 -->
+          <div class="modal-section task-type-section">
+            <label class="section-label">{{ $t('transcription.taskType') }}</label>
 
-                  <div class="radio-group">
-                    <label class="radio-item">
-                      <input type="radio" name="taskType" value="paragraph" v-model="taskType" />
-                      <span class="radio-label">{{ $t('transcription.paragraph') }}</span>
-                    </label>
-                    <label class="radio-item">
-                      <input type="radio" name="taskType" value="subtitle" v-model="taskType" />
-                      <span class="radio-label">{{ $t('transcription.subtitle') }}</span>
-                    </label>
-                  </div>
+            <div class="radio-group">
+              <label class="radio-item">
+                <input type="radio" name="taskType" value="paragraph" v-model="taskType" />
+                <span class="radio-label">{{ $t('transcription.paragraph') }}</span>
+              </label>
+              <label class="radio-item">
+                <input type="radio" name="taskType" value="subtitle" v-model="taskType" />
+                <span class="radio-label">{{ $t('transcription.subtitle') }}</span>
+              </label>
+            </div>
 
-                  <div class="task-type-hint">
-                    <span v-if="taskType === 'paragraph'" class="hint">{{ $t('transcription.paragraphHint') }}</span>
-                    <span v-else class="hint">{{ $t('transcription.subtitleHint') }}</span>
-                  </div>
-                </div>
+            <div class="task-type-hint">
+              <span v-if="taskType === 'paragraph'" class="hint">{{ $t('transcription.paragraphHint') }}</span>
+              <span v-else class="hint">{{ $t('transcription.subtitleHint') }}</span>
+            </div>
+          </div>
 
-                <!-- 檔案資訊 -->
-                <div class="modal-section file-section">
-                  <label class="section-label">{{ $t('transcription.fileInfo') }}</label>
-                  <div class="file-info">
-                    <span class="label">{{ $t('transcription.fileName') }}</span>
-                    <span class="value">{{ pendingFile?.name }}</span>
-                  </div>
-                  <div class="file-info" v-if="pendingFile">
-                    <span class="label">{{ $t('transcription.fileSize') }}</span>
-                    <span class="value">{{ (pendingFile.size / 1024 / 1024).toFixed(2) }} MB</span>
-                  </div>
-                  <div class="file-note">
-                    {{ $t('transcription.audioRetentionNote') }}
-                  </div>
-                </div>
+          <!-- 檔案資訊 -->
+          <div class="modal-section file-section">
+            <label class="section-label">{{ $t('transcription.fileInfo') }}</label>
+            <div class="file-info">
+              <span class="label">{{ $t('transcription.fileName') }}</span>
+              <span class="value">{{ pendingFile?.name }}</span>
+            </div>
+            <div class="file-info" v-if="pendingFile">
+              <span class="label">{{ $t('transcription.fileSize') }}</span>
+              <span class="value">{{ (pendingFile.size / 1024 / 1024).toFixed(2) }} MB</span>
+            </div>
+            <div class="file-note">
+              {{ $t('transcription.audioRetentionNote') }}
+            </div>
+          </div>
 
-                <!-- 說話者辨識 -->
-                <div class="modal-section diarize-section">
-                  <label class="section-label">{{ $t('transcription.speakerDiarization') }}</label>
+          <!-- 說話者辨識 -->
+          <div class="modal-section diarize-section">
+            <label class="section-label">{{ $t('transcription.speakerDiarization') }}</label>
 
-                  <label class="toggle-item">
-                    <div class="toggle-wrapper">
-                      <input type="checkbox" id="modal-diarize" v-model="enableDiarization" class="toggle-input" />
-                      <span class="toggle-track">
-                        <span class="toggle-thumb"></span>
-                      </span>
-                    </div>
-                    <span class="toggle-label-text">{{ $t('transcription.enable') }}</span>
-                  </label>
+            <label class="toggle-label">
+              <div class="toggle-switch-wrapper">
+                <input type="checkbox" id="modal-diarize" v-model="enableDiarization" class="toggle-input" />
+                <span class="toggle-slider"></span>
+              </div>
+              <span class="toggle-text">{{ $t('transcription.enable') }}</span>
+            </label>
 
-                  <div class="sub-setting" v-if="enableDiarization">
-                    <label for="modal-maxSpeakers" class="sub-label">
-                      {{ $t('transcription.maxSpeakers') }}
-                      <span class="hint">{{ $t('transcription.maxSpeakersHint') }}</span>
-                    </label>
-                    <input
-                      type="number"
-                      id="modal-maxSpeakers"
-                      v-model.number="maxSpeakers"
-                      min="2"
-                      max="10"
-                      :placeholder="$t('transcription.autoDetect')"
-                      class="number-input"
-                    />
-                  </div>
-                </div>
+            <div class="sub-setting" v-if="enableDiarization">
+              <label for="modal-maxSpeakers" class="sub-label">
+                {{ $t('transcription.maxSpeakers') }}
+                <span class="hint">{{ $t('transcription.maxSpeakersHint') }}</span>
+              </label>
+              <input
+                type="number"
+                id="modal-maxSpeakers"
+                v-model.number="maxSpeakers"
+                min="2"
+                max="10"
+                :placeholder="$t('transcription.autoDetect')"
+                class="number-input"
+              />
+            </div>
+          </div>
 
-                <!-- 標籤 -->
-                <div class="modal-section tag-section">
-                <label class="section-label">{{ $t('transcription.tags') }}</label>
-                <div class="tag-input-container">
-                  <div class="tag-input-wrapper">
-                    <input
-                      type="text"
-                      v-model="tagInput"
-                      @keydown.enter.prevent="addTag"
-                      @keydown.comma.prevent="addTag"
-                      :placeholder="$t('transcription.tagPlaceholder')"
-                      class="text-input"
-                    />
-                    <button
-                      type="button"
-                      class="btn-add-tag"
-                      @click="addTag"
-                      :disabled="!tagInput.trim()"
-                    >
-                      {{ $t('transcription.add') }}
-                    </button>
-                  </div>
+          <!-- 標籤 -->
+          <div class="modal-section tag-section">
+            <label class="section-label">{{ $t('transcription.tags') }}</label>
+            <div class="tag-input-container">
+              <div class="tag-input-wrapper">
+                <input
+                  type="text"
+                  v-model="tagInput"
+                  @keydown.enter.prevent="addTag"
+                  @keydown.comma.prevent="addTag"
+                  :placeholder="$t('transcription.tagPlaceholder')"
+                  class="text-input"
+                />
+                <button
+                  type="button"
+                  class="btn-add-tag"
+                  @click="addTag"
+                  :disabled="!tagInput.trim()"
+                >
+                  {{ $t('transcription.add') }}
+                </button>
+              </div>
 
-                  <!-- 快速選擇現有標籤 -->
-                  <div v-if="availableQuickTags.length > 0" class="quick-tags-section">
-                    <div class="quick-tags">
-                      <button
-                        v-for="tag in availableQuickTags"
-                        :key="tag"
-                        type="button"
-                        class="quick-tag-btn"
-                        @click="addQuickTag(tag)"
-                        :title="$t('transcription.addTagTooltip', { tag })"
-                      >
-                        + {{ tag }}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div v-if="selectedTags.length > 0" class="selected-tags">
-                    <span
-                      v-for="(tag, index) in selectedTags"
-                      :key="index"
-                      class="selected-tag"
-                    >
-                      {{ tag }}
-                      <button
-                        type="button"
-                        class="remove-tag"
-                        @click="removeTag(index)"
-                        :title="$t('transcription.removeTagTooltip')"
-                      >
-                        ×
-                      </button>
-                    </span>
-                  </div>
-                </div>
+              <!-- 快速選擇現有標籤 -->
+              <div v-if="availableQuickTags.length > 0" class="quick-tags-section">
+                <div class="quick-tags">
+                  <button
+                    v-for="tag in availableQuickTags"
+                    :key="tag"
+                    type="button"
+                    class="quick-tag-btn"
+                    @click="addQuickTag(tag)"
+                    :title="$t('transcription.addTagTooltip', { tag })"
+                  >
+                    + {{ tag }}
+                  </button>
                 </div>
               </div>
 
-              <!-- 動作按鈕 -->
-              <div class="modal-actions">
-                <button class="btn btn-primary btn-start" @click="confirmAndUpload">{{ $t('transcription.startTranscription') }}</button>
-                <button class="btn btn-secondary btn-cancel" @click="cancelUpload">{{ $t('transcription.cancel') }}</button>
+              <div v-if="selectedTags.length > 0" class="selected-tags">
+                <span
+                  v-for="(tag, index) in selectedTags"
+                  :key="index"
+                  class="selected-tag"
+                >
+                  {{ tag }}
+                  <button
+                    type="button"
+                    class="remove-tag"
+                    @click="removeTag(index)"
+                    :title="$t('transcription.removeTagTooltip')"
+                  >
+                    ×
+                  </button>
+                </span>
               </div>
             </div>
           </div>
-          <div class="electric-glow-1"></div>
-          <div class="electric-glow-2"></div>
         </div>
-        <div class="electric-overlay"></div>
-        <div class="electric-bg-glow"></div>
+
+        <!-- 動作按鈕 -->
+        <div class="modal-actions">
+          <button class="btn btn-primary btn-start" @click="confirmAndUpload">{{ $t('transcription.startTranscription') }}</button>
+          <button class="btn btn-secondary btn-cancel" @click="cancelUpload">{{ $t('transcription.cancel') }}</button>
+        </div>
+      </div>
     </div>
 
   </div>
@@ -206,10 +196,8 @@ function addTag() {
   const tag = tagInput.value.trim()
   if (tag && !selectedTags.value.includes(tag)) {
     selectedTags.value.push(tag)
-    tagInput.value = ''
-  } else if (selectedTags.value.includes(tag)) {
-    tagInput.value = ''
   }
+  tagInput.value = ''
 }
 
 function addQuickTag(tag) {
@@ -304,7 +292,6 @@ function cancelUpload() {
 
 
 
-// 改進的 timecode 匹配：結合位置和內容匹配
 // 生命週期
 onMounted(() => {
   refreshTasks()
@@ -320,6 +307,8 @@ onUnmounted(() => {
 
 <style scoped>
 .container {
+  --color-primary-rgb: 221, 132, 72;
+  --electric-primary: #dd8448;
   animation: fadeIn 0.5s ease-in;
 }
 
@@ -339,6 +328,11 @@ onUnmounted(() => {
   width: 100%;
   max-width: 800px;
   margin: 20px auto 0;
+  padding: 0;
+  border-radius: 20px;
+  background: var(--neu-bg);
+  box-shadow: var(--neu-shadow-raised);
+  border: none;
   animation: slideDown 0.3s ease;
 }
 
@@ -362,16 +356,9 @@ onUnmounted(() => {
 /* 確認區響應式排版 */
 .confirm-row {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 20px;
   margin-bottom: 20px;
-}
-
-/* 平板版：兩欄 */
-@media (max-width: 1024px) {
-  .confirm-row {
-    grid-template-columns: 1fr 1fr;
-  }
 }
 
 /* 移動版：垂直排列 */
@@ -388,19 +375,11 @@ onUnmounted(() => {
 
 .modal-section {
   margin-bottom: 20px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid rgba(221, 132, 72, 0.15);
 }
 
-.modal-section:last-of-type {
-  border-bottom: none;
-  padding-bottom: 0;
-}
-
-/* 確認區的 section 不需要底部邊框 */
+/* 確認區的 section 不需要底部邊框和額外 padding */
 .confirm-row .modal-section {
-  border-bottom: none;
-  padding-bottom: 0;
+  margin-bottom: 20px;
 }
 
 .section-label {
@@ -446,18 +425,25 @@ onUnmounted(() => {
 }
 
 /* Toggle 開關 */
-.toggle-item {
+.toggle-label {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   cursor: pointer;
   user-select: none;
+  padding-right: 5px;
+  position: relative;
 }
 
-.toggle-wrapper {
+.toggle-label:hover .toggle-slider {
+  transform: scale(1.05);
+}
+
+.toggle-switch-wrapper {
   position: relative;
-  width: 40px;
-  height: 22px;
+  width: 44px;
+  height: 24px;
+  display: inline-block;
 }
 
 .toggle-input {
@@ -467,48 +453,74 @@ onUnmounted(() => {
   position: absolute;
 }
 
-.toggle-track {
+.toggle-slider {
   position: absolute;
+  cursor: pointer;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: var(--neu-bg);
-  border-radius: 11px;
-  transition: all 0.3s ease;
-  box-shadow: var(--neu-shadow-inset);
+  background-color: #ccc;
+  transition: transform 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
+  border-radius: 24px;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.toggle-thumb {
+.toggle-slider:before {
   position: absolute;
-  top: 3px;
+  content: "";
+  height: 18px;
+  width: 18px;
   left: 3px;
-  width: 16px;
-  height: 16px;
-  background: var(--neu-bg);
+  bottom: 3px;
+  background-color: white;
+  transition: 0.3s;
   border-radius: 50%;
-  transition: all 0.3s ease;
-  box-shadow: var(--neu-shadow-btn-sm);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
-.toggle-input:checked + .toggle-track {
-  background: linear-gradient(145deg, #c8e6c9, #a5d6a7);
+.toggle-input:checked + .toggle-slider {
+  background: linear-gradient(135deg, var(--electric-primary) 0%, #b8762d 100%);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1), 0 0 8px rgba(var(--color-primary-rgb), 0.3);
 }
 
-.toggle-input:checked + .toggle-track .toggle-thumb {
-  transform: translateX(18px);
-  box-shadow: var(--neu-shadow-btn-hover-sm);
+.toggle-input:checked + .toggle-slider:before {
+  transform: translateX(20px);
 }
 
-.toggle-item:hover .toggle-track {
-  box-shadow: var(--neu-shadow-inset-hover);
+.toggle-label:hover .toggle-slider {
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2), 0 0 4px rgba(0, 0, 0, 0.1);
 }
 
-.toggle-item:hover .toggle-input:checked + .toggle-track {
-  background: linear-gradient(145deg, #b8d6b9, #95c697);
+.toggle-label:hover .toggle-input:checked + .toggle-slider {
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1), 0 0 12px rgba(var(--color-primary-rgb), 0.4);
 }
 
-.toggle-label-text {
+.toggle-label:active .toggle-slider {
+  transform: scale(0.98);
+  background-color: #ccc !important;
+}
+
+.toggle-label:active .toggle-input:checked + .toggle-slider {
+  background: linear-gradient(135deg, var(--electric-primary) 0%, #b8762d 100%) !important;
+}
+
+.toggle-slider:active {
+  background-color: #ccc !important;
+}
+
+.toggle-input:checked + .toggle-slider:active {
+  background: linear-gradient(135deg, var(--electric-primary) 0%, #b8762d 100%) !important;
+}
+
+.toggle-label:active .toggle-slider:before {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.toggle-text {
   font-size: 14px;
   color: var(--neu-text);
   font-weight: 500;
@@ -576,7 +588,7 @@ onUnmounted(() => {
 }
 
 .number-input {
-  width: 100%;
+  width: 120px;
   padding: 10px 12px;
   font-size: 14px;
   border: 2px solid rgba(221, 132, 72, 0.3);
@@ -609,6 +621,7 @@ onUnmounted(() => {
 
 .tag-input-wrapper .text-input {
   flex: 1;
+  max-width: 300px;
   padding: 10px 12px;
   font-size: 14px;
   border: 2px solid rgba(221, 132, 72, 0.3);

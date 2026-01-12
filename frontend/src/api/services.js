@@ -161,6 +161,15 @@ export const taskService = {
     const API_BASE = import.meta.env.VITE_API_URL || 'http://100.66.247.23:8000'
     return `${API_BASE}${NEW_ENDPOINTS.tasks.events(taskId)}?token=${token}`
   },
+
+  /**
+   * 獲取使用者所有標籤
+   * @returns {Promise} 標籤列表
+   */
+  async getAllTags() {
+    const response = await api.get(NEW_ENDPOINTS.tasks.tags)
+    return response.data
+  },
 }
 
 /**

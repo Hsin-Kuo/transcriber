@@ -1,14 +1,17 @@
 <template>
   <div class="tasks-container">
-
     <!-- 任務列表 -->
     <TaskList
       :tasks="tasks"
+      :current-page="currentPage"
+      :total-pages="totalPages"
       @download="downloadTask"
       @refresh="refreshTasks"
       @delete="deleteTask"
       @cancel="cancelTask"
       @view="viewTranscript"
+      @page-change="handlePageChange"
+      @filter-change="handleFilterChange"
     />
 
     <!-- 字幕下載對話框 -->
@@ -26,9 +29,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, inject } from 'vue'
-import api, { API_BASE, TokenManager } from '../utils/api'
+import { ref, onMounted, onBeforeUnmount, inject, computed } from 'vue'
+import api, { TokenManager } from '../utils/api'
 import TaskList from '../components/task/TaskListContainer.vue'
+import RulerPagination from '../components/common/RulerPagination.vue'
 import DownloadDialog from '../components/transcript/DownloadDialog.vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -46,6 +50,18 @@ const { t } = useI18n()
 const showNotification = inject('showNotification')
 const tasks = ref([])
 const eventSources = new Map() // SSE 連接管理
+
+// 分頁相關狀態
+const currentPage = ref(1)
+const pageSize = ref(10)
+const totalTasks = ref(0)
+
+// 篩選條件
+const currentTaskType = ref(null)
+const currentTags = ref([])
+
+// 計算總頁數
+const totalPages = computed(() => Math.ceil(totalTasks.value / pageSize.value))
 
 // 字幕下載相關狀態
 const currentDownloadTask = ref(null)
@@ -76,9 +92,29 @@ onMounted(async () => {
 // 刷新任務列表
 async function refreshTasks() {
   try {
-    // 使用新 API 服務層
-    const response = await taskService.getActiveList()
-    const serverTasks = response.all_tasks || []
+    // 計算分頁參數
+    const skip = (currentPage.value - 1) * pageSize.value
+
+    // 使用新 API 服務層，帶分頁參數和篩選條件
+    const params = {
+      skip: skip,
+      limit: pageSize.value
+    }
+
+    // 如果有 task_type 篩選，加入參數
+    if (currentTaskType.value) {
+      params.task_type = currentTaskType.value
+    }
+
+    // 如果有 tags 篩選，加入參數（逗號分隔）
+    if (currentTags.value && currentTags.value.length > 0) {
+      params.tags = currentTags.value.join(',')
+    }
+
+    const response = await taskService.list(params)
+
+    const serverTasks = response.tasks || []
+    totalTasks.value = response.total || 0
 
     // 保留本地狀態（cancelling 狀態和 SSE 更新的進度信息）
     const localStates = new Map()
@@ -138,6 +174,17 @@ async function refreshTasks() {
       return mergedTask
     })
 
+    // 獲取當前頁面的任務 ID 列表
+    const currentTaskIds = new Set(tasks.value.map(task => task.task_id))
+
+    // 關閉不在當前頁面的 SSE 連接
+    eventSources.forEach((eventSource, taskId) => {
+      if (!currentTaskIds.has(taskId)) {
+        console.log(`📄 任務 ${taskId} 不在當前頁面，關閉 SSE 連接`)
+        disconnectTaskSSE(taskId)
+      }
+    })
+
     // 為正在進行的任務建立 SSE 連接
     tasks.value.forEach(task => {
       if (['pending', 'processing'].includes(task.status)) {
@@ -147,6 +194,21 @@ async function refreshTasks() {
   } catch (error) {
     console.error('Failed to refresh task list:', error)
   }
+}
+
+// 處理頁面切換
+function handlePageChange(newPage) {
+  currentPage.value = newPage
+  refreshTasks()
+}
+
+// 處理篩選條件變更
+function handleFilterChange(filter) {
+  currentTaskType.value = filter.taskType
+  currentTags.value = filter.tags
+  // 篩選條件改變時，重置到第一頁
+  currentPage.value = 1
+  refreshTasks()
 }
 
 // 下載任務結果
@@ -366,6 +428,9 @@ function connectTaskSSE(taskId) {
 function disconnectTaskSSE(taskId) {
   const eventSource = eventSources.get(taskId)
   if (eventSource) {
+    // 在關閉前移除事件監聽器，避免觸發錯誤
+    eventSource.onmessage = null
+    eventSource.onerror = null
     eventSource.close()
     eventSources.delete(taskId)
     console.log(`🔌 關閉 SSE: ${taskId}`)
@@ -375,14 +440,18 @@ function disconnectTaskSSE(taskId) {
 // 斷開所有 SSE 連接
 function disconnectAllSSE() {
   eventSources.forEach((eventSource, taskId) => {
+    // 移除事件監聽器，避免觸發錯誤
+    eventSource.onmessage = null
+    eventSource.onerror = null
     eventSource.close()
     console.log(`🔌 關閉 SSE: ${taskId}`)
   })
   eventSources.clear()
 }
 
-// 組件卸載時斷開所有連接
-onUnmounted(() => {
+// 組件卸載前斷開所有連接
+onBeforeUnmount(() => {
+  console.log('🔌 組件即將卸載，關閉所有 SSE 連接')
   disconnectAllSSE()
 })
 </script>

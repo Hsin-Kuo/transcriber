@@ -37,8 +37,7 @@ class TranscriptionService:
         whisper_processor: WhisperProcessor,
         punctuation_processor: PunctuationProcessor,
         diarization_processor: Optional[DiarizationProcessor] = None,
-        executor: Optional[ThreadPoolExecutor] = None,
-        output_dir: Optional[Path] = None
+        executor: Optional[ThreadPoolExecutor] = None
     ):
         """初始化 TranscriptionService
 
@@ -48,15 +47,12 @@ class TranscriptionService:
             punctuation_processor: PunctuationProcessor 實例
             diarization_processor: DiarizationProcessor 實例（可選）
             executor: 線程池執行器（可選）
-            output_dir: 輸出目錄（可選）
         """
         self.task_service = task_service
         self.whisper = whisper_processor
         self.punctuation = punctuation_processor
         self.diarization = diarization_processor
         self.executor = executor or ThreadPoolExecutor(max_workers=3)
-        self.output_dir = output_dir or Path("output")
-        self.output_dir.mkdir(exist_ok=True)
 
     async def start_transcription(
         self,
@@ -314,16 +310,12 @@ class TranscriptionService:
                 self.task_service.cleanup_task_memory(task_id)
                 return
 
-            # 4. 儲存結果
-            self._update_progress(task_id, "正在儲存結果...")
-            result_file_path = self._save_results(task_id, final_text)
-            segments_file_path = self._save_segments(task_id, segments)
+            # 4. 保存轉錄結果到 MongoDB
+            self._save_transcription_results(task_id, final_text, segments)
 
             # 5. 標記完成
             self._mark_completed(
                 task_id,
-                result_file_path,
-                segments_file_path,
                 detected_language or language,
                 final_text,  # 传递文本用于计算字数
                 punctuation_model  # 传递标点符号模型信息
@@ -376,36 +368,6 @@ class TranscriptionService:
 
         return wav_path
 
-    def _save_results(self, task_id: str, text: str) -> Path:
-        """儲存轉錄結果
-
-        Args:
-            task_id: 任務 ID
-            text: 轉錄文字
-
-        Returns:
-            結果檔案路徑
-        """
-        result_file = self.output_dir / f"{task_id}.txt"
-        result_file.write_text(text, encoding='utf-8')
-        return result_file
-
-    def _save_segments(self, task_id: str, segments: list) -> Path:
-        """儲存 segments 資料
-
-        Args:
-            task_id: 任務 ID
-            segments: Segments 列表
-
-        Returns:
-            Segments 檔案路徑
-        """
-        segments_file = self.output_dir / f"{task_id}_segments.json"
-        segments_file.write_text(
-            json.dumps(segments, ensure_ascii=False, indent=2),
-            encoding='utf-8'
-        )
-        return segments_file
 
     def _update_progress(
         self,
@@ -527,11 +489,75 @@ class TranscriptionService:
             traceback.print_exc()
             return False
 
+    def _save_transcription_results(
+        self,
+        task_id: str,
+        transcription_text: str,
+        segments: Optional[list] = None
+    ) -> None:
+        """保存轉錄結果到 MongoDB
+
+        Args:
+            task_id: 任務 ID
+            transcription_text: 轉錄文本
+            segments: Segments 陣列（可選）
+        """
+        try:
+            from pymongo import MongoClient
+            from datetime import datetime
+            import os
+
+            # 連接 MongoDB（使用同步客戶端）
+            mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
+            db_name = os.getenv("MONGODB_DB_NAME", "transcriber")
+            client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+            db = client[db_name]
+
+            # 1. 保存轉錄文本到 transcriptions collection
+            now = datetime.utcnow()
+            transcription_doc = {
+                "_id": task_id,
+                "content": transcription_text,
+                "text_length": len(transcription_text),
+                "created_at": now,
+                "updated_at": now
+            }
+
+            # 使用 replace_one 來確保不會重複插入
+            db.transcriptions.replace_one(
+                {"_id": task_id},
+                transcription_doc,
+                upsert=True
+            )
+            print(f"✅ 已保存轉錄文本到 MongoDB (task_id: {task_id}, 長度: {len(transcription_text)})")
+
+            # 2. 保存 segments 到 segments collection（如果有）
+            if segments is not None and len(segments) > 0:
+                segment_doc = {
+                    "_id": task_id,
+                    "segments": segments,
+                    "segment_count": len(segments),
+                    "created_at": now,
+                    "updated_at": now
+                }
+
+                db.segments.replace_one(
+                    {"_id": task_id},
+                    segment_doc,
+                    upsert=True
+                )
+                print(f"✅ 已保存 segments 到 MongoDB (task_id: {task_id}, 數量: {len(segments)})")
+
+            client.close()
+
+        except Exception as e:
+            print(f"⚠️ 保存轉錄結果到 MongoDB 失敗：{e}")
+            import traceback
+            traceback.print_exc()
+
     def _mark_completed(
         self,
         task_id: str,
-        result_file_path: Path,
-        segments_file_path: Path,
         language: Optional[str],
         transcription_text: str = "",
         punctuation_model: Optional[str] = None
@@ -540,8 +566,6 @@ class TranscriptionService:
 
         Args:
             task_id: 任務 ID
-            result_file_path: 結果檔案路徑
-            segments_file_path: Segments 檔案路徑
             language: 偵測到的語言
             transcription_text: 轉錄文本（用於計算字數）
             punctuation_model: 使用的標點符號模型
@@ -555,9 +579,6 @@ class TranscriptionService:
         # 準備更新數據
         update_data = {
             "status": "completed",
-            "result.transcription_file": str(result_file_path),
-            "result.transcription_filename": result_file_path.name,
-            "result.segments_file": str(segments_file_path),
             "result.text_length": text_length,  # 字符數
             "result.word_count": word_count,    # 詞數
             "config.language": language,

@@ -22,6 +22,7 @@ export const NEW_ENDPOINTS = {
   tasks: {
     list: '/tasks',
     recent: '/tasks/recent',
+    tags: '/tasks/tags',
     get: (taskId) => `/tasks/${taskId}`,
     cancel: (taskId) => `/tasks/${taskId}/cancel`,
     delete: (taskId) => `/tasks/${taskId}`,

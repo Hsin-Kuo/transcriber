@@ -164,6 +164,7 @@
     "errorUpdateTagColor": "更新標籤顏色失敗",
     "errorUpdateTagColorFull": "更新標籤顏色失敗：{message}",
     "errorUpdateKeepAudio": "更新音檔保留狀態失敗",
+    "errorToggleKeepAudio": "切換音檔保留狀態失敗",
     "errorUpdateFailed": "更新失敗：{message}",
     "errorKeepAudioLimit": "最多只能勾選 3 個音檔保留",
     "errorSelectTasksFirst": "請先選擇要刪除的任務",
