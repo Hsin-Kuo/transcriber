@@ -32,7 +32,7 @@
               </div>
               <div class="region-actions">
                 <button
-                  @click="$emit('play-region', region)"
+                  @click="handlePlayRegion(region)"
                   class="action-btn play-btn"
                   title="播放此區段"
                 >
@@ -41,7 +41,7 @@
                   </svg>
                 </button>
                 <button
-                  @click="$emit('delete-region', region.id)"
+                  @click="handleDeleteRegion(region.id)"
                   class="action-btn delete-btn"
                   title="刪除此區段"
                 >
@@ -73,7 +73,7 @@ defineProps({
   }
 })
 
-defineEmits(['add-region', 'delete-region', 'play-region'])
+const emit = defineEmits(['add-region', 'delete-region', 'play-region'])
 
 function formatTime(seconds) {
   const mins = Math.floor(seconds / 60)
@@ -84,6 +84,16 @@ function formatTime(seconds) {
 
 function formatDuration(seconds) {
   return `${seconds.toFixed(1)}s`
+}
+
+function handlePlayRegion(region) {
+  console.log('🎵 Play region clicked:', region.id)
+  emit('play-region', region)
+}
+
+function handleDeleteRegion(regionId) {
+  console.log('🗑️ Delete region clicked:', regionId)
+  emit('delete-region', regionId)
 }
 </script>
 
@@ -213,6 +223,9 @@ function formatDuration(seconds) {
   background: rgba(255, 255, 255, 0.05);
   cursor: pointer;
   transition: all 0.2s ease;
+  padding: 0;
+  pointer-events: auto;
+  z-index: 10;
 }
 
 .action-btn:hover {

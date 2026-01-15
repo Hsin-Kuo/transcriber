@@ -98,7 +98,7 @@ function handleDelete() {
   background: linear-gradient(135deg, rgba(255, 107, 53, 0.2) 0%, rgba(221, 132, 72, 0.2) 100%);
   border: 2px solid rgba(255, 107, 53, 0.4);
   border-radius: 6px;
-  cursor: grab;
+  cursor: inherit;
   transition: all 0.2s ease;
   overflow: hidden;
 }
@@ -181,6 +181,7 @@ function handleDelete() {
   opacity: 0;
   transition: all 0.2s ease;
   padding: 0;
+  pointer-events: auto;
 }
 
 .timeline-clip:hover .clip-delete {

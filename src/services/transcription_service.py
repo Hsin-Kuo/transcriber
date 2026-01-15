@@ -136,16 +136,16 @@ class TranscriptionService:
             # 更新任務狀態為 processing
             self.task_service.update_memory_state(task_id, {"status": "processing"})
 
-            # 1. 音訊轉換（轉為 WAV 格式）
-            print(f"🔄 [_process_transcription] 開始轉換音檔格式")
+            # 1. 音訊轉換（轉為 MP3 格式，用於轉錄和保存）
+            print(f"🔄 [_process_transcription] 開始轉換音檔為 MP3 格式")
             self._update_progress(task_id, "正在轉換音檔格式...", {"audio_converted": False})
-            wav_path = self._convert_audio_to_wav(audio_file_path)
-            print(f"✅ [_process_transcription] 音檔轉換完成: {wav_path}")
+            mp3_path = self._convert_audio_to_mp3(audio_file_path)
+            print(f"✅ [_process_transcription] 音檔轉換完成: {mp3_path}")
             self._update_progress(task_id, "音檔轉換完成", {"audio_converted": True})
 
             # 檢查是否已取消
             if self._is_cancelled(task_id):
-                self._cleanup_temp_files(task_id, wav_path, save_audio=False)  # 取消時不保存音檔
+                self._cleanup_temp_files(task_id, mp3_path, save_audio=False)  # 取消時不保存音檔
                 self.task_service.cleanup_task_memory(task_id)
                 return
 
@@ -172,7 +172,7 @@ class TranscriptionService:
                     transcription_future = parallel_executor.submit(
                         self._run_transcription,
                         task_id,
-                        wav_path,
+                        mp3_path,
                         language,
                         use_chunking
                     )
@@ -181,7 +181,7 @@ class TranscriptionService:
                     diarization_future = parallel_executor.submit(
                         self._run_diarization,
                         task_id,
-                        wav_path,
+                        mp3_path,
                         max_speakers
                     )
 
@@ -256,7 +256,7 @@ class TranscriptionService:
                 print(f"🎤 [_process_transcription] 開始 Whisper 轉錄 (chunking={use_chunking})")
                 full_text, segments, detected_language = self._run_transcription(
                     task_id,
-                    wav_path,
+                    mp3_path,
                     language,
                     use_chunking
                 )
@@ -265,7 +265,7 @@ class TranscriptionService:
 
             # 檢查是否已取消
             if self._is_cancelled(task_id):
-                self._cleanup_temp_files(task_id, wav_path, save_audio=False)  # 取消時不保存音檔
+                self._cleanup_temp_files(task_id, mp3_path, save_audio=False)  # 取消時不保存音檔
                 self.task_service.cleanup_task_memory(task_id)
                 return
 
@@ -322,7 +322,7 @@ class TranscriptionService:
             )
 
             # 6. 清理臨時檔案（包含保存音檔）
-            self._cleanup_temp_files(task_id, wav_path)
+            self._cleanup_temp_files(task_id, mp3_path)
 
             # 7. 清理超出限制的舊音檔（在新音檔保存後才執行）
             self._cleanup_old_audio_files(task_id)
@@ -342,31 +342,34 @@ class TranscriptionService:
 
     # ========== 私有輔助方法 ==========
 
-    def _convert_audio_to_wav(self, audio_path: Path) -> Path:
-        """轉換音檔為 WAV 格式
+    def _convert_audio_to_mp3(self, audio_path: Path) -> Path:
+        """轉換音檔為 MP3 格式 (16kHz, mono, 128kbps)
+
+        用於 Whisper 轉錄和最終保存，避免重複轉換
 
         Args:
             audio_path: 原始音檔路徑
 
         Returns:
-            WAV 檔案路徑
+            MP3 檔案路徑
         """
-        # 如果已經是 WAV，直接返回
-        if audio_path.suffix.lower() == '.wav':
+        # 如果已經是 MP3，直接返回（Whisper 和 pyannote 都支援 MP3）
+        if audio_path.suffix.lower() == '.mp3':
             return audio_path
 
-        # 使用 ffmpeg 轉換
-        wav_path = audio_path.with_suffix('.wav')
+        # 使用 ffmpeg 轉換為 16kHz MP3
+        mp3_path = audio_path.with_suffix('.mp3')
 
         subprocess.run([
             'ffmpeg', '-y', '-i', str(audio_path),
-            '-acodec', 'pcm_s16le',  # WAV 格式
+            '-acodec', 'libmp3lame',  # MP3 編碼器
+            '-b:a', '128k',  # 128kbps（語音品質足夠）
             '-ar', '16000',  # 16kHz 採樣率（Whisper 推薦）
             '-ac', '1',  # 單聲道
-            str(wav_path)
+            str(mp3_path)
         ], check=True, capture_output=True, timeout=300)
 
-        return wav_path
+        return mp3_path
 
 
     def _update_progress(
@@ -797,22 +800,27 @@ class TranscriptionService:
                     if audio_file_path:
                         from pathlib import Path
                         audio_file = Path(audio_file_path)
+
+                        # 刪除實際文件（如果存在）
                         if audio_file.exists():
                             try:
                                 audio_file.unlink()
                                 print(f"🗑️ 已刪除舊音檔：{audio_file_path}")
-                                deleted_count += 1
-
-                                # 更新資料庫，清除音檔路徑
-                                db.tasks.update_one(
-                                    {"_id": old_task["_id"]},
-                                    {"$set": {
-                                        "result.audio_file": None,
-                                        "result.audio_filename": None
-                                    }}
-                                )
                             except Exception as e:
                                 print(f"⚠️ 刪除音檔失敗：{e}")
+                        else:
+                            print(f"⚠️ 音檔文件不存在（僅清除資料庫記錄）：{audio_file_path}")
+
+                        # 無論文件是否存在，都更新資料庫並計數
+                        # 這樣可以避免資料庫和文件系統不一致的問題
+                        db.tasks.update_one(
+                            {"_id": old_task["_id"]},
+                            {"$set": {
+                                "result.audio_file": None,
+                                "result.audio_filename": None
+                            }}
+                        )
+                        deleted_count += 1
 
                 print(f"✅ 自動清理完成，共刪除 {deleted_count} 個舊音檔")
 
@@ -823,9 +831,9 @@ class TranscriptionService:
             traceback.print_exc()
 
     def _save_audio_file_sync(self, task_id: str, temp_dir: Path, audio_files: list) -> None:
-        """同步處理音檔保存和更新（避免 event loop 衝突）
+        """同步處理音檔保存（直接移動已轉換的 MP3）
 
-        將音檔統一轉換為 MP3 格式以確保瀏覽器相容性
+        由於在轉錄前已經轉換為 16kHz MP3，這裡只需直接移動
         """
         print(f"🔧 [_save_audio_file_sync] 開始處理，audio_files 數量: {len(audio_files)}")
 
@@ -834,41 +842,33 @@ class TranscriptionService:
             return
 
         try:
-            original_audio = audio_files[0]
-            print(f"🔧 [_save_audio_file_sync] 原始音檔: {original_audio}")
-            print(f"🔧 [_save_audio_file_sync] 音檔是否存在: {original_audio.exists()}")
+            # 找到 MP3 檔案（應該已經是 16kHz MP3）
+            mp3_file = None
+            for f in audio_files:
+                if f.suffix.lower() == '.mp3':
+                    mp3_file = f
+                    break
+
+            if not mp3_file:
+                print(f"⚠️ [_save_audio_file_sync] 未找到 MP3 檔案")
+                return
+
+            print(f"🔧 [_save_audio_file_sync] 找到 MP3: {mp3_file}")
+            print(f"🔧 [_save_audio_file_sync] 音檔是否存在: {mp3_file.exists()}")
 
             uploads_dir = Path("uploads")
             uploads_dir.mkdir(exist_ok=True)
 
-            # 統一保存為 MP3 格式（瀏覽器相容性最好）
+            # 直接移動 MP3（無需再次轉換）
             permanent_audio = uploads_dir / f"{task_id}.mp3"
             print(f"🔧 [_save_audio_file_sync] 目標路徑: {permanent_audio}")
 
-            # 如果原始檔案已經是 MP3，直接移動
-            if original_audio.suffix.lower() == '.mp3':
-                shutil.move(str(original_audio), str(permanent_audio))
-                print(f"💾 已保存音檔（直接移動）：{permanent_audio}")
-            else:
-                # 使用 ffmpeg 轉換為 MP3（192kbps，品質良好且檔案大小適中）
-                print(f"🔄 [_save_audio_file_sync] 轉換音檔為 MP3 格式...")
-                result = subprocess.run([
-                    'ffmpeg', '-y', '-i', str(original_audio),
-                    '-acodec', 'libmp3lame',
-                    '-b:a', '192k',  # 192kbps 比特率
-                    '-ar', '44100',  # 44.1kHz 採樣率
-                    str(permanent_audio)
-                ], capture_output=True, text=True)
-
-                if result.returncode != 0:
-                    print(f"❌ ffmpeg 轉換失敗: {result.stderr}")
-                    raise Exception(f"音檔轉換為 MP3 失敗: {result.stderr}")
-
-                print(f"✅ 已轉換並保存音檔：{permanent_audio}")
+            shutil.move(str(mp3_file), str(permanent_audio))
+            print(f"💾 已移動音檔到：{permanent_audio}")
 
             # 使用同步方法更新任務的 audio_file 路徑
             # 保存原始檔名（但副檔名改為 .mp3）
-            original_filename = Path(original_audio.name).stem + ".mp3"
+            original_filename = Path(audio_files[0].name).stem + ".mp3"
             self._update_task_sync(task_id, {
                 "result.audio_file": str(permanent_audio),
                 "result.audio_filename": original_filename
@@ -879,7 +879,7 @@ class TranscriptionService:
             import traceback
             traceback.print_exc()
 
-    def _cleanup_temp_files(self, task_id: str, wav_path: Optional[Path], save_audio: bool = True) -> None:
+    def _cleanup_temp_files(self, task_id: str, mp3_path: Optional[Path], save_audio: bool = True) -> None:
         """清理臨時檔案
 
         ⚠️ 重要邏輯說明（請勿修改）：
@@ -900,16 +900,17 @@ class TranscriptionService:
 
         Args:
             task_id: 任務 ID
-            wav_path: WAV 檔案路徑（可選）
+            mp3_path: MP3 檔案路徑（可選，如果已移動則為 None）
             save_audio: 是否保存音檔（True=成功完成，False=失敗/取消）
         """
-        # 清理 WAV 檔案（如果是轉換生成的）
-        if wav_path and wav_path.exists():
+        # 注意：如果 save_audio=True，MP3 已被移動到 uploads/，這裡不需要刪除
+        # 只有在失敗/取消時才需要清理 MP3
+        if not save_audio and mp3_path and mp3_path.exists():
             try:
-                wav_path.unlink()
-                print(f"🗑️ 已清理臨時 WAV 檔案：{wav_path.name}")
+                mp3_path.unlink()
+                print(f"🗑️ 已清理臨時 MP3 檔案：{mp3_path.name}")
             except Exception as e:
-                print(f"⚠️ 清理 WAV 檔案失敗：{e}")
+                print(f"⚠️ 清理 MP3 檔案失敗：{e}")
 
         temp_dir = self.task_service.get_temp_dir(task_id)
         if temp_dir and temp_dir.exists():
@@ -955,15 +956,15 @@ class TranscriptionService:
     def _run_transcription(
         self,
         task_id: str,
-        wav_path: Path,
+        mp3_path: Path,
         language: Optional[str],
         use_chunking: bool
     ) -> tuple:
-        """執行 Whisper 轉錄（可並行執行）
+        """執行 Whisper 轉錄（使用 MP3 格式，可並行執行）
 
         Args:
             task_id: 任務 ID
-            wav_path: WAV 檔案路徑
+            mp3_path: MP3 檔案路徑（16kHz）
             language: 語言代碼
             use_chunking: 是否使用分段模式
 
@@ -973,7 +974,7 @@ class TranscriptionService:
         if use_chunking:
             self._update_progress(task_id, "正在並行分段轉錄音檔（多進程）...")
             full_text, segments, detected_language = self.whisper.transcribe_in_chunks_parallel(
-                wav_path,
+                mp3_path,
                 language=language,
                 max_workers=3,
                 progress_callback=lambda completed, total, processing=0: self._update_chunk_progress(
@@ -984,7 +985,7 @@ class TranscriptionService:
         else:
             self._update_progress(task_id, "正在轉錄音檔...")
             full_text, segments, detected_language = self.whisper.transcribe(
-                wav_path,
+                mp3_path,
                 language=language
             )
         return full_text, segments, detected_language
@@ -992,14 +993,14 @@ class TranscriptionService:
     def _run_diarization(
         self,
         task_id: str,
-        wav_path: Path,
+        mp3_path: Path,
         max_speakers: Optional[int]
     ) -> Optional[list]:
-        """執行說話者辨識（可並行執行）
+        """執行說話者辨識（使用 MP3 格式，可並行執行）
 
         Args:
             task_id: 任務 ID
-            wav_path: WAV 檔案路徑
+            mp3_path: MP3 檔案路徑（16kHz）
             max_speakers: 最大講者人數
 
         Returns:
@@ -1013,7 +1014,7 @@ class TranscriptionService:
             print(f"🔊 [並行] max_speakers 參數: {max_speakers}")
 
             diarization_segments = self.diarization.perform_diarization(
-                wav_path,
+                mp3_path,
                 max_speakers=max_speakers
             )
 

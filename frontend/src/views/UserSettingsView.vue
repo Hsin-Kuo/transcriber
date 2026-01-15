@@ -5,100 +5,101 @@
       <p>{{ $t('userSettings.description') }}</p>
     </div>
 
-    <!-- 使用者資訊 -->
-    <div class="card user-info-card">
-      <h2>{{ $t('userSettings.accountInfo') }}</h2>
-      <div class="info-item">
-        <span class="info-label">{{ $t('userSettings.email') }}</span>
-        <span class="info-value">{{ authStore.user?.email }}</span>
+    <div class="settings-grid">
+      <!-- 使用者資訊 -->
+      <div class="card user-info-card">
+        <h2>{{ $t('userSettings.accountInfo') }}</h2>
+        <div class="info-item">
+          <span class="info-label">{{ $t('userSettings.email') }}</span>
+          <span class="info-value">{{ authStore.user?.email }}</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">{{ $t('userSettings.accountType') }}</span>
+          <span class="info-value">{{ quotaTierName }}</span>
+        </div>
       </div>
-      <div class="info-item">
-        <span class="info-label">{{ $t('userSettings.accountType') }}</span>
-        <span class="info-value">{{ quotaTierName }}</span>
+
+      <!-- 語言設定 -->
+      <div class="card language-card">
+        <h2>{{ $t('userSettings.language') }}</h2>
+        <p class="language-description">{{ $t('userSettings.languageDescription') }}</p>
+        <div class="language-select-wrapper">
+          <select
+            v-model="currentLanguage"
+            @change="changeLanguage"
+            class="language-select"
+          >
+            <option
+              v-for="lang in availableLanguages"
+              :key="lang.code"
+              :value="lang.code"
+            >
+              {{ lang.name }}
+            </option>
+          </select>
+        </div>
       </div>
-    </div>
 
-    <!-- 語言設定 -->
-    <div class="card language-card">
-      <h2>{{ $t('userSettings.language') }}</h2>
-      <p class="language-description">{{ $t('userSettings.languageDescription') }}</p>
-      <div class="language-options">
-        <button
-          @click="changeLanguage('zh-TW')"
-          :class="{ active: currentLocale === 'zh-TW' }"
-          class="language-btn"
-        >
-          繁體中文
-        </button>
-        <button
-          @click="changeLanguage('en')"
-          :class="{ active: currentLocale === 'en' }"
-          class="language-btn"
-        >
-          English
-        </button>
-      </div>
-    </div>
-
-    <!-- 配額顯示 -->
-    <div class="quota-card electric-card">
-      <div class="electric-inner">
-        <div class="electric-border-outer">
-          <div class="electric-main quota-content">
-            <div class="quota-header">
-              <h3>{{ $t('userSettings.quotaUsage') }}</h3>
-              <span class="quota-tier">{{ quotaTierName }}</span>
-            </div>
-
-            <div class="quota-items">
-              <div class="quota-item">
-                <div class="quota-label">
-                  <span>{{ $t('userSettings.transcriptions') }}</span>
-                  <span class="quota-value">{{ authStore.usage?.transcriptions || 0 }} / {{ authStore.quota?.max_transcriptions || 0 }}</span>
-                </div>
-                <div class="quota-bar">
-                  <div
-                    class="quota-progress"
-                    :class="{ 'quota-warning': authStore.quotaPercentage?.transcriptions > 80 }"
-                    :style="{ width: `${authStore.quotaPercentage?.transcriptions || 0}%` }"
-                  ></div>
-                </div>
-                <div class="quota-remaining">
-                  {{ $t('userSettings.remaining') }} {{ authStore.remainingQuota?.transcriptions || 0 }}
-                </div>
+      <!-- 配額顯示 -->
+      <div class="quota-card electric-card">
+        <div class="electric-inner">
+          <div class="electric-border-outer">
+            <div class="electric-main quota-content">
+              <div class="quota-header">
+                <h3>{{ $t('userSettings.quotaUsage') }}</h3>
+                <span class="quota-tier">{{ quotaTierName }}</span>
               </div>
 
-              <div class="quota-item">
-                <div class="quota-label">
-                  <span>{{ $t('userSettings.duration') }}</span>
-                  <span class="quota-value">{{ Math.round(authStore.usage?.duration_minutes || 0) }} / {{ authStore.quota?.max_duration_minutes || 0 }} {{ $t('userSettings.minutes') }}</span>
+              <div class="quota-items">
+                <div class="quota-item">
+                  <div class="quota-label">
+                    <span>{{ $t('userSettings.transcriptions') }}</span>
+                    <span class="quota-value">{{ authStore.usage?.transcriptions || 0 }} / {{ authStore.quota?.max_transcriptions || 0 }}</span>
+                  </div>
+                  <div class="quota-bar">
+                    <div
+                      class="quota-progress"
+                      :class="{ 'quota-warning': authStore.quotaPercentage?.transcriptions > 80 }"
+                      :style="{ width: `${authStore.quotaPercentage?.transcriptions || 0}%` }"
+                    ></div>
+                  </div>
+                  <div class="quota-remaining">
+                    {{ $t('userSettings.remaining') }} {{ authStore.remainingQuota?.transcriptions || 0 }}
+                  </div>
                 </div>
-                <div class="quota-bar">
-                  <div
-                    class="quota-progress"
-                    :class="{ 'quota-warning': authStore.quotaPercentage?.duration > 80 }"
-                    :style="{ width: `${authStore.quotaPercentage?.duration || 0}%` }"
-                  ></div>
-                </div>
-                <div class="quota-remaining">
-                  {{ $t('userSettings.remaining') }} {{ Math.round(authStore.remainingQuota?.duration || 0) }} {{ $t('userSettings.minutes') }}
-                </div>
-              </div>
 
-              <div class="quota-item">
-                <div class="quota-label">
-                  <span>{{ $t('userSettings.storage') }}</span>
-                  <span class="quota-value">{{ formatBytes(authStore.usage?.storage_bytes || 0) }} / {{ formatBytes(authStore.quota?.max_storage_bytes || 0) }}</span>
+                <div class="quota-item">
+                  <div class="quota-label">
+                    <span>{{ $t('userSettings.duration') }}</span>
+                    <span class="quota-value">{{ Math.round(authStore.usage?.duration_minutes || 0) }} / {{ authStore.quota?.max_duration_minutes || 0 }} {{ $t('userSettings.minutes') }}</span>
+                  </div>
+                  <div class="quota-bar">
+                    <div
+                      class="quota-progress"
+                      :class="{ 'quota-warning': authStore.quotaPercentage?.duration > 80 }"
+                      :style="{ width: `${authStore.quotaPercentage?.duration || 0}%` }"
+                    ></div>
+                  </div>
+                  <div class="quota-remaining">
+                    {{ $t('userSettings.remaining') }} {{ Math.round(authStore.remainingQuota?.duration || 0) }} {{ $t('userSettings.minutes') }}
+                  </div>
                 </div>
-                <div class="quota-bar">
-                  <div
-                    class="quota-progress"
-                    :class="{ 'quota-warning': authStore.quotaPercentage?.storage > 80 }"
-                    :style="{ width: `${authStore.quotaPercentage?.storage || 0}%` }"
-                  ></div>
-                </div>
-                <div class="quota-remaining">
-                  {{ $t('userSettings.remaining') }} {{ formatBytes(authStore.remainingQuota?.storage || 0) }}
+
+                <div class="quota-item">
+                  <div class="quota-label">
+                    <span>{{ $t('userSettings.storage') }}</span>
+                    <span class="quota-value">{{ formatBytes(authStore.usage?.storage_bytes || 0) }} / {{ formatBytes(authStore.quota?.max_storage_bytes || 0) }}</span>
+                  </div>
+                  <div class="quota-bar">
+                    <div
+                      class="quota-progress"
+                      :class="{ 'quota-warning': authStore.quotaPercentage?.storage > 80 }"
+                      :style="{ width: `${authStore.quotaPercentage?.storage || 0}%` }"
+                    ></div>
+                  </div>
+                  <div class="quota-remaining">
+                    {{ $t('userSettings.remaining') }} {{ formatBytes(authStore.remainingQuota?.storage || 0) }}
+                  </div>
                 </div>
               </div>
             </div>
@@ -110,13 +111,24 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useI18n } from 'vue-i18n'
 
 const authStore = useAuthStore()
 const { t: $t, locale } = useI18n()
-const currentLocale = computed(() => locale.value)
+
+// 可用語言列表
+const availableLanguages = [
+  { code: 'zh-TW', name: '繁體中文' },
+  { code: 'en', name: 'English' }
+  // 未來可以在這裡新增更多語言
+  // { code: 'ja', name: '日本語' },
+  // { code: 'ko', name: '한국어' },
+]
+
+// 當前語言
+const currentLanguage = ref(locale.value)
 
 // 配額層級名稱
 const quotaTierName = computed(() => {
@@ -140,20 +152,21 @@ function formatBytes(bytes) {
 }
 
 // 切換語言
-function changeLanguage(lang) {
-  locale.value = lang
-  localStorage.setItem('locale', lang)
+function changeLanguage() {
+  locale.value = currentLanguage.value
+  localStorage.setItem('locale', currentLanguage.value)
 }
 </script>
 
 <style scoped>
 .settings-container {
-  max-width: 1000px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 0 20px;
 }
 
 .settings-header {
+  margin-top: 30px;
   margin-bottom: 32px;
   text-align: center;
 }
@@ -171,9 +184,14 @@ function changeLanguage(lang) {
   font-size: 1rem;
 }
 
-.user-info-card,
-.language-card {
-  margin-bottom: 24px;
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 24px;
+}
+
+.quota-card {
+  grid-column: 1 / -1;
 }
 
 .user-info-card h2,
@@ -215,39 +233,46 @@ function changeLanguage(lang) {
   margin: 0 0 16px 0;
 }
 
-.language-options {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
+.language-select-wrapper {
+  position: relative;
 }
 
-.language-btn {
-  padding: 12px 20px;
+.language-select {
+  width: 100%;
+  padding: 12px 16px;
   border: none;
   border-radius: 8px;
-  background: var(--upload-bg);
+  background: var(--neu-bg);
+  box-shadow: var(--neu-shadow-inset);
   color: var(--neu-text);
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236c8ba3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 20px;
+  padding-right: 40px;
 }
 
-.language-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+.language-select:hover {
+  box-shadow: var(--neu-shadow-btn);
 }
 
-.language-btn.active {
+.language-select:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(108, 139, 163, 0.2);
+}
+
+.language-select option {
   background: var(--neu-bg);
-  color: var(--neu-primary);
-  font-weight: 600;
+  color: var(--neu-text);
+  padding: 10px;
 }
 
 /* 配額卡片樣式 */
-.quota-card {
-  margin: 24px 0;
-}
 
 .quota-content {
   padding: 24px;
@@ -339,6 +364,14 @@ function changeLanguage(lang) {
 
   .settings-header h1 {
     font-size: 1.75rem;
+  }
+
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .quota-card {
+    grid-column: 1;
   }
 
   .quota-header {

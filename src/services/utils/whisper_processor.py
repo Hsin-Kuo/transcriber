@@ -488,17 +488,17 @@ class WhisperProcessor:
         total_duration_ms: int,
         chunk_duration_ms: int
     ) -> List[Path]:
-        """將音檔切分為多個小段
+        """將音檔切分為多個 MP3 小段
 
         使用 ffmpeg 流式處理，避免記憶體問題
 
         Args:
-            audio_path: 原始音檔路徑
+            audio_path: 原始音檔路徑（MP3）
             total_duration_ms: 音檔總長度（毫秒）
             chunk_duration_ms: 每段長度（毫秒）
 
         Returns:
-            chunk 檔案路徑列表
+            chunk 檔案路徑列表（MP3 格式）
         """
         chunk_files = []
         start_ms = 0
@@ -509,18 +509,19 @@ class WhisperProcessor:
 
             print(f"   準備第 {chunk_idx} 段 ({start_ms/1000/60:.1f}-{end_ms/1000/60:.1f} 分鐘)...")
 
-            # 使用 ffmpeg 直接切分，不載入到記憶體
-            temp_path = audio_path.parent / f"_temp_{audio_path.stem}_chunk_{chunk_idx}.wav"
+            # 使用 ffmpeg 直接切分為 MP3，不載入到記憶體
+            temp_path = audio_path.parent / f"_temp_{audio_path.stem}_chunk_{chunk_idx}.mp3"
             start_seconds = start_ms / 1000.0
             duration_seconds = (end_ms - start_ms) / 1000.0
 
             try:
-                # 使用 ffmpeg 切分音檔（流式處理，不佔用記憶體）
+                # 使用 ffmpeg 切分音檔為 MP3（流式處理，不佔用記憶體）
                 subprocess.run([
                     'ffmpeg', '-y', '-i', str(audio_path),
                     '-ss', str(start_seconds),
                     '-t', str(duration_seconds),
-                    '-acodec', 'pcm_s16le',  # WAV 格式
+                    '-acodec', 'libmp3lame',  # MP3 編碼
+                    '-b:a', '128k',  # 128kbps
                     '-ar', '16000',  # 16kHz 採樣率（Whisper 推薦）
                     '-ac', '1',  # 單聲道
                     str(temp_path)
@@ -531,7 +532,7 @@ class WhisperProcessor:
                 # 回退到 pydub（較慢但更穩定）
                 audio = AudioSegment.from_file(audio_path)
                 chunk_audio = audio[start_ms:end_ms]
-                chunk_audio.export(temp_path, format="wav")
+                chunk_audio.export(temp_path, format="mp3", bitrate="128k")
                 del audio, chunk_audio  # 立即釋放
 
             except Exception as e:
@@ -539,7 +540,7 @@ class WhisperProcessor:
                 # 回退到 pydub
                 audio = AudioSegment.from_file(audio_path)
                 chunk_audio = audio[start_ms:end_ms]
-                chunk_audio.export(temp_path, format="wav")
+                chunk_audio.export(temp_path, format="mp3", bitrate="128k")
                 del audio, chunk_audio  # 立即釋放
 
             chunk_files.append(temp_path)
