@@ -10,6 +10,11 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 3000,
+    allowedHosts: [
+      'localhost',
+      '100.66.247.23',
+      'testmacbook-pro.taila6a57b.ts.net'
+    ],
     proxy: {
       '/api': {
         target: API_TARGET,

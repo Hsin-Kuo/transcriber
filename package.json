@@ -4,6 +4,7 @@
   "description": "Whisper transcriber with frontend and backend",
   "scripts": {
     "dev": "cd frontend && npm run dev",
+    "dev:tailscale": "cd frontend && npm run dev:tailscale",
     "dev:admin": "cd admin-frontend && npm run dev",
     "dev:all": "npm run dev & npm run dev:admin",
     "build": "cd frontend && npm run build",

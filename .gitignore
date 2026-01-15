@@ -10,6 +10,11 @@ output/audio_clips/
 .env
 api_keys.json
 
+# 允許 frontend 的環境配置文件（不含敏感信息）
+!frontend/.env.development
+!frontend/.env.production
+!frontend/.env.tailscale
+
 # Python
 __pycache__/
 *.py[cod]
