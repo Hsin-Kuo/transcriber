@@ -81,13 +81,49 @@
 
       <div class="editor-actions electric-card">
         <div class="actions-content">
-              <button
-                @click="clipSelectedRegions"
-                :disabled="regions.length === 0 || processing"
-                class="btn btn-primary"
-              >
-                剪輯選取區段 ({{ regions.length }})
-              </button>
+              <div class="action-group">
+                <button
+                  @click="clipSelectedRegions"
+                  :disabled="regions.length === 0 || processing"
+                  class="btn btn-primary"
+                >
+                  剪輯選取區段 ({{ regions.length }})
+                </button>
+                <span class="action-hint">保留選取的部分</span>
+              </div>
+              <div class="action-group">
+                <button
+                  @click="deleteSelectedAndMerge"
+                  :disabled="regions.length === 0 || processing"
+                  class="btn btn-warning"
+                  title="刪除選取的區段，保留並合併剩餘部分"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    <line x1="10" y1="11" x2="10" y2="17"></line>
+                    <line x1="14" y1="11" x2="14" y2="17"></line>
+                  </svg>
+                  刪除選取並合併剩餘 ({{ regions.length }})
+                </button>
+                <span class="action-hint">刪除選取的部分，保留其他</span>
+              </div>
+              <div v-if="hasDeletedRegions" class="action-group">
+                <button
+                  @click="applyDeletionsAndRegenerate"
+                  :disabled="processing"
+                  class="btn btn-apply"
+                  title="套用刪除並重新生成波形"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                  </svg>
+                  套用刪除並重新生成
+                </button>
+                <span class="action-hint">將刪除套用到音訊檔案</span>
+              </div>
+              <div class="action-separator"></div>
               <button
                 @click="addCurrentFileAsClip"
                 :disabled="processing"
@@ -153,9 +189,7 @@ import RegionControls from '../components/editor/RegionControls.vue'
 import ClipManager from '../components/editor/ClipManager.vue'
 import MergePanel from '../components/editor/MergePanel.vue'
 import TimelineEditor from '../components/timeline/TimelineEditor.vue'
-import axios from 'axios'
-
-const API_BASE = '/api'
+import api from '../utils/api'
 
 const uploadedFiles = ref([])
 const currentFileId = ref(null)
@@ -170,6 +204,12 @@ let fileIdCounter = 0
 
 const currentFile = computed(() => {
   return uploadedFiles.value.find(f => f.id === currentFileId.value)
+})
+
+const hasDeletedRegions = computed(() => {
+  if (!waveformRef.value) return false
+  const deletedRegions = waveformRef.value.getDeletedRegions?.()
+  return deletedRegions && deletedRegions.length > 0
 })
 
 function handleFileAdd(event) {
@@ -230,7 +270,11 @@ function handleDurationLoaded(duration) {
 }
 
 function handleRegionsUpdate(newRegions) {
+  console.log('📋 AudioEditorView: handleRegionsUpdate called')
+  console.log('📋 Old regions:', regions.value.length, regions.value.map(r => r.id))
+  console.log('📋 New regions:', newRegions.length, newRegions.map(r => r.id))
   regions.value = newRegions
+  console.log('📋 regions.value updated:', regions.value.length)
 }
 
 async function clipSelectedRegions() {
@@ -248,7 +292,7 @@ async function clipSelectedRegions() {
       id: r.id
     }))))
 
-    const response = await axios.post(`${API_BASE}/audio/clip`, formData, {
+    const response = await api.post(`/audio/clip`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
 
@@ -259,7 +303,7 @@ async function clipSelectedRegions() {
         filename: clip.filename,
         duration: clip.duration,
         source: currentFile.value.name,
-        url: `${API_BASE}/audio/download/${clip.clip_id}`,
+        url: `/audio/download/${clip.clip_id}`,
         type: 'clip'
       })
     })
@@ -272,6 +316,230 @@ async function clipSelectedRegions() {
   } finally {
     processing.value = false
   }
+}
+
+async function deleteSelectedAndMerge() {
+  if (regions.value.length === 0 || !currentFile.value) return
+
+  // 確認操作
+  const confirmed = confirm(
+    `確定要刪除選取的 ${regions.value.length} 個區段嗎？\n\n` +
+    `剩餘部分將會作為片段添加到列表，您可以繼續編輯或下載。`
+  )
+
+  if (!confirmed) return
+
+  processing.value = true
+  processingMessage.value = '正在處理音訊...'
+
+  try {
+    const duration = currentFile.value.duration || 0
+
+    // 將選取的區段按開始時間排序
+    const sortedRegions = [...regions.value].sort((a, b) => a.start - b.start)
+
+    // 計算未被選取的時間範圍（保留的部分）
+    const keepRegions = []
+    let lastEnd = 0
+
+    for (const region of sortedRegions) {
+      // 如果當前區段之前有空隙，添加這個空隙
+      if (region.start > lastEnd) {
+        keepRegions.push({
+          start: lastEnd,
+          end: region.start,
+          id: `keep-${keepRegions.length}`
+        })
+      }
+      lastEnd = Math.max(lastEnd, region.end)
+    }
+
+    // 如果最後一個區段後面還有剩餘部分
+    if (lastEnd < duration) {
+      keepRegions.push({
+        start: lastEnd,
+        end: duration,
+        id: `keep-${keepRegions.length}`
+      })
+    }
+
+    if (keepRegions.length === 0) {
+      alert('刪除選取區段後沒有剩餘內容')
+      processing.value = false
+      return
+    }
+
+    console.log('保留的區段:', keepRegions)
+
+    // 調用後端剪輯
+    const formData = new FormData()
+    formData.append('audio_file', currentFile.value.file)
+    formData.append('regions', JSON.stringify(keepRegions))
+
+    const response = await api.post(`/audio/clip`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+
+    // 將保留的片段添加到列表
+    response.data.clips.forEach((clip, index) => {
+      const originalRegion = keepRegions[index]
+      clips.value.push({
+        id: clip.clip_id,
+        name: `${currentFile.value.name} - 保留 ${formatTime(originalRegion.start)}-${formatTime(originalRegion.end)}`,
+        filename: clip.filename,
+        duration: clip.duration,
+        source: currentFile.value.name,
+        url: `/audio/download/${clip.clip_id}`,
+        type: 'kept-segment',
+        originalStart: originalRegion.start,
+        originalEnd: originalRegion.end
+      })
+    })
+
+    alert(
+      `處理完成！\n\n` +
+      `已將 ${response.data.clips.length} 個保留片段添加到列表。\n` +
+      `您可以繼續編輯或在下方合併/下載這些片段。`
+    )
+
+    // 清空選取的區段
+    regions.value = []
+  } catch (error) {
+    console.error('處理失敗:', error)
+    alert('處理失敗：' + (error.response?.data?.detail || error.message))
+  } finally {
+    processing.value = false
+  }
+}
+
+async function applyDeletionsAndRegenerate() {
+  if (!waveformRef.value || !currentFile.value) return
+
+  const deletedRegions = waveformRef.value.getDeletedRegions()
+  if (!deletedRegions || deletedRegions.length === 0) {
+    alert('沒有需要套用的刪除')
+    return
+  }
+
+  // 確認操作
+  const confirmed = confirm(
+    `確定要套用 ${deletedRegions.length} 個刪除區段嗎？\n\n` +
+    `這將會重新生成音訊檔案和波形圖。\n` +
+    `原始檔案將被保留的片段合併後的檔案替換。`
+  )
+
+  if (!confirmed) return
+
+  processing.value = true
+  processingMessage.value = '正在套用刪除並重新生成音訊...'
+
+  try {
+    const duration = currentFile.value.duration || 0
+
+    // 將刪除的區段按開始時間排序
+    const sortedDeletedRegions = [...deletedRegions].sort((a, b) => a.start - b.start)
+
+    // 計算保留的時間範圍
+    const keepRegions = []
+    let lastEnd = 0
+
+    for (const region of sortedDeletedRegions) {
+      if (region.start > lastEnd) {
+        keepRegions.push({
+          start: lastEnd,
+          end: region.start,
+          id: `keep-${keepRegions.length}`
+        })
+      }
+      lastEnd = Math.max(lastEnd, region.end)
+    }
+
+    // 最後一個區段後面的剩餘部分
+    if (lastEnd < duration) {
+      keepRegions.push({
+        start: lastEnd,
+        end: duration,
+        id: `keep-${keepRegions.length}`
+      })
+    }
+
+    if (keepRegions.length === 0) {
+      alert('套用刪除後沒有剩餘內容')
+      processing.value = false
+      return
+    }
+
+    console.log('保留區段:', keepRegions)
+
+    // 調用後端處理音訊
+    const formData = new FormData()
+    formData.append('audio_file', currentFile.value.file)
+    formData.append('regions', JSON.stringify(keepRegions))
+
+    const response = await api.post(`/audio/clip`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+
+    // 如果有多個片段，需要先合併
+    let finalClipId
+    if (response.data.clips.length === 1) {
+      finalClipId = response.data.clips[0].clip_id
+    } else {
+      // 合併多個片段
+      processingMessage.value = '正在合併片段...'
+      const clipIds = response.data.clips.map(c => c.clip_id)
+      const mergeResponse = await api.post('/audio/merge', {
+        clip_ids: clipIds,
+        output_name: `${currentFile.value.name.replace(/\.[^/.]+$/, '')}_edited.mp3`
+      })
+      finalClipId = mergeResponse.data.merged_clip_id
+    }
+
+    // 下載處理後的音訊檔案
+    processingMessage.value = '正在載入新的音訊檔案...'
+    const audioResponse = await fetch(`/api/audio/download/${finalClipId}`)
+    const audioBlob = await audioResponse.blob()
+
+    // 創建新的 File 物件
+    const newFileName = currentFile.value.name.replace(/\.[^/.]+$/, '') + '_edited.mp3'
+    const newFile = new File([audioBlob], newFileName, { type: audioBlob.type })
+
+    // 更新當前檔案
+    currentFile.value.file = newFile
+    currentFile.value.name = newFileName
+    currentFile.value.size = newFile.size
+    currentFile.value.duration = null
+
+    // 清除刪除記錄
+    waveformRef.value.clearDeletedRegions()
+
+    // 清空區段選擇
+    regions.value = []
+
+    // 強制重新載入波形（透過改變 key）
+    const oldKey = currentFileId.value
+    currentFileId.value = null
+    await new Promise(resolve => setTimeout(resolve, 100))
+    currentFileId.value = oldKey
+
+    alert(
+      `✅ 套用完成！\n\n` +
+      `已刪除 ${deletedRegions.length} 個區段，保留 ${keepRegions.length} 個片段。\n` +
+      `波形圖已重新生成。`
+    )
+
+  } catch (error) {
+    console.error('套用刪除失敗:', error)
+    alert('套用刪除失敗：' + (error.response?.data?.detail || error.message))
+  } finally {
+    processing.value = false
+  }
+}
+
+function formatTime(seconds) {
+  const mins = Math.floor(seconds / 60)
+  const secs = Math.floor(seconds % 60)
+  return `${mins}:${secs.toString().padStart(2, '0')}`
 }
 
 async function addCurrentFileAsClip() {
@@ -289,7 +557,7 @@ async function addCurrentFileAsClip() {
       id: 'full-file'
     }]))
 
-    const response = await axios.post(`${API_BASE}/audio/clip`, formData)
+    const response = await api.post(`/audio/clip`, formData)
 
     const clip = response.data.clips[0]
     clips.value.push({
@@ -298,7 +566,7 @@ async function addCurrentFileAsClip() {
       filename: clip.filename,
       duration: clip.duration,
       source: currentFile.value.name,
-      url: `${API_BASE}/audio/download/${clip.clip_id}`,
+      url: `/audio/download/${clip.clip_id}`,
       type: 'full-file'
     })
 
@@ -325,9 +593,9 @@ async function handleMerge(selectedItems) {
     formData.append('clip_ids', JSON.stringify(selectedItems.map(item => item.id)))
     formData.append('mode', mergeMode.value)
 
-    const response = await axios.post(`${API_BASE}/audio/merge`, formData)
+    const response = await api.post(`/audio/merge`, formData)
 
-    const downloadUrl = `${API_BASE}/audio/download/${response.data.merged_id}`
+    const downloadUrl = `/audio/download/${response.data.merged_id}`
     window.open(downloadUrl, '_blank')
 
     alert('合併成功！正在下載...')
@@ -359,9 +627,9 @@ async function handleTimelineExport(timelineData) {
     formData.append('clip_ids', JSON.stringify(clipIds))
     formData.append('mode', 'same-file-clips')
 
-    const response = await axios.post(`${API_BASE}/audio/merge`, formData)
+    const response = await api.post(`/audio/merge`, formData)
 
-    const downloadUrl = `${API_BASE}/audio/download/${response.data.merged_id}`
+    const downloadUrl = `/audio/download/${response.data.merged_id}`
     window.open(downloadUrl, '_blank')
 
     alert('時間軸匯出成功！正在下載...')
@@ -391,7 +659,14 @@ function addRegion() {
 }
 
 function deleteRegion(id) {
-  waveformRef.value?.deleteRegion(id)
+  console.log('📋 AudioEditorView: deleteRegion called with id:', id)
+  console.log('📋 waveformRef.value:', waveformRef.value)
+  if (waveformRef.value) {
+    waveformRef.value.deleteRegion(id)
+    console.log('✅ deleteRegion executed')
+  } else {
+    console.error('❌ waveformRef is null!')
+  }
 }
 
 function playRegion(region) {
@@ -530,9 +805,29 @@ function handleClipDelete(clipId) {
 .actions-content {
   display: flex;
   justify-content: center;
+  align-items: center;
   gap: 16px;
   padding: 24px;
   background: var(--gradient-dark);
+}
+
+.action-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+.action-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.action-separator {
+  width: 1px;
+  height: 40px;
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .action-panels {
@@ -614,6 +909,26 @@ function handleClipDelete(clipId) {
 .btn-accent:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 8px 16px rgba(0, 184, 148, 0.3);
+}
+
+.btn-warning {
+  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+  color: white;
+}
+
+.btn-warning:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(231, 76, 60, 0.3);
+}
+
+.btn-apply {
+  background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+  color: white;
+}
+
+.btn-apply:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(52, 152, 219, 0.3);
 }
 
 .btn:disabled {
