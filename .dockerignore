@@ -1,0 +1,46 @@
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# 音檔和輸出檔案
+*.mp3
+*.m4a
+*.wav
+*.mp4
+data/
+output/
+
+# 允許 requirements.txt
+!requirements.txt
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentation
+docs/
+
+# 其他
+.DS_Store
+*.log
+api_keys.json
+.env
