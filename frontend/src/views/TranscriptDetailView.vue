@@ -160,6 +160,8 @@
                   </span><span
                     class="text-part"
                     :class="{ 'clickable': isAltPressed && currentTranscript.hasAudio }"
+                    :data-segment-index="part.segmentIndex"
+                    :data-start-time="part.start"
                     @click="handleTextClick(part.start, $event)"
                   >{{ part.text }}<span v-if="isAltPressed && currentTranscript.hasAudio" class="text-timecode-tooltip">
                       {{ formatTime(part.start) }}
@@ -366,7 +368,7 @@ const {
 } = useSegmentMarkers()
 
 // 控制是否顯示 timecode 標記
-const showTimecodeMarkers = ref(true)
+const showTimecodeMarkers = ref(false)
 
 // 保存編輯前的 timecode markers 狀態
 const savedTimecodeMarkersState = ref(true)
@@ -525,11 +527,40 @@ async function saveEditing() {
   }
 
   if (displayMode.value === 'paragraph') {
-    // 從 contenteditable div 中提取純文字內容（排除標記元素）
+    // 從 contenteditable div 中提取純文字內容和 segment 對應關係
     if (textareaRef.value) {
-      contentToSave = extractTextContent(textareaRef.value)
+      const extracted = extractTextContentWithSegments(textareaRef.value)
+      contentToSave = extracted.fullText
+
       // 更新到 currentTranscript
       currentTranscript.value.content = contentToSave
+
+      // 如果有 segments 資料，比對並更新有改變的 segments
+      if (segments.value && segments.value.length > 0 && extracted.segmentTexts.length > 0) {
+        const updatedSegments = [...segments.value]
+        let hasChanges = false
+
+        extracted.segmentTexts.forEach(({ segmentIndex, text }) => {
+          if (segmentIndex >= 0 && segmentIndex < updatedSegments.length) {
+            const originalText = updatedSegments[segmentIndex].text.trim()
+            const newText = text.trim()
+
+            // 只更新有改變的 segment
+            if (originalText !== newText) {
+              updatedSegments[segmentIndex] = {
+                ...updatedSegments[segmentIndex],
+                text: newText
+              }
+              hasChanges = true
+            }
+          }
+        })
+
+        // 如果有 segments 被修改，標記為需要保存
+        if (hasChanges) {
+          segmentsToSave = updatedSegments
+        }
+      }
     } else {
       contentToSave = currentTranscript.value.content
     }
@@ -718,6 +749,118 @@ function extractTextContent(element) {
   return text.replace(/\u200B/g, '')
 }
 
+/**
+ * 從 contenteditable 元素提取文字內容，並記錄每段文字對應的 segment
+ * @param {HTMLElement} element - contenteditable 元素
+ * @returns {Object} { fullText: string, segmentTexts: Array<{segmentIndex: number, text: string}> }
+ */
+function extractTextContentWithSegments(element) {
+  if (!element) {
+    return { fullText: '', segmentTexts: [] }
+  }
+
+  const clone = element.cloneNode(true)
+  let fullText = ''
+  const segmentTexts = []
+  let currentSegmentIndex = null
+  let currentSegmentText = ''
+
+  function traverseNode(node) {
+    // 跳過 segment-marker 元素及其內容
+    if (node.classList && node.classList.contains('segment-marker')) {
+      return
+    }
+
+    // 跳過 text-timecode-tooltip 元素
+    if (node.classList && node.classList.contains('text-timecode-tooltip')) {
+      return
+    }
+
+    // 檢查是否是帶有 data-segment-index 的節點
+    if (node.nodeType === Node.ELEMENT_NODE && node.hasAttribute && node.hasAttribute('data-segment-index')) {
+      // 如果之前有累積的 segment 文字，先保存
+      if (currentSegmentIndex !== null && currentSegmentText) {
+        segmentTexts.push({
+          segmentIndex: currentSegmentIndex,
+          text: currentSegmentText
+        })
+      }
+
+      // 開始新的 segment
+      currentSegmentIndex = parseInt(node.getAttribute('data-segment-index'), 10)
+      currentSegmentText = ''
+    }
+
+    // 處理文字節點
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent
+      fullText += text
+
+      // 如果當前在某個 segment 中，累積文字
+      if (currentSegmentIndex !== null) {
+        currentSegmentText += text
+      }
+      return
+    }
+
+    // 處理 <br> 標籤
+    if (node.nodeName === 'BR') {
+      fullText += '\n'
+      if (currentSegmentIndex !== null) {
+        currentSegmentText += '\n'
+      }
+      return
+    }
+
+    // 處理塊級元素（div）
+    if (node.nodeName === 'DIV' && fullText.length > 0 && !fullText.endsWith('\n')) {
+      fullText += '\n'
+      if (currentSegmentIndex !== null) {
+        currentSegmentText += '\n'
+      }
+    }
+
+    // 遞歸處理子節點
+    const children = Array.from(node.childNodes)
+    for (let child of children) {
+      traverseNode(child)
+    }
+
+    // 塊級元素結束時的換行處理
+    if (node.nodeName === 'DIV' && node.childNodes.length > 0) {
+      const hasOnlyBr = node.childNodes.length === 1 && node.childNodes[0].nodeName === 'BR'
+      if (!hasOnlyBr && !fullText.endsWith('\n')) {
+        fullText += '\n'
+        if (currentSegmentIndex !== null) {
+          currentSegmentText += '\n'
+        }
+      }
+    }
+  }
+
+  // 遍歷所有子節點
+  const children = Array.from(clone.childNodes)
+  for (let child of children) {
+    traverseNode(child)
+  }
+
+  // 保存最後一個 segment
+  if (currentSegmentIndex !== null && currentSegmentText) {
+    segmentTexts.push({
+      segmentIndex: currentSegmentIndex,
+      text: currentSegmentText
+    })
+  }
+
+  // 移除零寬度空格
+  fullText = fullText.replace(/\u200B/g, '')
+  segmentTexts.forEach(seg => {
+    seg.text = seg.text.replace(/\u200B/g, '').trim()
+  })
+
+  return { fullText, segmentTexts }
+}
+
 // 處理取代全部（段落模式專用）
 function handleReplaceAll() {
   if (displayMode.value === 'paragraph') {
@@ -859,7 +1002,8 @@ function getContentParts() {
       text: marker.text,
       isMarker: true,
       start: marker.start,
-      end: marker.end
+      end: marker.end,
+      segmentIndex: marker.segmentIndex  // 加入 segment index
     })
 
     lastIndex = marker.textEndIndex
