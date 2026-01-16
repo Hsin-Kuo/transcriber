@@ -325,7 +325,8 @@ class TranscriptionService:
             self._cleanup_temp_files(task_id, mp3_path)
 
             # 7. 清理超出限制的舊音檔（在新音檔保存後才執行）
-            self._cleanup_old_audio_files(task_id)
+            # ⚠️ 已停用：不再自動刪除音檔，未來由 AWS S3 Lifecycle Policy 管理
+            # self._cleanup_old_audio_files(task_id)
 
             # 8. 清理記憶體狀態（在所有檔案操作完成後）
             self.task_service.cleanup_task_memory(task_id)
@@ -720,7 +721,12 @@ class TranscriptionService:
     def _cleanup_old_audio_files(self, task_id: str) -> None:
         """清理超出限制的舊音檔
 
-        ⚠️ 重要邏輯說明（請勿修改）：
+        ⚠️ 已棄用（2026-01-16）：
+        此方法已停用，不再自動刪除音檔。
+        未來將由 AWS S3 Lifecycle Policy 管理音檔生命週期。
+        keep_audio 功能保留，供未來 S3 標籤使用。
+
+        ⚠️ 原邏輯說明（僅供參考）：
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         【自動清理規則】
         1. 每個用戶最多保留 4 個音檔
@@ -889,13 +895,13 @@ class TranscriptionService:
            - save_audio=False：不保存音檔（任務失敗或取消）
 
         2. 【keep_audio 的作用】
-           - False（默認）：可以被自動清理機制刪除
-           - True（用戶勾選）：受保護，不會被自動刪除
+           - False（默認）：標記為可刪除（供未來 S3 Lifecycle 使用）
+           - True（用戶勾選）：標記為保留（供未來 S3 標籤使用）
 
-        3. 【自動清理機制】
-           - 在轉錄完成後由 _cleanup_old_audio_files() 執行
-           - 用戶超過 4 個音檔時，從最舊的開始刪除
-           - 跳過 keep_audio = True 的音檔
+        3. 【自動清理機制】（已停用 2026-01-16）
+           - 不再自動刪除音檔
+           - 未來由 AWS S3 Lifecycle Policy 管理
+           - keep_audio 標記將用於 S3 物件標籤
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
         Args:
