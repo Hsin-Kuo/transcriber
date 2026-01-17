@@ -921,7 +921,8 @@ class TranscriptionService:
         temp_dir = self.task_service.get_temp_dir(task_id)
         if temp_dir and temp_dir.exists():
             print(f"📁 臨時目錄: {temp_dir}")
-            audio_files = list(temp_dir.glob("input.*"))
+            # 搜尋 input.* (單檔模式) 或 merged*.mp3 (合併模式)
+            audio_files = list(temp_dir.glob("input.*")) + list(temp_dir.glob("merged*.mp3"))
             print(f"🎵 找到的音檔: {[f.name for f in audio_files]}")
 
             # 只有在任務成功完成時才保存音檔

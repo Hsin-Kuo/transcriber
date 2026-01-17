@@ -44,6 +44,12 @@ export const NEW_ENDPOINTS = {
     updateOrder: '/tags/order',
     statistics: '/tags/statistics',
   },
+
+  // 音檔合併（新增）
+  audio: {
+    merge: '/audio/merge',
+    download: (filename) => `/audio/download/${filename}`,
+  },
 }
 
 /**

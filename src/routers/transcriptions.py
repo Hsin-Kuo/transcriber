@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from typing import Optional
+from typing import Optional, List
 from pathlib import Path
 from urllib.parse import quote
 from datetime import datetime, timezone
@@ -161,7 +161,10 @@ def get_task_field(task: dict, field: str):
 @router.post("")
 async def create_transcription(
     request: Request,
-    file: UploadFile = File(..., description="音檔 (支援 mp3/m4a/wav/mp4 等格式)"),
+    files: Optional[List[UploadFile]] = File(None, description="多個音檔 (用於合併)"),
+    file: Optional[UploadFile] = File(None, description="單個音檔 (支援 mp3/m4a/wav/mp4 等格式)"),
+    merge_files: bool = Form(False, description="是否為合併模式"),
+    custom_name: Optional[str] = Form(None, description="自訂任務名稱"),
     task_type: str = Form("paragraph", description="任務類型 (paragraph/subtitle)"),
     punct_provider: str = Form("gemini", description="標點提供者 (openai/gemini/none)"),
     chunk_audio: bool = Form(True, description="是否使用分段模式"),
@@ -173,13 +176,16 @@ async def create_transcription(
     current_user: dict = Depends(get_current_user),
     db = Depends(get_database)
 ):
-    """建立轉錄任務
+    """建立轉錄任務（支援單檔或多檔合併）
 
     上傳音檔進行轉錄（異步模式）
     立即返回任務 ID，轉錄在背景執行
 
     Args:
-        file: 音檔檔案
+        files: 多個音檔（合併模式）
+        file: 單個音檔（單檔模式）
+        merge_files: 是否為合併模式
+        custom_name: 自訂任務名稱
         task_type: 任務類型 (paragraph=段落/subtitle=字幕)
         punct_provider: 標點提供者 (openai/gemini/none)
         chunk_audio: 是否使用分段模式
@@ -197,6 +203,33 @@ async def create_transcription(
     Raises:
         HTTPException: 服務未就緒或參數錯誤
     """
+    # 處理檔案參數
+    if merge_files and files and len(files) > 0:
+        # 合併模式：多檔案
+        if len(files) < 2:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="合併模式至少需要2個檔案"
+            )
+        uploaded_files = files
+    elif file:
+        # 單檔模式
+        uploaded_files = [file]
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="請提供音檔"
+        )
+
+    # 檢查檔案總大小（注意：UploadFile.size 可能為 None）
+    total_size = sum(f.size or 0 for f in uploaded_files)
+    MAX_TOTAL_SIZE = 500 * 1024 * 1024  # 500MB
+    if total_size > 0 and total_size > MAX_TOTAL_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="檔案總大小超過限制（最大500MB）"
+        )
+
     # 驗證任務類型
     if task_type not in ["paragraph", "subtitle"]:
         raise HTTPException(
@@ -220,28 +253,82 @@ async def create_transcription(
     # 生成任務 ID
     task_id = str(uuid.uuid4())
 
-    # 建立臨時目錄並保存上傳的檔案
+    # 建立臨時目錄
     temp_dir = Path(tempfile.mkdtemp())
-    file_suffix = Path(file.filename).suffix
-    temp_audio = temp_dir / f"input{file_suffix}"
 
     try:
-        # 保存上傳的檔案
-        with temp_audio.open("wb") as f:
-            content = await file.read()
-            f.write(content)
+        # 如果是多檔案，先合併
+        if len(uploaded_files) > 1:
+            print(f"🔄 合併模式：{len(uploaded_files)} 個檔案")
 
-        print(f"📁 收到檔案：{file.filename} ({len(content) / 1024 / 1024:.2f} MB)")
+            # 保存上傳的檔案到臨時目錄
+            saved_files = []
+            for idx, upload_file in enumerate(uploaded_files):
+                file_suffix = Path(upload_file.filename).suffix
+                temp_path = temp_dir / f"input_{idx}{file_suffix}"
 
-        # 獲取音檔時長
-        from src.services.audio_service import AudioService
+                with temp_path.open("wb") as f:
+                    content = await upload_file.read()
+                    f.write(content)
+
+                saved_files.append(temp_path)
+                print(f"  📁 {idx + 1}. {upload_file.filename}")
+
+            # 合併音檔到臨時目錄（固定MP3格式：16kHz, mono, 192kbps）
+            from src.services.audio_service import AudioService
+            audio_service = AudioService()
+
+            # ⭐ 使用唯一檔名避免多用戶衝突
+            unique_id = str(uuid.uuid4())[:8]  # 使用前8個字符
+            merged_filename = f"merged_{unique_id}.mp3"
+
+            # 輸出路徑在臨時目錄內
+            merged_output_path = temp_dir / merged_filename
+            merged_audio_path = audio_service.merge_audio_files(
+                saved_files,
+                output_path=merged_output_path
+            )
+
+            # 使用合併後的音檔作為 temp_audio
+            temp_audio = merged_audio_path
+
+            # ⭐ 使用用戶自訂的任務名稱
+            if custom_name and custom_name.strip():
+                original_filename = f"{custom_name.strip()}.mp3"
+            else:
+                # 預設使用第一個檔案的檔名（去掉副檔名）
+                first_filename = uploaded_files[0].filename
+                original_filename = first_filename.rsplit('.', 1)[0] + '.mp3'
+
+            print(f"✅ 合併完成：{merged_audio_path}")
+            print(f"   任務名稱：{original_filename}")
+
+            # ⚠️ 重要：合併後的音檔會經歷與單檔相同的生命週期：
+            # 1. 轉錄成功 → 移動到 uploads/{task_id}.mp3
+            # 2. 轉錄失敗/取消 → 隨臨時目錄一起刪除
+        else:
+            # 單檔案模式（現有邏輯）
+            upload_file = uploaded_files[0]
+            file_suffix = Path(upload_file.filename).suffix
+            temp_audio = temp_dir / f"input{file_suffix}"
+
+            with temp_audio.open("wb") as f:
+                content = await upload_file.read()
+                f.write(content)
+
+            original_filename = upload_file.filename
+            print(f"📁 收到檔案：{upload_file.filename} ({len(content) / 1024 / 1024:.2f} MB)")
+
+        # 獲取音檔時長和大小
         audio_service = AudioService()
         try:
             audio_duration_ms = audio_service.get_audio_duration(temp_audio)
             audio_duration_seconds = audio_duration_ms / 1000.0
+            audio_size_mb = round(temp_audio.stat().st_size / 1024 / 1024, 2)
             print(f"⏱️ 音檔時長：{audio_duration_seconds:.2f} 秒")
+            print(f"📦 音檔大小：{audio_size_mb} MB")
         except Exception as e:
-            print(f"⚠️ 獲取音檔時長失敗：{e}")
+            print(f"⚠️ 獲取音檔資訊失敗：{e}")
             shutil.rmtree(temp_dir)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -322,8 +409,8 @@ async def create_transcription(
 
             # 檔案資訊
             "file": {
-                "filename": file.filename,
-                "size_mb": round(len(content) / 1024 / 1024, 2)
+                "filename": original_filename,
+                "size_mb": audio_size_mb
             },
 
             # 轉錄配置
@@ -417,14 +504,16 @@ async def create_transcription(
                 user_id=str(current_user["_id"]),
                 task_id=task_id,
                 status_code=200,
-                message=f"創建轉錄任務：{file.filename}",
+                message=f"創建轉錄任務：{original_filename}",
                 request_body={
-                    "filename": file.filename,
-                    "size_mb": round(len(content) / 1024 / 1024, 2),
+                    "filename": original_filename,
+                    "size_mb": audio_size_mb,
                     "punct_provider": punct_provider,
                     "chunk_audio": chunk_audio,
                     "diarize": diarize,
-                    "language": language
+                    "language": language,
+                    "merge_mode": len(uploaded_files) > 1,
+                    "file_count": len(uploaded_files)
                 }
             )
         except Exception as e:
@@ -445,8 +534,8 @@ async def create_transcription(
             "queued": should_queue,
             "queue_position": queue_position,
             "file": {
-                "filename": file.filename,
-                "size_mb": round(len(content) / 1024 / 1024, 2)
+                "filename": original_filename,
+                "size_mb": audio_size_mb
             },
             "config": {
                 "punct_provider": punct_provider,

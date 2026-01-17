@@ -41,7 +41,7 @@ export const transcriptionService = {
    * @returns {string} 音檔 URL
    */
   getAudioUrl(taskId, token) {
-    const API_BASE = import.meta.env.VITE_API_URL || 'http://100.66.247.23:8000'
+    const API_BASE = import.meta.env.VITE_API_URL || 'http://192.168.0.59:8000'
     return `${API_BASE}${NEW_ENDPOINTS.transcriptions.audio(taskId)}?token=${encodeURIComponent(token)}`
   },
 
@@ -158,7 +158,7 @@ export const taskService = {
    * @returns {string} SSE URL
    */
   getEventsUrl(taskId, token) {
-    const API_BASE = import.meta.env.VITE_API_URL || 'http://100.66.247.23:8000'
+    const API_BASE = import.meta.env.VITE_API_URL || 'http://192.168.0.59:8000'
     return `${API_BASE}${NEW_ENDPOINTS.tasks.events(taskId)}?token=${token}`
   },
 
@@ -305,6 +305,43 @@ export const legacyService = {
 }
 
 /**
+ * 音檔服務（新增）
+ */
+export const audioService = {
+  /**
+   * 合併多個音檔（僅用於下載功能）
+   * 固定輸出格式：MP3 (16kHz, mono, 192kbps)
+   * @param {File[]} files - 音檔陣列
+   * @returns {Promise} 合併結果
+   */
+  async merge(files) {
+    const formData = new FormData()
+
+    files.forEach((file) => {
+      formData.append('files', file)
+    })
+
+    const response = await api.post(NEW_ENDPOINTS.audio.merge, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+
+    return response.data
+  },
+
+  /**
+   * 下載合併後的音檔
+   * @param {string} filename - 檔案名稱
+   * @returns {Promise} Blob 響應
+   */
+  async download(filename) {
+    const response = await api.get(NEW_ENDPOINTS.audio.download(filename), {
+      responseType: 'blob'
+    })
+    return response.data
+  }
+}
+
+/**
  * 匯出所有服務
  */
 export default {
@@ -312,4 +349,5 @@ export default {
   taskService,
   tagService,
   legacyService,
+  audioService,
 }

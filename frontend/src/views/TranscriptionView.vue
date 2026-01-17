@@ -3,11 +3,23 @@
     <!-- SVG 濾鏡定義 -->
     <ElectricBorder />
 
-    <!-- 上傳區域 -->
-    <UploadZone @file-selected="handleFileUpload" :uploading="uploading" :disabled="!!pendingFile" />
+    <!-- 上傳區域（含三角形合併按鈕） -->
+    <UploadZone
+      @file-selected="handleFileUpload"
+      @open-merge="openMergeModal"
+      :uploading="uploading"
+      :disabled="!!pendingFile || mergeMode.isActive"
+    />
+
+    <!-- 合併對話窗 -->
+    <MergeModal
+      :visible="showMergeModal"
+      @close="closeMergeModal"
+      @confirm="handleMergeConfirm"
+    />
 
     <!-- 確認表單（在上傳區下方） -->
-    <div v-if="pendingFile" class="confirm-section">
+    <div v-if="pendingFile || mergeMode.showForm" class="confirm-section">
       <div class="modal-body">
         <!-- 第一排：任務類型 + 檔案資訊 + 說話者辨識 + 標籤 -->
         <div class="confirm-row">
@@ -35,14 +47,45 @@
           <!-- 檔案資訊 -->
           <div class="modal-section file-section">
             <label class="section-label">{{ $t('transcription.fileInfo') }}</label>
-            <div class="file-info">
-              <span class="label">{{ $t('transcription.fileName') }}</span>
-              <span class="value">{{ pendingFile?.name }}</span>
-            </div>
-            <div class="file-info" v-if="pendingFile">
-              <span class="label">{{ $t('transcription.fileSize') }}</span>
-              <span class="value">{{ (pendingFile.size / 1024 / 1024).toFixed(2) }} MB</span>
-            </div>
+
+            <!-- 合併模式：顯示多檔案資訊 -->
+            <template v-if="mergeMode.isActive">
+              <div class="merge-info-header">
+                <span class="merge-badge">🔀 合併模式</span>
+                <span class="file-count">{{ mergeMode.files.length }} 個檔案</span>
+              </div>
+              <ul class="merge-file-list">
+                <li v-for="(file, idx) in mergeMode.files" :key="idx" class="merge-file-item">
+                  <span class="file-number">{{ idx + 1 }}.</span>
+                  <span class="file-name">{{ file.name }}</span>
+                  <span class="file-size">({{ formatFileSize(file.size) }})</span>
+                </li>
+              </ul>
+              <!-- 任務名稱欄位 -->
+              <div class="task-name-section">
+                <label class="sub-label">任務名稱</label>
+                <input
+                  type="text"
+                  v-model="mergeTaskName"
+                  :placeholder="defaultMergeTaskName"
+                  class="text-input task-name-input"
+                />
+                <p class="hint">此名稱將用於識別合併後的轉錄任務</p>
+              </div>
+            </template>
+
+            <!-- 單檔模式：顯示單檔資訊 -->
+            <template v-else>
+              <div class="file-info">
+                <span class="label">{{ $t('transcription.fileName') }}</span>
+                <span class="value">{{ pendingFile?.name }}</span>
+              </div>
+              <div class="file-info" v-if="pendingFile">
+                <span class="label">{{ $t('transcription.fileSize') }}</span>
+                <span class="value">{{ (pendingFile.size / 1024 / 1024).toFixed(2) }} MB</span>
+              </div>
+            </template>
+
             <div class="file-note">
               {{ $t('transcription.audioRetentionNote') }}
             </div>
@@ -150,10 +193,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ElectricBorder from '../components/shared/ElectricBorder.vue'
 import UploadZone from '../components/UploadZone.vue'
+import MergeModal from '../components/merge/MergeModal.vue'
 
 // 新 API 服務層
 import { transcriptionService, taskService } from '../api/services'
@@ -169,6 +213,29 @@ const pendingFile = ref(null)
 const selectedTags = ref([])
 const tagInput = ref('')
 const tasks = ref([])  // 任務列表，用於顯示快速標籤
+
+// 合併模式狀態
+const mergeMode = reactive({
+  isActive: false,      // 是否處於合併模式
+  showForm: false,      // 是否顯示轉錄設定表單
+  files: []             // 待合併的檔案列表
+})
+const mergeTaskName = ref('')
+const showMergeModal = ref(false)  // 合併對話窗顯示狀態
+
+// 預設任務名稱（第一個檔案的檔名，去掉副檔名）
+const defaultMergeTaskName = computed(() => {
+  if (mergeMode.files.length > 0) {
+    const firstName = mergeMode.files[0].name
+    return firstName.replace(/\.[^/.]+$/, '')  // 去掉副檔名
+  }
+  return ''
+})
+
+// 格式化檔案大小
+function formatFileSize(bytes) {
+  return (bytes / 1024 / 1024).toFixed(2) + ' MB'
+}
 
 // 獲取所有唯一標籤
 const allTags = computed(() => {
@@ -222,12 +289,33 @@ async function refreshTasks() {
 
 // 確認後開始上傳
 async function confirmAndUpload() {
-  if (!pendingFile.value) return
+  // 判斷是合併模式還是單檔模式
+  const isMergeMode = mergeMode.isActive && mergeMode.files.length > 0
+
+  if (!isMergeMode && !pendingFile.value) return
 
   uploading.value = true
 
   const formData = new FormData()
-  formData.append('file', pendingFile.value)
+
+  if (isMergeMode) {
+    // 合併模式：添加所有檔案
+    mergeMode.files.forEach((file) => {
+      formData.append('files', file)
+    })
+    formData.append('merge_files', 'true')
+
+    // 添加自訂任務名稱（如果有）
+    const finalTaskName = mergeTaskName.value.trim() || defaultMergeTaskName.value
+    if (finalTaskName) {
+      formData.append('custom_name', finalTaskName)
+    }
+  } else {
+    // 單檔模式
+    formData.append('file', pendingFile.value)
+  }
+
+  // 共用的轉錄設定
   formData.append('task_type', taskType.value)
   formData.append('punct_provider', 'gemini')
   formData.append('chunk_audio', 'true')
@@ -246,7 +334,7 @@ async function confirmAndUpload() {
 
     const newTask = {
       ...responseData,
-      file: pendingFile.value.name,
+      file: isMergeMode ? `合併 ${mergeMode.files.length} 個檔案` : pendingFile.value.name,
       uploadedAt: new Date().toLocaleString('zh-TW')
     }
 
@@ -254,9 +342,12 @@ async function confirmAndUpload() {
 
     // 顯示轉錄中通知
     if (showNotification) {
+      const message = isMergeMode
+        ? `正在合併並轉錄 ${mergeMode.files.length} 個檔案`
+        : `正在轉錄「${pendingFile.value.name}」`
       showNotification({
         title: $t('transcription.transcribing'),
-        message: `正在轉錄「${pendingFile.value.name}」`,
+        message: message,
         type: 'processing',
         duration: 5000  // 5秒後自動關閉
       })
@@ -279,6 +370,11 @@ async function confirmAndUpload() {
     taskType.value = 'paragraph'  // 重置為預設值
     selectedTags.value = []
     tagInput.value = ''
+    // 重置合併模式
+    mergeMode.isActive = false
+    mergeMode.showForm = false
+    mergeMode.files = []
+    mergeTaskName.value = ''
   }
 }
 
@@ -288,7 +384,37 @@ function cancelUpload() {
   taskType.value = 'paragraph'  // 重置為預設值
   selectedTags.value = []
   tagInput.value = ''
+  // 也重置合併模式
+  mergeMode.isActive = false
+  mergeMode.showForm = false
+  mergeMode.files = []
+  mergeTaskName.value = ''
 }
+
+// 開啟合併對話窗
+function openMergeModal() {
+  showMergeModal.value = true
+}
+
+// 關閉合併對話窗
+function closeMergeModal() {
+  showMergeModal.value = false
+}
+
+// 處理合併對話窗確認（進入轉錄設定表單）
+function handleMergeConfirm(files) {
+  closeMergeModal()
+  handleShowTranscriptionForm(files)
+}
+
+// 處理「進入轉錄設定」（合併模式）
+function handleShowTranscriptionForm(files) {
+  mergeMode.isActive = true
+  mergeMode.showForm = true
+  mergeMode.files = files
+  mergeTaskName.value = ''  // 重置任務名稱
+}
+
 
 
 
@@ -781,6 +907,107 @@ onUnmounted(() => {
 
 .modal-actions .btn-start:active {
   box-shadow: var(--neu-shadow-btn-active);
+}
+
+/* 合併模式樣式 */
+.merge-info-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.merge-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: rgba(221, 132, 72, 0.15);
+  color: var(--electric-primary);
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.file-count {
+  font-size: 13px;
+  color: rgba(45, 45, 45, 0.7);
+  font-weight: 500;
+}
+
+.merge-file-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px 0;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.merge-file-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(221, 132, 72, 0.1);
+}
+
+.merge-file-item:last-child {
+  border-bottom: none;
+}
+
+.merge-file-item .file-number {
+  color: var(--electric-primary);
+  font-weight: 600;
+  min-width: 20px;
+}
+
+.merge-file-item .file-name {
+  flex: 1;
+  color: rgba(45, 45, 45, 0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.merge-file-item .file-size {
+  color: rgba(45, 45, 45, 0.5);
+  font-size: 12px;
+}
+
+.task-name-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(221, 132, 72, 0.15);
+}
+
+.task-name-input {
+  width: 100%;
+  max-width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  border: 2px solid rgba(221, 132, 72, 0.3);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #2d2d2d;
+  transition: all 0.3s;
+  margin-top: 6px;
+}
+
+.task-name-input:focus {
+  outline: none;
+  border-color: var(--electric-primary);
+  box-shadow: 0 0 0 3px rgba(221, 132, 72, 0.1);
+}
+
+.task-name-input::placeholder {
+  color: rgba(45, 45, 45, 0.4);
+}
+
+.task-name-section .hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: rgba(45, 45, 45, 0.5);
 }
 
 </style>

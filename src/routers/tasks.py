@@ -724,7 +724,7 @@ async def delete_task(
 
     # 物理刪除 MongoDB 中的 transcription 文檔
     from src.database.repositories.transcription_repo import TranscriptionRepository
-    transcription_repo = TranscriptionRepository(task_service.db)
+    transcription_repo = TranscriptionRepository(task_service.task_repo.db)
     try:
         deleted_transcription = await transcription_repo.delete(task_id)
         if deleted_transcription:
@@ -734,7 +734,7 @@ async def delete_task(
 
     # 物理刪除 MongoDB 中的 segment 文檔
     from src.database.repositories.segment_repo import SegmentRepository
-    segment_repo = SegmentRepository(task_service.db)
+    segment_repo = SegmentRepository(task_service.task_repo.db)
     try:
         deleted_segment = await segment_repo.delete(task_id)
         if deleted_segment:
@@ -960,7 +960,7 @@ async def batch_delete_tasks(
 
             # 物理刪除 MongoDB 中的 transcription 文檔
             from src.database.repositories.transcription_repo import TranscriptionRepository
-            transcription_repo = TranscriptionRepository(task_service.db)
+            transcription_repo = TranscriptionRepository(task_service.task_repo.db)
             try:
                 deleted_transcription = await transcription_repo.delete(task_id)
                 if deleted_transcription:
@@ -970,7 +970,7 @@ async def batch_delete_tasks(
 
             # 物理刪除 MongoDB 中的 segment 文檔
             from src.database.repositories.segment_repo import SegmentRepository
-            segment_repo = SegmentRepository(task_service.db)
+            segment_repo = SegmentRepository(task_service.task_repo.db)
             try:
                 deleted_segment = await segment_repo.delete(task_id)
                 if deleted_segment:

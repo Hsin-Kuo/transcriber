@@ -384,6 +384,10 @@ const originalSegments = ref([])
 
 // 講者名稱自動儲存（debounced）
 let speakerNamesSaveTimer = null
+// 用於追蹤滾動位置恢復的計時器（以便在 unmount 時清理）
+let scrollRestoreTimers = []
+// 追蹤組件是否已卸載
+let isMounted = true
 watch(speakerNames, (newValue) => {
   // 只有在字幕模式下才需要自動儲存
   if (displayMode.value !== 'subtitle') return
@@ -395,6 +399,7 @@ watch(speakerNames, (newValue) => {
 
   // 設定新的計時器（1秒後儲存）
   speakerNamesSaveTimer = setTimeout(async () => {
+    if (!isMounted) return // 如果組件已卸載，不執行
     console.log('🔄 ' + $t('transcriptDetail.autoSavingSpeaker') + ':', newValue)
     await updateSpeakerNames(newValue)
   }, 1000)
@@ -473,11 +478,13 @@ function handleStartEditing() {
 
   // 恢復滾動位置
   if (displayMode.value === 'paragraph' && savedScrollTop > 0) {
-    setTimeout(() => {
+    const timerId = setTimeout(() => {
+      if (!isMounted) return
       if (textareaRef.value) {
         textareaRef.value.scrollTop = savedScrollTop
       }
     }, 100)
+    scrollRestoreTimers.push(timerId)
   }
 }
 
@@ -506,11 +513,13 @@ function handleCancelEditing() {
 
   // 恢復滾動位置
   if (displayMode.value === 'paragraph' && savedScrollTop > 0) {
-    setTimeout(() => {
+    const timerId = setTimeout(() => {
+      if (!isMounted) return
       if (textareaRef.value) {
         textareaRef.value.scrollTop = savedScrollTop
       }
     }, 100)
+    scrollRestoreTimers.push(timerId)
   }
 }
 
@@ -593,11 +602,13 @@ async function saveEditing() {
     // 恢復滾動位置（段落模式）
     if (displayMode.value === 'paragraph' && savedScrollTop > 0) {
       // 使用 setTimeout 給 DOM 更多時間重新渲染
-      setTimeout(() => {
+      const timerId = setTimeout(() => {
+        if (!isMounted) return
         if (textareaRef.value) {
           textareaRef.value.scrollTop = savedScrollTop
         }
       }, 100)
+      scrollRestoreTimers.push(timerId)
     }
   }
 }
@@ -1157,12 +1168,27 @@ onMounted(() => {
   loadTranscript(route.params.taskId)
 
   // 延遲執行以確保 DOM 已渲染
-  setTimeout(() => {
+  const timerId = setTimeout(() => {
+    if (!isMounted) return
     fixSubtitleScrolling()
   }, 100)
+  scrollRestoreTimers.push(timerId)
 })
 
 onUnmounted(() => {
+  // 標記組件已卸載，防止異步操作更新狀態
+  isMounted = false
+
+  // 清除講者名稱自動儲存計時器
+  if (speakerNamesSaveTimer) {
+    clearTimeout(speakerNamesSaveTimer)
+    speakerNamesSaveTimer = null
+  }
+
+  // 清除所有滾動位置恢復計時器
+  scrollRestoreTimers.forEach(timer => clearTimeout(timer))
+  scrollRestoreTimers = []
+
   window.removeEventListener('beforeunload', handleBeforeUnload)
   // 移除 Alt 鍵監聽
   window.removeEventListener('keydown', handleKeyDown)

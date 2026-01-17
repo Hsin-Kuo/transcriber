@@ -288,7 +288,7 @@ watch(() => route.path, (newPath, oldPath) => {
 .nav-brand h2 {
   font-size: 1.5rem;
   margin: 0;
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: -0.5px;
   color: var(--nav-text);
   text-align: center;
