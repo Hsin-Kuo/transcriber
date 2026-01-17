@@ -135,7 +135,13 @@
             v-else-if="displayMode === 'paragraph'"
             class="textarea-wrapper"
           >
+            <!-- 替換中的過渡狀態（用於完全卸載 contenteditable 避免 Vue DOM 同步問題） -->
+            <div v-if="isReplacing" class="transcript-display replacing-state">
+              <span class="replacing-indicator">{{ $t('transcriptDetail.replacing') || '正在替換...' }}</span>
+            </div>
+            <!-- 正常的 contenteditable -->
             <div
+              v-else
               class="transcript-display"
               :class="{ 'editing': isEditing }"
               :contenteditable="isEditing"
@@ -143,7 +149,7 @@
               ref="textareaRef"
               @keydown="handleContentEditableKeyDown"
             >
-              <template v-for="(part, index) in getContentParts()" :key="index">
+              <template v-for="(part, index) in getContentParts()" :key="`part-${contentVersion}-${index}`">
                 <span v-if="!part.isMarker" class="text-part">{{ part.text }}</span>
                 <span v-else class="marker-wrapper"><span
                     v-if="showTimecodeMarkers"
@@ -378,6 +384,9 @@ const isAltPressed = ref(false)
 
 // 內容版本號（用於強制重新渲染 contenteditable）
 const contentVersion = ref(0)
+
+// 是否正在執行替換（用於暫時卸載 contenteditable 避免 Vue DOM 同步問題）
+const isReplacing = ref(false)
 
 // 保存編輯前的 segments 狀態（用於取消編輯時恢復）
 const originalSegments = ref([])
@@ -909,33 +918,54 @@ function handleReplaceAll() {
       savedScrollTop = textareaRef.value.scrollTop
     }
 
-    // ✅ 只更新一次: 先執行替換,再賦值
-    const replacedContent = contentToReplace.replace(regex, replaceText.value)
-    currentTranscript.value.content = replacedContent  // 只觸發一次 reactive 更新
-
-    // 清空舊標記，避免混合新舊索引
-    segmentMarkers.value = []
-
-    // 增加版本號，強制 Vue 重新渲染 contenteditable（避免舊內容殘留）
-    contentVersion.value++
-
-    // 重新生成標記（使用取代後的內容）
-    if (segments.value && currentTranscript.value.content) {
-      generateSegmentMarkers(segments.value, currentTranscript.value.content)
-    }
-
-    // 恢復滾動位置
-    if (savedScrollTop > 0) {
-      nextTick(() => {
-        if (textareaRef.value) {
-          textareaRef.value.scrollTop = savedScrollTop
-        }
-      })
-    }
+    // 保存替換文字（因為稍後會清空輸入框）
+    const replaceTextValue = replaceText.value
 
     // 清空輸入框
     findText.value = ''
     replaceText.value = ''
+
+    // 執行替換
+    const replacedContent = contentToReplace.replace(regex, replaceTextValue)
+
+    // 步驟 1: 設置替換狀態，完全卸載 contenteditable（避免 Vue DOM 同步問題）
+    isReplacing.value = true
+
+    // 步驟 2: 等待 contenteditable 完全卸載後，更新數據
+    nextTick(() => {
+      if (!isMounted) return
+
+      // 清空標記
+      segmentMarkers.value = []
+
+      // 更新內容
+      currentTranscript.value.content = replacedContent
+
+      // 增加版本號
+      contentVersion.value++
+
+      // 重新生成標記
+      if (segments.value && currentTranscript.value.content) {
+        generateSegmentMarkers(segments.value, currentTranscript.value.content)
+      }
+
+      // 步驟 3: 等待數據更新完成後，重新掛載 contenteditable
+      nextTick(() => {
+        if (!isMounted) return
+
+        // 取消替換狀態，重新掛載 contenteditable
+        isReplacing.value = false
+
+        // 步驟 4: 等待 contenteditable 重新掛載後，恢復滾動位置
+        nextTick(() => {
+          if (!isMounted) return
+
+          if (savedScrollTop > 0 && textareaRef.value) {
+            textareaRef.value.scrollTop = savedScrollTop
+          }
+        })
+      })
+    })
   } else if (displayMode.value === 'subtitle') {
     // 字幕模式：對 groupedSegments 中的所有 segment 文字進行取代
 
@@ -1492,6 +1522,20 @@ watch(
 .transcript-display.editing {
   background: var(--upload-bg);
   box-shadow: 0 0 0 2px var(--neu-primary);
+}
+
+/* 替換中的過渡狀態 */
+.transcript-display.replacing-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--upload-bg);
+  box-shadow: 0 0 0 2px var(--neu-primary);
+}
+
+.replacing-indicator {
+  color: var(--neu-text-light);
+  font-size: 14px;
 }
 
 /* 文字片段 */

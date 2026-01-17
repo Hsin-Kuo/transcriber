@@ -90,6 +90,11 @@ export function useTaskTags($t) {
         }
       })
       tagColors.value = colors
+
+      // 同時更新標籤順序（tags 已按 order 欄位排序）
+      if (tags.length > 0) {
+        customTagOrder.value = tags.map(tag => tag.name)
+      }
     } catch (error) {
       console.error(($t ? $t('taskList.errorFetchTagColors') : 'Error fetching tag colors') + ':', error)
     }
@@ -97,13 +102,25 @@ export function useTaskTags($t) {
 
   /**
    * 從後端獲取標籤順序
+   * 注意：這個函數現在從 tagsData 中提取名稱順序（因為 tagsData 已按 order 排序）
    */
   async function fetchTagOrder() {
     try {
-      const response = await api.get('/tags/order')
-      if (response.data.order && response.data.order.length > 0) {
-        customTagOrder.value = response.data.order
-        console.log('✅ ' + ($t ? $t('taskList.logLoadedTagOrder') : 'Loaded custom tag order'), response.data.count, ($t ? $t('taskList.logTagCount') : 'tags'))
+      // 如果 tagsData 已經有數據，直接從中提取名稱順序
+      if (tagsData.value.length > 0) {
+        customTagOrder.value = tagsData.value.map(tag => tag.name)
+        console.log('✅ ' + ($t ? $t('taskList.logLoadedTagOrder') : 'Loaded custom tag order'), tagsData.value.length, ($t ? $t('taskList.logTagCount') : 'tags'))
+        return
+      }
+
+      // 如果 tagsData 尚未加載，則先獲取標籤數據
+      const response = await api.get('/tags')
+      const tags = response.data || []
+
+      if (tags.length > 0) {
+        tagsData.value = tags
+        customTagOrder.value = tags.map(tag => tag.name)
+        console.log('✅ ' + ($t ? $t('taskList.logLoadedTagOrder') : 'Loaded custom tag order'), tags.length, ($t ? $t('taskList.logTagCount') : 'tags'))
       }
     } catch (error) {
       console.error(($t ? $t('taskList.errorFetchTagOrder') : 'Error fetching tag order') + ':', error)
@@ -127,31 +144,67 @@ export function useTaskTags($t) {
   }
 
   /**
-   * 更新標籤顏色
+   * 更新標籤顏色（本地）
+   * 只更新本地狀態，不發送 API 請求
    * @param {string} tagName - 標籤名稱
    * @param {string} color - 顏色代碼
    */
-  async function updateTagColor(tagName, color) {
+  function updateTagColorLocal(tagName, color) {
+    // 只更新本地顏色狀態
+    tagColors.value = { ...tagColors.value, [tagName]: color }
+  }
+
+  /**
+   * 保存標籤顏色到後端
+   * @param {string} tagName - 標籤名稱
+   * @param {string} color - 顏色代碼
+   */
+  async function saveTagColor(tagName, color) {
     try {
+      // 調試：查看 tagsData 的內容
+      console.log('🔍 saveTagColor - 查找標籤:', tagName)
+      console.log('🔍 tagsData 內容:', JSON.stringify(tagsData.value.map(t => ({ name: t.name, id: t._id || t.tag_id }))))
+
       // 從 tagsData 中找到對應的標籤對象
-      const tagObj = tagsData.value.find(t => t.name === tagName)
+      let tagObj = tagsData.value.find(t => t.name === tagName)
+
+      // 如果標籤不存在於後端，先創建它
       if (!tagObj) {
-        throw new Error($t ? $t('taskList.errorTagNotFound') : 'Tag not found')
+        console.log('🏷️ 標籤不存在於 tagsData，正在創建:', tagName)
+        const response = await api.post('/tags', {
+          name: tagName,
+          color: color
+        })
+        tagObj = response.data
+
+        // 將新標籤添加到 tagsData
+        tagsData.value = [...tagsData.value, tagObj]
+        console.log('✅ 標籤創建成功:', tagObj)
+        return
       }
 
-      // 使用正確的 API 端點和標籤 ID
-      await api.put(`/tags/${tagObj._id || tagObj.tag_id}`, {
+      // 使用正確的 API 端點和標籤 ID（優先使用 tag_id，即 UUID 格式）
+      await api.put(`/tags/${tagObj.tag_id || tagObj._id}`, {
         name: tagObj.name,
         color: color,
         description: tagObj.description || null
       })
-
-      // 更新本地顏色
-      tagColors.value[tagName] = color
     } catch (error) {
       console.error(($t ? $t('taskList.errorUpdateTagColor') : 'Error updating tag color') + ':', error)
       throw error
     }
+  }
+
+  /**
+   * 更新標籤顏色（向後兼容，立即保存）
+   * @param {string} tagName - 標籤名稱
+   * @param {string} color - 顏色代碼
+   */
+  async function updateTagColor(tagName, color) {
+    // 先更新本地狀態
+    updateTagColorLocal(tagName, color)
+    // 然後保存到後端
+    await saveTagColor(tagName, color)
   }
 
   /**
@@ -224,12 +277,13 @@ export function useTaskTags($t) {
   /**
    * 根據標籤名稱數組獲取標籤 ID 數組
    * @param {Array} tagNames - 標籤名稱數組
-   * @returns {Array} 標籤 ID 數組
+   * @returns {Array} 標籤 ID 數組（使用 tag_id，即 UUID 格式）
    */
   function getTagIds(tagNames) {
     return tagNames.map(tagName => {
       const tagObj = tagsData.value.find(t => t.name === tagName)
-      return tagObj ? (tagObj._id || tagObj.tag_id) : null
+      // 優先使用 tag_id（UUID），因為後端 update_order 使用 tag_id 查詢
+      return tagObj ? (tagObj.tag_id || tagObj._id) : null
     }).filter(id => id !== null)
   }
 
@@ -245,6 +299,8 @@ export function useTaskTags($t) {
     fetchTagOrder,
     saveTagOrder,
     updateTagColor,
+    updateTagColorLocal,
+    saveTagColor,
     renameTag,
     getTagColor,
     getTagIds,

@@ -20,13 +20,14 @@ class TagRepository:
         self.db = db
         self.collection = db.tags
 
-    async def create(self, user_id: str, name: str, color: Optional[str] = None) -> Dict[str, Any]:
+    async def create(self, user_id: str, name: str, color: Optional[str] = None, description: Optional[str] = None) -> Dict[str, Any]:
         """建立新標籤
 
         Args:
             user_id: 使用者 ID
             name: 標籤名稱
             color: 標籤顏色（可選）
+            description: 標籤描述（可選）
 
         Returns:
             建立的標籤資料
@@ -53,6 +54,7 @@ class TagRepository:
             "user_id": user_id,
             "name": name,
             "color": color,
+            "description": description,
             "order": next_order,
             "created_at": get_current_time(),
             "updated_at": None
@@ -164,13 +166,21 @@ class TagRepository:
         updated_count = 0
         current_time = get_current_time()
 
+        print(f"🔍 [tag_repo.update_order] user_id: {user_id}, tag_ids: {tag_ids}")
+
         for index, tag_id in enumerate(tag_ids):
+            # 先檢查標籤是否存在
+            existing = await self.collection.find_one({"tag_id": tag_id, "user_id": user_id})
+            print(f"🔍 [tag_repo.update_order] tag_id={tag_id}, index={index}, exists={existing is not None}")
+
             result = await self.collection.update_one(
                 {"tag_id": tag_id, "user_id": user_id},
                 {"$set": {"order": index, "updated_at": current_time}}
             )
+            print(f"🔍 [tag_repo.update_order] matched={result.matched_count}, modified={result.modified_count}")
             updated_count += result.modified_count
 
+        print(f"✅ [tag_repo.update_order] 總共更新 {updated_count} 個標籤")
         return updated_count
 
     async def get_by_name(self, user_id: str, name: str) -> Optional[Dict[str, Any]]:

@@ -30,6 +30,7 @@ class TagCreate(BaseModel):
     """建立標籤的請求模型"""
     name: str = Field(..., min_length=1, max_length=50, description="標籤名稱")
     color: Optional[str] = Field(None, pattern="^#[0-9A-Fa-f]{6}$", description="顏色（HEX 格式，如 #FF6B6B）")
+    description: Optional[str] = Field(None, max_length=200, description="標籤描述")
 
 
 class TagUpdate(BaseModel):
