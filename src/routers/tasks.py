@@ -10,7 +10,9 @@ import os
 from ..auth.dependencies import get_current_user, get_current_user_sse
 from ..database.mongodb import get_database
 from ..database.repositories.task_repo import TaskRepository
+from ..database.repositories.tag_repo import TagRepository
 from ..services.task_service import TaskService
+from ..services.tag_service import TagService
 from ..services.utils.async_utils import get_current_time
 
 try:
@@ -34,6 +36,20 @@ def get_task_service(db=Depends(get_database)) -> TaskService:
     """
     # ✅ 返回單例而不是創建新實例
     return get_task_service_singleton()
+
+
+def get_tag_service(db=Depends(get_database)) -> TagService:
+    """依賴注入：獲取 TagService 實例
+
+    Args:
+        db: 資料庫實例
+
+    Returns:
+        TagService 實例
+    """
+    tag_repo = TagRepository(db)
+    task_repo = TaskRepository(db)
+    return TagService(tag_repo, task_repo)
 
 
 @router.get("/recent")
@@ -724,7 +740,7 @@ async def delete_task(
 
     # 物理刪除 MongoDB 中的 transcription 文檔
     from src.database.repositories.transcription_repo import TranscriptionRepository
-    transcription_repo = TranscriptionRepository(task_service.db)
+    transcription_repo = TranscriptionRepository(task_service.task_repo.db)
     try:
         deleted_transcription = await transcription_repo.delete(task_id)
         if deleted_transcription:
@@ -734,7 +750,7 @@ async def delete_task(
 
     # 物理刪除 MongoDB 中的 segment 文檔
     from src.database.repositories.segment_repo import SegmentRepository
-    segment_repo = SegmentRepository(task_service.db)
+    segment_repo = SegmentRepository(task_service.task_repo.db)
     try:
         deleted_segment = await segment_repo.delete(task_id)
         if deleted_segment:
@@ -763,6 +779,7 @@ async def update_task_tags(
     task_id: str,
     tags_data: dict,
     task_service: TaskService = Depends(get_task_service),
+    tag_service: TagService = Depends(get_tag_service),
     current_user: dict = Depends(get_current_user)
 ):
     """更新任務標籤
@@ -771,6 +788,7 @@ async def update_task_tags(
         task_id: 任務 ID
         tags_data: 標籤數據 {"tags": ["tag1", "tag2"]}
         task_service: TaskService 實例
+        tag_service: TagService 實例
         current_user: 當前用戶
 
     Returns:
@@ -779,26 +797,57 @@ async def update_task_tags(
     Raises:
         HTTPException: 任務不存在或無權訪問
     """
-    # 獲取任務（含權限驗證）
-    task = await task_service.get_task(task_id, str(current_user["_id"]))
+    try:
+        # 獲取任務（含權限驗證）
+        task = await task_service.get_task(task_id, str(current_user["_id"]))
 
-    if not task:
+        if not task:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="任務不存在或無權訪問"
+            )
+
+        # 更新標籤
+        tags = tags_data.get("tags", [])
+        user_id = str(current_user["_id"])
+
+        # 自動為新標籤創建記錄到 tags 表
+        try:
+            existing_tags = await tag_service.get_all_tags(user_id)
+            existing_tag_names = {tag["name"] for tag in existing_tags}
+
+            # 創建不存在的標籤
+            for tag_name in tags:
+                if tag_name and tag_name not in existing_tag_names:
+                    try:
+                        await tag_service.create_tag(user_id=user_id, name=tag_name)
+                        print(f"🏷️ 自動創建標籤記錄：{tag_name}")
+                    except ValueError as e:
+                        # 標籤可能已存在（並發情況），忽略錯誤
+                        print(f"⚠️ 創建標籤 {tag_name} 時出現警告：{e}")
+        except Exception as tag_error:
+            # 自動創建標籤失敗不應該阻止標籤更新
+            print(f"⚠️ 自動創建標籤時出錯（不影響標籤更新）：{tag_error}")
+
+        await task_service.update_task_status(task_id, {"tags": tags})
+
+        print(f"🏷️ 已更新任務 {task_id} 的標籤：{tags}")
+
+        return {
+            "message": "標籤已更新",
+            "task_id": task_id,
+            "tags": tags
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ 更新標籤時發生錯誤：{type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任務不存在或無權訪問"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"更新標籤失敗：{str(e)}"
         )
-
-    # 更新標籤
-    tags = tags_data.get("tags", [])
-    await task_service.update_task_status(task_id, {"tags": tags})
-
-    print(f"🏷️ 已更新任務 {task_id} 的標籤：{tags}")
-
-    return {
-        "message": "標籤已更新",
-        "task_id": task_id,
-        "tags": tags
-    }
 
 
 @router.put("/{task_id}/keep-audio")
@@ -960,7 +1009,7 @@ async def batch_delete_tasks(
 
             # 物理刪除 MongoDB 中的 transcription 文檔
             from src.database.repositories.transcription_repo import TranscriptionRepository
-            transcription_repo = TranscriptionRepository(task_service.db)
+            transcription_repo = TranscriptionRepository(task_service.task_repo.db)
             try:
                 deleted_transcription = await transcription_repo.delete(task_id)
                 if deleted_transcription:
@@ -970,7 +1019,7 @@ async def batch_delete_tasks(
 
             # 物理刪除 MongoDB 中的 segment 文檔
             from src.database.repositories.segment_repo import SegmentRepository
-            segment_repo = SegmentRepository(task_service.db)
+            segment_repo = SegmentRepository(task_service.task_repo.db)
             try:
                 deleted_segment = await segment_repo.delete(task_id)
                 if deleted_segment:
@@ -1005,6 +1054,7 @@ async def batch_delete_tasks(
 async def batch_add_tags(
     tags_data: dict,
     task_service: TaskService = Depends(get_task_service),
+    tag_service: TagService = Depends(get_tag_service),
     current_user: dict = Depends(get_current_user)
 ):
     """批次添加標籤到任務
@@ -1012,6 +1062,7 @@ async def batch_add_tags(
     Args:
         tags_data: 標籤數據 {"task_ids": ["id1"], "tags": ["tag1"]}
         task_service: TaskService 實例
+        tag_service: TagService 實例
         current_user: 當前用戶
 
     Returns:
@@ -1028,6 +1079,23 @@ async def batch_add_tags(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="未提供任務 ID 或標籤"
         )
+
+    # 自動為新標籤創建記錄到 tags 表
+    user_id = str(current_user["_id"])
+
+    # 獲取現有標籤
+    existing_tags = await tag_service.get_all_tags(user_id)
+    existing_tag_names = {tag["name"] for tag in existing_tags}
+
+    # 創建不存在的標籤
+    for tag_name in tags_to_add:
+        if tag_name and tag_name not in existing_tag_names:
+            try:
+                await tag_service.create_tag(user_id=user_id, name=tag_name)
+                print(f"🏷️ 自動創建標籤記錄：{tag_name}")
+            except ValueError as e:
+                # 標籤可能已存在（並發情況），忽略錯誤
+                print(f"⚠️ 創建標籤 {tag_name} 時出現警告：{e}")
 
     updated_count = 0
 

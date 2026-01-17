@@ -28,12 +28,12 @@
         <span v-if="!isCollapsed">{{ $t('navigation.transcription') }}</span>
       </router-link>
 
-      <router-link to="/editor" class="nav-link" active-class="active" :title="isCollapsed ? $t('navigation.audioEditor') : ''">
+      <!-- <router-link to="/editor" class="nav-link" active-class="active" :title="isCollapsed ? $t('navigation.audioEditor') : ''">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
         </svg>
         <span v-if="!isCollapsed">{{ $t('navigation.audioEditor') }}</span>
-      </router-link>
+      </router-link> -->
 
       <!-- 所有任務按鈕（收合時顯示） -->
       <router-link v-if="authStore.isAuthenticated && isCollapsed" to="/tasks" class="nav-link" active-class="active" :title="$t('navigation.allTasks')" @click="clearTaskFilters">
@@ -288,7 +288,7 @@ watch(() => route.path, (newPath, oldPath) => {
 .nav-brand h2 {
   font-size: 1.5rem;
   margin: 0;
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: -0.5px;
   color: var(--nav-text);
   text-align: center;

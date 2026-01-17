@@ -367,15 +367,19 @@ function handleTagColorChanged() {
   // 顏色變更後無需刷新，因為 composable 已更新
 }
 
-function handleTagsReordered() {
-  // 標籤順序變更後無需額外操作
+async function handleTagsReordered() {
+  // 標籤順序變更後重新獲取標籤數據，確保順序同步
+  await fetchTagColors()
+  await fetchAllTags()
 }
 
-// 獲取所有標籤
+// 獲取所有標籤（使用 /tags API，已按 order 排序）
 async function fetchAllTags() {
   try {
-    const response = await taskService.getAllTags()
-    allTags.value = response.tags || []
+    const response = await api.get('/tags')
+    // /tags 返回完整標籤對象（含 order），提取名稱並保持順序
+    const tags = response.data || []
+    allTags.value = tags.map(tag => tag.name)
   } catch (error) {
     console.error('Failed to fetch tags:', error)
     allTags.value = []

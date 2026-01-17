@@ -138,12 +138,17 @@ async def update_tag_order(
         HTTPException: 標籤不存在或無權訪問
     """
     try:
-        print(f"🔍 更新標籤順序 - user_id: {current_user['_id']}, tag_ids: {order_data.tag_ids}")
-        await tag_service.update_tag_order(
-            str(current_user["_id"]),
-            order_data.tag_ids
-        )
-        print(f"✅ 標籤順序更新成功")
+        user_id = str(current_user["_id"])
+        print(f"\n{'='*60}")
+        print(f"🔍 [tags.py] 更新標籤順序")
+        print(f"   current_user['_id'] 類型: {type(current_user['_id'])}")
+        print(f"   current_user['_id'] 值: {current_user['_id']}")
+        print(f"   轉換後 user_id: {user_id}")
+        print(f"   tag_ids: {order_data.tag_ids}")
+        print(f"{'='*60}\n")
+
+        result = await tag_service.update_tag_order(user_id, order_data.tag_ids)
+        print(f"✅ [tags.py] 標籤順序更新成功, result={result}")
 
         # 記錄 audit log
         from ..utils.audit_logger import get_audit_logger

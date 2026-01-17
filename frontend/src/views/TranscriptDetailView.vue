@@ -135,7 +135,13 @@
             v-else-if="displayMode === 'paragraph'"
             class="textarea-wrapper"
           >
+            <!-- 替換中的過渡狀態（用於完全卸載 contenteditable 避免 Vue DOM 同步問題） -->
+            <div v-if="isReplacing" class="transcript-display replacing-state">
+              <span class="replacing-indicator">{{ $t('transcriptDetail.replacing') || '正在替換...' }}</span>
+            </div>
+            <!-- 正常的 contenteditable -->
             <div
+              v-else
               class="transcript-display"
               :class="{ 'editing': isEditing }"
               :contenteditable="isEditing"
@@ -143,7 +149,7 @@
               ref="textareaRef"
               @keydown="handleContentEditableKeyDown"
             >
-              <template v-for="(part, index) in getContentParts()" :key="index">
+              <template v-for="(part, index) in getContentParts()" :key="`part-${contentVersion}-${index}`">
                 <span v-if="!part.isMarker" class="text-part">{{ part.text }}</span>
                 <span v-else class="marker-wrapper"><span
                     v-if="showTimecodeMarkers"
@@ -379,11 +385,18 @@ const isAltPressed = ref(false)
 // 內容版本號（用於強制重新渲染 contenteditable）
 const contentVersion = ref(0)
 
+// 是否正在執行替換（用於暫時卸載 contenteditable 避免 Vue DOM 同步問題）
+const isReplacing = ref(false)
+
 // 保存編輯前的 segments 狀態（用於取消編輯時恢復）
 const originalSegments = ref([])
 
 // 講者名稱自動儲存（debounced）
 let speakerNamesSaveTimer = null
+// 用於追蹤滾動位置恢復的計時器（以便在 unmount 時清理）
+let scrollRestoreTimers = []
+// 追蹤組件是否已卸載
+let isMounted = true
 watch(speakerNames, (newValue) => {
   // 只有在字幕模式下才需要自動儲存
   if (displayMode.value !== 'subtitle') return
@@ -395,6 +408,7 @@ watch(speakerNames, (newValue) => {
 
   // 設定新的計時器（1秒後儲存）
   speakerNamesSaveTimer = setTimeout(async () => {
+    if (!isMounted) return // 如果組件已卸載，不執行
     console.log('🔄 ' + $t('transcriptDetail.autoSavingSpeaker') + ':', newValue)
     await updateSpeakerNames(newValue)
   }, 1000)
@@ -473,11 +487,13 @@ function handleStartEditing() {
 
   // 恢復滾動位置
   if (displayMode.value === 'paragraph' && savedScrollTop > 0) {
-    setTimeout(() => {
+    const timerId = setTimeout(() => {
+      if (!isMounted) return
       if (textareaRef.value) {
         textareaRef.value.scrollTop = savedScrollTop
       }
     }, 100)
+    scrollRestoreTimers.push(timerId)
   }
 }
 
@@ -506,11 +522,13 @@ function handleCancelEditing() {
 
   // 恢復滾動位置
   if (displayMode.value === 'paragraph' && savedScrollTop > 0) {
-    setTimeout(() => {
+    const timerId = setTimeout(() => {
+      if (!isMounted) return
       if (textareaRef.value) {
         textareaRef.value.scrollTop = savedScrollTop
       }
     }, 100)
+    scrollRestoreTimers.push(timerId)
   }
 }
 
@@ -593,11 +611,13 @@ async function saveEditing() {
     // 恢復滾動位置（段落模式）
     if (displayMode.value === 'paragraph' && savedScrollTop > 0) {
       // 使用 setTimeout 給 DOM 更多時間重新渲染
-      setTimeout(() => {
+      const timerId = setTimeout(() => {
+        if (!isMounted) return
         if (textareaRef.value) {
           textareaRef.value.scrollTop = savedScrollTop
         }
       }, 100)
+      scrollRestoreTimers.push(timerId)
     }
   }
 }
@@ -898,33 +918,54 @@ function handleReplaceAll() {
       savedScrollTop = textareaRef.value.scrollTop
     }
 
-    // ✅ 只更新一次: 先執行替換,再賦值
-    const replacedContent = contentToReplace.replace(regex, replaceText.value)
-    currentTranscript.value.content = replacedContent  // 只觸發一次 reactive 更新
-
-    // 清空舊標記，避免混合新舊索引
-    segmentMarkers.value = []
-
-    // 增加版本號，強制 Vue 重新渲染 contenteditable（避免舊內容殘留）
-    contentVersion.value++
-
-    // 重新生成標記（使用取代後的內容）
-    if (segments.value && currentTranscript.value.content) {
-      generateSegmentMarkers(segments.value, currentTranscript.value.content)
-    }
-
-    // 恢復滾動位置
-    if (savedScrollTop > 0) {
-      nextTick(() => {
-        if (textareaRef.value) {
-          textareaRef.value.scrollTop = savedScrollTop
-        }
-      })
-    }
+    // 保存替換文字（因為稍後會清空輸入框）
+    const replaceTextValue = replaceText.value
 
     // 清空輸入框
     findText.value = ''
     replaceText.value = ''
+
+    // 執行替換
+    const replacedContent = contentToReplace.replace(regex, replaceTextValue)
+
+    // 步驟 1: 設置替換狀態，完全卸載 contenteditable（避免 Vue DOM 同步問題）
+    isReplacing.value = true
+
+    // 步驟 2: 等待 contenteditable 完全卸載後，更新數據
+    nextTick(() => {
+      if (!isMounted) return
+
+      // 清空標記
+      segmentMarkers.value = []
+
+      // 更新內容
+      currentTranscript.value.content = replacedContent
+
+      // 增加版本號
+      contentVersion.value++
+
+      // 重新生成標記
+      if (segments.value && currentTranscript.value.content) {
+        generateSegmentMarkers(segments.value, currentTranscript.value.content)
+      }
+
+      // 步驟 3: 等待數據更新完成後，重新掛載 contenteditable
+      nextTick(() => {
+        if (!isMounted) return
+
+        // 取消替換狀態，重新掛載 contenteditable
+        isReplacing.value = false
+
+        // 步驟 4: 等待 contenteditable 重新掛載後，恢復滾動位置
+        nextTick(() => {
+          if (!isMounted) return
+
+          if (savedScrollTop > 0 && textareaRef.value) {
+            textareaRef.value.scrollTop = savedScrollTop
+          }
+        })
+      })
+    })
   } else if (displayMode.value === 'subtitle') {
     // 字幕模式：對 groupedSegments 中的所有 segment 文字進行取代
 
@@ -1157,12 +1198,27 @@ onMounted(() => {
   loadTranscript(route.params.taskId)
 
   // 延遲執行以確保 DOM 已渲染
-  setTimeout(() => {
+  const timerId = setTimeout(() => {
+    if (!isMounted) return
     fixSubtitleScrolling()
   }, 100)
+  scrollRestoreTimers.push(timerId)
 })
 
 onUnmounted(() => {
+  // 標記組件已卸載，防止異步操作更新狀態
+  isMounted = false
+
+  // 清除講者名稱自動儲存計時器
+  if (speakerNamesSaveTimer) {
+    clearTimeout(speakerNamesSaveTimer)
+    speakerNamesSaveTimer = null
+  }
+
+  // 清除所有滾動位置恢復計時器
+  scrollRestoreTimers.forEach(timer => clearTimeout(timer))
+  scrollRestoreTimers = []
+
   window.removeEventListener('beforeunload', handleBeforeUnload)
   // 移除 Alt 鍵監聽
   window.removeEventListener('keydown', handleKeyDown)
@@ -1466,6 +1522,20 @@ watch(
 .transcript-display.editing {
   background: var(--upload-bg);
   box-shadow: 0 0 0 2px var(--neu-primary);
+}
+
+/* 替換中的過渡狀態 */
+.transcript-display.replacing-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--upload-bg);
+  box-shadow: 0 0 0 2px var(--neu-primary);
+}
+
+.replacing-indicator {
+  color: var(--neu-text-light);
+  font-size: 14px;
 }
 
 /* 文字片段 */

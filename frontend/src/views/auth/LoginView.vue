@@ -113,7 +113,7 @@ async function resendVerification() {
 
   try {
     const response = await fetch(
-      `${import.meta.env.VITE_API_URL || 'http://100.66.247.23:8000'}/auth/resend-verification`,
+      `${import.meta.env.VITE_API_URL || 'http://192.168.0.59:8000'}/auth/resend-verification`,
       {
         method: 'POST',
         headers: {

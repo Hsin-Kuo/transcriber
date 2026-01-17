@@ -137,7 +137,7 @@ import { useTaskTags } from '../../composables/task/useTaskTags'
 import ColorPickerPopup from './ColorPickerPopup.vue'
 
 const { t: $t } = useI18n()
-const { getTagColor, updateTagColor, renameTag, saveTagOrder, getTagIds } = useTaskTags($t)
+const { getTagColor, updateTagColorLocal, saveTagColor, renameTag, saveTagOrder, getTagIds, tagsData, fetchTagColors } = useTaskTags($t)
 
 // Props
 const props = defineProps({
@@ -189,11 +189,22 @@ const colorPickerTag = ref(null)
 const colorPickerPosition = ref({})
 const colorPickerButtons = ref({})
 
+// 記錄編輯過程中更改的顏色（tag -> color）
+const pendingColorChanges = ref({})
+
 // Computed
 const displayedTagsList = computed(() => {
   if (props.isEditing && editingTagOrder.value.length > 0) {
     return editingTagOrder.value
   }
+
+  // 非編輯模式下，按 customTagOrder 排序
+  if (props.customTagOrder.length > 0 && props.allTags.length > 0) {
+    const orderedTags = props.customTagOrder.filter(tag => props.allTags.includes(tag))
+    const newTags = props.allTags.filter(tag => !props.customTagOrder.includes(tag))
+    return [...orderedTags, ...newTags]
+  }
+
   return props.allTags
 })
 
@@ -223,19 +234,55 @@ function clearFilter() {
 function startEditing() {
   emit('update:isEditing', true)
   editingTagOrder.value = [...props.allTags]
+  // 清空待保存的顏色更改
+  pendingColorChanges.value = {}
 }
 
 async function saveEditing() {
-  // 保存標籤順序到後端
   try {
+    // 檢查是否有標籤不存在於 tags repository，如果有則先創建
+    const existingTagNames = new Set(tagsData.value.map(t => t.name))
+    const missingTags = editingTagOrder.value.filter(tag => !existingTagNames.has(tag))
+
+    if (missingTags.length > 0) {
+      console.log('🏷️ 發現缺少的標籤，正在創建:', missingTags)
+      // 創建缺少的標籤（使用 saveTagColor 會自動創建）
+      for (const tagName of missingTags) {
+        await saveTagColor(tagName, getTagColor(tagName))
+      }
+      // 重新獲取標籤數據
+      await fetchTagColors()
+    }
+
+    // 保存標籤順序到後端
     const tagIds = getTagIds(editingTagOrder.value)
-    await saveTagOrder(tagIds)
+    console.log('🔍 保存順序 - 標籤名稱:', editingTagOrder.value)
+    console.log('🔍 保存順序 - 標籤 ID:', tagIds)
+
+    if (tagIds.length > 0) {
+      await saveTagOrder(tagIds)
+    } else {
+      console.warn('⚠️ 沒有有效的標籤 ID 可保存')
+    }
+
+    // 保存所有待保存的顏色更改
+    const colorChangePromises = Object.entries(pendingColorChanges.value).map(
+      ([tag, color]) => saveTagColor(tag, color)
+    )
+    if (colorChangePromises.length > 0) {
+      await Promise.all(colorChangePromises)
+      console.log('✅ 已保存', colorChangePromises.length, '個標籤顏色')
+    }
+
     emit('update:customTagOrder', [...editingTagOrder.value])
     emit('tags-reordered')
   } catch (error) {
+    console.error('❌ 保存標籤順序失敗:', error)
     alert($t('taskList.errorSaveTagOrderFull', { message: error.message }))
   }
 
+  // 清空待保存的顏色更改
+  pendingColorChanges.value = {}
   emit('update:isEditing', false)
   showColorPicker.value = false
 }
@@ -395,13 +442,14 @@ function handleToggleColorPicker(tag) {
   }
 }
 
-async function handleColorSelected({ tag, color }) {
-  try {
-    await updateTagColor(tag, color)
-    emit('tag-color-changed', { tag, color })
-  } catch (error) {
-    console.error('Error updating tag color:', error)
-  }
+function handleColorSelected({ tag, color }) {
+  // 只更新本地狀態，不立即保存到後端
+  updateTagColorLocal(tag, color)
+
+  // 記錄顏色更改，等保存時一起保存
+  pendingColorChanges.value = { ...pendingColorChanges.value, [tag]: color }
+
+  emit('tag-color-changed', { tag, color })
 }
 </script>
 
