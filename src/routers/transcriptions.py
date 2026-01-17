@@ -258,6 +258,9 @@ async def create_transcription(
 
     try:
         # 如果是多檔案，先合併
+        # 導入 AudioService（用於合併音檔和獲取時長）
+        from src.services.audio_service import AudioService
+
         if len(uploaded_files) > 1:
             print(f"🔄 合併模式：{len(uploaded_files)} 個檔案")
 
@@ -275,7 +278,6 @@ async def create_transcription(
                 print(f"  📁 {idx + 1}. {upload_file.filename}")
 
             # 合併音檔到臨時目錄（固定MP3格式：16kHz, mono, 192kbps）
-            from src.services.audio_service import AudioService
             audio_service = AudioService()
 
             # ⭐ 使用唯一檔名避免多用戶衝突
