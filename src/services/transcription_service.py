@@ -191,7 +191,10 @@ class TranscriptionService:
                         for future in as_completed([transcription_future, diarization_future]):
                             if future == transcription_future:
                                 full_text, segments, detected_language = future.result()
-                                print(f"✅ [並行] Whisper 轉錄完成 (文字長度: {len(full_text)})")
+                                if full_text is not None:
+                                    print(f"✅ [並行] Whisper 轉錄完成 (文字長度: {len(full_text)})")
+                                else:
+                                    print(f"⚠️ [並行] Whisper 轉錄返回空結果")
                             elif future == diarization_future:
                                 diarization_segments = future.result()
                                 if diarization_segments:
@@ -260,6 +263,16 @@ class TranscriptionService:
                     language,
                     use_chunking
                 )
+
+            # 檢查轉錄結果是否有效（可能因取消而為 None）
+            if full_text is None:
+                if self._is_cancelled(task_id):
+                    print(f"🛑 [_process_transcription] 任務 {task_id} 已取消，中止處理")
+                    self._cleanup_temp_files(task_id, mp3_path, save_audio=False)
+                    self.task_service.cleanup_task_memory(task_id)
+                    return
+                else:
+                    raise ValueError("轉錄結果為空")
 
             print(f"✅ [_process_transcription] 轉錄完成 (文字長度: {len(full_text)}, 語言: {detected_language})")
 
