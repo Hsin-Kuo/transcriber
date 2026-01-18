@@ -331,7 +331,7 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   padding: 10px 0;
-  border-bottom: 1px solid rgba(163, 177, 198, 0.2);
+  border-bottom: 1px solid rgba(var(--color-divider-rgb), 0.2);
 }
 
 .stat-item:last-child {
@@ -349,15 +349,15 @@ onMounted(() => {
 }
 
 .value.success {
-  color: #2e7d32;
+  color: var(--color-success-dark);
 }
 
 .value.warning {
-  color: #f57c00;
+  color: var(--color-warning-dark);
 }
 
 .value.danger {
-  color: #c62828;
+  color: var(--color-danger-dark);
 }
 
 .value.highlight {
@@ -368,11 +368,11 @@ onMounted(() => {
 .cost-estimate {
   margin-top: 15px;
   padding: 12px;
-  background: linear-gradient(145deg, #f5d9c4, #e8c4a8);
+  background: var(--gradient-warm);
   border-radius: 12px;
   text-align: center;
   font-weight: 700;
-  color: #a0522d;
+  color: var(--color-warning-brown);
   box-shadow:
     inset 2px 2px 5px var(--neu-shadow-dark),
     inset -2px -2px 5px var(--neu-shadow-light);
@@ -387,7 +387,7 @@ onMounted(() => {
 .data-table td {
   padding: 12px;
   text-align: left;
-  border-bottom: 1px solid rgba(163, 177, 198, 0.2);
+  border-bottom: 1px solid rgba(var(--color-divider-rgb), 0.2);
 }
 
 .data-table th {
@@ -475,7 +475,7 @@ onMounted(() => {
 }
 
 .chart-bar:hover {
-  background: linear-gradient(180deg, #a5d6a7, #66bb6a);
+  background: var(--gradient-success);
   transform: translateY(-3px);
   box-shadow:
     5px 5px 10px var(--neu-shadow-dark),
@@ -513,7 +513,7 @@ onMounted(() => {
 
 .refresh-btn {
   padding: 12px 24px;
-  background: linear-gradient(145deg, #e9eef5, #d1d9e6);
+  background: var(--gradient-cool);
   color: var(--neu-primary);
   border: none;
   border-radius: 12px;

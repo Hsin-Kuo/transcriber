@@ -433,8 +433,6 @@ onUnmounted(() => {
 
 <style scoped>
 .container {
-  --color-primary-rgb: 221, 132, 72;
-  --electric-primary: #dd8448;
   animation: fadeIn 0.5s ease-in;
 }
 
@@ -511,7 +509,7 @@ onUnmounted(() => {
 .section-label {
   display: block;
   font-size: 13px;
-  color: rgba(45, 45, 45, 0.6);
+  color: rgba(var(--color-text-dark-rgb), 0.6);
   font-weight: 600;
   margin-bottom: 10px;
   text-transform: uppercase;
@@ -531,19 +529,19 @@ onUnmounted(() => {
 }
 
 .file-info .label {
-  color: rgba(45, 45, 45, 0.6);
+  color: rgba(var(--color-text-dark-rgb), 0.6);
   font-weight: 500;
 }
 
 .file-info .value {
-  color: rgba(45, 45, 45, 0.95);
+  color: rgba(var(--color-text-dark-rgb), 0.95);
   font-weight: 600;
 }
 
 .file-note {
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid rgba(163, 177, 198, 0.2);
+  border-top: 1px solid rgba(var(--color-divider-rgb), 0.2);
   font-size: 11px;
   line-height: 1.5;
   color: var(--neu-text-light);
@@ -586,10 +584,10 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: #ccc;
+  background-color: var(--color-gray-100);
   transition: transform 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
   border-radius: 24px;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+  box-shadow: inset 0 1px 3px var(--color-overlay-light);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -602,15 +600,15 @@ onUnmounted(() => {
   width: 18px;
   left: 3px;
   bottom: 3px;
-  background-color: white;
+  background-color: var(--color-white);
   transition: 0.3s;
   border-radius: 50%;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 4px rgba(var(--color-text-dark-rgb), 0.2);
 }
 
 .toggle-input:checked + .toggle-slider {
-  background: linear-gradient(135deg, var(--electric-primary) 0%, #b8762d 100%);
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1), 0 0 8px rgba(var(--color-primary-rgb), 0.3);
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+  box-shadow: inset 0 1px 3px rgba(var(--color-text-dark-rgb), 0.1), 0 0 8px rgba(var(--color-primary-rgb), 0.3);
 }
 
 .toggle-input:checked + .toggle-slider:before {
@@ -618,32 +616,32 @@ onUnmounted(() => {
 }
 
 .toggle-label:hover .toggle-slider {
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2), 0 0 4px rgba(0, 0, 0, 0.1);
+  box-shadow: inset 0 1px 3px rgba(var(--color-text-dark-rgb), 0.2), 0 0 4px rgba(var(--color-text-dark-rgb), 0.1);
 }
 
 .toggle-label:hover .toggle-input:checked + .toggle-slider {
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1), 0 0 12px rgba(var(--color-primary-rgb), 0.4);
+  box-shadow: inset 0 1px 3px rgba(var(--color-text-dark-rgb), 0.1), 0 0 12px rgba(var(--color-primary-rgb), 0.4);
 }
 
 .toggle-label:active .toggle-slider {
   transform: scale(0.98);
-  background-color: #ccc !important;
+  background-color: var(--color-gray-100) !important;
 }
 
 .toggle-label:active .toggle-input:checked + .toggle-slider {
-  background: linear-gradient(135deg, var(--electric-primary) 0%, #b8762d 100%) !important;
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%) !important;
 }
 
 .toggle-slider:active {
-  background-color: #ccc !important;
+  background-color: var(--color-gray-100) !important;
 }
 
 .toggle-input:checked + .toggle-slider:active {
-  background: linear-gradient(135deg, var(--electric-primary) 0%, #b8762d 100%) !important;
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%) !important;
 }
 
 .toggle-label:active .toggle-slider:before {
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 1px 2px rgba(var(--color-text-dark-rgb), 0.2);
 }
 
 .toggle-text {
@@ -686,7 +684,7 @@ onUnmounted(() => {
 
 .task-type-hint .hint {
   font-size: 12px;
-  color: rgba(45, 45, 45, 0.6);
+  color: rgba(var(--color-text-dark-rgb), 0.6);
   font-weight: 400;
   line-height: 1.4;
 }
@@ -700,7 +698,7 @@ onUnmounted(() => {
 .sub-label {
   display: block;
   font-size: 13px;
-  color: rgba(45, 45, 45, 0.8);
+  color: rgba(var(--color-text-dark-rgb), 0.8);
   font-weight: 500;
   margin-bottom: 8px;
 }
@@ -708,7 +706,7 @@ onUnmounted(() => {
 .sub-label .hint {
   display: block;
   font-size: 12px;
-  color: rgba(45, 45, 45, 0.6);
+  color: rgba(var(--color-text-dark-rgb), 0.6);
   font-weight: 400;
   margin-top: 4px;
 }
@@ -717,21 +715,21 @@ onUnmounted(() => {
   width: 120px;
   padding: 10px 12px;
   font-size: 14px;
-  border: 2px solid rgba(221, 132, 72, 0.3);
+  border: 2px solid rgba(var(--color-primary-rgb), 0.3);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.9);
-  color: #2d2d2d;
+  color: var(--color-text-dark);
   transition: all 0.3s;
 }
 
 .number-input:focus {
   outline: none;
-  border-color: var(--electric-primary);
-  box-shadow: 0 0 0 3px rgba(221, 132, 72, 0.1);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.1);
 }
 
 .number-input::placeholder {
-  color: rgba(45, 45, 45, 0.4);
+  color: rgba(var(--color-text-dark-rgb), 0.4);
 }
 
 /* 標籤輸入樣式 */
@@ -750,17 +748,17 @@ onUnmounted(() => {
   max-width: 300px;
   padding: 10px 12px;
   font-size: 14px;
-  border: 2px solid rgba(221, 132, 72, 0.3);
+  border: 2px solid rgba(var(--color-primary-rgb), 0.3);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.9);
-  color: #2d2d2d;
+  color: var(--color-text-dark);
   transition: all 0.3s;
 }
 
 .tag-input-wrapper .text-input:focus {
   outline: none;
-  border-color: var(--electric-primary);
-  box-shadow: 0 0 0 3px rgba(221, 132, 72, 0.1);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.1);
 }
 
 .btn-add-tag {
@@ -768,7 +766,7 @@ onUnmounted(() => {
   font-size: 14px;
   font-weight: 500;
   color: white;
-  background: #77969A;
+  background: var(--color-teal);
   border: none;
   border-radius: 8px;
   cursor: pointer;
@@ -777,13 +775,13 @@ onUnmounted(() => {
 }
 
 .btn-add-tag:hover:not(:disabled) {
-  background: #336774;
+  background: var(--color-teal-dark);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(119, 150, 154, 0.3);
+  box-shadow: 0 4px 12px rgba(var(--color-teal-rgb), 0.3);
 }
 
 .btn-add-tag:disabled {
-  background: rgba(119, 150, 154, 0.4);
+  background: color-mix(in srgb, var(--color-teal) 40%, transparent);
   cursor: not-allowed;
 }
 
@@ -791,9 +789,9 @@ onUnmounted(() => {
 .quick-tags-section {
   margin-bottom: 12px;
   padding: 10px;
-  background: rgba(119, 150, 154, 0.05);
+  background: rgba(var(--color-teal-rgb), 0.05);
   border-radius: 8px;
-  border: 1px dashed rgba(119, 150, 154, 0.2);
+  border: 1px dashed rgba(var(--color-teal-rgb), 0.2);
 }
 
 .quick-tags {
@@ -807,19 +805,19 @@ onUnmounted(() => {
   padding: 5px 12px;
   font-size: 12px;
   font-weight: 500;
-  color: #77969A;
-  background: white;
-  border: 1.5px solid rgba(119, 150, 154, 0.3);
+  color: var(--color-teal);
+  background: var(--color-white);
+  border: 1.5px solid rgba(var(--color-teal-rgb), 0.3);
   border-radius: 10px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .quick-tag-btn:hover {
-  background: rgba(119, 150, 154, 0.1);
-  border-color: #77969A;
+  background: rgba(var(--color-teal-rgb), 0.1);
+  border-color: var(--color-teal);
   transform: translateY(-1px);
-  box-shadow: 0 2px 6px rgba(119, 150, 154, 0.15);
+  box-shadow: 0 2px 6px rgba(var(--color-teal-rgb), 0.15);
 }
 
 .quick-tag-btn:active {
@@ -837,18 +835,18 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   padding: 6px 12px;
-  background: rgba(102, 126, 234, 0.15);
-  border: 1px solid rgba(102, 126, 234, 0.3);
+  background: color-mix(in srgb, var(--color-purple) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-purple) 30%, transparent);
   border-radius: 12px;
   font-size: 13px;
   font-weight: 500;
-  color: #667eea;
+  color: var(--color-purple);
   transition: all 0.2s;
 }
 
 .selected-tag:hover {
-  background: rgba(102, 126, 234, 0.2);
-  border-color: rgba(102, 126, 234, 0.4);
+  background: color-mix(in srgb, var(--color-purple) 20%, transparent);
+  border-color: color-mix(in srgb, var(--color-purple) 40%, transparent);
 }
 
 .remove-tag {
@@ -859,10 +857,10 @@ onUnmounted(() => {
   height: 18px;
   padding: 0;
   margin: 0;
-  background: rgba(102, 126, 234, 0.2);
+  background: color-mix(in srgb, var(--color-purple) 20%, transparent);
   border: none;
   border-radius: 50%;
-  color: #667eea;
+  color: var(--color-purple);
   font-size: 16px;
   line-height: 1;
   cursor: pointer;
@@ -870,8 +868,8 @@ onUnmounted(() => {
 }
 
 .remove-tag:hover {
-  background: rgba(239, 68, 68, 0.2);
-  color: #ef4444;
+  background: color-mix(in srgb, var(--color-danger) 20%, transparent);
+  color: var(--color-danger);
 }
 
 .modal-actions {
@@ -922,8 +920,8 @@ onUnmounted(() => {
   align-items: center;
   gap: 4px;
   padding: 4px 10px;
-  background: rgba(221, 132, 72, 0.15);
-  color: var(--electric-primary);
+  background: rgba(var(--color-primary-rgb), 0.15);
+  color: var(--color-primary);
   border-radius: 12px;
   font-size: 12px;
   font-weight: 600;
@@ -931,7 +929,7 @@ onUnmounted(() => {
 
 .file-count {
   font-size: 13px;
-  color: rgba(45, 45, 45, 0.7);
+  color: rgba(var(--color-text-dark-rgb), 0.7);
   font-weight: 500;
 }
 
@@ -949,7 +947,7 @@ onUnmounted(() => {
   gap: 8px;
   padding: 6px 0;
   font-size: 13px;
-  border-bottom: 1px solid rgba(221, 132, 72, 0.1);
+  border-bottom: 1px solid rgba(var(--color-primary-rgb), 0.1);
 }
 
 .merge-file-item:last-child {
@@ -957,28 +955,28 @@ onUnmounted(() => {
 }
 
 .merge-file-item .file-number {
-  color: var(--electric-primary);
+  color: var(--color-primary);
   font-weight: 600;
   min-width: 20px;
 }
 
 .merge-file-item .file-name {
   flex: 1;
-  color: rgba(45, 45, 45, 0.9);
+  color: rgba(var(--color-text-dark-rgb), 0.9);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .merge-file-item .file-size {
-  color: rgba(45, 45, 45, 0.5);
+  color: rgba(var(--color-text-dark-rgb), 0.5);
   font-size: 12px;
 }
 
 .task-name-section {
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid rgba(221, 132, 72, 0.15);
+  border-top: 1px solid rgba(var(--color-primary-rgb), 0.15);
 }
 
 .task-name-input {
@@ -986,28 +984,28 @@ onUnmounted(() => {
   max-width: 100%;
   padding: 10px 12px;
   font-size: 14px;
-  border: 2px solid rgba(221, 132, 72, 0.3);
+  border: 2px solid rgba(var(--color-primary-rgb), 0.3);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.9);
-  color: #2d2d2d;
+  color: var(--color-text-dark);
   transition: all 0.3s;
   margin-top: 6px;
 }
 
 .task-name-input:focus {
   outline: none;
-  border-color: var(--electric-primary);
-  box-shadow: 0 0 0 3px rgba(221, 132, 72, 0.1);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.1);
 }
 
 .task-name-input::placeholder {
-  color: rgba(45, 45, 45, 0.4);
+  color: rgba(var(--color-text-dark-rgb), 0.4);
 }
 
 .task-name-section .hint {
   margin-top: 6px;
   font-size: 11px;
-  color: rgba(45, 45, 45, 0.5);
+  color: rgba(var(--color-text-dark-rgb), 0.5);
 }
 
 </style>

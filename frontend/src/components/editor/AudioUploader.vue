@@ -74,18 +74,18 @@ function handleFileChange(event) {
 }
 
 .upload-icon {
-  color: #DD8448;
+  color: var(--color-primary);
   opacity: 0.8;
 }
 
 .uploader-content h2 {
   font-size: 1.8rem;
   margin: 0;
-  color: #fff;
+  color: var(--color-white);
 }
 
 .uploader-content p {
-  color: #aaa;
+  color: var(--color-gray-200);
   margin: 0;
 }
 

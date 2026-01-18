@@ -96,7 +96,7 @@ function formatDuration(seconds) {
 .manager-header h3 {
   margin: 0;
   font-size: 1.3rem;
-  color: #fff;
+  color: var(--color-white);
 }
 
 .clip-count {
@@ -111,7 +111,7 @@ function formatDuration(seconds) {
 .empty-state {
   text-align: center;
   padding: 40px 20px;
-  color: #888;
+  color: var(--color-gray-300);
 }
 
 .empty-state p {
@@ -120,7 +120,7 @@ function formatDuration(seconds) {
 
 .hint {
   font-size: 0.9rem;
-  color: #666;
+  color: var(--color-gray-400);
 }
 
 .clips-list {
@@ -166,7 +166,7 @@ function formatDuration(seconds) {
 }
 
 .clip-name {
-  color: #fff;
+  color: var(--color-white);
   font-weight: 500;
   font-size: 1rem;
 }
@@ -179,7 +179,7 @@ function formatDuration(seconds) {
 }
 
 .clip-source {
-  color: #888;
+  color: var(--color-gray-300);
   max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;

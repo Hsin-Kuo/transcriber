@@ -83,14 +83,14 @@ defineEmits(['start-transcription', 'download-merged', 'cancel'])
 .action-description p {
   margin: 0;
   font-size: 15px;
-  color: rgba(45, 45, 45, 0.9);
+  color: rgba(var(--color-text-dark-rgb), 0.9);
   font-weight: 500;
 }
 
 .action-description .hint {
   margin-top: 8px;
   font-size: 13px;
-  color: rgba(45, 45, 45, 0.6);
+  color: rgba(var(--color-text-dark-rgb), 0.6);
   font-weight: 400;
 }
 
@@ -139,28 +139,28 @@ defineEmits(['start-transcription', 'download-merged', 'cancel'])
 }
 
 .btn-secondary {
-  background: #77969A;
+  background: var(--color-teal);
   color: white;
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: #336774;
+  background: var(--color-teal-dark);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(119, 150, 154, 0.3);
+  box-shadow: 0 4px 12px rgba(var(--color-teal-rgb), 0.3);
 }
 
 .btn-cancel {
   padding: 10px 20px;
   font-size: 13px;
   background: transparent;
-  color: rgba(45, 45, 45, 0.6);
-  border: 1px solid rgba(45, 45, 45, 0.2);
+  color: rgba(var(--color-text-dark-rgb), 0.6);
+  border: 1px solid rgba(var(--color-text-dark-rgb), 0.2);
 }
 
 .btn-cancel:hover:not(:disabled) {
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
-  border-color: #ef4444;
+  background: rgba(var(--color-danger-rgb), 0.1);
+  color: var(--color-danger);
+  border-color: var(--color-danger);
 }
 
 .merging-progress {
@@ -216,7 +216,7 @@ defineEmits(['start-transcription', 'download-merged', 'cancel'])
 
 .merging-progress p {
   font-size: 13px;
-  color: rgba(45, 45, 45, 0.7);
+  color: rgba(var(--color-text-dark-rgb), 0.7);
   margin: 0;
 }
 

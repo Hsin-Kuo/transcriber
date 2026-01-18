@@ -838,7 +838,7 @@ onUnmounted(() => {
 }
 
 .btn-add-speaker:hover:not(:disabled) {
-  background: #ff8040;
+  background: var(--color-orange);
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(255, 145, 77, 0.3);
 }

@@ -121,19 +121,19 @@ function formatSize(bytes) {
   align-items: center;
   margin-bottom: 16px;
   padding-bottom: 12px;
-  border-bottom: 2px solid rgba(221, 132, 72, 0.2);
+  border-bottom: 2px solid rgba(var(--color-primary-rgb), 0.2);
 }
 
 .list-header h4 {
   font-size: 16px;
   font-weight: 600;
-  color: rgba(45, 45, 45, 0.9);
+  color: rgba(var(--color-text-dark-rgb), 0.9);
   margin: 0;
 }
 
 .list-header .hint {
   font-size: 12px;
-  color: rgba(45, 45, 45, 0.5);
+  color: rgba(var(--color-text-dark-rgb), 0.5);
 }
 
 .file-items {
@@ -149,21 +149,21 @@ function formatSize(bytes) {
   gap: 12px;
   padding: 12px;
   background: rgba(255, 255, 255, 0.8);
-  border: 1px solid rgba(221, 132, 72, 0.2);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.2);
   border-radius: 10px;
   transition: all 0.2s;
   cursor: move;
 }
 
 .file-item:hover {
-  background: rgba(255, 255, 255, 1);
-  border-color: rgba(221, 132, 72, 0.4);
+  background: var(--color-white);
+  border-color: rgba(var(--color-primary-rgb), 0.4);
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgba(var(--color-text-dark-rgb), 0.1);
 }
 
 .drag-handle {
-  color: rgba(45, 45, 45, 0.4);
+  color: rgba(var(--color-text-dark-rgb), 0.4);
   font-size: 18px;
   cursor: grab;
   user-select: none;
@@ -179,11 +179,11 @@ function formatSize(bytes) {
   justify-content: center;
   width: 28px;
   height: 28px;
-  background: rgba(221, 132, 72, 0.15);
+  background: rgba(var(--color-primary-rgb), 0.15);
   border-radius: 50%;
   font-size: 13px;
   font-weight: 600;
-  color: var(--electric-primary);
+  color: var(--color-primary);
 }
 
 .file-info {
@@ -197,7 +197,7 @@ function formatSize(bytes) {
 .file-name {
   font-size: 14px;
   font-weight: 500;
-  color: rgba(45, 45, 45, 0.9);
+  color: rgba(var(--color-text-dark-rgb), 0.9);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -205,7 +205,7 @@ function formatSize(bytes) {
 
 .file-size {
   font-size: 12px;
-  color: rgba(45, 45, 45, 0.6);
+  color: rgba(var(--color-text-dark-rgb), 0.6);
 }
 
 .remove-btn {
@@ -218,23 +218,23 @@ function formatSize(bytes) {
   background: transparent;
   border: none;
   border-radius: 8px;
-  color: rgba(239, 68, 68, 0.7);
+  color: color-mix(in srgb, var(--color-danger) 70%, transparent);
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .remove-btn:hover {
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  color: var(--color-danger);
 }
 
 .total-info {
   padding-top: 12px;
-  border-top: 1px solid rgba(221, 132, 72, 0.2);
+  border-top: 1px solid rgba(var(--color-primary-rgb), 0.2);
   text-align: right;
   font-size: 13px;
   font-weight: 600;
-  color: rgba(45, 45, 45, 0.7);
+  color: rgba(var(--color-text-dark-rgb), 0.7);
 }
 
 @media (max-width: 768px) {

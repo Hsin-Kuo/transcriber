@@ -296,12 +296,18 @@ function initWavesurfer() {
   // 創建 regions plugin
   regionsPlugin.value = RegionsPlugin.create()
 
+  // 從 CSS 變數取得編輯器顏色
+  const styles = getComputedStyle(document.documentElement)
+  const waveColor = styles.getPropertyValue('--editor-waveform').trim() || '#DD8448'
+  const progressColor = styles.getPropertyValue('--editor-progress').trim() || '#FF6B35'
+  const cursorColor = styles.getPropertyValue('--editor-cursor').trim() || '#FFFFFF'
+
   // 創建 WaveSurfer 實例 - 優化大檔案效能
   wavesurfer.value = WaveSurfer.create({
     container: waveformEl.value,
-    waveColor: '#DD8448',
-    progressColor: '#FF6B35',
-    cursorColor: '#FFFFFF',
+    waveColor,
+    progressColor,
+    cursorColor,
     barWidth: 2,
     barGap: 1,
     barRadius: 2,
@@ -475,13 +481,14 @@ function addRegion() {
 
   console.log('➕ Creating region:', { start, end })
 
-  // 生成隨機顏色
+  // 從 CSS 變數取得區段顏色
+  const styles = getComputedStyle(document.documentElement)
   const colors = [
-    'rgba(221, 132, 72, 0.3)',
-    'rgba(255, 107, 53, 0.3)',
-    'rgba(0, 184, 148, 0.3)',
-    'rgba(156, 39, 176, 0.3)',
-    'rgba(33, 150, 243, 0.3)'
+    styles.getPropertyValue('--editor-region-1').trim() || 'rgba(221, 132, 72, 0.3)',
+    styles.getPropertyValue('--editor-region-2').trim() || 'rgba(255, 107, 53, 0.3)',
+    styles.getPropertyValue('--editor-region-3').trim() || 'rgba(0, 184, 148, 0.3)',
+    styles.getPropertyValue('--editor-region-4').trim() || 'rgba(156, 39, 176, 0.3)',
+    styles.getPropertyValue('--editor-region-5').trim() || 'rgba(33, 150, 243, 0.3)'
   ]
   const color = colors[Math.floor(Math.random() * colors.length)]
 
@@ -559,10 +566,12 @@ function deleteRegion(regionId) {
     deletedRegionIds.value.add(regionId)
     console.log('🌊 Added to deleted list:', regionId)
 
-    // 將區段改為灰色並禁用互動
+    // 將區段改為灰色並禁用互動（從 CSS 變數取得顏色）
     try {
+      const styles = getComputedStyle(document.documentElement)
+      const deletedColor = styles.getPropertyValue('--editor-region-deleted').trim() || 'rgba(100, 100, 100, 0.3)'
       region.setOptions({
-        color: 'rgba(100, 100, 100, 0.3)',
+        color: deletedColor,
         drag: false,
         resize: false
       })
@@ -651,7 +660,7 @@ defineExpose({
 <style scoped>
 .waveform-wrapper {
   padding: 24px;
-  background: linear-gradient(135deg, rgba(28, 28, 28, 0.95) 0%, rgba(20, 20, 20, 0.95) 100%);
+  background: var(--editor-bg-gradient);
   position: relative;
 }
 
@@ -693,24 +702,24 @@ defineExpose({
 .marker-line {
   width: 2px;
   height: 100%;
-  background: rgba(255, 107, 53, 0.8);
+  background: var(--editor-marker-color);
   position: relative;
   z-index: 2;
 }
 
 .marker-line-start {
-  box-shadow: 2px 0 8px rgba(255, 107, 53, 0.5);
+  box-shadow: 2px 0 8px rgba(var(--color-orange-rgb), 0.5);
 }
 
 .marker-line-end {
-  box-shadow: -2px 0 8px rgba(255, 107, 53, 0.5);
+  box-shadow: -2px 0 8px rgba(var(--color-orange-rgb), 0.5);
 }
 
 .marker-fill {
   flex: 1;
-  background: rgba(255, 255, 255, 0.05);
-  border-top: 1px dashed rgba(255, 107, 53, 0.3);
-  border-bottom: 1px dashed rgba(255, 107, 53, 0.3);
+  background: var(--editor-marker-fill);
+  border-top: 1px dashed rgba(var(--color-orange-rgb), 0.3);
+  border-bottom: 1px dashed rgba(var(--color-orange-rgb), 0.3);
 }
 
 /* 美化滾動條 */
@@ -724,29 +733,29 @@ defineExpose({
 }
 
 .waveform::-webkit-scrollbar-thumb {
-  background: rgba(221, 132, 72, 0.5);
+  background: rgba(var(--color-primary-rgb), 0.5);
   border-radius: 6px;
   transition: background 0.3s ease;
 }
 
 .waveform::-webkit-scrollbar-thumb:hover {
-  background: rgba(221, 132, 72, 0.8);
+  background: rgba(var(--color-primary-rgb), 0.8);
 }
 
 .waveform-hint {
   margin-top: 12px;
   padding: 10px 16px;
-  background: rgba(221, 132, 72, 0.1);
-  border: 1px solid rgba(221, 132, 72, 0.3);
+  background: rgba(var(--color-primary-rgb), 0.1);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.3);
   border-radius: 6px;
-  color: #999;
+  color: var(--color-gray-200);
   font-size: 0.85rem;
   text-align: center;
   line-height: 1.5;
 }
 
 .waveform-hint strong {
-  color: #DD8448;
+  color: var(--color-primary);
   font-weight: 600;
 }
 
@@ -765,7 +774,7 @@ defineExpose({
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.05);
-  color: #aaa;
+  color: var(--color-gray-200);
   font-size: 0.95rem;
   font-weight: 500;
   cursor: pointer;
@@ -774,25 +783,25 @@ defineExpose({
 
 .control-btn:hover {
   background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  color: var(--color-white);
   border-color: rgba(255, 255, 255, 0.3);
 }
 
 .control-btn.active {
-  background: rgba(255, 107, 53, 0.2);
-  color: #FF6B35;
-  border-color: rgba(255, 107, 53, 0.5);
+  background: rgba(var(--color-orange-rgb), 0.2);
+  color: var(--color-orange);
+  border-color: rgba(var(--color-orange-rgb), 0.5);
 }
 
 .control-btn-primary {
-  background: linear-gradient(135deg, rgba(255, 107, 53, 0.2) 0%, rgba(221, 132, 72, 0.2) 100%);
-  color: #DD8448;
-  border-color: rgba(221, 132, 72, 0.5);
+  background: linear-gradient(135deg, rgba(var(--color-orange-rgb), 0.2) 0%, rgba(var(--color-primary-rgb), 0.2) 100%);
+  color: var(--color-primary);
+  border-color: rgba(var(--color-primary-rgb), 0.5);
 }
 
 .control-btn-primary:hover {
-  background: linear-gradient(135deg, rgba(255, 107, 53, 0.3) 0%, rgba(221, 132, 72, 0.3) 100%);
-  color: #FF6B35;
+  background: linear-gradient(135deg, rgba(var(--color-orange-rgb), 0.3) 0%, rgba(var(--color-primary-rgb), 0.3) 100%);
+  color: var(--color-orange);
 }
 
 .zoom-control {
@@ -803,7 +812,7 @@ defineExpose({
 }
 
 .zoom-control label {
-  color: #aaa;
+  color: var(--color-gray-200);
   font-size: 0.9rem;
 }
 
@@ -811,7 +820,7 @@ defineExpose({
   width: 150px;
   height: 4px;
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(var(--color-white), 0.1);
   outline: none;
   cursor: pointer;
 }
@@ -821,7 +830,7 @@ defineExpose({
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #DD8448;
+  background: var(--color-primary);
   cursor: pointer;
 }
 
@@ -829,13 +838,13 @@ defineExpose({
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #DD8448;
+  background: var(--color-primary);
   cursor: pointer;
   border: none;
 }
 
 .zoom-value {
-  color: #DD8448;
+  color: var(--color-primary);
   font-weight: 600;
   font-size: 0.9rem;
   min-width: 40px;
@@ -844,7 +853,7 @@ defineExpose({
 .loading-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(20, 20, 20, 0.9);
+  background: var(--editor-bg-dark);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -857,7 +866,7 @@ defineExpose({
   width: 40px;
   height: 40px;
   border: 3px solid rgba(255, 255, 255, 0.1);
-  border-top-color: #DD8448;
+  border-top-color: var(--color-primary);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
   margin-bottom: 12px;
@@ -870,13 +879,13 @@ defineExpose({
 }
 
 .loading-overlay p {
-  color: #aaa;
+  color: var(--color-gray-200);
   font-size: 0.95rem;
   margin: 4px 0;
 }
 
 .loading-overlay .loading-hint {
-  color: #888;
+  color: var(--color-gray-300);
   font-size: 0.85rem;
   max-width: 400px;
   text-align: center;
@@ -886,7 +895,7 @@ defineExpose({
 .error-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(20, 20, 20, 0.95);
+  background: var(--editor-bg-dark);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -902,10 +911,10 @@ defineExpose({
 }
 
 .error-message {
-  color: #ff6b6b;
+  color: var(--color-danger-light);
   font-size: 0.9rem;
-  background: rgba(255, 107, 107, 0.1);
-  border: 1px solid rgba(255, 107, 107, 0.3);
+  background: rgba(var(--color-danger-rgb), 0.1);
+  border: 1px solid rgba(var(--color-danger-rgb), 0.3);
   border-radius: 6px;
   padding: 16px;
   margin-bottom: 20px;
@@ -919,7 +928,7 @@ defineExpose({
 .btn-dismiss {
   padding: 10px 24px;
   background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  color: var(--color-white);
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 6px;
   font-size: 0.95rem;

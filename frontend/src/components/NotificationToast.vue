@@ -142,15 +142,15 @@ onUnmounted(() => {
 }
 
 .notification-info .notification-icon {
-  color: #3b82f6;
+  color: var(--color-info);
 }
 
 .notification-success .notification-icon {
-  color: #10b981;
+  color: var(--color-success);
 }
 
 .notification-error .notification-icon {
-  color: #ef4444;
+  color: var(--color-danger);
 }
 
 .notification-processing .notification-icon {

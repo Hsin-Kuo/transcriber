@@ -142,7 +142,7 @@ h2 {
 }
 
 .error-message {
-  color: #c62828;
+  color: var(--color-danger-dark);
   font-weight: 500;
 }
 
@@ -165,7 +165,7 @@ h2 {
 }
 
 .btn-primary {
-  background: linear-gradient(145deg, #e9eef5, #d1d9e6);
+  background: var(--gradient-cool);
   color: var(--neu-primary);
 }
 
@@ -180,7 +180,7 @@ h2 {
 }
 
 .btn-secondary {
-  background: linear-gradient(145deg, #e9eef5, #d1d9e6);
+  background: var(--gradient-cool);
   color: var(--neu-text);
 }
 

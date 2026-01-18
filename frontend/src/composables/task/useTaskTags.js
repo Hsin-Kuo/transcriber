@@ -1,7 +1,11 @@
 import { ref, computed } from 'vue'
 import api from '../../utils/api'
 
-// 預設顏色選項（與 TaskList.vue 中保持一致）
+/**
+ * 預設顏色選項
+ * 這些顏色值對應 assets/colors.css 中的 --tag-color-1 到 --tag-color-20
+ * 保持為 hex 值是因為需要存儲到數據庫和動態設置樣式
+ */
 export const presetColors = [
   '#667eea', '#f093fb', '#4facfe', '#43e97b', '#fa709a',
   '#feca57', '#48dbfb', '#ff6b6b', '#ee5a6f', '#c44569',
@@ -9,18 +13,21 @@ export const presetColors = [
   '#6c5ce7', '#e17055', '#74b9ff', '#55efc4', '#ffeaa7'
 ]
 
-// 默認顏色（用於生成 hash）
+/**
+ * 默認顏色（用於根據標籤名稱 hash 生成顏色）
+ * 對應 colors.css 中的標籤預設色
+ */
 const defaultColors = [
-  '#667eea', // 紫藍
-  '#f093fb', // 粉紫
-  '#4facfe', // 天藍
-  '#43e97b', // 青綠
-  '#fa709a', // 粉紅
-  '#feca57', // 橘黃
-  '#48dbfb', // 青藍
-  '#ff6b6b', // 珊瑚紅
-  '#ee5a6f', // 玫瑰紅
-  '#c44569', // 暗紅
+  '#667eea', // 紫藍 --tag-color-1
+  '#f093fb', // 粉紫 --tag-color-2
+  '#4facfe', // 天藍 --tag-color-3
+  '#43e97b', // 青綠 --tag-color-4
+  '#fa709a', // 粉紅 --tag-color-5
+  '#feca57', // 橘黃 --tag-color-6
+  '#48dbfb', // 青藍 --tag-color-7
+  '#ff6b6b', // 珊瑚紅 --tag-color-8
+  '#ee5a6f', // 玫瑰紅 --tag-color-9
+  '#c44569', // 暗紅 --tag-color-10
 ]
 
 // ===== 全局共享狀態 =====

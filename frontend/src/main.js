@@ -3,6 +3,7 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router'
 import i18n from './i18n'
+import './assets/colors.css'  // 統一顏色管理
 import './style.css'
 
 const app = createApp(App)

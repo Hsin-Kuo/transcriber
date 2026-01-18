@@ -212,7 +212,7 @@ const currentColor = computed(() => {
   if (colorPickerTag.value) {
     return getTagColor(colorPickerTag.value)
   }
-  return '#667eea'
+  return 'var(--color-purple)'
 })
 
 // Methods
@@ -511,14 +511,14 @@ function handleColorSelected({ tag, color }) {
 }
 
 .drag-handle:hover {
-  color: #77969A;
+  color: var(--color-teal);
 }
 
 .filter-tag-input {
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 500;
-  border: 2px solid #44465b;
+  border: 2px solid var(--color-secondary);
   border-radius: 12px;
   outline: none;
   min-width: 100px;
@@ -547,7 +547,7 @@ function handleColorSelected({ tag, color }) {
 
 .filter-tag-btn.active {
   font-weight: 600;
-  border-bottom: 2px solid #916a2d;
+  border-bottom: 2px solid var(--color-nav-recent-bg);
 }
 
 .filter-tag-btn.active:hover:not(:disabled) {
@@ -601,7 +601,7 @@ function handleColorSelected({ tag, color }) {
 .btn-edit-filter {
   background: rgba(var(--color-teal-rgb), 0.1);
   border-color: rgba(var(--color-teal-rgb), 0.3);
-  color: #77969a;
+  color: var(--color-teal);
 }
 
 .btn-edit-filter:hover {
@@ -611,7 +611,7 @@ function handleColorSelected({ tag, color }) {
 .btn-save-filter {
   background: rgba(var(--color-success-rgb), 0.15);
   border-color: rgba(var(--color-success-rgb), 0.3);
-  color: #059669;
+  color: var(--color-success-light);
   font-size: 16px;
   font-weight: 600;
 }

@@ -258,14 +258,14 @@ function handleMergeClick() {
 }
 
 .merge-icon svg {
-  stroke: rgba(45, 45, 45, 0.5);
+  stroke: rgba(var(--color-text-dark-rgb), 0.5);
   transition: stroke 0.3s ease;
 }
 
 .merge-label {
   font-size: 12px;
   font-weight: 500;
-  color: rgba(45, 45, 45, 0.6);
+  color: rgba(var(--color-text-dark-rgb), 0.6);
   margin-top: 4px;
   transition: color 0.3s ease;
 }

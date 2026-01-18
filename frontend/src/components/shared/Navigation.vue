@@ -244,7 +244,7 @@ watch(() => route.path, (newPath, oldPath) => {
   width: 28px;
   height: 36px;
   border: none;
-  background: #ffffff00;
+  background: transparent;
   border-radius: 6px;
   box-shadow: var(--neu-shadow-btn-sm);
   cursor: pointer;
@@ -282,7 +282,7 @@ watch(() => route.path, (newPath, oldPath) => {
   left: 80px;
   right: -50px;
   height: 1px;
-  background-color: black;
+  background-color: var(--color-black);
 }
 
 .nav-brand h2 {

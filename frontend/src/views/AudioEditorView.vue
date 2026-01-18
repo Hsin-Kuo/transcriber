@@ -679,14 +679,7 @@ function handleClipDelete(clipId) {
 </script>
 
 <style scoped>
-/* CSS 變數 */
-.editor-container {
-  --color-primary: #DD8448;
-  --color-text-muted: var(--color-text-muted);
-  --color-text-secondary: var(--color-text-secondary);
-  --color-danger: var(--color-danger);
-  --gradient-dark: var(--gradient-dark);
-}
+/* CSS 變數已移至 colors.css */
 
 .editor-container {
   min-height: calc(100vh - 200px);
@@ -711,7 +704,7 @@ function handleClipDelete(clipId) {
 .files-header h3 {
   margin: 0;
   font-size: 1.3rem;
-  color: #fff;
+  color: var(--color-white);
 }
 
 .files-list {
@@ -760,7 +753,7 @@ function handleClipDelete(clipId) {
 }
 
 .file-name {
-  color: #fff;
+  color: var(--color-white);
   font-weight: 500;
   margin-bottom: 4px;
 }
@@ -858,7 +851,7 @@ function handleClipDelete(clipId) {
 }
 
 .btn-timeline {
-  background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);
+  background: var(--gradient-purple);
   color: white;
   font-size: 1.1rem;
 }
@@ -892,7 +885,7 @@ function handleClipDelete(clipId) {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #FF6B35 0%, var(--color-primary) 100%);
+  background: linear-gradient(135deg, var(--color-orange) 0%, var(--color-primary) 100%);
   color: white;
 }
 
@@ -902,7 +895,7 @@ function handleClipDelete(clipId) {
 }
 
 .btn-accent {
-  background: linear-gradient(135deg, #00b894 0%, #00cec9 100%);
+  background: var(--gradient-teal);
   color: white;
 }
 
@@ -912,7 +905,7 @@ function handleClipDelete(clipId) {
 }
 
 .btn-warning {
-  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+  background: var(--gradient-danger);
   color: white;
 }
 
@@ -922,7 +915,7 @@ function handleClipDelete(clipId) {
 }
 
 .btn-apply {
-  background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+  background: var(--gradient-blue);
   color: white;
 }
 

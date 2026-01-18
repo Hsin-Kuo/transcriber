@@ -384,13 +384,13 @@ async function handleRegister() {
 
 .error-hint {
   font-size: 0.85rem;
-  color: #c62828;
+  color: var(--color-danger-dark);
   margin-top: 4px;
   font-weight: 500;
 }
 
 .error-message {
-  color: #c62828;
+  color: var(--color-danger-dark);
   font-size: 0.85rem;
   text-align: left;
   font-weight: 500;

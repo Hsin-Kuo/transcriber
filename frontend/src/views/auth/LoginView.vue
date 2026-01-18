@@ -220,8 +220,8 @@ async function resendVerification() {
   margin: 0 auto;
   background: var(--upload-bg);
   border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  border: 1px solid rgba(160, 145, 124, 0.2);
+  box-shadow: 0 4px 12px rgba(var(--color-text-dark-rgb), 0.08);
+  border: 1px solid rgba(var(--color-divider-rgb), 0.2);
   position: relative;
   z-index: 1;
 }
@@ -265,9 +265,9 @@ async function resendVerification() {
 
 .form-group input {
   padding: 12px 16px;
-  border: 2px solid rgba(160, 145, 124, 0.3);
+  border: 2px solid rgba(var(--color-divider-rgb), 0.3);
   border-radius: 8px;
-  background: white;
+  background: var(--color-white);
   color: var(--neu-text);
   font-size: 1rem;
   transition: all 0.2s ease;
@@ -276,7 +276,7 @@ async function resendVerification() {
 .form-group input:focus {
   outline: none;
   border-color: var(--neu-primary);
-  box-shadow: 0 0 0 3px rgba(68, 70, 91, 0.1);
+  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.1);
 }
 
 .form-group input:disabled {
@@ -286,7 +286,7 @@ async function resendVerification() {
 }
 
 .error-message {
-  color: #c62828;
+  color: var(--color-danger-dark);
   font-size: 0.85rem;
   text-align: left;
   font-weight: 500;
@@ -296,19 +296,19 @@ async function resendVerification() {
 .verification-prompt {
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid rgba(198, 40, 40, 0.2);
+  border-top: 1px solid rgba(var(--color-danger-rgb), 0.2);
 }
 
 .verification-text {
   margin: 0 0 12px 0;
   font-size: 0.85rem;
-  color: #c62828;
+  color: var(--color-danger-dark);
   font-weight: 500;
 }
 
 .btn-resend {
   padding: 10px 20px;
-  background: white;
+  background: var(--color-white);
   color: var(--neu-primary);
   border: 2px solid var(--neu-primary);
   border-radius: 8px;
@@ -321,7 +321,7 @@ async function resendVerification() {
 
 .btn-resend:hover:not(:disabled) {
   background: var(--neu-primary);
-  color: white;
+  color: var(--color-white);
 }
 
 .btn-resend:active:not(:disabled) {
@@ -336,9 +336,9 @@ async function resendVerification() {
 .resend-success {
   margin: 12px 0 0 0;
   padding: 10px;
-  background: #d4edda;
+  background: var(--color-success-bg);
   border-radius: 6px;
-  color: #155724;
+  color: var(--color-success-dark);
   font-size: 0.85rem;
   font-weight: 600;
 }
@@ -346,7 +346,7 @@ async function resendVerification() {
 .btn-primary {
   padding: 14px 24px;
   background: var(--neu-primary-dark);
-  color: white;
+  color: var(--color-white);
   border: none;
   border-radius: 8px;
   font-size: 1rem;
@@ -357,14 +357,14 @@ async function resendVerification() {
 }
 
 .btn-primary:hover:not(:disabled) {
-  color: white;
+  color: var(--color-white);
   transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 8px rgba(var(--color-text-dark-rgb), 0.15);
 }
 
 .btn-primary:active:not(:disabled) {
   transform: translateY(0);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 4px rgba(var(--color-text-dark-rgb), 0.1);
 }
 
 .btn-primary:disabled {

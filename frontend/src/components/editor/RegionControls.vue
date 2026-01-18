@@ -100,7 +100,7 @@ function handleDeleteRegion(regionId) {
 <style scoped>
 .controls-content {
   padding: 24px;
-  background: linear-gradient(135deg, rgba(28, 28, 28, 0.95) 0%, rgba(20, 20, 20, 0.95) 100%);
+  background: var(--editor-bg-gradient);
 }
 
 .controls-header {
@@ -113,12 +113,12 @@ function handleDeleteRegion(regionId) {
 .controls-header h3 {
   margin: 0;
   font-size: 1.3rem;
-  color: #fff;
+  color: var(--color-white);
 }
 
 .region-count {
-  background: rgba(221, 132, 72, 0.2);
-  color: #DD8448;
+  background: rgba(var(--color-primary-rgb), 0.2);
+  color: var(--color-primary);
   padding: 4px 12px;
   border-radius: 12px;
   font-size: 0.85rem;
@@ -128,7 +128,7 @@ function handleDeleteRegion(regionId) {
 .empty-state {
   text-align: center;
   padding: 40px 20px;
-  color: #888;
+  color: var(--color-gray-300);
 }
 
 .empty-state p {
@@ -137,7 +137,7 @@ function handleDeleteRegion(regionId) {
 
 .hint {
   font-size: 0.9rem;
-  color: #666;
+  color: var(--color-gray-400);
 }
 
 .regions-list {
@@ -161,7 +161,7 @@ function handleDeleteRegion(regionId) {
 
 .region-item:hover {
   background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(221, 132, 72, 0.3);
+  border-color: rgba(var(--color-primary-rgb), 0.3);
 }
 
 .region-info {
@@ -172,8 +172,8 @@ function handleDeleteRegion(regionId) {
 }
 
 .region-number {
-  background: rgba(221, 132, 72, 0.2);
-  color: #DD8448;
+  background: rgba(var(--color-primary-rgb), 0.2);
+  color: var(--color-primary);
   padding: 4px 10px;
   border-radius: 6px;
   font-weight: 600;
@@ -188,21 +188,21 @@ function handleDeleteRegion(regionId) {
 }
 
 .time-label {
-  color: #888;
+  color: var(--color-gray-300);
 }
 
 .time-value {
-  color: #fff;
+  color: var(--color-white);
   font-weight: 500;
   font-family: 'Courier New', monospace;
 }
 
 .separator {
-  color: #666;
+  color: var(--color-gray-400);
 }
 
 .region-duration {
-  color: #DD8448;
+  color: var(--color-primary);
   font-weight: 600;
   margin-left: auto;
 }
@@ -233,21 +233,21 @@ function handleDeleteRegion(regionId) {
 }
 
 .play-btn {
-  color: #4CAF50;
+  color: var(--color-success-alt);
 }
 
 .play-btn:hover {
-  border-color: rgba(76, 175, 80, 0.5);
-  background: rgba(76, 175, 80, 0.1);
+  border-color: rgba(var(--color-success-alt-rgb), 0.5);
+  background: rgba(var(--color-success-alt-rgb), 0.1);
 }
 
 .delete-btn {
-  color: #F44336;
+  color: var(--color-danger);
 }
 
 .delete-btn:hover {
-  border-color: rgba(244, 67, 54, 0.5);
-  background: rgba(244, 67, 54, 0.1);
+  border-color: rgba(var(--color-danger-rgb), 0.5);
+  background: rgba(var(--color-danger-rgb), 0.1);
 }
 
 .regions-list::-webkit-scrollbar {
@@ -260,11 +260,11 @@ function handleDeleteRegion(regionId) {
 }
 
 .regions-list::-webkit-scrollbar-thumb {
-  background: rgba(221, 132, 72, 0.5);
+  background: rgba(var(--color-primary-rgb), 0.5);
   border-radius: 3px;
 }
 
 .regions-list::-webkit-scrollbar-thumb:hover {
-  background: rgba(221, 132, 72, 0.7);
+  background: rgba(var(--color-primary-rgb), 0.7);
 }
 </style>

@@ -471,17 +471,17 @@ defineExpose({
 .audio-error {
   padding: 16px;
   background: rgba(255, 235, 238, 0.9);
-  border-left: 4px solid #c62828;
+  border-left: 4px solid var(--color-danger-dark);
   border-radius: 8px;
   margin-bottom: 12px;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  box-shadow: 0 2px 8px rgba(198, 40, 40, 0.1);
+  box-shadow: 0 2px 8px rgba(var(--color-danger-rgb), 0.1);
 }
 
 .error-message {
-  color: #c62828;
+  color: var(--color-danger-dark);
   font-size: 0.9rem;
   line-height: 1.5;
 }
@@ -493,8 +493,8 @@ defineExpose({
   gap: 8px;
   padding: 8px 16px;
   background: var(--neu-bg);
-  color: #c62828;
-  border: 1px solid #c62828;
+  color: var(--color-danger-dark);
+  border: 1px solid var(--color-danger-dark);
   border-radius: 8px;
   cursor: pointer;
   font-size: 0.85rem;
@@ -504,9 +504,9 @@ defineExpose({
 }
 
 .btn-retry:hover {
-  background: #c62828;
-  color: white;
-  box-shadow: 0 2px 8px rgba(198, 40, 40, 0.2);
+  background: var(--color-danger-dark);
+  color: var(--color-white);
+  box-shadow: 0 2px 8px rgba(var(--color-danger-rgb), 0.2);
   transform: translateY(-1px);
 }
 

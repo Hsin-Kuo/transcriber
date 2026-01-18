@@ -296,7 +296,7 @@ function handleCancel() {
   font-size: 12px;
   font-weight: 500;
   color: white;
-  background: #667eea;
+  background: var(--color-purple);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   transition: all 0.2s ease;
   cursor: default;
@@ -327,8 +327,8 @@ function handleCancel() {
   font-size: 12px;
   font-weight: 500;
   color: white;
-  background: #667eea;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  background: var(--color-purple);
+  box-shadow: 0 2px 8px rgba(var(--color-purple-rgb), 0.3);
 }
 
 .tag-text-input {
@@ -338,7 +338,7 @@ function handleCancel() {
   padding: 2px 6px;
   font-size: 12px;
   width: 80px;
-  color: #2d2d2d;
+  color: var(--color-text-dark);
 }
 
 .tag-text-input:focus {
@@ -400,9 +400,9 @@ function handleCancel() {
   justify-content: center;
   padding: 2px 6px;
   background: rgba(var(--color-teal-rgb), 0.1);
-  border: 1px solid #77969a4d;
+  border: 1px solid rgba(var(--color-teal-rgb), 0.3);
   border-radius: 4px;
-  color: #77969A;
+  color: var(--color-teal);
   cursor: pointer;
   transition: all 0.2s;
   font-size: 12px;
@@ -476,7 +476,7 @@ function handleCancel() {
 
 .btn-tag-action.btn-save {
   background: rgba(var(--color-success-rgb), 0.15);
-  color: #059669;
+  color: var(--color-success-light);
 }
 
 .btn-tag-action.btn-save:hover {
@@ -485,7 +485,7 @@ function handleCancel() {
 
 .btn-tag-action.btn-cancel {
   background: rgba(var(--color-danger-rgb), 0.15);
-  color: #ef4444;
+  color: var(--color-danger);
 }
 
 .btn-tag-action.btn-cancel:hover {
@@ -520,10 +520,10 @@ function handleCancel() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(102, 126, 234, 0.15);
-  border: 1px solid rgba(102, 126, 234, 0.3);
+  background: rgba(var(--color-purple-rgb), 0.15);
+  border: 1px solid rgba(var(--color-purple-rgb), 0.3);
   border-radius: 6px;
-  color: #667eea;
+  color: var(--color-purple);
   font-size: 18px;
   font-weight: 600;
   cursor: pointer;
@@ -531,8 +531,8 @@ function handleCancel() {
 }
 
 .btn-add-tag-inline:hover:not(:disabled) {
-  background: rgba(102, 126, 234, 0.25);
-  border-color: rgba(102, 126, 234, 0.5);
+  background: rgba(var(--color-purple-rgb), 0.25);
+  border-color: rgba(var(--color-purple-rgb), 0.5);
 }
 
 .btn-add-tag-inline:disabled {

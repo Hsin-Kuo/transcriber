@@ -131,7 +131,7 @@ function selectColor(color) {
   background: rgba(var(--color-danger-rgb), 0.1);
   border: none;
   border-radius: 4px;
-  color: #ef4444;
+  color: var(--color-danger);
   font-size: 14px;
   cursor: pointer;
   transition: all 0.2s;

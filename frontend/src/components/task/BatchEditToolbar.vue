@@ -337,7 +337,7 @@ function handleManualAddTags() {
 
 .btn-batch-delete {
   background: rgba(var(--color-danger-rgb), 0.15);
-  color: #ef4444;
+  color: var(--color-danger);
 }
 
 .btn-batch-delete:hover {
@@ -380,7 +380,7 @@ function handleManualAddTags() {
 }
 
 .batch-tags-info svg {
-  color: #77969a;
+  color: var(--color-teal);
 }
 
 .tags-title {

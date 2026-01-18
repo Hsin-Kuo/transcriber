@@ -293,7 +293,7 @@ function exportTimeline() {
   background: rgba(255, 107, 53, 0.1);
   border: 1px solid rgba(255, 107, 53, 0.3);
   border-radius: 6px;
-  color: #FF6B35;
+  color: var(--color-orange);
   font-size: 14px;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -307,7 +307,7 @@ function exportTimeline() {
 .control-btn.active {
   background: rgba(221, 132, 72, 0.2);
   border-color: rgba(221, 132, 72, 0.5);
-  color: #DD8448;
+  color: var(--color-primary);
 }
 
 .control-btn:disabled {
@@ -319,7 +319,7 @@ function exportTimeline() {
   display: flex;
   align-items: center;
   gap: 12px;
-  color: #aaa;
+  color: var(--color-gray-200);
   font-size: 14px;
 }
 
@@ -336,7 +336,7 @@ function exportTimeline() {
   -webkit-appearance: none;
   width: 14px;
   height: 14px;
-  background: #FF6B35;
+  background: var(--color-orange);
   border-radius: 50%;
   cursor: pointer;
 }
@@ -344,7 +344,7 @@ function exportTimeline() {
 .zoom-slider::-moz-range-thumb {
   width: 14px;
   height: 14px;
-  background: #FF6B35;
+  background: var(--color-orange);
   border-radius: 50%;
   cursor: pointer;
   border: none;
@@ -354,12 +354,12 @@ function exportTimeline() {
   min-width: 60px;
   text-align: right;
   font-weight: 500;
-  color: #FF6B35;
+  color: var(--color-orange);
 }
 
 .time-display {
   margin-left: auto;
-  color: #aaa;
+  color: var(--color-gray-200);
   font-size: 14px;
   font-weight: 500;
   font-family: monospace;
@@ -392,7 +392,7 @@ function exportTimeline() {
   background: rgba(255, 255, 255, 0.05);
   border: 1px dashed rgba(255, 255, 255, 0.2);
   border-radius: 6px;
-  color: #aaa;
+  color: var(--color-gray-200);
   font-size: 14px;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -403,7 +403,7 @@ function exportTimeline() {
 .add-track-btn:hover {
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.3);
-  color: #fff;
+  color: var(--color-white);
 }
 
 .timeline-footer {
@@ -419,7 +419,7 @@ function exportTimeline() {
   align-items: center;
   gap: 8px;
   padding: 12px 24px;
-  background: linear-gradient(135deg, #FF6B35 0%, #DD8448 100%);
+  background: linear-gradient(135deg, var(--color-orange) 0%, var(--color-primary) 100%);
   border: none;
   border-radius: 8px;
   color: white;

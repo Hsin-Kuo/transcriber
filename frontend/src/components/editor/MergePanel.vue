@@ -156,7 +156,7 @@ function formatDuration(seconds) {
 .panel-header h3 {
   margin: 0 0 20px 0;
   font-size: 1.3rem;
-  color: #fff;
+  color: var(--color-white);
 }
 
 .mode-selector {
@@ -165,7 +165,7 @@ function formatDuration(seconds) {
 
 .mode-label {
   display: block;
-  color: #aaa;
+  color: var(--color-gray-200);
   font-size: 0.9rem;
   margin-bottom: 8px;
 }
@@ -185,7 +185,7 @@ function formatDuration(seconds) {
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.05);
-  color: #aaa;
+  color: var(--color-gray-200);
   font-size: 0.9rem;
   font-weight: 500;
   cursor: pointer;
@@ -194,7 +194,7 @@ function formatDuration(seconds) {
 
 .mode-btn:hover {
   background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  color: var(--color-white);
 }
 
 .mode-btn.active {
@@ -227,7 +227,7 @@ function formatDuration(seconds) {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
-  color: #aaa;
+  color: var(--color-gray-200);
   font-size: 0.9rem;
 }
 
@@ -248,7 +248,7 @@ function formatDuration(seconds) {
 .empty-state {
   text-align: center;
   padding: 30px 20px;
-  color: #888;
+  color: var(--color-gray-300);
 }
 
 .empty-state p {
@@ -257,7 +257,7 @@ function formatDuration(seconds) {
 
 .hint {
   font-size: 0.85rem;
-  color: #666;
+  color: var(--color-gray-400);
 }
 
 .clips-selection-list {
@@ -323,7 +323,7 @@ function formatDuration(seconds) {
 }
 
 .clip-name {
-  color: #fff;
+  color: var(--color-white);
   font-weight: 500;
 }
 

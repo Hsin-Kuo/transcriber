@@ -369,7 +369,7 @@ function getKeepAudioTooltip() {
 
 .task-header h3 {
   font-size: 16px;
-  color: #2d2d2d;
+  color: var(--color-text-dark);
   margin: 0;
 }
 
@@ -411,7 +411,7 @@ function getKeepAudioTooltip() {
 
 .badge-pending {
   background: rgba(59, 130, 246, 0.15);
-  color: #3b82f6;
+  color: var(--color-info);
 }
 
 .badge-processing {
@@ -421,17 +421,17 @@ function getKeepAudioTooltip() {
 
 .badge-completed {
   background: rgba(var(--color-success-rgb), 0.15);
-  color: #059669;
+  color: var(--color-success-light);
 }
 
 .badge-failed {
   background: rgba(var(--color-danger-rgb), 0.15);
-  color: #ef4444;
+  color: var(--color-danger);
 }
 
 .badge-cancelled {
   background: rgba(107, 114, 128, 0.15);
-  color: #6b7280;
+  color: var(--color-neutral-light);
 }
 
 .badge-task-type,
@@ -445,14 +445,14 @@ function getKeepAudioTooltip() {
 }
 
 .badge-paragraph {
-  background: #808F7C;
-  border-color: #808F7C;
+  background: var(--color-teal-light);
+  border-color: var(--color-teal-light);
   color: rgba(255, 255, 255, 0.95);
 }
 
 .badge-subtitle {
-  background: #77969A;
-  border-color: #77969A;
+  background: var(--color-teal);
+  border-color: var(--color-teal);
   color: rgba(255, 255, 255, 0.95);
 }
 
@@ -469,7 +469,7 @@ function getKeepAudioTooltip() {
 
 .progress-bar {
   height: 6px;
-  background: #e2e8f0;
+  background: var(--color-gray-100);
   border-radius: 3px;
   overflow: hidden;
   margin-bottom: 8px;
@@ -477,7 +477,7 @@ function getKeepAudioTooltip() {
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #dd8448 0%, #f59e42 100%);
+  background: linear-gradient(90deg, var(--color-primary) 0%, var(--color-primary-light) 100%);
   transition: width 0.5s ease;
   border-radius: 3px;
 }
@@ -519,7 +519,7 @@ function getKeepAudioTooltip() {
   border: 1px solid rgba(var(--color-danger-rgb), 0.3);
   border-radius: 6px;
   font-size: 13px;
-  color: #ef4444;
+  color: var(--color-danger);
 }
 
 /* 操作按鈕區域 */
@@ -573,7 +573,7 @@ function getKeepAudioTooltip() {
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: #ccc;
+  background-color: var(--color-gray-100);
   transition: all 0.3s ease;
   border-radius: 24px;
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
@@ -607,7 +607,7 @@ function getKeepAudioTooltip() {
 .toggle-input:disabled + .toggle-slider {
   opacity: 0.5;
   cursor: not-allowed;
-  background-color: #ddd;
+  background-color: var(--color-gray-100);
 }
 
 .toggle-input:disabled + .toggle-slider:before {
@@ -631,7 +631,7 @@ function getKeepAudioTooltip() {
 
 .unlock-icon {
   left: 6px;
-  color: #888;
+  color: var(--color-gray-300);
   opacity: 1;
 }
 
@@ -669,7 +669,7 @@ function getKeepAudioTooltip() {
   padding: 1px 4px;
   font-size: 11px;
   font-weight: 600;
-  background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+  background: var(--gradient-danger);
   color: white;
   border-radius: 4px;
   box-shadow: 0 2px 4px rgba(255, 107, 107, 0.3);
@@ -715,7 +715,7 @@ function getKeepAudioTooltip() {
 
 .btn-danger {
   background: rgba(var(--color-danger-rgb), 0.15);
-  color: #ef4444;
+  color: var(--color-danger);
 }
 
 .btn-danger:hover {
@@ -724,7 +724,7 @@ function getKeepAudioTooltip() {
 
 .btn-warning {
   background: rgba(245, 158, 11, 0.15);
-  color: #f59e0b;
+  color: var(--color-warning);
 }
 
 .btn-warning:hover {

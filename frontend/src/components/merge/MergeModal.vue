@@ -239,7 +239,7 @@ function handleConfirm() {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--color-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -256,9 +256,9 @@ function handleConfirm() {
   width: 90%;
   max-width: 800px;
   max-height: 85vh;
-  background: var(--neu-bg, #e0e5ec);
+  background: var(--neu-bg);
   border-radius: 20px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 20px 60px var(--color-overlay-light);
   display: flex;
   flex-direction: column;
   animation: slideUp 0.3s ease;
@@ -280,14 +280,14 @@ function handleConfirm() {
   justify-content: space-between;
   align-items: center;
   padding: 20px 24px;
-  border-bottom: 1px solid rgba(163, 177, 198, 0.3);
+  border-bottom: 1px solid rgba(var(--color-divider-rgb), 0.3);
 }
 
 .modal-header h2 {
   margin: 0;
   font-size: 20px;
   font-weight: 600;
-  color: rgba(45, 45, 45, 0.9);
+  color: rgba(var(--color-text-dark-rgb), 0.9);
 }
 
 .close-btn {
@@ -300,14 +300,14 @@ function handleConfirm() {
   background: transparent;
   border: none;
   border-radius: 10px;
-  color: rgba(45, 45, 45, 0.5);
+  color: rgba(var(--color-text-dark-rgb), 0.5);
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .close-btn:hover {
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  color: var(--color-danger);
 }
 
 .modal-body {
@@ -328,7 +328,7 @@ function handleConfirm() {
 .section-title {
   font-size: 14px;
   font-weight: 600;
-  color: rgba(45, 45, 45, 0.7);
+  color: rgba(var(--color-text-dark-rgb), 0.7);
   margin-bottom: 12px;
   display: flex;
   align-items: center;
@@ -337,7 +337,7 @@ function handleConfirm() {
 
 .file-count {
   font-weight: 500;
-  color: var(--electric-primary, #dd8448);
+  color: var(--color-primary);
 }
 
 /* 上傳區 */
@@ -354,7 +354,7 @@ function handleConfirm() {
   align-items: center;
   justify-content: center;
   padding: 30px 20px;
-  border: 3px dashed rgba(221, 132, 72, 0.3);
+  border: 3px dashed rgba(var(--color-primary-rgb), 0.3);
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.5);
   cursor: pointer;
@@ -363,37 +363,37 @@ function handleConfirm() {
 }
 
 .upload-zone:hover {
-  border-color: rgba(221, 132, 72, 0.5);
+  border-color: rgba(var(--color-primary-rgb), 0.5);
   background: rgba(255, 255, 255, 0.8);
 }
 
 .upload-zone.drag-over {
-  border-color: var(--electric-primary, #dd8448);
+  border-color: var(--color-primary);
   border-style: solid;
-  background: rgba(221, 132, 72, 0.1);
+  background: rgba(var(--color-primary-rgb), 0.1);
 }
 
 .upload-icon {
-  color: var(--electric-primary, #dd8448);
+  color: var(--color-primary);
   margin-bottom: 12px;
 }
 
 .upload-text {
   font-size: 16px;
   font-weight: 600;
-  color: rgba(45, 45, 45, 0.8);
+  color: rgba(var(--color-text-dark-rgb), 0.8);
   margin: 0 0 4px;
 }
 
 .upload-hint {
   font-size: 14px;
-  color: rgba(45, 45, 45, 0.6);
+  color: rgba(var(--color-text-dark-rgb), 0.6);
   margin: 0 0 8px;
 }
 
 .format-hint {
   font-size: 12px;
-  color: rgba(45, 45, 45, 0.4);
+  color: rgba(var(--color-text-dark-rgb), 0.4);
   margin: 0;
 }
 
@@ -410,7 +410,7 @@ function handleConfirm() {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: rgba(45, 45, 45, 0.4);
+  color: rgba(var(--color-text-dark-rgb), 0.4);
   text-align: center;
 }
 
@@ -444,19 +444,19 @@ function handleConfirm() {
   gap: 10px;
   padding: 10px 12px;
   background: rgba(255, 255, 255, 0.8);
-  border: 1px solid rgba(163, 177, 198, 0.3);
+  border: 1px solid rgba(var(--color-divider-rgb), 0.3);
   border-radius: 10px;
   transition: all 0.2s;
 }
 
 .file-item:hover {
-  background: white;
-  border-color: rgba(221, 132, 72, 0.3);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  background: var(--color-white);
+  border-color: rgba(var(--color-primary-rgb), 0.3);
+  box-shadow: 0 2px 8px rgba(var(--color-text-dark-rgb), 0.08);
 }
 
 .drag-handle {
-  color: rgba(45, 45, 45, 0.3);
+  color: rgba(var(--color-text-dark-rgb), 0.3);
   cursor: grab;
   padding: 4px;
   display: flex;
@@ -468,7 +468,7 @@ function handleConfirm() {
 }
 
 .drag-handle:hover {
-  color: rgba(45, 45, 45, 0.6);
+  color: rgba(var(--color-text-dark-rgb), 0.6);
 }
 
 .file-number {
@@ -477,11 +477,11 @@ function handleConfirm() {
   justify-content: center;
   width: 24px;
   height: 24px;
-  background: rgba(221, 132, 72, 0.15);
+  background: rgba(var(--color-primary-rgb), 0.15);
   border-radius: 50%;
   font-size: 12px;
   font-weight: 600;
-  color: var(--electric-primary, #dd8448);
+  color: var(--color-primary);
   flex-shrink: 0;
 }
 
@@ -496,7 +496,7 @@ function handleConfirm() {
 .file-name {
   font-size: 13px;
   font-weight: 500;
-  color: rgba(45, 45, 45, 0.9);
+  color: rgba(var(--color-text-dark-rgb), 0.9);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -504,7 +504,7 @@ function handleConfirm() {
 
 .file-size {
   font-size: 11px;
-  color: rgba(45, 45, 45, 0.5);
+  color: rgba(var(--color-text-dark-rgb), 0.5);
 }
 
 .remove-btn {
@@ -517,24 +517,24 @@ function handleConfirm() {
   background: transparent;
   border: none;
   border-radius: 6px;
-  color: rgba(239, 68, 68, 0.5);
+  color: color-mix(in srgb, var(--color-danger) 50%, transparent);
   cursor: pointer;
   transition: all 0.2s;
   flex-shrink: 0;
 }
 
 .remove-btn:hover {
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  color: var(--color-danger);
 }
 
 .total-info {
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid rgba(163, 177, 198, 0.3);
+  border-top: 1px solid rgba(var(--color-divider-rgb), 0.3);
   font-size: 13px;
   font-weight: 600;
-  color: rgba(45, 45, 45, 0.7);
+  color: rgba(var(--color-text-dark-rgb), 0.7);
   text-align: right;
 }
 
@@ -544,13 +544,13 @@ function handleConfirm() {
   justify-content: space-between;
   align-items: center;
   padding: 16px 24px;
-  border-top: 1px solid rgba(163, 177, 198, 0.3);
+  border-top: 1px solid rgba(var(--color-divider-rgb), 0.3);
   gap: 16px;
 }
 
 .footer-hint {
   font-size: 13px;
-  color: rgba(221, 132, 72, 0.8);
+  color: rgba(var(--color-primary-rgb), 0.8);
   font-weight: 500;
 }
 
@@ -577,24 +577,24 @@ function handleConfirm() {
 
 .btn-cancel {
   background: transparent;
-  color: rgba(45, 45, 45, 0.6);
-  border: 1px solid rgba(45, 45, 45, 0.2);
+  color: rgba(var(--color-text-dark-rgb), 0.6);
+  border: 1px solid rgba(var(--color-text-dark-rgb), 0.2);
 }
 
 .btn-cancel:hover:not(:disabled) {
-  background: rgba(45, 45, 45, 0.05);
-  border-color: rgba(45, 45, 45, 0.3);
+  background: rgba(var(--color-text-dark-rgb), 0.05);
+  border-color: rgba(var(--color-text-dark-rgb), 0.3);
 }
 
 .btn-primary {
-  background: var(--electric-primary, #dd8448);
-  color: white;
+  background: var(--color-primary);
+  color: var(--color-white);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: #c67339;
+  background: var(--color-primary-darker);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(221, 132, 72, 0.3);
+  box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.3);
 }
 
 .btn-primary:active:not(:disabled) {

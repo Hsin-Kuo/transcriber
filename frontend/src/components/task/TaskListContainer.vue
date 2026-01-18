@@ -429,7 +429,7 @@ onMounted(() => {
 }
 
 .task-list.task-type-paragraph :deep(.tasks) {
-  background-color: #808F7C;
+  background-color: var(--color-teal-light);
   padding: 10px;
   border-radius: 8px;
   position: relative;
@@ -437,7 +437,7 @@ onMounted(() => {
 }
 
 .task-list.task-type-subtitle :deep(.tasks) {
-  background-color: #77969A;
+  background-color: var(--color-teal);
   padding: 10px;
   border-radius: 8px;
   position: relative;
@@ -453,14 +453,14 @@ onMounted(() => {
 }
 
 .task-list.task-type-paragraph :deep(.empty-state) {
-  background-color: #808F7C;
+  background-color: var(--color-teal-light);
   border-radius: 8px;
   position: relative;
   z-index: 3;
 }
 
 .task-list.task-type-subtitle :deep(.empty-state) {
-  background-color: #77969A;
+  background-color: var(--color-teal);
   border-radius: 8px;
   position: relative;
   z-index: 3;
@@ -521,13 +521,13 @@ onMounted(() => {
 
 /* 段落頁籤顏色 */
 .tab-btn.tab-paragraph {
-  background: #808F7C;
+  background: var(--color-teal-light);
   color: rgba(255, 255, 255, 0.95);
 }
 
 /* 字幕頁籤顏色 */
 .tab-btn.tab-subtitle {
-  background: #77969A;
+  background: var(--color-teal);
   color: rgba(255, 255, 255, 0.95);
 }
 
@@ -578,7 +578,7 @@ onMounted(() => {
 
 .btn-secondary {
   background: rgba(var(--color-teal-rgb), 0.1);
-  color: #77969a;
+  color: var(--color-teal);
   border: 1px solid rgba(var(--color-teal-rgb), 0.3);
 }
 

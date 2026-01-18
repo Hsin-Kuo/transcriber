@@ -126,7 +126,7 @@ function isNewestTask(task) {
 .tasks.batch-mode {
   gap: 0;
   box-shadow: 0 2px 8px rgba(var(--color-primary-rgb), 0.08);
-  background: #916a2d;
+  background: var(--color-nav-recent-bg);
   padding: 20px;
   border-radius: 12px;
 }

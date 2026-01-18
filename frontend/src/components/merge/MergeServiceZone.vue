@@ -70,9 +70,9 @@ function handleConfirm(files) {
   padding: 14px 24px;
   font-size: 15px;
   font-weight: 500;
-  color: rgba(45, 45, 45, 0.7);
+  color: rgba(var(--color-text-dark-rgb), 0.7);
   background: var(--neu-bg, #e0e5ec);
-  border: 2px dashed rgba(163, 177, 198, 0.4);
+  border: 2px dashed rgba(var(--color-divider-rgb), 0.4);
   border-radius: 14px;
   cursor: pointer;
   transition: all 0.3s;
@@ -94,7 +94,7 @@ function handleConfirm(files) {
 }
 
 .merge-btn svg {
-  color: rgba(45, 45, 45, 0.5);
+  color: rgba(var(--color-text-dark-rgb), 0.5);
   transition: color 0.3s;
 }
 
