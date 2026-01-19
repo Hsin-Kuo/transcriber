@@ -103,7 +103,7 @@
               :title="getKeepAudioTooltip()"
             >
               <label class="toggle-label">
-                <div class="toggle-knob-wrapper">
+                <div class="toggle-pin-wrapper">
                   <input
                     type="checkbox"
                     :checked="task.keep_audio"
@@ -111,28 +111,12 @@
                     :disabled="!task.keep_audio && keepAudioCount >= 3"
                     class="toggle-input"
                   />
-                  <!-- 扇形灰底 -->
-                  <svg class="knob-arc-bg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-                    <path d="M 20 22 L 9.7 9.7 A 16 16 0 0 1 30.3 9.7 Z" fill="currentColor"/>
+                  <!-- 圖釘（線條風格） -->
+                  <svg class="pin-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M9 4v6l-2 4v2h10v-2l-2-4V4"/>
+                    <line x1="12" y1="16" x2="12" y2="21"/>
+                    <line x1="8" y1="4" x2="16" y2="4"/>
                   </svg>
-                  <!-- 點（10點鐘方向） -->
-                  <span class="knob-dot unlock-icon"></span>
-                  <!-- 上鎖圖標（2點鐘方向） -->
-                  <svg class="knob-lock-icon locked-icon" xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                  </svg>
-                  <!-- 旋鈕 -->
-                  <span class="toggle-knob">
-                    <svg class="knob-indicator" xmlns="http://www.w3.org/2000/svg" width="12" height="36" viewBox="0 0 12 36">
-                      <!-- 主指針：長方形 -->
-                      <rect x="5" y="1" width="2" height="17" rx="1" fill="currentColor"/>
-                      <!-- 圓心：圓形 -->
-                      <circle cx="6" cy="18" r="3" fill="currentColor"/>
-                      <!-- 尾巴：長方形 -->
-                      <rect x="5" y="20" width="2" height="6" rx="1" fill="currentColor"/>
-                    </svg>
-                  </span>
                 </div>
                 <span v-if="isNewest" class="newest-badge" :title="$t('taskList.newestTaskAudioKept')">
                   {{ $t('taskList.newestBadge') }}
@@ -546,7 +530,7 @@ function getKeepAudioTooltip() {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 12px;
+  /* gap: 12px; */
 }
 
 /* Keep Audio 切換開關 */
@@ -568,152 +552,63 @@ function getKeepAudioTooltip() {
   border-radius: 10%;
 }
 
-/* 旋鈕式切換開關 */
-.toggle-knob-wrapper {
+/* 圖釘式切換開關 */
+.toggle-pin-wrapper {
   position: relative;
-  width: 40px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   display: inline-block;
 }
 
-.toggle-knob-wrapper .toggle-input {
+.toggle-pin-wrapper .toggle-input {
   opacity: 0;
   width: 0;
   height: 0;
   position: absolute;
 }
 
-/* 扇形灰底 */
-.knob-arc-bg {
+/* 圖釘圖標 */
+.pin-icon {
   position: absolute;
-  width: 40px;
-  height: 40px;
+  width: 24px;
+  height: 24px;
   top: 50%;
   left: 50%;
-  transform: translate(-50%, -45%);
-  color: rgba(0, 0, 0, 0.08);
-  pointer-events: none;
+  color: #555;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  transform-origin: center 30%;
 }
 
-/* 鎖頭圖標 - 外圈位置 */
-.knob-lock-icon {
-  position: absolute;
-  transition: all 0.3s ease;
-  z-index: 1;
-  pointer-events: none;
-}
-
-/* 點樣式（10點鐘方向） */
-.knob-dot.unlock-icon {
-  position: absolute;
-  top: 5px;
-  left: -1px;
-  width: 5px;
-  height: 5px;
-  background: var(--color-gray-300);
-  border-radius: 50%;
-  transition: all 0.3s ease;
+/* 未選中狀態 - 傾斜 */
+.toggle-input:not(:checked) ~ .pin-icon {
+  transform: translate(-50%, -50%) rotate(35deg);
+  color: var(--nav-text);
   opacity: 1;
 }
 
-.knob-lock-icon.locked-icon {
-  /* 2點鐘方向 */
-  top: 2px;
-  right: -4px;
-  color: rgb(177, 79, 22);
-  /* filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3)); */
-  opacity: 0.4;
-}
-
-/* 旋鈕主體 */
-.toggle-knob {
-  position: absolute;
-  top: 65%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 32px;
-  height: 32px;
-  /* background: var(--color-gray-100); */
-  border-radius: 50%;
-  /* border: 0.9px solid var(--nav-text); */
-  cursor: pointer;
-  transition: all 0.3s ease;
-  /* box-shadow:
-    0 2px 4px rgba(0, 0, 0, 0.15),
-    inset 0 1px 1px rgba(255, 255, 255, 0.8); */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* 旋鈕指示線 - 手錶指針風格 SVG */
-.knob-indicator {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: #30302f;
-  transition: all 0.3s ease;
-}
-
-/* 未選中狀態 - 10點鐘方向 (-60度) */
-.toggle-input:not(:checked) ~ .toggle-knob {
-  transform: translate(-50%, -50%) rotate(-40deg);
-}
-
-/* 選中狀態 - 2點鐘方向 (60度) */
-.toggle-input:checked ~ .toggle-knob {
-  transform: translate(-50%, -50%) rotate(40deg);
-
-  color: #ec6f16;
-  /* background: #e4811e; */
-  /* box-shadow:
-    0 2px 6px rgba(var(--color-primary-rgb), 0.4),
-    inset 0 1px 1px rgba(255, 255, 255, 0.3); */
-}
-
-.toggle-input:checked ~ .toggle-knob .knob-indicator {
-  color: rgb(203, 85, 5);
-}
-
-/* 選中時的圖標狀態 */
-.toggle-input:checked ~ .knob-dot.unlock-icon {
-  opacity: 0.4;
-}
-
-.toggle-input:checked ~ .knob-lock-icon.locked-icon {
+/* 選中狀態 - 垂直插入 */
+.toggle-input:checked ~ .pin-icon {
+  transform: translate(-50%, -50%) rotate(0deg);
+  color: #e67216;
   opacity: 1;
 }
 
 /* 禁用狀態 */
-.toggle-input:disabled ~ .toggle-knob {
-  opacity: 0.5;
+.toggle-input:disabled ~ .pin-icon {
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
-.toggle-input:disabled ~ .knob-lock-icon,
-.toggle-input:disabled ~ .knob-dot {
-  opacity: 0.3;
-}
-
 /* hover 效果 */
-.toggle-label:hover .toggle-knob {
-  transform: translate(-50%, -50%) rotate(-40deg) scale(1.05);
+.toggle-label:hover .toggle-input:not(:disabled):not(:checked) ~ .pin-icon {
+  transform: translate(-50%, -50%) rotate(-35deg) scale(1.08);
+  color: #444;
 }
 
-.toggle-label:hover .toggle-input:checked ~ .toggle-knob {
-  transform: translate(-50%, -50%) rotate(40deg) scale(1.05);
-  /* box-shadow:
-    0 3px 8px rgba(var(--color-primary-rgb), 0.5),
-    inset 0 1px 1px rgba(255, 255, 255, 0.3); */
-}
-
-.toggle-label:hover .toggle-input:disabled ~ .toggle-knob {
-  transform: translate(-50%, -50%) rotate(-40deg) scale(1);
-}
-
-.toggle-label:hover .toggle-input:disabled:checked ~ .toggle-knob {
-  transform: translate(-50%, -50%) rotate(40deg) scale(1);
+.toggle-label:hover .toggle-input:not(:disabled):checked ~ .pin-icon {
+  transform: translate(-50%, -50%) rotate(0deg) scale(1.08);
+  color: #ff8c2a;
 }
 
 .newest-badge {
@@ -792,7 +687,7 @@ function getKeepAudioTooltip() {
 }
 
 .btn-group-left {
-  border: 1.5px solid var(--nav-text);
+  /* border: 1.5px solid var(--nav-text); */
   border-radius: 10%;
   /* border-top-right-radius: 0;
   border-bottom-right-radius: 0; */
@@ -801,7 +696,7 @@ function getKeepAudioTooltip() {
 .btn-group-right {
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
-  border-left: 1px solid rgba(255, 255, 255, 0.3);
+  /* border-left: 1px solid rgba(255, 255, 255, 0.3); */
 }
 
 .btn-group .btn {
