@@ -81,13 +81,13 @@ function handleEnter(event) {
   padding: 10px 14px;
   border: none;
   border-radius: 8px;
-  background: var(--neu-bg);
-  color: var(--neu-text);
+  background: var(--main-bg);
+  color: var(--main-text);
   font-size: 0.95rem;
 }
 
 .replace-input:focus {
-  outline: 2px solid var(--neu-primary);
+  outline: 2px solid var(--main-primary);
 }
 
 @media (max-width: 768px) {

@@ -110,9 +110,8 @@ function formatSize(bytes) {
   max-width: 700px;
   margin: 20px auto;
   padding: 20px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   border-radius: 16px;
-  box-shadow: var(--neu-shadow-raised);
 }
 
 .list-header {

@@ -71,7 +71,7 @@ function handleConfirm(files) {
   font-size: 15px;
   font-weight: 500;
   color: rgba(var(--color-text-dark-rgb), 0.7);
-  background: var(--neu-bg, #e0e5ec);
+  background: var(--main-bg, #e0e5ec);
   border: 2px dashed rgba(var(--color-divider-rgb), 0.4);
   border-radius: 14px;
   cursor: pointer;

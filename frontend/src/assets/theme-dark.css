@@ -1,0 +1,209 @@
+/**
+ * 深色主題 (Dark Theme)
+ * 定義語意化的 CSS 變數，映射到色票
+ * 深色模式下的顏色配置
+ */
+
+:root[data-theme="dark"] {
+  /* ========================================
+     主題色 - Theme Colors
+     ======================================== */
+
+  /* 背景色系 - 深色背景 */
+  --color-bg: var(--palette-gray-900);
+  --color-bg-light: var(--palette-gray-800);
+  --color-bg-lighter: var(--palette-gray-700);
+  --color-bg-dark: var(--palette-black);
+
+  /* 主色調 - 保持橘色但稍微調亮 */
+  --color-primary: var(--palette-orange-light);
+  --color-primary-light: var(--palette-orange-warm);
+  --color-primary-dark: var(--palette-orange-primary);
+  --color-primary-darker: var(--palette-orange-dark);
+
+  /* 次要色調 */
+  --color-secondary: var(--palette-blue-gray-light);
+  --color-secondary-light: var(--palette-cream-dark);
+  --color-secondary-dark: var(--palette-sand);
+
+  /* 文字色 - 淺色文字 */
+  --color-text: var(--palette-cream-light);
+  --color-text-light: var(--palette-sand);
+  --color-text-lighter: var(--palette-gray-400);
+  --color-text-dark: var(--palette-white);
+  --color-text-muted: var(--palette-gray-300);
+
+  /* RGB 版本 (用於 rgba) */
+  --color-primary-rgb: 245, 158, 66;
+  --color-text-dark-rgb: 255, 255, 255;
+  --color-divider-rgb: 80, 80, 80;
+  --color-orange-rgb: var(--palette-orange-bright-rgb);
+  --color-teal-rgb: var(--palette-teal-rgb);
+  --color-success-alt-rgb: var(--palette-green-success-rgb);
+
+  /* ========================================
+     導航色 - Navigation Colors
+     ======================================== */
+  --color-nav-bg: var(--palette-gray-800);
+  --color-nav-text: var(--palette-cream-light);
+  --color-nav-active-bg: var(--palette-gray-600);
+  --color-nav-recent-bg: var(--palette-orange-dark);
+  --color-nav-recent-text: var(--palette-cream-light);
+  --color-nav-recent-btn: var(--palette-orange-primary);
+
+  /* ========================================
+     狀態色 - Status Colors
+     ======================================== */
+
+  /* 成功 - 稍微調亮 */
+  --color-success: var(--palette-green-bright);
+  --color-success-light: var(--palette-green-mint);
+  --color-success-dark: var(--palette-green-emerald);
+  --color-success-alt: var(--palette-green-success);
+  --color-success-bright: var(--palette-green-bright);
+  --color-success-rgb: var(--palette-green-emerald-rgb);
+  --color-success-bg: rgba(16, 185, 129, 0.2);
+
+  /* 危險/錯誤 - 稍微調亮 */
+  --color-danger: var(--palette-red-light);
+  --color-danger-light: var(--palette-red-coral);
+  --color-danger-dark: var(--palette-red-bright);
+  --color-danger-darker: var(--palette-red-dark);
+  --color-danger-alt: var(--palette-red-alt);
+  --color-danger-deep: var(--palette-red-deep);
+  --color-danger-rgb: var(--palette-red-bright-rgb);
+
+  /* 警告 */
+  --color-warning: var(--palette-yellow-light);
+  --color-warning-light: var(--palette-yellow-cream);
+  --color-warning-dark: var(--palette-yellow-amber);
+  --color-warning-brown: var(--palette-orange-rust);
+
+  /* 信息 */
+  --color-info: var(--palette-blue-light);
+  --color-info-light: var(--palette-blue-aqua);
+  --color-info-dark: var(--palette-blue-primary);
+
+  /* 取消/中立 */
+  --color-neutral: var(--palette-gray-300);
+  --color-neutral-light: var(--palette-gray-400);
+
+  /* ========================================
+     功能色 - Feature Colors
+     ======================================== */
+
+  /* 青綠色 */
+  --color-teal: var(--palette-teal);
+  --color-teal-dark: var(--palette-teal-cyan);
+  --color-teal-light: var(--palette-teal-olive);
+  --color-teal-rgb: var(--palette-teal-rgb);
+
+  /* 紫藍色 */
+  --color-purple: var(--palette-purple-light);
+  --color-purple-light: var(--palette-purple-pink);
+  --color-purple-dark: var(--palette-purple-primary);
+  --color-purple-deep: var(--palette-purple-deep);
+  --color-purple-rgb: var(--palette-purple-primary-rgb);
+
+  /* 橘紅色 */
+  --color-orange: var(--palette-orange-bright);
+  --color-orange-light: var(--palette-orange-warm);
+  --color-orange-dark: var(--palette-orange-rust);
+
+  /* ========================================
+     中性色 - Neutral Colors (反轉)
+     ======================================== */
+
+  /* 深色系 (在暗色主題中變淺) */
+  --color-gray-900: var(--palette-gray-50);
+  --color-gray-800: var(--palette-gray-100);
+  --color-gray-700: var(--palette-gray-200);
+  --color-gray-600: var(--palette-gray-300);
+  --color-gray-500: var(--palette-gray-400);
+  --color-gray-400: var(--palette-gray-500);
+  --color-gray-300: var(--palette-gray-600);
+  --color-gray-200: var(--palette-gray-700);
+  --color-gray-100: var(--palette-gray-800);
+  --color-gray-50: var(--palette-gray-900);
+
+  /* 淺色系 (反轉) */
+  --color-white: var(--palette-gray-900);
+  --color-black: var(--palette-white);
+
+  /* 分隔線 */
+  --color-divider: var(--palette-gray-600);
+
+  /* Overlay 遮罩 - 深色主題用較淺的遮罩 */
+  --color-overlay: rgba(0, 0, 0, 0.7);
+  --color-overlay-dark: rgba(0, 0, 0, 0.9);
+  --color-overlay-light: rgba(0, 0, 0, 0.5);
+
+  /* ========================================
+     陰影色 - Shadow Colors
+     ======================================== */
+  --color-shadow-light: rgba(255, 255, 255, 0.05);
+  --color-shadow-dark: rgba(0, 0, 0, 0.5);
+
+  /* ========================================
+     漸層背景 - Gradient Backgrounds
+     ======================================== */
+  --gradient-primary: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+  --gradient-success: linear-gradient(180deg, rgba(67, 233, 123, 0.3), rgba(16, 185, 129, 0.3));
+  --gradient-danger: linear-gradient(135deg, rgba(248, 113, 113, 0.3) 0%, rgba(239, 68, 68, 0.3) 100%);
+  --gradient-purple: linear-gradient(135deg, var(--palette-purple-light) 0%, var(--palette-purple-dark) 100%);
+  --gradient-blue: linear-gradient(135deg, var(--palette-blue-light) 0%, var(--palette-blue-dark) 100%);
+  --gradient-teal: linear-gradient(135deg, var(--palette-teal-cyan) 0%, var(--palette-green-sea) 100%);
+  --gradient-warm: linear-gradient(145deg, rgba(221, 132, 72, 0.2), rgba(184, 118, 45, 0.2));
+  --gradient-cool: linear-gradient(145deg, var(--palette-gray-700), var(--palette-gray-800));
+
+  /* ========================================
+     編輯器專用色 - Editor Colors
+     ======================================== */
+  --editor-bg: rgba(15, 15, 15, 0.98);
+  --editor-bg-dark: rgba(10, 10, 10, 0.98);
+  --editor-bg-gradient: linear-gradient(135deg, rgba(15, 15, 15, 0.98) 0%, rgba(10, 10, 10, 0.98) 100%);
+  --editor-waveform: var(--palette-orange-light);
+  --editor-progress: var(--palette-orange-bright);
+  --editor-cursor: var(--palette-white);
+  --editor-region-1: rgba(var(--palette-orange-primary-rgb), 0.4);
+  --editor-region-2: rgba(var(--palette-orange-bright-rgb), 0.4);
+  --editor-region-3: rgba(var(--palette-green-sea-rgb), 0.4);
+  --editor-region-4: rgba(var(--palette-purple-material-rgb), 0.4);
+  --editor-region-5: rgba(var(--palette-blue-primary-rgb), 0.4);
+  --editor-region-deleted: rgba(80, 80, 80, 0.4);
+  --editor-marker-color: rgba(var(--palette-orange-bright-rgb), 0.9);
+  --editor-marker-fill: rgba(255, 255, 255, 0.08);
+
+  /* ========================================
+     Legacy 變數映射 (向後兼容)
+     ======================================== */
+  --main-bg: var(--color-bg);
+  --upload-bg: var(--color-bg-light);
+  --main-bg-dark: var(--color-bg-dark);
+  --main-bg-light: var(--color-bg-lighter);
+  --main-primary: var(--color-secondary);
+  --main-primary-light: var(--color-secondary-light);
+  --main-primary-dark: var(--color-secondary-dark);
+  --main-text: var(--color-text);
+  --main-text-light: var(--color-text-light);
+  --main-text-lighter: var(--color-text-lighter);
+  --main-shadow-light: var(--color-shadow-light);
+  --main-shadow-dark: var(--color-shadow-dark);
+  --nav-bg: var(--color-nav-bg);
+  --nav-text: var(--color-nav-text);
+  --nav-active-bg: var(--color-nav-active-bg);
+  --nav-recent-bg: var(--color-nav-recent-bg);
+  --nav-recent-text: var(--color-nav-recent-text);
+  --nav-recent-btn: var(--color-nav-recent-btn);
+  --electric-primary: var(--color-primary);
+
+  /* 中性色 legacy */
+  --neutral-900: var(--color-gray-900);
+  --neutral-800: var(--color-gray-800);
+  --neutral-100: var(--color-gray-50);
+
+  /* ========================================
+     Neumorphism 陰影 - 深色主題調整
+     ======================================== */
+  --main-shadow: 8px 8px 16px var(--color-shadow-dark), -8px -8px 16px var(--color-shadow-light);
+}

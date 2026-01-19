@@ -173,13 +173,13 @@ function changeLanguage() {
 
 .settings-header h1 {
   font-size: 2rem;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   margin: 0 0 8px 0;
   font-weight: 700;
 }
 
 .settings-header p {
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   margin: 0;
   font-size: 1rem;
 }
@@ -197,7 +197,7 @@ function changeLanguage() {
 .user-info-card h2,
 .language-card h2 {
   font-size: 1.25rem;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   margin: 0 0 20px 0;
   font-weight: 600;
 }
@@ -216,20 +216,20 @@ function changeLanguage() {
 
 .info-label {
   font-size: 0.95rem;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   font-weight: 500;
 }
 
 .info-value {
   font-size: 0.95rem;
-  color: var(--neu-text);
+  color: var(--main-text);
   font-weight: 600;
 }
 
 /* 語言設定樣式 */
 .language-description {
   font-size: 0.9rem;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   margin: 0 0 16px 0;
 }
 
@@ -242,9 +242,8 @@ function changeLanguage() {
   padding: 12px 16px;
   border: none;
   border-radius: 8px;
-  background: var(--neu-bg);
-  box-shadow: var(--neu-shadow-inset);
-  color: var(--neu-text);
+  background: var(--main-bg);
+  color: var(--main-text);
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
@@ -257,9 +256,7 @@ function changeLanguage() {
   padding-right: 40px;
 }
 
-.language-select:hover {
-  box-shadow: var(--neu-shadow-btn);
-}
+
 
 .language-select:focus {
   outline: none;
@@ -267,8 +264,8 @@ function changeLanguage() {
 }
 
 .language-select option {
-  background: var(--neu-bg);
-  color: var(--neu-text);
+  background: var(--main-bg);
+  color: var(--main-text);
   padding: 10px;
 }
 
@@ -276,7 +273,7 @@ function changeLanguage() {
 
 .quota-content {
   padding: 24px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
 }
 
 .quota-header {
@@ -291,18 +288,17 @@ function changeLanguage() {
 .quota-header h3 {
   margin: 0;
   font-size: 1.25rem;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   font-weight: 600;
 }
 
 .quota-tier {
   padding: 6px 16px;
-  background: var(--neu-bg);
-  box-shadow: var(--neu-shadow-btn);
+  background: var(--main-bg);
   border-radius: 12px;
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--neu-primary);
+  color: var(--main-primary);
 }
 
 .quota-items {
@@ -321,26 +317,25 @@ function changeLanguage() {
   justify-content: space-between;
   align-items: center;
   font-size: 0.95rem;
-  color: var(--neu-text);
+  color: var(--main-text);
   font-weight: 500;
 }
 
 .quota-value {
   font-weight: 600;
-  color: var(--neu-primary);
+  color: var(--main-primary);
 }
 
 .quota-bar {
   height: 10px;
-  background: var(--neu-bg);
-  box-shadow: var(--neu-shadow-inset);
+  background: var(--main-bg);
   border-radius: 8px;
   overflow: hidden;
 }
 
 .quota-progress {
   height: 100%;
-  background: linear-gradient(90deg, var(--neu-primary), var(--neu-primary-light));
+  background: linear-gradient(90deg, var(--main-primary), var(--main-primary-light));
   border-radius: 8px;
   transition: width 0.3s ease, background 0.3s ease;
   box-shadow: 0 0 8px rgba(108, 139, 163, 0.3);
@@ -353,7 +348,7 @@ function changeLanguage() {
 
 .quota-remaining {
   font-size: 0.85rem;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   text-align: right;
 }
 

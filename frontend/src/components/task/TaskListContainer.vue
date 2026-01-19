@@ -406,11 +406,7 @@ onMounted(() => {
   --electric-primary: #dd8448;
   --electric-card-bg: linear-gradient(135deg, #f5f5f5 0%, #ffffff 100%);
   --electric-card-shadow-hover: 0 8px 24px rgba(0, 0, 0, 0.12);
-  --neu-bg: #e6e6e6;
-  --neu-shadow-btn: 6px 6px 12px rgba(0, 0, 0, 0.1), -6px -6px 12px rgba(255, 255, 255, 0.8);
-  --neu-shadow-btn-hover: 8px 8px 16px rgba(0, 0, 0, 0.12), -8px -8px 16px rgba(255, 255, 255, 0.9);
-  --neu-shadow-btn-active: inset 4px 4px 8px rgba(0, 0, 0, 0.1), inset -4px -4px 8px rgba(255, 255, 255, 0.8);
-  --neu-shadow-inset: inset 4px 4px 8px rgba(0, 0, 0, 0.08), inset -4px -4px 8px rgba(255, 255, 255, 0.6);
+  --main-bg: #e6e6e6;
   --nav-recent-bg: #77969A;
 }
 
@@ -421,7 +417,7 @@ onMounted(() => {
 
 /* 根據任務類型設置任務列表容器背景色 */
 .task-list.task-type-all :deep(.tasks) {
-  background-color: var(--upload-bg);
+  /* background-color: var(--upload-bg); */
   padding: 10px;
   border-radius: 8px;
   position: relative;
@@ -429,7 +425,7 @@ onMounted(() => {
 }
 
 .task-list.task-type-paragraph :deep(.tasks) {
-  background-color: var(--color-teal-light);
+  /* background-color: var(--color-teal-light); */
   padding: 10px;
   border-radius: 8px;
   position: relative;
@@ -437,7 +433,7 @@ onMounted(() => {
 }
 
 .task-list.task-type-subtitle :deep(.tasks) {
-  background-color: var(--color-teal);
+  /* background-color: var(--color-teal); */
   padding: 10px;
   border-radius: 8px;
   position: relative;
@@ -516,25 +512,25 @@ onMounted(() => {
 
 /* 全部頁籤顏色 */
 .tab-btn.tab-all {
-  background: var(--upload-bg);
+  background: #00000000;
 }
 
 /* 段落頁籤顏色 */
 .tab-btn.tab-paragraph {
-  background: var(--color-teal-light);
-  color: rgba(255, 255, 255, 0.95);
+  background: #00000000;
+  color: var(--nav-text);
 }
 
 /* 字幕頁籤顏色 */
 .tab-btn.tab-subtitle {
-  background: var(--color-teal);
-  color: rgba(255, 255, 255, 0.95);
+  background: #00000000;
+  color: var(--nav-text);
 }
 
 /* 批次編輯頁籤顏色 */
 .tab-btn.tab-batch-edit {
   padding: 6px 20px 18px 20px;
-  background: var(--nav-bg);
+  background: #00000000;
 }
 
 /* 批次編輯模式下，其他頁籤變成淺灰色 */

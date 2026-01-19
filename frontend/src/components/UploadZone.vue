@@ -124,14 +124,11 @@ function handleMergeClick() {
   position: relative;
 }
 
-.upload-zone:hover:not(.uploading) {
-  box-shadow: var(--neu-shadow-inset-hover);
-}
 
 .upload-zone.drag-over {
   box-shadow:
-    inset 10px 10px 20px var(--neu-shadow-dark),
-    inset -10px -10px 20px var(--neu-shadow-light);
+    inset 10px 10px 20px var(--main-shadow-dark),
+    inset -10px -10px 20px var(--main-shadow-light);
   transform: scale(0.99);
 }
 
@@ -186,8 +183,8 @@ function handleMergeClick() {
   width: 48px;
   height: 48px;
   border: 4px solid transparent;
-  border-top: 4px solid var(--neu-primary);
-  border-right: 4px solid var(--neu-primary-light);
+  border-top: 4px solid var(--main-primary);
+  border-right: 4px solid var(--main-primary-light);
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }
@@ -200,7 +197,7 @@ function handleMergeClick() {
 
 .uploading-content p {
   font-size: 16px;
-  color: var(--neu-text);
+  color: var(--main-text);
   font-weight: 600;
 }
 
@@ -218,7 +215,7 @@ function handleMergeClick() {
   right: 0;
   width: 140px;
   height: 140px;
-  background: var(--neu-bg, #e0e5ec);
+  background: var(--main-bg, #e0e5ec);
   border: none;
   cursor: pointer;
   display: flex;
@@ -230,8 +227,8 @@ function handleMergeClick() {
   clip-path: polygon(100% 0, 100% 100%, 0 100%);
   transition: all 0.3s ease;
   box-shadow:
-    -3px -3px 6px var(--neu-shadow-light, rgba(255, 255, 255, 0.8)),
-    3px 3px 6px var(--neu-shadow-dark, rgba(163, 177, 198, 0.6));
+    -3px -3px 6px var(--main-shadow-light, rgba(255, 255, 255, 0.8)),
+    3px 3px 6px var(--main-shadow-dark, rgba(163, 177, 198, 0.6));
 }
 
 .merge-triangle-btn:hover:not(.disabled) {

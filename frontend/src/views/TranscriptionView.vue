@@ -454,8 +454,7 @@ onUnmounted(() => {
   margin: 20px auto 0;
   padding: 0;
   border-radius: 20px;
-  background: var(--neu-bg);
-  box-shadow: var(--neu-shadow-raised);
+  background: var(--main-bg);
   border: none;
   animation: slideDown 0.3s ease;
 }
@@ -544,7 +543,7 @@ onUnmounted(() => {
   border-top: 1px solid rgba(var(--color-divider-rgb), 0.2);
   font-size: 11px;
   line-height: 1.5;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   font-style: italic;
 }
 
@@ -646,7 +645,7 @@ onUnmounted(() => {
 
 .toggle-text {
   font-size: 14px;
-  color: var(--neu-text);
+  color: var(--main-text);
   font-weight: 500;
 }
 
@@ -674,7 +673,7 @@ onUnmounted(() => {
 
 .radio-label {
   font-size: 14px;
-  color: var(--neu-text);
+  color: var(--main-text);
   font-weight: 500;
 }
 
@@ -893,19 +892,14 @@ onUnmounted(() => {
 
 /* 開始轉錄按鈕 - 使用者頭貼風格 */
 .modal-actions .btn-start {
-  background: var(--neu-bg);
-  color: var(--neu-primary);
-  box-shadow: var(--neu-shadow-btn);
+  background: var(--main-bg);
+  color: var(--main-primary);
 }
 
 .modal-actions .btn-start:hover {
-  box-shadow: var(--neu-shadow-btn-hover);
-  color: var(--neu-primary-dark);
+  color: var(--main-primary-dark);
 }
 
-.modal-actions .btn-start:active {
-  box-shadow: var(--neu-shadow-btn-active);
-}
 
 /* 合併模式樣式 */
 .merge-info-header {

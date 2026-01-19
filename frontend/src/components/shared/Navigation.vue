@@ -13,8 +13,36 @@
     </button>
 
     <div class="nav-brand">
-      <h2 v-if="!isCollapsed">🎙️ Soundtime</h2>
-      <h2 v-else class="brand-icon">🎙️</h2>
+      <svg class="brand-icon" width="28" height="24" viewBox="0 0 28 24">
+        <!-- 列1: 2個點 -->
+        <circle cx="2" cy="18" r="1.5" fill="currentColor"/>
+        <circle cx="2" cy="22" r="1.5" fill="currentColor"/>
+        <!-- 列2: 1個點 -->
+        <circle cx="6" cy="22" r="1.5" fill="currentColor"/>
+        <!-- 列3: 4個點 -->
+        <circle cx="10" cy="10" r="1.5" fill="currentColor"/>
+        <circle cx="10" cy="14" r="1.5" fill="currentColor"/>
+        <circle cx="10" cy="18" r="1.5" fill="currentColor"/>
+        <circle cx="10" cy="22" r="1.5" fill="currentColor"/>
+        <!-- 列4: 3個點 -->
+        <circle cx="14" cy="14" r="1.5" fill="currentColor"/>
+        <circle cx="14" cy="18" r="1.5" fill="currentColor"/>
+        <circle cx="14" cy="22" r="1.5" fill="currentColor"/>
+        <!-- 列5: 1個點 -->
+        <circle cx="18" cy="22" r="1.5" fill="currentColor"/>
+        <!-- 列6: 6個點 -->
+        <circle cx="22" cy="2" r="1.5" fill="currentColor"/>
+        <circle cx="22" cy="6" r="1.5" fill="currentColor"/>
+        <circle cx="22" cy="10" r="1.5" fill="currentColor"/>
+        <circle cx="22" cy="14" r="1.5" fill="currentColor"/>
+        <circle cx="22" cy="18" r="1.5" fill="currentColor"/>
+        <circle cx="22" cy="22" r="1.5" fill="currentColor"/>
+        <!-- 列7: 3個點 -->
+        <circle cx="26" cy="14" r="1.5" fill="currentColor"/>
+        <circle cx="26" cy="18" r="1.5" fill="currentColor"/>
+        <circle cx="26" cy="22" r="1.5" fill="currentColor"/>
+      </svg>
+      <h2 v-if="!isCollapsed">Soundtime</h2>
     </div>
 
     <div class="nav-links">
@@ -211,7 +239,6 @@ watch(() => route.path, (newPath, oldPath) => {
   padding: 28px 20px;
   background: var(--nav-bg);
   border-radius: 0;
-  box-shadow: var(--neu-shadow-raised);
   transition: all 0.3s ease;
 }
 
@@ -246,7 +273,6 @@ watch(() => route.path, (newPath, oldPath) => {
   border: none;
   background: transparent;
   border-radius: 6px;
-  box-shadow: var(--neu-shadow-btn-sm);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -256,21 +282,23 @@ watch(() => route.path, (newPath, oldPath) => {
 }
 
 .toggle-btn:hover {
-  box-shadow: var(--neu-shadow-btn-hover-sm);
   transform: translateX(-2px);
 }
 
 .toggle-btn:active {
-  box-shadow: var(--neu-shadow-btn-active-sm);
   transform: translateX(0);
 }
 
 .toggle-btn svg {
-  stroke: var(--neu-primary);
+  stroke: var(--main-primary);
   transition: all 0.2s ease;
 }
 
 .nav-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   padding-bottom: 20px;
   position: relative;
 }
@@ -300,7 +328,8 @@ watch(() => route.path, (newPath, oldPath) => {
 }
 
 .brand-icon {
-  font-size: 1.8rem;
+  color: var(--nav-text);
+  flex-shrink: 0;
 }
 
 .nav-links {
@@ -319,18 +348,15 @@ watch(() => route.path, (newPath, oldPath) => {
   font-weight: 600;
   color: var(--nav-text);
   background: var(--nav-bg);
-  box-shadow: var(--neu-shadow-btn);
   transition: all 0.3s ease;
 }
 
 .nav-link:hover {
-  box-shadow: var(--neu-shadow-btn-hover);
-  color: var(--neu-primary);
+  color: var(--main-primary);
   transform: translateX(4px);
 }
 
 .nav-link.active {
-  box-shadow: var(--neu-shadow-btn-active);
   color: var(--nav-recent-text);
   background: var(--nav-active-bg);
 }
@@ -395,7 +421,7 @@ watch(() => route.path, (newPath, oldPath) => {
   gap: 12px;
   padding: 20px 20px 28px 20px;
   margin: 0 -20px -28px -20px;
-  background: var(--nav-recent-bg);
+  /* background: var(--nav-recent-bg); */
   border-top: 1px solid rgba(var(--color-divider-rgb), 0.2);
   transition: all 0.3s ease;
   position: relative;
@@ -447,7 +473,6 @@ watch(() => route.path, (newPath, oldPath) => {
   height: 48px;
   border-radius: 50%;
   background: var(--nav-bg);
-  box-shadow: var(--neu-shadow-btn);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -459,13 +484,9 @@ watch(() => route.path, (newPath, oldPath) => {
 }
 
 .avatar-circle:hover {
-  box-shadow: var(--neu-shadow-btn-hover);
-  color: var(--neu-primary-dark);
+  color: var(--main-primary-dark);
 }
 
-.avatar-circle:active {
-  box-shadow: var(--neu-shadow-btn-active);
-}
 
 .logout-btn {
   display: flex;
@@ -480,20 +501,17 @@ watch(() => route.path, (newPath, oldPath) => {
   font-weight: 600;
   font-size: 0.9rem;
   color: var(--nav-text);
-  box-shadow: var(--neu-shadow-btn);
   transition: all 0.3s ease;
   position: relative;
   z-index: 1;
 }
 
 .logout-btn:hover {
-  box-shadow: var(--neu-shadow-btn-hover);
-  color: var(--neu-primary);
+  color: var(--main-primary);
   transform: translateY(-2px);
 }
 
 .logout-btn:active {
-  box-shadow: var(--neu-shadow-btn-active);
   transform: translateY(0);
 }
 
@@ -525,7 +543,7 @@ watch(() => route.path, (newPath, oldPath) => {
   gap: 8px;
   min-height: 0;
   overflow: hidden;
-  background: var(--nav-recent-bg);
+  background: var(--nav-bg);
   margin: 0 -20px -24px -20px;
   border-radius: 0;
   position: relative;
@@ -544,7 +562,7 @@ watch(() => route.path, (newPath, oldPath) => {
 .recent-tasks-header h3 {
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--neu-text-lighter);
+  color: var(--nav-text);
   margin: 0;
 }
 
@@ -552,24 +570,21 @@ watch(() => route.path, (newPath, oldPath) => {
   padding: 4px 10px;
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--neu-text-lighter);
+  color: var(--nav-text);
   text-decoration: none;
-  background: var(--nav-recent-btn);
-  box-shadow: var(--neu-shadow-btn-sm);
+  /* background: var(--nav-recent-btn); */
   border-radius: 8px;
   transition: all 0.2s ease;
   white-space: nowrap;
 }
 
 .all-tasks-btn:hover {
-  box-shadow: var(--neu-shadow-btn-hover-sm);
-  color: var(--neu-primary);
+  color: var(--main-primary);
   transform: translateY(-1px);
 }
 
 .all-tasks-btn.active {
-  box-shadow: var(--neu-shadow-btn-active-sm);
-  color: var(--neu-text-lighter);
+  color: var(--nav-text);
 }
 
 .recent-tasks-list {
@@ -619,7 +634,7 @@ watch(() => route.path, (newPath, oldPath) => {
 .task-name {
   font-size: 0.8rem;
   font-weight: 400;
-  color: var(--neu-text-lighter);
+  color: var(--nav-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

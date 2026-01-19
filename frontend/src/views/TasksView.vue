@@ -458,7 +458,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .tasks-container {
-  max-width: 1400px;
+  max-width: 900px;
   margin: 0 auto;
 }
 
@@ -469,13 +469,13 @@ onBeforeUnmount(() => {
 
 .tasks-header h1 {
   font-size: 2rem;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   margin: 0 0 8px 0;
   font-weight: 700;
 }
 
 .tasks-header p {
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   margin: 0;
   font-size: 1rem;
 }

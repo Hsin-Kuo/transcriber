@@ -10,7 +10,7 @@ export default defineConfig({
     proxy: {
       '/api': {
         // 連接到本地原生運行的後端
-        target: 'http://192.168.0.59:8000',
+        target: 'http://100.66.247.23:8000',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, '')
       }

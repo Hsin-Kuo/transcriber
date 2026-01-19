@@ -1,83 +1,25 @@
 /* CSS 變數 */
 :root {
   /* 背景色 */
-  --neu-bg: #e7ece0;
+  --main-bg: #e7ece0;
   /* e0e5ec */
-  --neu-bg-dark: #a3b1c6;
-  --neu-bg-light: #ffffff;
+  --main-bg-dark: #a3b1c6;
+  --main-bg-light: #ffffff;
 
   /* 主色調 - 柔和的藍灰色系 */
-  --neu-primary: #6c8ba3;
-  --neu-primary-light: #8ba5bd;
-  --neu-primary-dark: #4a6680;
+  --main-primary: #6c8ba3;
+  --main-primary-light: #8ba5bd;
+  --main-primary-dark: #4a6680;
 
   /* 陰影 */
-  --neu-shadow-light: #ffffff;
-  --neu-shadow-dark: #a3b1c6;
+  --main-shadow-light: #ffffff;
+  --main-shadow-dark: #a3b1c6;
 
-  /* 外陰影 - 凸出效果（圓鼓立體感） */
-  --neu-shadow-raised:
-    4px 4px 6px 0px rgba(163, 177, 198, 0.3),
-    -4px -4px 4px 0px rgba(255, 255, 255, 0.4),
-    inset -2px -2px 4px 0px rgba(163, 177, 198, 0.3),
-    inset 4px 4px 5px 0px rgba(255, 255, 255, 0.4);
-
-  /* 內陰影 - 凹陷效果（更自然的深度） */
-  --neu-shadow-inset:
-    -4px -4px 4px 0px rgba(163, 177, 198, 0.4),
-    4px 4px 4px 0px rgba(255, 255, 255, 0.5),
-    inset 4px 4px 5px 0px rgba(163, 177, 198, 0.4),
-    inset -4px -4px 5px 0px rgba(255, 255, 255, 0.5);
-
-  /* 內陰影 - 凹陷效果（更深） */
-  --neu-shadow-inset-hover:
-    -4px -4px 6px 0px rgba(163, 177, 198, 0.5),
-    4px 4px 6px 0px rgba(255, 255, 255, 0.7),
-    inset 8px 8px 14px 0px rgba(163, 177, 198, 0.5),
-    inset -8px -8px 14px 0px rgba(255, 255, 255, 0.7);
-
-  /* 按鈕陰影 - 圓鼓隆起效果 */
-  --neu-shadow-btn:
-    6px 3px 10px 0px rgba(163, 177, 198, 0.5),
-    -8px -6px 12px 0px rgba(255, 255, 255, 0.7),
-    inset -2px -2px 4px 0px rgba(163, 177, 198, 0.5),
-    inset 1px 1px 3px 0px rgba(255, 255, 255, 0.8);
-
-  --neu-shadow-btn-hover:
-    6px 6px 12px 0px rgba(163, 177, 198, 0.55),
-    -5px -5px 12px 0px rgba(255, 255, 255, 0.75),
-    inset -2px -2px 4px 0px rgba(163, 177, 198, 0.4),
-    inset 1px 1px 3px 0px rgba(255, 255, 255, 0.85);
-
-  --neu-shadow-btn-active:
-    -2px -2px 4px 0px rgba(163, 177, 198, 0.6),
-    2px 2px 4px 0px rgba(255, 255, 255, 0.6),
-    inset 6px 6px 12px 0px rgba(163, 177, 198, 0.4),
-    inset -6px -6px 12px 0px rgba(255, 255, 255, 0.5);
-
-  /* 按鈕陰影 - 小 */
-  --neu-shadow-btn-sm:
-    1px 1px 3px 0px rgba(163, 177, 198, 0.5),
-    -1px -1px 3px 0px rgba(255, 255, 255, 0.7),
-    inset -1px -1px 2px 0px rgba(163, 177, 198, 0.5),
-    inset 1px 1px 3px 0px rgba(255, 255, 255, 0.8);
-
-  --neu-shadow-btn-hover-sm:
-    1px 1px 3px 0px rgba(163, 177, 198, 0.55),
-    -1px -1px 3px 0px rgba(255, 255, 255, 0.75),
-    inset -1px -1px 2px 0px rgba(163, 177, 198, 0.4),
-    inset 1px 1px 3px 0px rgba(255, 255, 255, 0.85);
-
-  --neu-shadow-btn-active-sm:
-    -2px -2px 4px 0px rgba(163, 177, 198, 0.6),
-    2px 2px 4px 0px rgba(255, 255, 255, 0.6),
-    inset 6px 6px 12px 0px rgba(163, 177, 198, 0.4),
-    inset -6px -6px 12px 0px rgba(255, 255, 255, 0.5);
 
   /* 文字顏色 */
-  --neu-text: #4a5568;
-  --neu-text-light: #718096;
-  --neu-text-lighter: #a0aec0;
+  --main-text: #4a5568;
+  --main-text-light: #718096;
+  --main-text-lighter: #a0aec0;
 
   /* 中性色 */
   --neutral-900: #1a1a1a;
@@ -95,7 +37,7 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
     Ubuntu, Cantarell, sans-serif;
   /* 背景 - 使用純色 */
-  background-color: var(--neu-bg);
+  background-color: var(--main-bg);
   min-height: 100vh;
   padding: 0;
 }
@@ -119,13 +61,12 @@ body {
 
 /* 通用樣式 */
 .card {
-  background: var(--neu-bg);
+  background: var(--main-bg);
   border-radius: 20px;
   padding: 24px;
-  box-shadow: var(--neu-shadow-raised);
   margin-bottom: 20px;
   position: relative;
-  color: var(--neu-text);
+  color: var(--main-text);
   border: none;
 }
 
@@ -139,42 +80,38 @@ body {
   font-size: 14px;
   font-weight: 600;
   transition: all 0.3s ease;
-  background: var(--neu-bg);
-  color: var(--neu-text);
-  box-shadow: var(--neu-shadow-btn);
+  background: var(--main-bg);
+  color: var(--main-text);
   position: relative;
   overflow: hidden;
 }
 
 .btn:hover:not(:disabled) {
-  box-shadow: var(--neu-shadow-btn-hover);
   transform: translateY(-2px);
 }
 
 .btn:active:not(:disabled) {
-  box-shadow: var(--neu-shadow-btn-active);
   transform: translateY(0);
 }
 
 .btn-primary {
   background: linear-gradient(145deg, #e9eef5, #d1d9e6);
-  color: var(--neu-primary);
+  color: var(--main-primary);
 }
 
 .btn-primary:hover:not(:disabled) {
-  color: var(--neu-primary-dark);
+  color: var(--main-primary-dark);
 }
 
 .btn-primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
-  box-shadow: var(--neu-shadow-btn);
 }
 
 .btn-secondary {
   background: linear-gradient(145deg, #ccd5e0, #a3b1c6);
-  color: var(--neu-bg-light);
+  color: var(--main-bg-light);
 }
 
 .btn-secondary:hover:not(:disabled) {
@@ -182,9 +119,8 @@ body {
 }
 
 .btn-danger {
-  background: var(--neu-bg);
+  background: var(--main-bg);
   color: #d64545;
-  box-shadow: var(--neu-shadow-btn);
 }
 
 .btn-danger:hover:not(:disabled) {
@@ -204,7 +140,6 @@ body {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
-  box-shadow: var(--neu-shadow-btn);
 }
 
 .badge {
@@ -214,9 +149,9 @@ body {
   font-size: 12px;
   font-weight: 600;
   box-shadow:
-    inset 2px 2px 5px var(--neu-shadow-dark),
-    inset -2px -2px 5px var(--neu-shadow-light);
-  background: var(--neu-bg);
+    inset 2px 2px 5px var(--main-shadow-dark),
+    inset -2px -2px 5px var(--main-shadow-light);
+  background: var(--main-bg);
 }
 
 .badge-pending {
@@ -226,7 +161,7 @@ body {
 
 .badge-processing {
   background: linear-gradient(145deg, #d1d9e6, #b8c4d4);
-  color: var(--neu-primary);
+  color: var(--main-primary);
 }
 
 .badge-completed {

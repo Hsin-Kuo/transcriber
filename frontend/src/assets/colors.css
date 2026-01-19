@@ -1,165 +1,132 @@
 /**
- * 統一顏色管理檔案
- * 所有專案中使用的顏色都定義在此處
- * 組件中應使用這些 CSS 變數而非 hardcoded 顏色值
+ * 色票定義檔案 (Palette)
+ * 定義所有原始顏色值，不含語意
+ * 這些是不會隨主題改變的基礎色票
  */
 
 :root {
   /* ========================================
-     主題色 - Theme Colors
+     基礎色票 - Base Palette
      ======================================== */
 
-  /* 背景色系 */
-  --color-bg: #EFE1C6;
-  --color-bg-light: #F4ECD5;
-  --color-bg-lighter: #ffffff;
-  --color-bg-dark: #a3b1c6;
+  /* 暖色系 - Warm Colors */
+  --palette-cream: #EFE1C6;
+  --palette-cream-light: #F4ECD5;
+  --palette-cream-dark: #e5cea5;
+  --palette-sand: #a0917c;
+  --palette-brown: rgb(145, 106, 45);
+  --palette-brown-dark: #916a2d;
+  --palette-brown-medium: #997337;
 
-  /* 主色調 */
-  --color-primary: #dd8448;
-  --color-primary-light: #f59e42;
-  --color-primary-dark: #b8762d;
-  --color-primary-darker: #c67339;
+  /* 橘色系 - Orange Colors */
+  --palette-orange-primary: #dd8448;
+  --palette-orange-light: #f59e42;
+  --palette-orange-dark: #b8762d;
+  --palette-orange-darker: #c67339;
+  --palette-orange-bright: #FF6B35;
+  --palette-orange-warm: #ff8c42;
+  --palette-orange-rust: #e17055;
 
-  /* 次要色調 (藍灰色) */
-  --color-secondary: #44465b;
-  --color-secondary-light: #a0917c;
-  --color-secondary-dark: #a0917c;
+  /* 藍灰色系 - Blue Gray Colors */
+  --palette-blue-gray: #44465b;
+  --palette-blue-gray-light: #a3b1c6;
+  --palette-blue-gray-muted: #4a6680;
+  --palette-navy: #1d293a;
 
-  /* 文字色 */
-  --color-text: rgb(145, 106, 45);
-  --color-text-light: #a0917c;
-  --color-text-lighter: #e5cea5;
-  --color-text-dark: #2d2d2d;
-  --color-text-muted: #4a6680;
+  /* 綠色系 - Green Colors */
+  --palette-green-emerald: #10b981;
+  --palette-green-teal: #059669;
+  --palette-green-forest: #2e7d32;
+  --palette-green-success: #4CAF50;
+  --palette-green-bright: #43e97b;
+  --palette-green-mint: #55efc4;
+  --palette-green-sea: #00b894;
+  --palette-green-light: #a5d6a7;
+  --palette-green-medium: #66bb6a;
 
-  /* RGB 版本 (用於 rgba) */
-  --color-primary-rgb: 221, 132, 72;
-  --color-text-dark-rgb: 45, 45, 45;
-  --color-divider-rgb: 163, 177, 198;
-  --color-orange-rgb: 255, 107, 53;
-  --color-teal-rgb: 119, 150, 154;
-  --color-success-alt-rgb: 76, 175, 80;
+  /* 紅色系 - Red Colors */
+  --palette-red-bright: #ef4444;
+  --palette-red-light: #f87171;
+  --palette-red-dark: #c62828;
+  --palette-red-darker: #b83939;
+  --palette-red-alt: #d64545;
+  --palette-red-deep: #dc2626;
+  --palette-red-coral: #ff6b6b;
+  --palette-red-rose: #ee5a6f;
+  --palette-red-wine: #c44569;
+
+  /* 黃橘色系 - Yellow/Orange Colors */
+  --palette-yellow-amber: #f59e0b;
+  --palette-yellow-light: #feca57;
+  --palette-yellow-orange: #f57c00;
+  --palette-yellow-sienna: #a0522d;
+  --palette-yellow-gold: #fdcb6e;
+  --palette-yellow-cream: #ffeaa7;
+
+  /* 藍色系 - Blue Colors */
+  --palette-blue-primary: #3b82f6;
+  --palette-blue-light: #74b9ff;
+  --palette-blue-dark: #0984e3;
+  --palette-blue-sky: #4facfe;
+  --palette-blue-aqua: #48dbfb;
+  --palette-blue-bright: #0984e3;
+
+  /* 紫色系 - Purple Colors */
+  --palette-purple-primary: #667eea;
+  --palette-purple-light: #a29bfe;
+  --palette-purple-dark: #6c5ce7;
+  --palette-purple-deep: #8b5cf6;
+  --palette-purple-pink: #f093fb;
+  --palette-purple-rose: #fd79a8;
+  --palette-purple-orchid: #9b59b6;
+  --palette-purple-plum: #8e44ad;
+  --palette-purple-material: #9c27b0;
+
+  /* 青綠色系 - Teal Colors */
+  --palette-teal: #77969A;
+  --palette-teal-dark: #336774;
+  --palette-teal-olive: #89916B;
+  --palette-teal-cyan: #00cec9;
+
+  /* 粉紅色系 - Pink Colors */
+  --palette-pink-hot: #fa709a;
+  --palette-pink-rose: #fd79a8;
+
+  /* 灰色系 - Gray Colors */
+  --palette-gray-900: #1a1a1a;
+  --palette-gray-800: #2d2d2d;
+  --palette-gray-700: #1c1c1c;
+  --palette-gray-600: #141414;
+  --palette-gray-500: #616161;
+  --palette-gray-400: #666666;
+  --palette-gray-300: #888888;
+  --palette-gray-200: #aaaaaa;
+  --palette-gray-100: #cccccc;
+  --palette-gray-50: #f5f5f5;
+
+  /* 基礎色 - Base Colors */
+  --palette-white: #ffffff;
+  --palette-black: #000000;
 
   /* ========================================
-     導航色 - Navigation Colors
+     RGB 版本 (用於 rgba 計算)
      ======================================== */
-  --color-nav-bg: #ded1b6;
-  --color-nav-text: #1d293a;
-  --color-nav-active-bg: #a0917c;
-  --color-nav-recent-bg: #916a2d;
-  --color-nav-recent-text: #ebdec5;
-  --color-nav-recent-btn: #997337;
-
-  /* ========================================
-     狀態色 - Status Colors
-     ======================================== */
-
-  /* 成功 */
-  --color-success: #10b981;
-  --color-success-light: #059669;
-  --color-success-dark: #2e7d32;
-  --color-success-alt: #4CAF50;
-  --color-success-bright: #43e97b;
-  --color-success-rgb: 16, 185, 129;
-
-  /* 危險/錯誤 */
-  --color-danger: #ef4444;
-  --color-danger-light: #f87171;
-  --color-danger-dark: #c62828;
-  --color-danger-darker: #b83939;
-  --color-danger-alt: #d64545;
-  --color-danger-deep: #dc2626;
-  --color-danger-rgb: 239, 68, 68;
-
-  /* 警告 */
-  --color-warning: #f59e0b;
-  --color-warning-light: #feca57;
-  --color-warning-dark: #f57c00;
-  --color-warning-brown: #a0522d;
-
-  /* 信息 */
-  --color-info: #3b82f6;
-  --color-info-light: #74b9ff;
-  --color-info-dark: #0984e3;
-
-  /* 取消/中立 */
-  --color-neutral: #616161;
-  --color-neutral-light: #6b7280;
-
-  /* ========================================
-     功能色 - Feature Colors
-     ======================================== */
-
-  /* 青綠色 (合併工具、標籤等) */
-  --color-teal: #77969A;
-  --color-teal-dark: #336774;
-  --color-teal-light: #89916B;
-  --color-teal-rgb: 119, 150, 154;
-
-  /* 紫藍色 (標籤、進度等) */
-  --color-purple: #667eea;
-  --color-purple-light: #a29bfe;
-  --color-purple-dark: #6c5ce7;
-  --color-purple-deep: #8b5cf6;
-  --color-purple-rgb: 102, 126, 234;
-
-  /* 橘紅色 (編輯器高亮) */
-  --color-orange: #FF6B35;
-  --color-orange-light: #ff8c42;
-  --color-orange-dark: #e17055;
-
-  /* ========================================
-     中性色 - Neutral Colors
-     ======================================== */
-
-  /* 深色系 */
-  --color-gray-900: #1a1a1a;
-  --color-gray-800: #2d2d2d;
-  --color-gray-700: #1c1c1c;
-  --color-gray-600: #141414;
-  --color-gray-500: #616161;
-  --color-gray-400: #666666;
-  --color-gray-300: #888888;
-  --color-gray-200: #aaaaaa;
-  --color-gray-100: #cccccc;
-  --color-gray-50: #f5f5f5;
-
-  /* 淺色系 */
-  --color-white: #ffffff;
-  --color-black: #000000;
-
-  /* 分隔線 */
-  --color-divider: #a3b1c6;
-
-  /* Overlay 遮罩 */
-  --color-overlay: rgba(0, 0, 0, 0.5);
-  --color-overlay-dark: rgba(0, 0, 0, 0.85);
-  --color-overlay-light: rgba(0, 0, 0, 0.3);
-
-  /* 成功背景色 */
-  --color-success-bg: #d4edda;
-
-  /* ========================================
-     陰影色 - Shadow Colors
-     ======================================== */
-  --color-shadow-light: #ffffff;
-  --color-shadow-dark: #a3b1c6;
-
-  /* ========================================
-     漸層背景 - Gradient Backgrounds
-     ======================================== */
-  --gradient-primary: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
-  --gradient-success: linear-gradient(180deg, #a5d6a7, #66bb6a);
-  --gradient-danger: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
-  --gradient-purple: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);
-  --gradient-blue: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
-  --gradient-teal: linear-gradient(135deg, #00b894 0%, #00cec9 100%);
-  --gradient-warm: linear-gradient(145deg, #f5d9c4, #e8c4a8);
-  --gradient-cool: linear-gradient(145deg, #e9eef5, #d1d9e6);
+  --palette-orange-primary-rgb: 221, 132, 72;
+  --palette-gray-800-rgb: 45, 45, 45;
+  --palette-blue-gray-light-rgb: 163, 177, 198;
+  --palette-orange-bright-rgb: 255, 107, 53;
+  --palette-teal-rgb: 119, 150, 154;
+  --palette-green-success-rgb: 76, 175, 80;
+  --palette-green-emerald-rgb: 16, 185, 129;
+  --palette-red-bright-rgb: 239, 68, 68;
+  --palette-purple-primary-rgb: 102, 126, 234;
+  --palette-blue-primary-rgb: 33, 150, 243;
+  --palette-purple-material-rgb: 156, 39, 176;
+  --palette-green-sea-rgb: 0, 184, 148;
 
   /* ========================================
      標籤預設色 - Tag Preset Colors
+     這些是固定的標籤顏色，不隨主題變化
      ======================================== */
   --tag-color-1: #667eea;   /* 紫藍 */
   --tag-color-2: #f093fb;   /* 粉紫 */
@@ -181,51 +148,4 @@
   --tag-color-18: #74b9ff;  /* 淡藍 */
   --tag-color-19: #55efc4;  /* 青綠 */
   --tag-color-20: #ffeaa7;  /* 淺黃 */
-
-  /* ========================================
-     編輯器專用色 - Editor Colors
-     ======================================== */
-  --editor-bg: rgba(28, 28, 28, 0.95);
-  --editor-bg-dark: rgba(20, 20, 20, 0.95);
-  --editor-bg-gradient: linear-gradient(135deg, rgba(28, 28, 28, 0.95) 0%, rgba(20, 20, 20, 0.95) 100%);
-  --editor-waveform: #DD8448;
-  --editor-progress: #FF6B35;
-  --editor-cursor: #FFFFFF;
-  --editor-region-1: rgba(221, 132, 72, 0.3);
-  --editor-region-2: rgba(255, 107, 53, 0.3);
-  --editor-region-3: rgba(0, 184, 148, 0.3);
-  --editor-region-4: rgba(156, 39, 176, 0.3);
-  --editor-region-5: rgba(33, 150, 243, 0.3);
-  --editor-region-deleted: rgba(100, 100, 100, 0.3);
-  --editor-marker-color: rgba(255, 107, 53, 0.8);
-  --editor-marker-fill: rgba(255, 255, 255, 0.05);
-
-  /* ========================================
-     Legacy 變數映射 (向後兼容)
-     保留舊的變數名稱以避免破壞現有代碼
-     ======================================== */
-  --neu-bg: var(--color-bg);
-  --upload-bg: var(--color-bg-light);
-  --neu-bg-dark: var(--color-bg-dark);
-  --neu-bg-light: var(--color-bg-lighter);
-  --neu-primary: var(--color-secondary);
-  --neu-primary-light: var(--color-secondary-light);
-  --neu-primary-dark: var(--color-secondary-dark);
-  --neu-text: var(--color-text);
-  --neu-text-light: var(--color-text-light);
-  --neu-text-lighter: var(--color-text-lighter);
-  --neu-shadow-light: var(--color-shadow-light);
-  --neu-shadow-dark: var(--color-shadow-dark);
-  --nav-bg: var(--color-nav-bg);
-  --nav-text: var(--color-nav-text);
-  --nav-active-bg: var(--color-nav-active-bg);
-  --nav-recent-bg: var(--color-nav-recent-bg);
-  --nav-recent-text: var(--color-nav-recent-text);
-  --nav-recent-btn: var(--color-nav-recent-btn);
-  --electric-primary: var(--color-primary);
-
-  /* 中性色 legacy */
-  --neutral-900: var(--color-gray-900);
-  --neutral-800: var(--color-gray-800);
-  --neutral-100: var(--color-gray-50);
 }

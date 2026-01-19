@@ -258,38 +258,34 @@ onMounted(() => {
   display: flex;
   gap: 15px;
   margin-bottom: 30px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   padding: 15px 20px;
   border-radius: 20px;
-  box-shadow: var(--neu-shadow-raised);
   justify-content: center;
 }
 
 .nav-link {
   padding: 12px 24px;
   background: linear-gradient(145deg, #e9eef5, #d1d9e6);
-  color: var(--neu-text);
+  color: var(--main-text);
   text-decoration: none;
   border-radius: 12px;
   font-weight: 600;
   transition: all 0.3s;
-  box-shadow: var(--neu-shadow-btn);
 }
 
 .nav-link:hover {
-  box-shadow: var(--neu-shadow-btn-hover);
   transform: translateY(-2px);
 }
 
 .nav-link.active {
-  background: linear-gradient(145deg, var(--neu-primary-light), var(--neu-primary));
+  background: linear-gradient(145deg, var(--main-primary-light), var(--main-primary));
   color: white;
-  box-shadow: var(--neu-shadow-btn-active);
 }
 
 .page-title {
   text-align: center;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   margin-bottom: 30px;
   font-weight: 700;
   font-size: 28px;
@@ -300,10 +296,9 @@ onMounted(() => {
   display: flex;
   gap: 15px;
   align-items: center;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   padding: 20px;
   border-radius: 20px;
-  box-shadow: var(--neu-shadow-raised);
   margin-bottom: 20px;
   flex-wrap: wrap;
 }
@@ -316,7 +311,7 @@ onMounted(() => {
 
 .filter-item label {
   font-weight: 600;
-  color: var(--neu-text);
+  color: var(--main-text);
   white-space: nowrap;
 }
 
@@ -325,11 +320,11 @@ onMounted(() => {
   padding: 8px 12px;
   border: none;
   border-radius: 12px;
-  background: var(--neu-bg);
-  color: var(--neu-text);
+  background: var(--main-bg);
+  color: var(--main-text);
   box-shadow:
-    inset 3px 3px 6px var(--neu-shadow-dark),
-    inset -3px -3px 6px var(--neu-shadow-light);
+    inset 3px 3px 6px var(--main-shadow-dark),
+    inset -3px -3px 6px var(--main-shadow-light);
   font-size: 14px;
   outline: none;
   transition: all 0.3s;
@@ -346,25 +341,23 @@ onMounted(() => {
 .filter-select:focus,
 .filter-input:focus {
   box-shadow:
-    inset 2px 2px 4px var(--neu-shadow-dark),
-    inset -2px -2px 4px var(--neu-shadow-light);
+    inset 2px 2px 4px var(--main-shadow-dark),
+    inset -2px -2px 4px var(--main-shadow-light);
 }
 
 .filter-btn {
   padding: 8px 16px;
   background: linear-gradient(145deg, #e9eef5, #d1d9e6);
-  color: var(--neu-primary);
+  color: var(--main-primary);
   border: none;
   border-radius: 12px;
   cursor: pointer;
   font-size: 14px;
   font-weight: 700;
   transition: all 0.3s;
-  box-shadow: var(--neu-shadow-btn);
 }
 
 .filter-btn:hover {
-  box-shadow: var(--neu-shadow-btn-hover);
   transform: translateY(-2px);
 }
 
@@ -378,13 +371,13 @@ onMounted(() => {
   text-align: center;
   padding: 40px;
   font-size: 18px;
-  color: var(--neu-text);
+  color: var(--main-text);
 }
 
 .spinner {
   border: 4px solid transparent;
-  border-top: 4px solid var(--neu-primary);
-  border-right: 4px solid var(--neu-primary-light);
+  border-top: 4px solid var(--main-primary);
+  border-right: 4px solid var(--main-primary-light);
   border-radius: 50%;
   width: 40px;
   height: 40px;
@@ -399,10 +392,9 @@ onMounted(() => {
 
 /* 記錄列表 */
 .logs-section {
-  background: var(--neu-bg);
+  background: var(--main-bg);
   border-radius: 20px;
   padding: 24px;
-  box-shadow: var(--neu-shadow-raised);
 }
 
 .logs-header {
@@ -414,25 +406,23 @@ onMounted(() => {
 
 .total-count {
   font-weight: 600;
-  color: var(--neu-text);
+  color: var(--main-text);
   font-size: 16px;
 }
 
 .refresh-btn {
   padding: 8px 16px;
   background: linear-gradient(145deg, #e9eef5, #d1d9e6);
-  color: var(--neu-primary);
+  color: var(--main-primary);
   border: none;
   border-radius: 12px;
   cursor: pointer;
   font-size: 14px;
   font-weight: 700;
   transition: all 0.3s;
-  box-shadow: var(--neu-shadow-btn);
 }
 
 .refresh-btn:hover {
-  box-shadow: var(--neu-shadow-btn-hover);
   transform: translateY(-2px);
 }
 
@@ -440,7 +430,7 @@ onMounted(() => {
   text-align: center;
   padding: 60px;
   font-size: 20px;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
 }
 
 /* 表格 */
@@ -448,8 +438,8 @@ onMounted(() => {
   overflow-x: auto;
   border-radius: 12px;
   box-shadow:
-    inset 2px 2px 4px var(--neu-shadow-dark),
-    inset -2px -2px 4px var(--neu-shadow-light);
+    inset 2px 2px 4px var(--main-shadow-dark),
+    inset -2px -2px 4px var(--main-shadow-light);
 }
 
 .logs-table {
@@ -459,11 +449,11 @@ onMounted(() => {
 }
 
 .logs-table th {
-  background: var(--neu-bg);
+  background: var(--main-bg);
   padding: 14px 12px;
   text-align: left;
   font-weight: 700;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   border-bottom: 2px solid rgba(163, 177, 198, 0.3);
   position: sticky;
   top: 0;
@@ -473,7 +463,7 @@ onMounted(() => {
 .logs-table td {
   padding: 12px;
   border-bottom: 1px solid rgba(163, 177, 198, 0.15);
-  color: var(--neu-text);
+  color: var(--main-text);
 }
 
 .logs-table tbody tr {
@@ -496,7 +486,7 @@ onMounted(() => {
 .timestamp {
   white-space: nowrap;
   font-weight: 600;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   font-size: 12px;
 }
 
@@ -526,18 +516,18 @@ onMounted(() => {
 }
 
 .user-id {
-  background: var(--neu-bg);
+  background: var(--main-bg);
   padding: 3px 8px;
   border-radius: 6px;
   font-size: 11px;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   box-shadow:
-    inset 2px 2px 4px var(--neu-shadow-dark),
-    inset -2px -2px 4px var(--neu-shadow-light);
+    inset 2px 2px 4px var(--main-shadow-dark),
+    inset -2px -2px 4px var(--main-shadow-light);
 }
 
 .null-value {
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   font-style: italic;
 }
 
@@ -575,13 +565,13 @@ onMounted(() => {
 .ip {
   font-family: monospace;
   font-size: 12px;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
 }
 
 .path {
   font-family: monospace;
   font-size: 11px;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   max-width: 250px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -598,7 +588,7 @@ onMounted(() => {
 .duration {
   font-family: monospace;
   font-size: 12px;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   text-align: right;
 }
 
@@ -616,18 +606,16 @@ onMounted(() => {
 .page-btn {
   padding: 10px 20px;
   background: linear-gradient(145deg, #e9eef5, #d1d9e6);
-  color: var(--neu-primary);
+  color: var(--main-primary);
   border: none;
   border-radius: 12px;
   cursor: pointer;
   font-size: 14px;
   font-weight: 700;
   transition: all 0.3s;
-  box-shadow: var(--neu-shadow-btn);
 }
 
 .page-btn:hover:not(:disabled) {
-  box-shadow: var(--neu-shadow-btn-hover);
   transform: translateY(-2px);
 }
 
@@ -639,7 +627,7 @@ onMounted(() => {
 
 .page-info {
   font-weight: 600;
-  color: var(--neu-text);
+  color: var(--main-text);
   font-size: 14px;
 }
 

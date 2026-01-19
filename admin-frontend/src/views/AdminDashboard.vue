@@ -358,38 +358,34 @@ onMounted(() => {
   display: flex;
   gap: 15px;
   margin-bottom: 30px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   padding: 15px 20px;
   border-radius: 20px;
-  box-shadow: var(--neu-shadow-raised);
   justify-content: center;
 }
 
 .nav-link {
   padding: 12px 24px;
   background: linear-gradient(145deg, #e9eef5, #d1d9e6);
-  color: var(--neu-text);
+  color: var(--main-text);
   text-decoration: none;
   border-radius: 12px;
   font-weight: 600;
   transition: all 0.3s;
-  box-shadow: var(--neu-shadow-btn);
 }
 
 .nav-link:hover {
-  box-shadow: var(--neu-shadow-btn-hover);
   transform: translateY(-2px);
 }
 
 .nav-link.active {
-  background: linear-gradient(145deg, var(--neu-primary-light), var(--neu-primary));
+  background: linear-gradient(145deg, var(--main-primary-light), var(--main-primary));
   color: white;
-  box-shadow: var(--neu-shadow-btn-active);
 }
 
 .admin-title {
   text-align: center;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   margin-bottom: 30px;
   font-weight: 700;
 }
@@ -398,13 +394,13 @@ onMounted(() => {
   text-align: center;
   padding: 40px;
   font-size: 18px;
-  color: var(--neu-text);
+  color: var(--main-text);
 }
 
 .spinner {
   border: 4px solid transparent;
-  border-top: 4px solid var(--neu-primary);
-  border-right: 4px solid var(--neu-primary-light);
+  border-top: 4px solid var(--main-primary);
+  border-right: 4px solid var(--main-primary-light);
   border-radius: 50%;
   width: 40px;
   height: 40px;
@@ -425,10 +421,9 @@ onMounted(() => {
 }
 
 .stat-card {
-  background: var(--neu-bg);
+  background: var(--main-bg);
   border-radius: 20px;
   padding: 24px;
-  box-shadow: var(--neu-shadow-raised);
   border: 1px solid rgba(255, 255, 255, 0.3);
 }
 
@@ -443,7 +438,7 @@ onMounted(() => {
 .stat-card h2 {
   font-size: 18px;
   margin-bottom: 15px;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   font-weight: 700;
 }
 
@@ -459,13 +454,13 @@ onMounted(() => {
 }
 
 .label {
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   font-weight: 500;
 }
 
 .value {
   font-weight: 700;
-  color: var(--neu-text);
+  color: var(--main-text);
 }
 
 .value.success {
@@ -481,7 +476,7 @@ onMounted(() => {
 }
 
 .value.highlight {
-  color: var(--neu-primary);
+  color: var(--main-primary);
   font-size: 1.2em;
 }
 
@@ -494,8 +489,8 @@ onMounted(() => {
   font-weight: 700;
   color: #a0522d;
   box-shadow:
-    inset 2px 2px 5px var(--neu-shadow-dark),
-    inset -2px -2px 5px var(--neu-shadow-light);
+    inset 2px 2px 5px var(--main-shadow-dark),
+    inset -2px -2px 5px var(--main-shadow-light);
 }
 
 .data-table {
@@ -511,43 +506,43 @@ onMounted(() => {
 }
 
 .data-table th {
-  background: var(--neu-bg);
+  background: var(--main-bg);
   font-weight: 700;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   box-shadow:
-    inset 2px 2px 4px var(--neu-shadow-dark),
-    inset -2px -2px 4px var(--neu-shadow-light);
+    inset 2px 2px 4px var(--main-shadow-dark),
+    inset -2px -2px 4px var(--main-shadow-light);
 }
 
 .data-table code {
-  background: var(--neu-bg);
+  background: var(--main-bg);
   padding: 4px 8px;
   border-radius: 8px;
   font-size: 0.9em;
   box-shadow:
-    inset 2px 2px 4px var(--neu-shadow-dark),
-    inset -2px -2px 4px var(--neu-shadow-light);
+    inset 2px 2px 4px var(--main-shadow-dark),
+    inset -2px -2px 4px var(--main-shadow-light);
 }
 
 .progress-bar {
   position: relative;
   width: 100%;
   height: 24px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   border-radius: 12px;
   overflow: hidden;
   box-shadow:
-    inset 3px 3px 6px var(--neu-shadow-dark),
-    inset -3px -3px 6px var(--neu-shadow-light);
+    inset 3px 3px 6px var(--main-shadow-dark),
+    inset -3px -3px 6px var(--main-shadow-light);
 }
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--neu-primary), var(--neu-primary-light));
+  background: linear-gradient(90deg, var(--main-primary), var(--main-primary-light));
   transition: width 0.3s;
   box-shadow:
-    2px 2px 4px var(--neu-shadow-dark),
-    -2px -2px 4px var(--neu-shadow-light);
+    2px 2px 4px var(--main-shadow-dark),
+    -2px -2px 4px var(--main-shadow-light);
 }
 
 .progress-text {
@@ -557,7 +552,7 @@ onMounted(() => {
   transform: translate(-50%, -50%);
   font-size: 0.85em;
   font-weight: 700;
-  color: var(--neu-text);
+  color: var(--main-text);
 }
 
 .chart-container {
@@ -583,23 +578,23 @@ onMounted(() => {
 
 .chart-bar {
   width: 100%;
-  background: linear-gradient(180deg, var(--neu-primary-light), var(--neu-primary));
+  background: linear-gradient(180deg, var(--main-primary-light), var(--main-primary));
   border-radius: 8px 8px 0 0;
   position: relative;
   min-height: 20px;
   transition: all 0.3s;
   cursor: pointer;
   box-shadow:
-    3px 3px 6px var(--neu-shadow-dark),
-    -3px -3px 6px var(--neu-shadow-light);
+    3px 3px 6px var(--main-shadow-dark),
+    -3px -3px 6px var(--main-shadow-light);
 }
 
 .chart-bar:hover {
   background: linear-gradient(180deg, #a5d6a7, #66bb6a);
   transform: translateY(-3px);
   box-shadow:
-    5px 5px 10px var(--neu-shadow-dark),
-    -5px -5px 10px var(--neu-shadow-light);
+    5px 5px 10px var(--main-shadow-dark),
+    -5px -5px 10px var(--main-shadow-light);
 }
 
 .bar-value {
@@ -610,13 +605,13 @@ onMounted(() => {
   font-size: 0.75em;
   font-weight: 700;
   white-space: nowrap;
-  color: var(--neu-text);
+  color: var(--main-text);
 }
 
 .bar-label {
   margin-top: 5px;
   font-size: 0.7em;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   writing-mode: horizontal-tb;
   text-align: center;
   font-weight: 600;
@@ -634,28 +629,25 @@ onMounted(() => {
 .refresh-btn {
   padding: 12px 24px;
   background: linear-gradient(145deg, #e9eef5, #d1d9e6);
-  color: var(--neu-primary);
+  color: var(--main-primary);
   border: none;
   border-radius: 12px;
   cursor: pointer;
   font-size: 16px;
   font-weight: 700;
   transition: all 0.3s;
-  box-shadow: var(--neu-shadow-btn);
 }
 
 .refresh-btn:hover {
-  box-shadow: var(--neu-shadow-btn-hover);
   transform: translateY(-2px);
 }
 
 .refresh-btn:active {
-  box-shadow: var(--neu-shadow-btn-active);
   transform: translateY(0);
 }
 
 .last-update {
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   font-size: 14px;
   font-weight: 500;
 }
@@ -691,7 +683,7 @@ onMounted(() => {
 .model-type-title {
   font-size: 16px;
   font-weight: 700;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   margin-bottom: 12px;
   padding-bottom: 8px;
   border-bottom: 2px solid rgba(163, 177, 198, 0.3);
@@ -700,7 +692,7 @@ onMounted(() => {
 .no-data {
   text-align: center;
   padding: 30px;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   font-style: italic;
 }
 </style>

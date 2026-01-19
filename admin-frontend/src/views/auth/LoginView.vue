@@ -95,7 +95,7 @@ async function handleLogin() {
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
 }
 
 .auth-card {
@@ -112,13 +112,13 @@ async function handleLogin() {
   font-size: 2rem;
   margin: 0 0 10px 0;
   text-align: center;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   font-weight: 700;
 }
 
 .auth-subtitle {
   text-align: center;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   margin: 0 0 30px 0;
   font-size: 0.9rem;
 }
@@ -137,7 +137,7 @@ async function handleLogin() {
 
 .form-group label {
   font-size: 0.9rem;
-  color: var(--neu-text);
+  color: var(--main-text);
   font-weight: 600;
 }
 
@@ -145,18 +145,17 @@ async function handleLogin() {
   padding: 14px 18px;
   border: none;
   border-radius: 12px;
-  background: var(--neu-bg);
-  color: var(--neu-text);
+  background: var(--main-bg);
+  color: var(--main-text);
   font-size: 1rem;
   transition: all 0.3s ease;
-  box-shadow: var(--neu-shadow-inset);
 }
 
 .form-group input:focus {
   outline: none;
   box-shadow:
-    inset 6px 6px 10px var(--neu-shadow-dark),
-    inset -6px -6px 10px var(--neu-shadow-light),
+    inset 6px 6px 10px var(--main-shadow-dark),
+    inset -6px -6px 10px var(--main-shadow-light),
     0 0 0 3px rgba(108, 139, 163, 0.2);
 }
 
@@ -174,14 +173,14 @@ async function handleLogin() {
   text-align: center;
   font-weight: 600;
   box-shadow:
-    4px 4px 8px var(--neu-shadow-dark),
-    -4px -4px 8px var(--neu-shadow-light);
+    4px 4px 8px var(--main-shadow-dark),
+    -4px -4px 8px var(--main-shadow-light);
 }
 
 .btn-primary {
   padding: 14px 24px;
   background: linear-gradient(145deg, #e9eef5, #d1d9e6);
-  color: var(--neu-primary);
+  color: var(--main-primary);
   border: none;
   border-radius: 12px;
   font-size: 1rem;
@@ -189,17 +188,14 @@ async function handleLogin() {
   cursor: pointer;
   transition: all 0.3s ease;
   margin-top: 10px;
-  box-shadow: var(--neu-shadow-btn);
 }
 
 .btn-primary:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: var(--neu-shadow-btn-hover);
 }
 
 .btn-primary:active:not(:disabled) {
   transform: translateY(0);
-  box-shadow: var(--neu-shadow-btn-active);
 }
 
 .btn-primary:disabled {
@@ -211,18 +207,18 @@ async function handleLogin() {
 .auth-footer {
   margin-top: 30px;
   text-align: center;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   font-size: 0.9rem;
 }
 
 .auth-footer a {
-  color: var(--neu-primary);
+  color: var(--main-primary);
   text-decoration: none;
   font-weight: 600;
   transition: color 0.3s ease;
 }
 
 .auth-footer a:hover {
-  color: var(--neu-primary-dark);
+  color: var(--main-primary-dark);
 }
 </style>

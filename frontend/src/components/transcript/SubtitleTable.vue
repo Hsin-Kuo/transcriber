@@ -408,7 +408,7 @@ onUnmounted(() => {
   display: block;
   font-size: 11px;
   font-weight: 600;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 8px;
@@ -426,7 +426,7 @@ onUnmounted(() => {
   border: none;
   border-radius: 6px;
   background: var(--upload-bg);
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -434,8 +434,8 @@ onUnmounted(() => {
 }
 
 .format-btn.active {
-  color: var(--neu-primary);
-  background: var(--neu-bg);
+  color: var(--main-primary);
+  background: var(--main-bg);
 }
 
 .format-btn:hover {
@@ -459,7 +459,7 @@ onUnmounted(() => {
   appearance: none;
   width: 16px;
   height: 16px;
-  background: var(--neu-primary);
+  background: var(--main-primary);
   border-radius: 50%;
   cursor: pointer;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
@@ -468,7 +468,7 @@ onUnmounted(() => {
 .density-slider::-moz-range-thumb {
   width: 16px;
   height: 16px;
-  background: var(--neu-primary);
+  background: var(--main-primary);
   border-radius: 50%;
   cursor: pointer;
   border: none;
@@ -479,7 +479,7 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   font-size: 10px;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   margin-top: 4px;
 }
 
@@ -500,7 +500,7 @@ onUnmounted(() => {
 .speaker-code {
   font-size: 11px;
   font-weight: 600;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   font-family: 'Courier New', monospace;
 }
 
@@ -509,20 +509,20 @@ onUnmounted(() => {
   padding: 6px 10px;
   border: 1px solid rgba(163, 177, 198, 0.2);
   border-radius: 4px;
-  background: var(--neu-bg);
-  color: var(--neu-text);
+  background: var(--main-bg);
+  color: var(--main-text);
   font-size: 12px;
   outline: none;
   transition: all 0.2s ease;
 }
 
 .speaker-input:focus {
-  border-color: var(--neu-primary);
+  border-color: var(--main-primary);
   background: var(--upload-bg);
 }
 
 .speaker-input::placeholder {
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   opacity: 0.5;
 }
 
@@ -535,7 +535,7 @@ onUnmounted(() => {
   overflow-y: auto !important;
   overflow-x: hidden;
   border-radius: 12px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   padding: 12px;
   flex: 1;
   position: relative;
@@ -576,12 +576,12 @@ onUnmounted(() => {
 .subtitle-table thead th {
   position: sticky;
   top: -12px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   padding: 12px;
   text-align: left;
   font-size: 11px;
   font-weight: 700;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   z-index: 10;
@@ -617,18 +617,18 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   transition: all 0.2s ease;
   flex-shrink: 0;
 }
 
 .settings-btn:hover {
-  color: var(--neu-primary);
+  color: var(--main-primary);
   background: rgba(255, 145, 77, 0.1);
 }
 
 .settings-btn.active {
-  color: var(--neu-primary);
+  color: var(--main-primary);
   background: rgba(255, 145, 77, 0.15);
 }
 
@@ -643,7 +643,7 @@ onUnmounted(() => {
 }
 
 .subtitle-row {
-  background: var(--neu-bg);
+  background: var(--main-bg);
   transition: all 0.2s ease;
   position: relative;
   z-index: 1;
@@ -660,7 +660,7 @@ onUnmounted(() => {
   text-align: right;
   font-family: 'Courier New', monospace;
   font-size: 13px;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   white-space: nowrap;
   vertical-align: top;
   transition: width 0.3s ease;
@@ -685,7 +685,7 @@ onUnmounted(() => {
 
 .col-time.clickable:hover {
   background: rgba(255, 145, 77, 0.1);
-  color: var(--neu-primary);
+  color: var(--main-primary);
   transform: translateX(-2px);
 }
 
@@ -705,11 +705,11 @@ onUnmounted(() => {
 .speaker-badge {
   display: inline-block;
   padding: 4px 10px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   border-radius: 8px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   transition: all 0.2s ease;
 }
 
@@ -768,7 +768,7 @@ onUnmounted(() => {
   cursor: pointer;
   transition: all 0.15s ease;
   text-align: left;
-  color: var(--neu-text);
+  color: var(--main-text);
 }
 
 .speaker-option:hover {
@@ -776,8 +776,8 @@ onUnmounted(() => {
 }
 
 .speaker-option.current {
-  background: var(--neu-bg);
-  color: var(--neu-primary);
+  background: var(--main-bg);
+  color: var(--main-primary);
 }
 
 .speaker-code {
@@ -785,11 +785,11 @@ onUnmounted(() => {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
 }
 
 .speaker-option.current .speaker-code {
-  color: var(--neu-primary);
+  color: var(--main-primary);
 }
 
 .speaker-name {
@@ -812,21 +812,21 @@ onUnmounted(() => {
   padding: 6px 10px;
   border: 1px solid rgba(163, 177, 198, 0.2);
   border-radius: 6px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   font-size: 13px;
-  color: var(--neu-text);
+  color: var(--main-text);
   transition: all 0.2s ease;
 }
 
 .speaker-input:focus {
   outline: none;
-  border-color: var(--neu-primary);
+  border-color: var(--main-primary);
   box-shadow: 0 0 0 2px rgba(255, 145, 77, 0.1);
 }
 
 .btn-add-speaker {
   padding: 6px 12px;
-  background: var(--neu-primary);
+  background: var(--main-primary);
   color: white;
   border: none;
   border-radius: 6px;
@@ -853,7 +853,7 @@ onUnmounted(() => {
   padding: 12px;
   font-size: 15px;
   line-height: 1.6;
-  color: var(--neu-text);
+  color: var(--main-text);
   min-height: 48px;
   vertical-align: top;
 }
@@ -871,7 +871,7 @@ onUnmounted(() => {
 }
 
 .col-content[contenteditable="true"]:focus {
-  outline: 2px solid var(--neu-primary);
+  outline: 2px solid var(--main-primary);
   background: var(--upload-bg);
 }
 

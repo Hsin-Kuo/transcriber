@@ -12,7 +12,7 @@
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   /*  背景 - 使用純色 */
-  background-color: var(--neu-bg);
+  background-color: var(--main-bg);
   min-height: 100vh;
   padding: 0;
   position: relative;
@@ -99,35 +99,14 @@ body::before {
 
 /* 通用樣式 */
 .card {
-  background: var(--neu-bg);
+  background: var(--main-bg);
   border-radius: 20px;
   padding: 24px;
-  box-shadow: var(--neu-shadow-raised);
   margin-bottom: 20px;
   position: relative;
-  color: var(--neu-text);
+  color: var(--main-text);
   border: none;
 }
-
-/*  卡片效果樣式 */
-/* .electric-card {
-  padding: 0;
-  border-radius: 20px;
-  position: relative;
-  background: var(--neu-bg);
-  box-shadow: var(--neu-shadow-raised);
-  border: none;
-}
-
-.electric-inner {
-  position: relative;
-}
-
-.electric-border-outer {
-  border-radius: 20px;
-  padding: 0;
-} */
-
 
 .btn {
   padding: 12px 24px;
@@ -137,25 +116,14 @@ body::before {
   font-size: 14px;
   font-weight: 600;
   transition: all 0.3s ease;
-  background: var(--neu-bg);
-  color: var(--neu-text);
-  /* box-shadow: var(--neu-shadow-btn); */
+  background: var(--main-bg);
+  color: var(--main-text);
   position: relative;
   overflow: hidden;
 }
 
-/* .btn:hover:not(:disabled) {
-  box-shadow: var(--neu-shadow-btn-hover);
-  transform: translateY(-2px);
-} */
-
-/* .btn:active:not(:disabled) {
-  box-shadow: var(--neu-shadow-btn-active);
-  transform: translateY(0);
-} */
-
 .btn-primary {
-  background: var(--neu-primary-dark);
+  background: var(--main-primary-dark);
   color: white;
   border: none;
 }
@@ -173,9 +141,9 @@ body::before {
 }
 
 .btn-secondary {
-  background: var(--neu-bg);
-  color: var(--neu-primary-light);
-  /* border: 2px solid var(--neu-primary); */
+  background: var(--main-bg);
+  color: var(--main-primary-light);
+  /* border: 2px solid var(--main-primary); */
 }
 
 /* .btn-secondary:hover:not(:disabled) {
@@ -186,9 +154,8 @@ body::before {
 } */
 
 .btn-danger {
-  background: var(--neu-bg);
+  background: var(--main-bg);
   color: var(--color-danger-alt);
-  /* box-shadow: var(--neu-shadow-btn); */
 }
 
 .btn-danger:hover:not(:disabled) {
@@ -208,7 +175,6 @@ body::before {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
-  /* box-shadow: var(--neu-shadow-btn); */
 }
 
 .badge {
@@ -227,7 +193,7 @@ body::before {
 
 .badge-processing {
   background: transparent;
-  color: var(--neu-primary);
+  color: var(--main-primary);
 }
 
 .badge-completed {

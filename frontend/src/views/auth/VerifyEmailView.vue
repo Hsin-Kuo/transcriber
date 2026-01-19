@@ -88,7 +88,7 @@ onMounted(async () => {
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
 }
 
 .auth-card {
@@ -115,7 +115,7 @@ onMounted(async () => {
   width: 60px;
   height: 60px;
   border: 5px solid rgba(var(--color-primary-rgb), 0.1);
-  border-top: 5px solid var(--neu-primary);
+  border-top: 5px solid var(--main-primary);
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }
@@ -128,7 +128,7 @@ onMounted(async () => {
 
 h2 {
   font-size: 1.8rem;
-  color: var(--neu-text);
+  color: var(--main-text);
   margin: 0;
   font-weight: 700;
 }
@@ -136,7 +136,7 @@ h2 {
 .success-message,
 .error-message {
   font-size: 1.1rem;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   margin: 0;
   line-height: 1.6;
 }
@@ -161,37 +161,32 @@ h2 {
   font-weight: 700;
   cursor: pointer;
   transition: all 0.3s ease;
-  box-shadow: var(--neu-shadow-btn);
 }
 
 .btn-primary {
   background: var(--gradient-cool);
-  color: var(--neu-primary);
+  color: var(--main-primary);
 }
 
 .btn-primary:hover {
   transform: translateY(-2px);
-  box-shadow: var(--neu-shadow-btn-hover);
 }
 
 .btn-primary:active {
   transform: translateY(0);
-  box-shadow: var(--neu-shadow-btn-active);
 }
 
 .btn-secondary {
   background: var(--gradient-cool);
-  color: var(--neu-text);
+  color: var(--main-text);
 }
 
 .btn-secondary:hover {
   transform: translateY(-2px);
-  box-shadow: var(--neu-shadow-btn-hover);
-  color: var(--neu-primary);
+  color: var(--main-primary);
 }
 
 .btn-secondary:active {
   transform: translateY(0);
-  box-shadow: var(--neu-shadow-btn-active);
 }
 </style>

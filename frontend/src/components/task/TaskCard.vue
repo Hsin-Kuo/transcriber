@@ -94,65 +94,78 @@
 
         <!-- 操作按鈕區域 -->
         <div class="task-actions" @click.stop>
-          <!-- Keep Audio 切換開關 -->
-          <div
-            v-if="task.status === 'completed' && (task.result?.audio_file || task.audio_file)"
-            class="keep-audio-toggle"
-            :title="getKeepAudioTooltip()"
-          >
-            <label class="toggle-label">
-              <div class="toggle-switch-wrapper">
-                <input
-                  type="checkbox"
-                  :checked="task.keep_audio"
-                  @change="handleToggleKeepAudio"
-                  :disabled="!task.keep_audio && keepAudioCount >= 3"
-                  class="toggle-input"
-                />
-                <span class="toggle-slider">
-                  <!-- 解鎖圖標（未選中時顯示） -->
-                  <svg class="lock-icon unlock-icon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                    <path d="M7 11V7a5 5 0 0 1 9.9-1"></path>
+          <!-- 已完成任務的按鈕行 -->
+          <div v-if="task.status === 'completed'" class="completed-actions-row">
+            <!-- Keep Audio 切換開關 -->
+            <div
+              v-if="task.result?.audio_file || task.audio_file"
+              class="keep-audio-toggle"
+              :title="getKeepAudioTooltip()"
+            >
+              <label class="toggle-label">
+                <div class="toggle-knob-wrapper">
+                  <input
+                    type="checkbox"
+                    :checked="task.keep_audio"
+                    @change="handleToggleKeepAudio"
+                    :disabled="!task.keep_audio && keepAudioCount >= 3"
+                    class="toggle-input"
+                  />
+                  <!-- 扇形灰底 -->
+                  <svg class="knob-arc-bg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+                    <path d="M 20 22 L 9.7 9.7 A 16 16 0 0 1 30.3 9.7 Z" fill="currentColor"/>
                   </svg>
-                  <!-- 上鎖圖標（選中時顯示） -->
-                  <svg class="lock-icon locked-icon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <!-- 點（10點鐘方向） -->
+                  <span class="knob-dot unlock-icon"></span>
+                  <!-- 上鎖圖標（2點鐘方向） -->
+                  <svg class="knob-lock-icon locked-icon" xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                     <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
                     <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
                   </svg>
+                  <!-- 旋鈕 -->
+                  <span class="toggle-knob">
+                    <svg class="knob-indicator" xmlns="http://www.w3.org/2000/svg" width="12" height="36" viewBox="0 0 12 36">
+                      <!-- 主指針：長方形 -->
+                      <rect x="5" y="1" width="2" height="17" rx="1" fill="currentColor"/>
+                      <!-- 圓心：圓形 -->
+                      <circle cx="6" cy="18" r="3" fill="currentColor"/>
+                      <!-- 尾巴：長方形 -->
+                      <rect x="5" y="20" width="2" height="6" rx="1" fill="currentColor"/>
+                    </svg>
+                  </span>
+                </div>
+                <span v-if="isNewest" class="newest-badge" :title="$t('taskList.newestTaskAudioKept')">
+                  {{ $t('taskList.newestBadge') }}
                 </span>
-              </div>
-              <span v-if="isNewest" class="newest-badge" :title="$t('taskList.newestTaskAudioKept')">
-                {{ $t('taskList.newestBadge') }}
-              </span>
-            </label>
-          </div>
+              </label>
+            </div>
 
-          <!-- 已完成任務的雙聯按鈕組 -->
-          <div v-if="task.status === 'completed'" class="btn-group">
-            <button
-              class="btn btn-download btn-group-left btn-icon"
-              @click.stop="emit('download', task)"
-              :title="$t('taskList.downloadTranscript')"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-              </svg>
-            </button>
-            <button
-              class="btn btn-danger btn-group-right btn-icon"
-              @click.stop="emit('delete', task.task_id)"
-              :title="$t('taskList.deleteTask')"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="3 6 5 6 21 6"></polyline>
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                <line x1="10" y1="11" x2="10" y2="17"></line>
-                <line x1="14" y1="11" x2="14" y2="17"></line>
-              </svg>
-            </button>
+            <!-- 雙聯按鈕組 -->
+            <div class="btn-group">
+              <button
+                class="btn btn-download btn-group-left btn-icon"
+                @click.stop="emit('download', task)"
+                :title="$t('taskList.downloadTranscript')"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+              </button>
+              <button
+                class="btn btn-danger btn-group-right btn-icon"
+                @click.stop="emit('delete', task.task_id)"
+                :title="$t('taskList.deleteTask')"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                  <line x1="10" y1="11" x2="10" y2="17"></line>
+                  <line x1="14" y1="11" x2="14" y2="17"></line>
+                </svg>
+              </button>
+            </div>
           </div>
 
           <!-- 進行中任務的取消按鈕 -->
@@ -265,7 +278,7 @@ function getKeepAudioTooltip() {
 
 .electric-card.task-wrapper {
   position: relative;
-  margin-bottom: -40px;
+  /* margin-bottom: -40px; */
   filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.12));
 }
 
@@ -281,11 +294,11 @@ function getKeepAudioTooltip() {
 .electric-card.task-wrapper:nth-child(10) { z-index: 100; }
 
 .task-item {
-  padding: 28px 20px 48px 20px;
+  padding: 28px 20px 28px 20px;
   /* margin-left: 10px; */
   transition: all 0.3s;
   position: relative;
-  background: var(--upload-bg);
+  /* background: var(--upload-bg); */
   background-image:
     repeating-linear-gradient(0deg, transparent, transparent 9px, rgba(0, 0, 0, 0.015) 9px, rgba(0, 0, 0, 0.015) 10px),
     repeating-linear-gradient(90deg, transparent, transparent 9px, rgba(0, 0, 0, 0.015) 9px, rgba(0, 0, 0, 0.015) 10px);
@@ -306,12 +319,8 @@ function getKeepAudioTooltip() {
 }
 
 .task-wrapper:hover .task-item {
-  filter: drop-shadow(0 6px 12px rgba(var(--color-primary-rgb), 0.2));
+  /* filter: drop-shadow(0 6px 12px rgba(var(--color-primary-rgb), 0.2)); */
   transform: translateY(-2px);
-}
-
-.task-wrapper:hover .task-item.clickable {
-  filter: drop-shadow(0 8px 16px rgba(var(--color-primary-rgb), 0.25));
 }
 
 .task-item.batch-edit-mode {
@@ -369,7 +378,8 @@ function getKeepAudioTooltip() {
 
 .task-header h3 {
   font-size: 16px;
-  color: var(--color-text-dark);
+  font-weight: 450;
+  color: var(--nav-text);
   margin: 0;
 }
 
@@ -531,6 +541,14 @@ function getKeepAudioTooltip() {
   flex-shrink: 0;
 }
 
+/* 已完成任務的按鈕行 */
+.completed-actions-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+
 /* Keep Audio 切換開關 */
 .keep-audio-toggle {
   display: flex;
@@ -544,122 +562,158 @@ function getKeepAudioTooltip() {
   gap: 10px;
   cursor: pointer;
   user-select: none;
-  padding-right: 5px;
+  padding: 0px 5px;
   position: relative;
+  /* border: 2px solid var(--nav-text); */
+  border-radius: 10%;
 }
 
-.toggle-label:hover .toggle-slider {
-  transform: scale(1.05);
-}
-
-.toggle-switch-wrapper {
+/* 旋鈕式切換開關 */
+.toggle-knob-wrapper {
   position: relative;
-  width: 44px;
-  height: 24px;
+  width: 40px;
+  height: 34px;
   display: inline-block;
 }
 
-.toggle-input {
+.toggle-knob-wrapper .toggle-input {
   opacity: 0;
   width: 0;
   height: 0;
   position: absolute;
 }
 
-.toggle-slider {
+/* 扇形灰底 */
+.knob-arc-bg {
   position: absolute;
-  cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: var(--color-gray-100);
-  transition: all 0.3s ease;
-  border-radius: 24px;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: 40px;
+  height: 40px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -45%);
+  color: rgba(0, 0, 0, 0.08);
+  pointer-events: none;
 }
 
-.toggle-slider:before {
-  position: absolute;
-  content: "";
-  height: 18px;
-  width: 18px;
-  left: 3px;
-  bottom: 3px;
-  background-color: white;
-  transition: 0.3s;
-  border-radius: 50%;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-}
-
-.toggle-input:checked + .toggle-slider {
-  background: linear-gradient(135deg, var(--electric-primary) 0%, #b8762d 100%);
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1), 0 0 8px rgba(var(--color-primary-rgb), 0.3);
-}
-
-.toggle-input:checked + .toggle-slider:before {
-  transform: translateX(20px);
-}
-
-.toggle-input:disabled + .toggle-slider {
-  opacity: 0.5;
-  cursor: not-allowed;
-  background-color: var(--color-gray-100);
-}
-
-.toggle-input:disabled + .toggle-slider:before {
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
-}
-
-.toggle-label:hover .toggle-slider:not(.toggle-input:disabled + .toggle-slider) {
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2), 0 0 4px rgba(0, 0, 0, 0.1);
-}
-
-.toggle-label:hover .toggle-input:checked + .toggle-slider {
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1), 0 0 12px rgba(var(--color-primary-rgb), 0.4);
-}
-
-.lock-icon {
+/* 鎖頭圖標 - 外圈位置 */
+.knob-lock-icon {
   position: absolute;
   transition: all 0.3s ease;
   z-index: 1;
   pointer-events: none;
 }
 
-.unlock-icon {
-  left: 6px;
-  color: var(--color-gray-300);
+/* 點樣式（10點鐘方向） */
+.knob-dot.unlock-icon {
+  position: absolute;
+  top: 5px;
+  left: -1px;
+  width: 5px;
+  height: 5px;
+  background: var(--color-gray-300);
+  border-radius: 50%;
+  transition: all 0.3s ease;
   opacity: 1;
 }
 
-.locked-icon {
-  right: 6px;
+.knob-lock-icon.locked-icon {
+  /* 2點鐘方向 */
+  top: 2px;
+  right: -4px;
   color: rgb(177, 79, 22);
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
-  opacity: 0;
-}
-
-.toggle-input:not(:checked) + .toggle-slider .unlock-icon {
-  opacity: 1;
-}
-
-.toggle-input:not(:checked) + .toggle-slider .locked-icon {
-  opacity: 0;
-}
-
-.toggle-input:checked + .toggle-slider .unlock-icon {
-  opacity: 0;
-}
-
-.toggle-input:checked + .toggle-slider .locked-icon {
-  opacity: 1;
-}
-
-.toggle-input:disabled + .toggle-slider .lock-icon {
+  /* filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3)); */
   opacity: 0.4;
+}
+
+/* 旋鈕主體 */
+.toggle-knob {
+  position: absolute;
+  top: 65%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 32px;
+  height: 32px;
+  /* background: var(--color-gray-100); */
+  border-radius: 50%;
+  /* border: 0.9px solid var(--nav-text); */
+  cursor: pointer;
+  transition: all 0.3s ease;
+  /* box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.15),
+    inset 0 1px 1px rgba(255, 255, 255, 0.8); */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 旋鈕指示線 - 手錶指針風格 SVG */
+.knob-indicator {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #30302f;
+  transition: all 0.3s ease;
+}
+
+/* 未選中狀態 - 10點鐘方向 (-60度) */
+.toggle-input:not(:checked) ~ .toggle-knob {
+  transform: translate(-50%, -50%) rotate(-40deg);
+}
+
+/* 選中狀態 - 2點鐘方向 (60度) */
+.toggle-input:checked ~ .toggle-knob {
+  transform: translate(-50%, -50%) rotate(40deg);
+
+  color: #ec6f16;
+  /* background: #e4811e; */
+  /* box-shadow:
+    0 2px 6px rgba(var(--color-primary-rgb), 0.4),
+    inset 0 1px 1px rgba(255, 255, 255, 0.3); */
+}
+
+.toggle-input:checked ~ .toggle-knob .knob-indicator {
+  color: rgb(203, 85, 5);
+}
+
+/* 選中時的圖標狀態 */
+.toggle-input:checked ~ .knob-dot.unlock-icon {
+  opacity: 0.4;
+}
+
+.toggle-input:checked ~ .knob-lock-icon.locked-icon {
+  opacity: 1;
+}
+
+/* 禁用狀態 */
+.toggle-input:disabled ~ .toggle-knob {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toggle-input:disabled ~ .knob-lock-icon,
+.toggle-input:disabled ~ .knob-dot {
+  opacity: 0.3;
+}
+
+/* hover 效果 */
+.toggle-label:hover .toggle-knob {
+  transform: translate(-50%, -50%) rotate(-40deg) scale(1.05);
+}
+
+.toggle-label:hover .toggle-input:checked ~ .toggle-knob {
+  transform: translate(-50%, -50%) rotate(40deg) scale(1.05);
+  /* box-shadow:
+    0 3px 8px rgba(var(--color-primary-rgb), 0.5),
+    inset 0 1px 1px rgba(255, 255, 255, 0.3); */
+}
+
+.toggle-label:hover .toggle-input:disabled ~ .toggle-knob {
+  transform: translate(-50%, -50%) rotate(-40deg) scale(1);
+}
+
+.toggle-label:hover .toggle-input:disabled:checked ~ .toggle-knob {
+  transform: translate(-50%, -50%) rotate(40deg) scale(1);
 }
 
 .newest-badge {
@@ -705,21 +759,21 @@ function getKeepAudioTooltip() {
 }
 
 .btn-download {
-  background: rgba(var(--color-primary-rgb), 0.15);
-  color: var(--color-primary);
+  background: #00000000;
+  color: var(--nav-text);
 }
 
 .btn-download:hover {
-  background: rgba(var(--color-primary-rgb), 0.25);
+  background: #00000000;
 }
 
 .btn-danger {
-  background: rgba(var(--color-danger-rgb), 0.15);
-  color: var(--color-danger);
+  background: #00000000;
+  color: var(--nav-text);
 }
 
 .btn-danger:hover {
-  background: rgba(var(--color-danger-rgb), 0.25);
+  background: #00000000;
 }
 
 .btn-warning {
@@ -738,8 +792,10 @@ function getKeepAudioTooltip() {
 }
 
 .btn-group-left {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
+  border: 1.5px solid var(--nav-text);
+  border-radius: 10%;
+  /* border-top-right-radius: 0;
+  border-bottom-right-radius: 0; */
 }
 
 .btn-group-right {

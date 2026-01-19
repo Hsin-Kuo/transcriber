@@ -116,16 +116,14 @@ onUnmounted(() => {
   min-width: 300px;
   max-width: 400px;
   padding: 16px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   border-radius: 12px;
-  box-shadow: var(--neu-shadow-raised), 0 4px 12px rgba(0, 0, 0, 0.15);
   pointer-events: auto;
   cursor: pointer;
   transition: all 0.3s ease;
 }
 
 .notification-toast:hover {
-  box-shadow: var(--neu-shadow-btn-hover), 0 6px 16px rgba(0, 0, 0, 0.2);
   transform: translateY(-2px);
 }
 
@@ -137,8 +135,7 @@ onUnmounted(() => {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: var(--neu-bg);
-  box-shadow: var(--neu-shadow-btn);
+  background: var(--main-bg);
 }
 
 .notification-info .notification-icon {
@@ -154,7 +151,7 @@ onUnmounted(() => {
 }
 
 .notification-processing .notification-icon {
-  color: var(--neu-primary);
+  color: var(--main-primary);
   animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
@@ -175,13 +172,13 @@ onUnmounted(() => {
 .notification-title {
   font-size: 0.95rem;
   font-weight: 600;
-  color: var(--neu-text);
+  color: var(--main-text);
   margin-bottom: 4px;
 }
 
 .notification-message {
   font-size: 0.85rem;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   line-height: 1.4;
 }
 
@@ -191,7 +188,7 @@ onUnmounted(() => {
   height: 24px;
   border: none;
   background: transparent;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -202,7 +199,7 @@ onUnmounted(() => {
 
 .notification-close:hover {
   background: rgba(0, 0, 0, 0.05);
-  color: var(--neu-text);
+  color: var(--main-text);
 }
 
 /* Animation */

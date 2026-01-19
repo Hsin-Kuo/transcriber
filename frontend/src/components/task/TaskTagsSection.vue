@@ -297,14 +297,14 @@ function handleCancel() {
   font-weight: 500;
   color: white;
   background: var(--color-purple);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  /* box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); */
   transition: all 0.2s ease;
   cursor: default;
 }
 
 .tag-badge:hover {
   transform: translateY(-1px);
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15);
+  /* box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15); */
 }
 
 .tag-badge.editable {
@@ -314,7 +314,7 @@ function handleCancel() {
 
 .tag-badge.editable:hover {
   opacity: 0.9;
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.2);
+  /* box-shadow: 0 3px 8px rgba(0, 0, 0, 0.2); */
 }
 
 /* 標籤文字編輯狀態 */
@@ -328,7 +328,7 @@ function handleCancel() {
   font-weight: 500;
   color: white;
   background: var(--color-purple);
-  box-shadow: 0 2px 8px rgba(var(--color-purple-rgb), 0.3);
+  /* box-shadow: 0 2px 8px rgba(var(--color-purple-rgb), 0.3); */
 }
 
 .tag-text-input {

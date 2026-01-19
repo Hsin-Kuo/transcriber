@@ -492,7 +492,7 @@ defineExpose({
   justify-content: center;
   gap: 8px;
   padding: 8px 16px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   color: var(--color-danger-dark);
   border: 1px solid var(--color-danger-dark);
   border-radius: 8px;
@@ -521,7 +521,7 @@ defineExpose({
 
 /* Circular player */
 .custom-audio-player.circular-player {
-  background: var(--neu-bg);
+  background: var(--main-bg);
   padding: 10px 5px 0px;
   border-radius: 20px;
   display: flex;
@@ -566,7 +566,7 @@ defineExpose({
 /* Time display */
 .time-display-center {
   font-size: 0.8rem;
-  color: var(--neu-text);
+  color: var(--main-text);
   font-weight: 500;
   text-align: center;
   margin-top: -90px;
@@ -626,7 +626,7 @@ defineExpose({
 }
 
 .mute-btn-volume:hover {
-  background: var(--neu-bg);
+  background: var(--main-bg);
   transform: translateY(-1px);
 }
 
@@ -639,8 +639,8 @@ defineExpose({
   height: 2.5px;
   -webkit-appearance: none;
   appearance: none;
-  background: var(--neu-bg);
-  border: var(--neu-primary) 0.5px solid;
+  background: var(--main-bg);
+  border: var(--main-primary) 0.5px solid;
   border-radius: 2px;
   outline: none;
   cursor: pointer;
@@ -653,7 +653,7 @@ defineExpose({
   appearance: none;
   width: 5px;
   height: 14px;
-  background: var(--neu-primary);
+  background: var(--main-primary);
   border-radius: 30%;
   cursor: pointer;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
@@ -662,7 +662,7 @@ defineExpose({
 .volume-slider-horizontal::-moz-range-thumb {
   width: 10px;
   height: 10px;
-  background: var(--neu-primary);
+  background: var(--main-primary);
   border-radius: 50%;
   cursor: pointer;
   border: none;
@@ -675,7 +675,7 @@ defineExpose({
   top: 5px;
   left: 15px;
   z-index: 5;
-  color: var(--neu-text);
+  color: var(--main-text);
   opacity: 0.6;
 }
 
@@ -697,8 +697,7 @@ defineExpose({
 }
 
 .info-btn:hover {
-  background: var(--neu-bg) !important;
-  box-shadow: var(--neu-shadow-btn) !important;
+  background: var(--main-bg) !important;
 }
 
 .shortcuts-tooltip {
@@ -706,7 +705,7 @@ defineExpose({
   bottom: 100%;
   right: 0;
   margin-bottom: 8px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   border-radius: 12px;
   padding: 12px;
   display: none;
@@ -724,7 +723,7 @@ defineExpose({
   top: 100%;
   right: 20px;
   border: 6px solid transparent;
-  border-top-color: var(--neu-bg);
+  border-top-color: var(--main-bg);
 }
 
 .keyboard-shortcuts-info:hover .shortcuts-tooltip,
@@ -735,7 +734,7 @@ defineExpose({
 .shortcuts-title {
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--neu-text);
+  color: var(--main-text);
   margin-bottom: 4px;
 }
 
@@ -748,7 +747,7 @@ defineExpose({
 .shortcuts-section-title {
   font-size: 0.7rem;
   font-weight: 600;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   margin-top: 4px;
   margin-bottom: 2px;
 }
@@ -758,30 +757,30 @@ defineExpose({
   align-items: center;
   gap: 12px;
   font-size: 0.75rem;
-  color: var(--neu-text);
+  color: var(--main-text);
 }
 
 .shortcut-item kbd {
-  background: var(--neu-bg);
+  background: var(--main-bg);
   padding: 3px 6px;
   border-radius: 6px;
   font-size: 0.7rem;
   font-weight: 600;
   font-family: monospace;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   min-width: 28px;
   text-align: center;
 }
 
 .shortcut-item span {
   flex: 1;
-  color: var(--neu-text);
+  color: var(--main-text);
   font-size: 0.75rem;
 }
 
 /* Control buttons */
 .audio-control-btn {
-  background: var(--neu-bg);
+  background: var(--main-bg);
   border: none;
   border-radius: 50%;
   width: 40px;
@@ -790,7 +789,7 @@ defineExpose({
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: var(--neu-text);
+  color: var(--main-text);
   transition: all 0.2s ease;
   position: relative;
   flex-shrink: 0;
@@ -799,7 +798,7 @@ defineExpose({
 
 .audio-control-btn:hover {
   transform: translateY(-2px);
-  color: var(--neu-primary);
+  color: var(--main-primary);
 }
 
 .audio-control-btn:active {
@@ -821,7 +820,7 @@ defineExpose({
   font-size: 9px;
   font-weight: 700;
   bottom: 7px;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   font-family: inherit;
 }
 
@@ -849,14 +848,13 @@ defineExpose({
 }
 
 .speed-btn:hover {
-  background: var(--neu-bg) !important;
-  box-shadow: var(--neu-shadow-btn) !important;
+  background: var(--main-bg) !important;
 }
 
 .speed-label {
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--neu-text);
+  color: var(--main-text);
 }
 
 .speed-dropdown {
@@ -899,19 +897,19 @@ defineExpose({
   cursor: pointer;
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--neu-text);
+  color: var(--main-text);
   transition: all 0.2s ease;
   text-align: center;
 }
 
 .speed-option:hover {
   background: rgba(163, 177, 198, 0.15);
-  color: var(--neu-primary);
+  color: var(--main-primary);
 }
 
 .speed-option.active {
   background: rgba(163, 177, 198, 0.2);
-  color: var(--neu-primary);
+  color: var(--main-primary);
   font-weight: 700;
 }
 

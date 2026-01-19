@@ -230,7 +230,7 @@ function nextPage() {
   justify-content: center;
   font-size: 11px;
   font-weight: 500;
-  color: var(--neu-text);
+  color: var(--main-text);
   background: transparent;
   border: none;
   cursor: pointer;
@@ -255,7 +255,7 @@ function nextPage() {
 /* 刻度線基礎樣式 */
 .tick {
   width: 1px;
-  background: var(--neu-text, #333);
+  background: var(--main-text, #333);
   flex-shrink: 0;
   margin-right: 3px;
 }
@@ -290,9 +290,9 @@ function nextPage() {
 .current-page {
   font-size: 13px;
   font-weight: 700;
-  color: var(--neu-primary);
-  /* background: rgba(var(--neu-primary-rgb, 59, 130, 246), 0.1);
-  border: 2px solid var(--neu-primary); */
+  color: var(--main-primary);
+  /* background: rgba(var(--main-primary-rgb, 59, 130, 246), 0.1);
+  border: 2px solid var(--main-primary); */
   cursor: default;
 }
 
@@ -301,7 +301,7 @@ function nextPage() {
 .end-label {
   font-size: 11px;
   font-weight: 500;
-  color: var(--neu-text);
+  color: var(--main-text);
   opacity: 0.6;
   cursor: default;
 }
@@ -328,13 +328,13 @@ function nextPage() {
 
 /* Hover 效果 */
 .control-button:hover:not(.disabled):not(.current-page):not(.start-label):not(.end-label) {
-  color: var(--neu-primary);
-  background: rgba(var(--neu-primary-rgb, 59, 130, 246), 0.08);
+  color: var(--main-primary);
+  background: rgba(var(--main-primary-rgb, 59, 130, 246), 0.08);
 }
 
 /* Active 狀態 */
 .page-button.active {
-  color: var(--neu-primary);
+  color: var(--main-primary);
   font-weight: 700;
 }
 

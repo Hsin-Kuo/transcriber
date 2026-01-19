@@ -62,7 +62,7 @@ function formatDate(dateString) {
   flex-direction: column;
   gap: 8px;
   padding: 12px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   border-radius: 12px;
 }
 
@@ -71,11 +71,11 @@ function formatDate(dateString) {
   align-items: center;
   gap: 8px;
   font-size: 13px;
-  color: var(--neu-text);
+  color: var(--main-text);
 }
 
 .meta-item svg {
-  stroke: var(--neu-primary);
+  stroke: var(--main-primary);
   flex-shrink: 0;
 }
 </style>

@@ -149,7 +149,7 @@ defineEmits(['close', 'download', 'update:selectedFormat', 'update:includeSpeake
 }
 
 .download-dialog {
-  background: var(--neu-bg);
+  background: var(--main-bg);
   border-radius: 16px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
   max-width: 500px;
@@ -184,7 +184,7 @@ defineEmits(['close', 'download', 'update:selectedFormat', 'update:includeSpeake
   margin: 0;
   font-size: 20px;
   font-weight: 600;
-  color: var(--neu-text);
+  color: var(--main-text);
 }
 
 .btn-close {
@@ -193,7 +193,7 @@ defineEmits(['close', 'download', 'update:selectedFormat', 'update:includeSpeake
   cursor: pointer;
   padding: 8px;
   border-radius: 8px;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   transition: all 0.2s ease;
   display: flex;
   align-items: center;
@@ -202,7 +202,7 @@ defineEmits(['close', 'download', 'update:selectedFormat', 'update:includeSpeake
 
 .btn-close:hover {
   background: rgba(160, 145, 124, 0.15);
-  color: var(--neu-text);
+  color: var(--main-text);
 }
 
 .dialog-body {
@@ -213,7 +213,7 @@ defineEmits(['close', 'download', 'update:selectedFormat', 'update:includeSpeake
 
 .dialog-description {
   margin: 0 0 16px 0;
-  color: var(--neu-text);
+  color: var(--main-text);
   font-size: 14px;
 }
 
@@ -228,11 +228,11 @@ defineEmits(['close', 'download', 'update:selectedFormat', 'update:includeSpeake
 .current-settings li {
   margin: 8px 0;
   font-size: 14px;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
 }
 
 .current-settings strong {
-  color: var(--neu-text);
+  color: var(--main-text);
   font-weight: 600;
 }
 
@@ -256,19 +256,19 @@ defineEmits(['close', 'download', 'update:selectedFormat', 'update:includeSpeake
   width: 18px;
   height: 18px;
   cursor: pointer;
-  accent-color: var(--neu-primary);
+  accent-color: var(--main-primary);
 }
 
 .checkbox-text {
   font-size: 15px;
   font-weight: 600;
-  color: var(--neu-text);
+  color: var(--main-text);
 }
 
 .option-hint {
   margin: 8px 0 0 28px;
   font-size: 13px;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   line-height: 1.4;
 }
 
@@ -301,11 +301,11 @@ defineEmits(['close', 'download', 'update:selectedFormat', 'update:includeSpeake
 }
 
 .format-option input[type="radio"]:checked + .format-info {
-  color: var(--neu-primary);
+  color: var(--main-primary);
 }
 
 .format-option:has(input[type="radio"]:checked) {
-  border-color: var(--neu-primary);
+  border-color: var(--main-primary);
   background: rgba(160, 145, 124, 0.2);
 }
 
@@ -319,12 +319,12 @@ defineEmits(['close', 'download', 'update:selectedFormat', 'update:includeSpeake
 .format-name {
   font-weight: 600;
   font-size: 15px;
-  color: var(--neu-text);
+  color: var(--main-text);
 }
 
 .format-desc {
   font-size: 13px;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
 }
 
 .dialog-footer {

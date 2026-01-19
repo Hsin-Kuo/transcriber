@@ -1313,14 +1313,14 @@ watch(
   width: 44px;
   height: 44px;
   border: none;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   border-radius: 12px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: all 0.3s ease;
-  color: var(--neu-primary);
+  color: var(--main-primary);
 }
 
 .btn-back-icon:hover {
@@ -1341,7 +1341,7 @@ watch(
 .section-label {
   font-size: 11px;
   font-weight: 600;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -1349,7 +1349,7 @@ watch(
 .editable-title {
   font-size: 1.5rem;
   font-weight: 700;
-  color: var(--neu-text);
+  color: var(--main-text);
   margin: 0;
   cursor: pointer;
   padding: 8px 12px;
@@ -1360,7 +1360,7 @@ watch(
 
 .editable-title:hover {
   background: rgba(163, 177, 198, 0.1);
-  color: var(--neu-primary);
+  color: var(--main-primary);
 }
 
 .title-input {
@@ -1368,10 +1368,10 @@ watch(
   padding: 8px 12px;
   font-size: 1rem;
   font-weight: 400;
-  border: 2px solid var(--neu-primary);
+  border: 2px solid var(--main-primary);
   border-radius: 8px;
-  background: var(--neu-bg);
-  color: var(--neu-text);
+  background: var(--main-bg);
+  color: var(--main-text);
 }
 
 /* 段落模式控制項 */
@@ -1403,7 +1403,7 @@ watch(
   width: 16px;
   height: 16px;
   cursor: pointer;
-  accent-color: var(--neu-primary);
+  accent-color: var(--main-primary);
 }
 
 .toggle-checkbox:disabled {
@@ -1413,7 +1413,7 @@ watch(
 .toggle-text {
   font-size: 12px;
   font-weight: 500;
-  color: var(--neu-text);
+  color: var(--main-text);
 }
 
 /* 按鈕組 */
@@ -1434,8 +1434,8 @@ watch(
   padding: 10px 20px;
   border: none;
   border-radius: 12px;
-  background: var(--neu-bg);
-  color: var(--neu-primary);
+  background: var(--main-bg);
+  color: var(--main-primary);
   cursor: pointer;
   font-size: 14px;
   font-weight: 600;
@@ -1445,7 +1445,7 @@ watch(
 }
 
 .btn-action:hover {
-  color: var(--neu-primary-dark);
+  color: var(--main-primary-dark);
   transform: translateY(-2px);
 }
 
@@ -1482,14 +1482,14 @@ watch(
   align-items: center;
   justify-content: center;
   flex: 1;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
 }
 
 .spinner {
   width: 40px;
   height: 40px;
   border: 3px solid rgba(163, 177, 198, 0.2);
-  border-top-color: var(--neu-primary);
+  border-top-color: var(--main-primary);
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }
@@ -1505,8 +1505,8 @@ watch(
   padding: 20px;
   border: none;
   border-radius: 12px;
-  background: var(--neu-bg);
-  color: var(--neu-text);
+  background: var(--main-bg);
+  color: var(--main-text);
   font-size: 1rem;
   line-height: 1.8;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -1521,7 +1521,7 @@ watch(
 
 .transcript-display.editing {
   background: var(--upload-bg);
-  box-shadow: 0 0 0 2px var(--neu-primary);
+  box-shadow: 0 0 0 2px var(--main-primary);
 }
 
 /* 替換中的過渡狀態 */
@@ -1530,11 +1530,11 @@ watch(
   align-items: center;
   justify-content: center;
   background: var(--upload-bg);
-  box-shadow: 0 0 0 2px var(--neu-primary);
+  box-shadow: 0 0 0 2px var(--main-primary);
 }
 
 .replacing-indicator {
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   font-size: 14px;
 }
 
@@ -1607,7 +1607,7 @@ watch(
   margin-right: 2px;
   vertical-align: super;
   cursor: pointer;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   opacity: 0.4;
   transition: all 0.2s ease;
   font-size: 8px;
@@ -1634,7 +1634,7 @@ watch(
 .segment-marker:hover {
   opacity: 1;
   transform: scale(1.3);
-  color: var(--neu-primary-dark);
+  color: var(--main-primary-dark);
 }
 
 .segment-marker svg {
