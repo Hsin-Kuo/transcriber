@@ -10,9 +10,9 @@
      ======================================== */
 
   /* 背景色系 */
-  --color-bg: var(--palette-cream-light);
+  --color-bg: var(--palette-gray-50);
   --color-bg-light: var(--palette-cream-light);
-  --color-bg-lighter: var(--palette-white);
+  --color-bg-lighter: var(--palette-cream-lighter);
   --color-bg-dark: var(--palette-blue-gray-light);
 
   /* 主色調 */
@@ -44,9 +44,11 @@
   /* ========================================
      導航色 - Navigation Colors
      ======================================== */
-  --color-nav-bg: #e4d9c5;
+  --color-nav-bg: #cdcdcc;
+  /* --color-nav-bg: #e4d9c5; */
+
   --color-nav-text: var(--palette-navy);
-  --color-nav-active-bg: var(--palette-sand);
+  --color-nav-active-bg: var(--palette-yellow-orange);
   --color-nav-recent-bg: var(--palette-brown-dark);
   --color-nav-recent-text: #ebdec5;
   --color-nav-recent-btn: var(--palette-brown-medium);
@@ -179,7 +181,7 @@
      保留舊的變數名稱以避免破壞現有代碼
      ======================================== */
   --main-bg: var(--color-bg);
-  --upload-bg: var(--color-bg-light);
+  --upload-bg: var(--color-bg-lighter);
   --main-bg-dark: var(--color-bg-dark);
   --main-bg-light: var(--color-bg-lighter);
   --main-primary: var(--color-secondary);

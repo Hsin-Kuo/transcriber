@@ -19,7 +19,7 @@ body {
 }
 
 /* 為 body 添加紋理（粗細與間距變化） */
-body::before {
+bodyd::before {
   content: '';
   position: fixed;
   top: 0;

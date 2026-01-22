@@ -22,13 +22,28 @@
       />
 
       <div v-if="!uploading" class="upload-content">
-        <svg class="upload-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
-          />
+        <svg class="upload-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- 第一排：3個 -->
+          <rect x="5.5" y="1" width="1.2" height="7" rx="0.5" fill="currentColor"/>
+          <rect x="11.5" y="0" width="1.2" height="5" rx="0.5" fill="currentColor"/>
+          <rect x="17.5" y="1" width="1.2" height="6" rx="0.5" stroke="currentColor" stroke-width="0.3"/>
+
+          <!-- 第二排：4個（與第一排交錯） -->
+          <rect x="2.5" y="5" width="1.2" height="8" rx="0.5" stroke="currentColor" stroke-width="0.3"/>
+          <rect x="8.5" y="6" width="1.2" height="6" rx="0.5" fill="currentColor"/>
+          <rect x="14.5" y="5" width="1.2" height="5" rx="0.5" stroke="currentColor" stroke-width="0.3"/>
+          <rect x="20.5" y="4" width="1.2" height="7" rx="0.5" fill="currentColor"/>
+
+          <!-- 第三排：3個 -->
+          <rect x="5.5" y="11" width="1.2" height="5" rx="0.5" stroke="currentColor" stroke-width="0.3"/>
+          <rect x="11.5" y="10" width="1.2" height="8" rx="0.5" fill="currentColor"/>
+          <rect x="17.5" y="12" width="1.2" height="6" rx="0.5" fill="currentColor"/>
+
+          <!-- 第四排：4個（與第三排交錯） -->
+          <rect x="2.5" y="16" width="1.2" height="7" rx="0.5" fill="currentColor"/>
+          <rect x="8.5" y="17" width="1.2" height="5" rx="0.5" stroke="currentColor" stroke-width="0.3"/>
+          <rect x="14.5" y="15" width="1.2" height="8" rx="0.5" stroke="currentColor" stroke-width="0.3"/>
+          <rect x="20.5" y="17" width="1.2" height="6" rx="0.5" stroke="currentColor" stroke-width="0.3"/>
         </svg>
         <h3>{{ $t('uploadZone.clickToUpload') }}</h3>
         <p>{{ $t('uploadZone.supportedFormats') }}</p>
@@ -49,8 +64,19 @@
       title="合併多個音檔"
     >
       <div class="merge-icon">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"></path>
+        <svg width="36" height="24" viewBox="0 0 36 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <!-- 第一行（最右） -->
+          <line x1="13" y1="4" x2="21" y2="4"/>
+          <line x1="26" y1="4" x2="34" y2="4"/>
+          <!-- 第二行 -->
+          <line x1="11" y1="9" x2="19" y2="9"/>
+          <line x1="24" y1="9" x2="32" y2="9"/>
+          <!-- 第三行 -->
+          <line x1="9" y1="14" x2="17" y2="14"/>
+          <line x1="22" y1="14" x2="30" y2="14"/>
+          <!-- 第四行（最左） -->
+          <line x1="7" y1="19" x2="15" y2="19"/>
+          <line x1="20" y1="19" x2="28" y2="19"/>
         </svg>
       </div>
       <span class="merge-label">合併音檔</span>
@@ -112,7 +138,8 @@ function handleMergeClick() {
   text-align: center;
   cursor: pointer;
   transition: all 0.3s ease;
-  background: var(--upload-bg);
+  /* background: var(--upload-bg); */
+  border: 1px solid var(--nav-text);
   clip-path: polygon(
     60px 0,
     100% 0,

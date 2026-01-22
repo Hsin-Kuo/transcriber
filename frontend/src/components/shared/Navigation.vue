@@ -63,11 +63,26 @@
         <span v-if="!isCollapsed">{{ $t('navigation.audioEditor') }}</span>
       </router-link> -->
 
-      <!-- 所有任務按鈕（收合時顯示） -->
-      <router-link v-if="authStore.isAuthenticated && isCollapsed" to="/tasks" class="nav-link" active-class="active" :title="$t('navigation.allTasks')" @click="clearTaskFilters">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+      <!-- 所有任務按鈕 -->
+      <router-link v-if="authStore.isAuthenticated" to="/tasks" class="nav-link" active-class="active" :title="isCollapsed ? $t('navigation.allTasks') : ''" @click="clearTaskFilters">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <!-- 9條-45度斜線構成的正方形 -->
+          <!-- 線 2 -->
+          <line x1="0.8" y1="5.4" x2="5.4" y2="0.8"/>
+          <!-- 線 3 -->
+          <line x1="0.8" y1="10" x2="10" y2="0.8"/>
+          <!-- 線 4 -->
+          <line x1="0.8" y1="14.6" x2="14.6" y2="0.8"/>
+          <!-- 線 5：反對角線 -->
+          <line x1="0.8" y1="19.2" x2="19.2" y2="0.8"/>
+          <!-- 線 6 -->
+          <line x1="5.4" y1="19.2" x2="19.2" y2="5.4"/>
+          <!-- 線 7 -->
+          <line x1="10" y1="19.2" x2="19.2" y2="10"/>
+          <!-- 線 8 -->
+          <line x1="14.6" y1="19.2" x2="19.2" y2="14.6"/>
         </svg>
+        <span v-if="!isCollapsed">{{ $t('navigation.allTasks') }}</span>
       </router-link>
     </div>
 
@@ -75,9 +90,6 @@
     <div v-if="authStore.isAuthenticated && !isCollapsed" class="recent-tasks">
       <div class="recent-tasks-header">
         <h3>{{ $t('navigation.recent') }}</h3>
-        <router-link to="/tasks" class="all-tasks-btn" active-class="active" @click="clearTaskFilters">
-          {{ $t('navigation.allTasks') }}
-        </router-link>
       </div>
 
       <div class="recent-tasks-list">
@@ -217,13 +229,13 @@ watch(() => route.path, (newPath, oldPath) => {
 <style scoped>
 /* CSS 變數 */
 .navigation {
-  --texture-pattern:
+  /* --texture-pattern:
     repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(255, 255, 255, 0.018) 3px, rgba(255, 255, 255, 0.018) 4px),
     repeating-linear-gradient(0deg, transparent, transparent 9px, rgba(255, 255, 255, 0.028) 9px, rgba(255, 255, 255, 0.028) 11px),
     repeating-linear-gradient(0deg, transparent, transparent 19px, rgba(255, 255, 255, 0.038) 19px, rgba(255, 255, 255, 0.038) 21px),
     repeating-linear-gradient(90deg, transparent, transparent 5px, rgba(0, 0, 0, 0.018) 5px, rgba(0, 0, 0, 0.018) 6px),
     repeating-linear-gradient(90deg, transparent, transparent 13px, rgba(0, 0, 0, 0.028) 13px, rgba(0, 0, 0, 0.028) 15px),
-    repeating-linear-gradient(90deg, transparent, transparent 31px, rgba(0, 0, 0, 0.038) 31px, rgba(0, 0, 0, 0.038) 33px);
+    repeating-linear-gradient(90deg, transparent, transparent 31px, rgba(0, 0, 0, 0.038) 31px, rgba(0, 0, 0, 0.038) 33px); */
   --color-divider-rgb: 163, 177, 198;
 }
 
@@ -347,7 +359,7 @@ watch(() => route.path, (newPath, oldPath) => {
   text-decoration: none;
   font-weight: 600;
   color: var(--nav-text);
-  background: var(--nav-bg);
+  /* background: var(--nav-bg); */
   transition: all 0.3s ease;
 }
 
@@ -543,7 +555,7 @@ watch(() => route.path, (newPath, oldPath) => {
   gap: 8px;
   min-height: 0;
   overflow: hidden;
-  background: var(--nav-bg);
+  /* background: var(--nav-bg); */
   margin: 0 -20px -24px -20px;
   border-radius: 0;
   position: relative;
@@ -564,27 +576,6 @@ watch(() => route.path, (newPath, oldPath) => {
   font-weight: 600;
   color: var(--nav-text);
   margin: 0;
-}
-
-.all-tasks-btn {
-  padding: 4px 10px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--nav-text);
-  text-decoration: none;
-  /* background: var(--nav-recent-btn); */
-  border-radius: 8px;
-  transition: all 0.2s ease;
-  white-space: nowrap;
-}
-
-.all-tasks-btn:hover {
-  color: var(--main-primary);
-  transform: translateY(-1px);
-}
-
-.all-tasks-btn.active {
-  color: var(--nav-text);
 }
 
 .recent-tasks-list {

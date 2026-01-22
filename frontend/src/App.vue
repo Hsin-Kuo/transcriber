@@ -116,6 +116,7 @@ body.transcript-detail-page .app-container {
 body.transcript-detail-page .content-wrapper {
   height: 100%;
   overflow: hidden;
+  max-width: none;
 }
 
 @media (max-width: 768px) {

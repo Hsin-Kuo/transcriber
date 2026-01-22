@@ -1,88 +1,55 @@
 <template>
   <div class="transcript-detail-container">
+    <!-- 固定頂部 Header -->
+    <TranscriptHeader
+      :task-display-name="currentTranscript.custom_name || currentTranscript.filename || $t('transcriptDetail.transcript')"
+      :created-at="currentTranscript.created_at"
+      :text-length="currentTranscript.text_length"
+      :duration-text="currentTranscript.duration_text"
+      :is-editing="isEditing"
+      :is-editing-title="isEditingTitle"
+      :editing-task-name="editingTaskName"
+      :display-mode="displayMode"
+      :show-timecode-markers="showTimecodeMarkers"
+      :time-format="timeFormat"
+      :density-threshold="densityThreshold"
+      :speaker-names="speakerNames"
+      :has-speaker-info="hasSpeakerInfo"
+      :unique-speakers="uniqueSpeakers"
+      :search-text="searchText"
+      :replace-text="replaceText"
+      :total-matches="searchMatches.length"
+      :current-match-index="currentMatchIndex"
+      :match-case="matchCase"
+      :match-whole-word="matchWholeWord"
+      @go-back="goBack"
+      @start-title-edit="startTitleEdit"
+      @save-task-name="saveTaskName"
+      @cancel-title-edit="cancelTitleEdit"
+      @update:editing-task-name="editingTaskName = $event"
+      @start-editing="handleStartEditing"
+      @save-editing="saveEditing"
+      @cancel-editing="handleCancelEditing"
+      @download="downloadTranscript"
+      @update:show-timecode-markers="showTimecodeMarkers = $event"
+      @update:time-format="timeFormat = $event"
+      @update:density-threshold="densityThreshold = $event"
+      @update:speaker-names="speakerNames = $event"
+      @update:search-text="searchText = $event"
+      @update:replace-text="replaceText = $event"
+      @update:match-case="matchCase = $event"
+      @update:match-whole-word="matchWholeWord = $event"
+      @search="handleSearch"
+      @go-to-previous="goToPreviousMatch"
+      @go-to-next="goToNextMatch"
+      @replace-current="handleReplaceCurrent"
+      @replace-all="handleReplaceAllNew"
+    />
+
     <!-- 雙欄佈局 -->
     <div class="transcript-layout">
       <!-- 左側控制面板 -->
       <div class="left-panel card">
-        <!-- 返回按鈕 -->
-        <button @click="goBack" class="btn-back-icon" :title="$t('transcriptDetail.goBack')">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M19 12H5M12 19l-7-7 7-7"/>
-          </svg>
-        </button>
-
-        <!-- 任務名稱 -->
-        <div class="task-name-section">
-          <label class="section-label">{{ $t('taskList.taskName') }}</label>
-          <input
-            v-if="isEditingTitle"
-            ref="titleInput"
-            v-model="editingTaskName"
-            type="text"
-            class="title-input"
-            @blur="saveTaskName"
-            @keyup.enter="saveTaskName"
-            @keyup.esc="cancelTitleEdit"
-          />
-          <h2 v-else @click="startTitleEdit" class="editable-title" :title="$t('transcriptDetail.edit')">
-            {{ currentTranscript.custom_name || currentTranscript.filename || $t('transcriptDetail.transcript') }}
-          </h2>
-        </div>
-
-        <!-- 元數據 -->
-        <TranscriptMetadata
-          :created-at="currentTranscript.created_at"
-          :text-length="currentTranscript.text_length"
-          :duration-text="currentTranscript.duration_text"
-        />
-
-        <!-- 段落模式控制項 -->
-        <div v-if="displayMode === 'paragraph'" class="paragraph-controls">
-          <div class="control-group">
-            <label class="toggle-label" :class="{ 'disabled': isEditing }">
-              <input
-                type="checkbox"
-                v-model="showTimecodeMarkers"
-                class="toggle-checkbox"
-                :disabled="isEditing"
-              />
-              <span class="toggle-text">{{ $t('transcriptDetail.timecodeMarkers') }}</span>
-            </label>
-          </div>
-        </div>
-
-        <!-- 按鈕組 -->
-        <div class="action-buttons">
-          <button v-if="!isEditing" @click="handleStartEditing" class="btn btn-action">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-            </svg>
-            <span>{{ $t('transcriptDetail.edit') }}</span>
-          </button>
-          <button v-else @click="saveEditing" class="btn btn-action">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="20 6 9 17 4 12"></polyline>
-            </svg>
-            <span>{{ $t('transcriptDetail.save') }}</span>
-          </button>
-          <button v-if="isEditing" @click="handleCancelEditing" class="btn btn-action">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-            <span>{{ $t('transcriptDetail.cancel') }}</span>
-          </button>
-          <button v-if="!isEditing" @click="downloadTranscript" class="btn btn-action">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7 10 12 15 17 10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
-            </svg>
-            <span>{{ $t('transcriptDetail.download') }}</span>
-          </button>
-        </div>
-
         <!-- 音訊播放器組件 -->
         <AudioPlayer
           v-if="currentTranscript.hasAudio"
@@ -145,12 +112,17 @@
               class="transcript-display"
               :class="{ 'editing': isEditing }"
               :contenteditable="isEditing"
-              :key="`transcript-${showTimecodeMarkers}-${isEditing}-${contentVersion}`"
+              :key="`transcript-${showTimecodeMarkers}-${isEditing}-${contentVersion}-${searchText}`"
               ref="textareaRef"
               @keydown="handleContentEditableKeyDown"
             >
-              <template v-for="(part, index) in getContentParts()" :key="`part-${contentVersion}-${index}`">
-                <span v-if="!part.isMarker" class="text-part">{{ part.text }}</span>
+              <template v-for="(part, index) in getContentPartsWithHighlight()" :key="`part-${contentVersion}-${index}`">
+                <span v-if="!part.isMarker && !part.isHighlight" class="text-part">{{ part.text }}</span>
+                <span
+                  v-else-if="part.isHighlight"
+                  class="search-highlight"
+                  :class="{ 'current': part.isCurrent }"
+                >{{ part.text }}</span>
                 <span v-else class="marker-wrapper"><span
                     v-if="showTimecodeMarkers"
                     class="segment-marker"
@@ -163,15 +135,23 @@
                     <span class="timecode-tooltip">
                       {{ formatTime(part.start) }}
                     </span>
-                  </span><span
-                    class="text-part"
-                    :class="{ 'clickable': isAltPressed && currentTranscript.hasAudio }"
-                    :data-segment-index="part.segmentIndex"
-                    :data-start-time="part.start"
-                    @click="handleTextClick(part.start, $event)"
-                  >{{ part.text }}<span v-if="isAltPressed && currentTranscript.hasAudio" class="text-timecode-tooltip">
-                      {{ formatTime(part.start) }}
-                    </span></span>
+                  </span><template v-for="(subPart, subIndex) in splitTextWithHighlight(part.text, part.segmentIndex)" :key="`sub-${subIndex}`">
+                    <span
+                      v-if="subPart.isHighlight"
+                      class="search-highlight"
+                      :class="{ 'current': subPart.isCurrent }"
+                    >{{ subPart.text }}</span>
+                    <span
+                      v-else
+                      class="text-part"
+                      :class="{ 'clickable': isAltPressed && currentTranscript.hasAudio }"
+                      :data-segment-index="part.segmentIndex"
+                      :data-start-time="part.start"
+                      @click="handleTextClick(part.start, $event)"
+                    >{{ subPart.text }}<span v-if="isAltPressed && currentTranscript.hasAudio && subIndex === 0" class="text-timecode-tooltip">
+                        {{ formatTime(part.start) }}
+                      </span></span>
+                  </template>
                 </span>
               </template>
             </div>
@@ -194,13 +174,6 @@
           />
         </div>
 
-        <!-- 取代工具列組件 -->
-        <ReplaceToolbar
-          v-if="isEditing && !loadingTranscript && !transcriptError"
-          v-model:find-text="findText"
-          v-model:replace-text="replaceText"
-          @replace-all="handleReplaceAll"
-        />
       </div>
     </div>
 
@@ -226,11 +199,10 @@ import { useI18n } from 'vue-i18n'
 const { t: $t } = useI18n()
 
 // 子組件
+import TranscriptHeader from '../components/transcript/TranscriptHeader.vue'
 import AudioPlayer from '../components/transcript/AudioPlayer.vue'
 import SubtitleTable from '../components/transcript/SubtitleTable.vue'
 import DownloadDialog from '../components/transcript/DownloadDialog.vue'
-import ReplaceToolbar from '../components/transcript/ReplaceToolbar.vue'
-import TranscriptMetadata from '../components/transcript/TranscriptMetadata.vue'
 
 // Composables
 import { useTranscriptData } from '../composables/transcript/useTranscriptData'
@@ -336,9 +308,6 @@ const {
   isEditing,
   isEditingTitle,
   editingTaskName,
-  findText,
-  replaceText,
-  titleInput, // 用於 template ref
   startTitleEdit,
   cancelTitleEdit,
   startEditing,
@@ -346,6 +315,14 @@ const {
   finishEditing,
   handleBeforeUnload
 } = useTranscriptEditor(currentTranscript, originalContent, displayMode, groupedSegments, convertTableToPlainText)
+
+// ========== 搜尋/取代功能 ==========
+const searchText = ref('')
+const replaceText = ref('')
+const searchMatches = ref([]) // 存放所有匹配的位置 { start, end }
+const currentMatchIndex = ref(0)
+const matchCase = ref(false)
+const matchWholeWord = ref(false)
 
 // 重新定義 hasUnsavedChanges，檢查實際的 DOM 內容
 const hasUnsavedChanges = computed(() => {
@@ -381,6 +358,18 @@ const savedTimecodeMarkersState = ref(true)
 
 // 控制 Alt 鍵狀態（用於點擊句子跳轉）
 const isAltPressed = ref(false)
+
+// 計算唯一講者列表（用於字幕模式設定）
+const uniqueSpeakers = computed(() => {
+  if (!segments.value || segments.value.length === 0) return []
+  const speakers = new Set()
+  segments.value.forEach(seg => {
+    if (seg.speaker) {
+      speakers.add(seg.speaker)
+    }
+  })
+  return Array.from(speakers).sort()
+})
 
 // 內容版本號（用於強制重新渲染 contenteditable）
 const contentVersion = ref(0)
@@ -881,136 +870,263 @@ function extractTextContentWithSegments(element) {
   return { fullText, segmentTexts }
 }
 
-// 處理取代全部（段落模式專用）
-function handleReplaceAll() {
-  if (displayMode.value === 'paragraph') {
-    // 如果沒有輸入查找文字，直接返回
-    if (!findText.value) {
-      return
+// ========== 搜尋功能處理 ==========
+
+// 執行搜尋
+function handleSearch(text) {
+  searchText.value = text
+  if (!text) {
+    searchMatches.value = []
+    currentMatchIndex.value = 0
+    return
+  }
+
+  const content = getSearchableContent()
+  const matches = []
+
+  try {
+    // 跳脫正則表達式特殊字元
+    let escapedText = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+    // 全字匹配
+    if (matchWholeWord.value) {
+      escapedText = `\\b${escapedText}\\b`
     }
 
-    // 從 contenteditable div 提取當前的純文字（排除標記）
-    let contentToReplace = currentTranscript.value.content
-    if (textareaRef.value) {
-      contentToReplace = extractTextContent(textareaRef.value)
-    }
+    // 大小寫匹配
+    const flags = matchCase.value ? 'g' : 'gi'
+    const regex = new RegExp(escapedText, flags)
+    let match
 
-    // 計算會取代多少處
-    const regex = new RegExp(findText.value, 'g')
-    const matches = contentToReplace.match(regex)
-    const matchCount = matches ? matches.length : 0
-
-    // 如果沒有找到，提示用戶
-    if (matchCount === 0) {
-      alert(`找不到「${findText.value}」`)
-      return
-    }
-
-    // 顯示確認對話框
-    const confirmMessage = `找到 ${matchCount} 處「${findText.value}」\n確定全部取代為「${replaceText.value}」嗎？`
-    if (!confirm(confirmMessage)) {
-      return // 用戶取消
-    }
-
-    // 保存滾動位置
-    let savedScrollTop = 0
-    if (textareaRef.value) {
-      savedScrollTop = textareaRef.value.scrollTop
-    }
-
-    // 保存替換文字（因為稍後會清空輸入框）
-    const replaceTextValue = replaceText.value
-
-    // 清空輸入框
-    findText.value = ''
-    replaceText.value = ''
-
-    // 執行替換
-    const replacedContent = contentToReplace.replace(regex, replaceTextValue)
-
-    // 步驟 1: 設置替換狀態，完全卸載 contenteditable（避免 Vue DOM 同步問題）
-    isReplacing.value = true
-
-    // 步驟 2: 等待 contenteditable 完全卸載後，更新數據
-    nextTick(() => {
-      if (!isMounted) return
-
-      // 清空標記
-      segmentMarkers.value = []
-
-      // 更新內容
-      currentTranscript.value.content = replacedContent
-
-      // 增加版本號
-      contentVersion.value++
-
-      // 重新生成標記
-      if (segments.value && currentTranscript.value.content) {
-        generateSegmentMarkers(segments.value, currentTranscript.value.content)
-      }
-
-      // 步驟 3: 等待數據更新完成後，重新掛載 contenteditable
-      nextTick(() => {
-        if (!isMounted) return
-
-        // 取消替換狀態，重新掛載 contenteditable
-        isReplacing.value = false
-
-        // 步驟 4: 等待 contenteditable 重新掛載後，恢復滾動位置
-        nextTick(() => {
-          if (!isMounted) return
-
-          if (savedScrollTop > 0 && textareaRef.value) {
-            textareaRef.value.scrollTop = savedScrollTop
-          }
-        })
+    while ((match = regex.exec(content)) !== null) {
+      matches.push({
+        start: match.index,
+        end: match.index + match[0].length,
+        text: match[0]
       })
-    })
-  } else if (displayMode.value === 'subtitle') {
-    // 字幕模式：對 groupedSegments 中的所有 segment 文字進行取代
-
-    // 如果沒有輸入查找文字，直接返回
-    if (!findText.value) {
-      return
     }
+  } catch (e) {
+    // 無效的正則表達式，忽略
+  }
 
-    // 計算會取代多少處
-    const regex = new RegExp(findText.value, 'g')
-    let totalMatches = 0
+  searchMatches.value = matches
+  currentMatchIndex.value = matches.length > 0 ? 0 : 0
 
-    // 遍歷所有 groups 和 segments 計算匹配數
+  // 滾動到第一個匹配項
+  if (matches.length > 0) {
+    scrollToMatch(0)
+  }
+}
+
+// 取得可搜尋的內容
+function getSearchableContent() {
+  if (displayMode.value === 'paragraph') {
+    if (textareaRef.value) {
+      return extractTextContent(textareaRef.value)
+    }
+    return currentTranscript.value.content || ''
+  } else if (displayMode.value === 'subtitle') {
+    // 字幕模式：合併所有 segment 文字
+    let content = ''
     groupedSegments.value.forEach(group => {
       group.segments.forEach(segment => {
-        const matches = segment.text.match(regex)
-        if (matches) {
-          totalMatches += matches.length
+        content += segment.text + '\n'
+      })
+    })
+    return content
+  }
+  return ''
+}
+
+// 跳到上一個匹配項
+function goToPreviousMatch() {
+  if (searchMatches.value.length === 0) return
+  currentMatchIndex.value = (currentMatchIndex.value - 1 + searchMatches.value.length) % searchMatches.value.length
+  scrollToMatch(currentMatchIndex.value)
+}
+
+// 跳到下一個匹配項
+function goToNextMatch() {
+  if (searchMatches.value.length === 0) return
+  currentMatchIndex.value = (currentMatchIndex.value + 1) % searchMatches.value.length
+  scrollToMatch(currentMatchIndex.value)
+}
+
+// 滾動到指定的匹配項
+function scrollToMatch(index) {
+  if (displayMode.value === 'paragraph') {
+    // 段落模式：查找並滾動到匹配文字
+    nextTick(() => {
+      const highlightedElements = document.querySelectorAll('.search-highlight')
+      if (highlightedElements[index]) {
+        highlightedElements[index].scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    })
+  } else if (displayMode.value === 'subtitle') {
+    // 字幕模式：找到對應的行並滾動
+    nextTick(() => {
+      const highlightedElements = document.querySelectorAll('.search-highlight')
+      if (highlightedElements[index]) {
+        highlightedElements[index].scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    })
+  }
+}
+
+// 取代當前匹配項
+function handleReplaceCurrent(newReplaceText) {
+  if (!isEditing.value || searchMatches.value.length === 0) return
+
+  replaceText.value = newReplaceText
+  const match = searchMatches.value[currentMatchIndex.value]
+
+  if (displayMode.value === 'paragraph') {
+    // 段落模式
+    let content = currentTranscript.value.content || ''
+    if (textareaRef.value) {
+      content = extractTextContent(textareaRef.value)
+    }
+
+    // 取代當前匹配
+    const before = content.substring(0, match.start)
+    const after = content.substring(match.end)
+    const replacedContent = before + newReplaceText + after
+
+    // 更新內容
+    updateContentAfterReplace(replacedContent)
+
+    // 重新搜尋並跳到下一個（如果有）
+    nextTick(() => {
+      handleSearch(searchText.value)
+    })
+  } else if (displayMode.value === 'subtitle') {
+    // 字幕模式：找到匹配項並取代
+    let charCount = 0
+    let found = false
+
+    for (const group of groupedSegments.value) {
+      if (found) break
+      for (const segment of group.segments) {
+        const segmentEnd = charCount + segment.text.length + 1 // +1 for newline
+        if (match.start >= charCount && match.start < segmentEnd) {
+          // 找到了對應的 segment
+          const localStart = match.start - charCount
+          const localEnd = match.end - charCount
+          segment.text = segment.text.substring(0, localStart) + newReplaceText + segment.text.substring(localEnd)
+          found = true
+          break
+        }
+        charCount = segmentEnd
+      }
+    }
+
+    // 重新搜尋
+    nextTick(() => {
+      handleSearch(searchText.value)
+    })
+  }
+}
+
+// 全部取代（新版）
+function handleReplaceAllNew(newReplaceText) {
+  if (!isEditing.value || searchMatches.value.length === 0) return
+
+  replaceText.value = newReplaceText
+  const searchPattern = searchText.value
+
+  // 確認對話框
+  const confirmMessage = $t('searchReplace.confirmReplaceAll', {
+    count: searchMatches.value.length,
+    search: searchPattern,
+    replace: newReplaceText
+  })
+  if (!confirm(confirmMessage)) {
+    return
+  }
+
+  if (displayMode.value === 'paragraph') {
+    // 段落模式
+    let content = currentTranscript.value.content || ''
+    if (textareaRef.value) {
+      content = extractTextContent(textareaRef.value)
+    }
+
+    // 跳脫正則表達式特殊字元
+    let escapedText = searchPattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    if (matchWholeWord.value) {
+      escapedText = `\\b${escapedText}\\b`
+    }
+    const flags = matchCase.value ? 'g' : 'gi'
+    const regex = new RegExp(escapedText, flags)
+    const replacedContent = content.replace(regex, newReplaceText)
+
+    // 更新內容
+    updateContentAfterReplace(replacedContent)
+
+    // 清空搜尋結果
+    searchMatches.value = []
+    currentMatchIndex.value = 0
+  } else if (displayMode.value === 'subtitle') {
+    // 字幕模式
+    let escapedText = searchPattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    if (matchWholeWord.value) {
+      escapedText = `\\b${escapedText}\\b`
+    }
+    const flags = matchCase.value ? 'g' : 'gi'
+    const regex = new RegExp(escapedText, flags)
+
+    groupedSegments.value.forEach(group => {
+      group.segments.forEach(segment => {
+        segment.text = segment.text.replace(regex, newReplaceText)
+      })
+    })
+
+    // 清空搜尋結果
+    searchMatches.value = []
+    currentMatchIndex.value = 0
+  }
+}
+
+// 更新內容（取代後）
+function updateContentAfterReplace(replacedContent) {
+  // 保存滾動位置
+  let savedScrollTop = 0
+  if (textareaRef.value) {
+    savedScrollTop = textareaRef.value.scrollTop
+  }
+
+  // 設置替換狀態
+  isReplacing.value = true
+
+  nextTick(() => {
+    if (!isMounted) return
+
+    // 清空標記
+    segmentMarkers.value = []
+
+    // 更新內容
+    currentTranscript.value.content = replacedContent
+
+    // 增加版本號
+    contentVersion.value++
+
+    // 重新生成標記
+    if (segments.value && currentTranscript.value.content) {
+      generateSegmentMarkers(segments.value, currentTranscript.value.content)
+    }
+
+    nextTick(() => {
+      if (!isMounted) return
+      isReplacing.value = false
+
+      nextTick(() => {
+        if (!isMounted) return
+        if (savedScrollTop > 0 && textareaRef.value) {
+          textareaRef.value.scrollTop = savedScrollTop
         }
       })
     })
-
-    // 如果沒有找到，提示用戶
-    if (totalMatches === 0) {
-      alert(`找不到「${findText.value}」`)
-      return
-    }
-
-    // 顯示確認對話框
-    const confirmMessage = `找到 ${totalMatches} 處「${findText.value}」\n確定全部取代為「${replaceText.value}」嗎？`
-    if (!confirm(confirmMessage)) {
-      return // 用戶取消
-    }
-
-    // 執行取代：遍歷所有 groups 和 segments
-    groupedSegments.value.forEach(group => {
-      group.segments.forEach(segment => {
-        segment.text = segment.text.replace(regex, replaceText.value)
-      })
-    })
-
-    // 清空輸入框
-    findText.value = ''
-    replaceText.value = ''
-  }
+  })
 }
 
 // 將文字內容分割成帶有標記的片段
@@ -1056,6 +1172,163 @@ function getContentParts() {
       text: content.substring(lastIndex),
       isMarker: false
     })
+  }
+
+  return parts
+}
+
+// 將文字內容分割成帶有標記和搜尋高亮的片段
+function getContentPartsWithHighlight() {
+  const parts = getContentParts()
+
+  // 如果沒有搜尋文字，直接返回原始 parts
+  if (!searchText.value || searchMatches.value.length === 0) {
+    return parts
+  }
+
+  // 需要將非標記的純文字部分進一步分割為包含搜尋高亮的片段
+  const result = []
+  let globalCharIndex = 0
+
+  for (const part of parts) {
+    if (!part.isMarker) {
+      // 純文字部分：分割搜尋高亮
+      const subParts = splitTextWithHighlightByPosition(part.text, globalCharIndex)
+      result.push(...subParts)
+      globalCharIndex += part.text.length
+    } else {
+      // 標記部分：保留原樣，但內部文字會在模板中用 splitTextWithHighlight 處理
+      result.push(part)
+      globalCharIndex += part.text.length
+    }
+  }
+
+  return result
+}
+
+// 根據全局位置分割文字並添加搜尋高亮
+function splitTextWithHighlightByPosition(text, startPosition) {
+  if (!searchText.value || searchMatches.value.length === 0) {
+    return [{ text, isMarker: false, isHighlight: false }]
+  }
+
+  const endPosition = startPosition + text.length
+  const parts = []
+  let lastIndex = 0
+
+  // 找出所有在這段文字範圍內的匹配
+  const relevantMatches = searchMatches.value
+    .map((match, idx) => ({ ...match, matchIndex: idx }))
+    .filter(match => match.start < endPosition && match.end > startPosition)
+
+  for (const match of relevantMatches) {
+    // 計算在當前文字中的相對位置
+    const localStart = Math.max(0, match.start - startPosition)
+    const localEnd = Math.min(text.length, match.end - startPosition)
+
+    // 添加匹配之前的普通文字
+    if (localStart > lastIndex) {
+      parts.push({
+        text: text.substring(lastIndex, localStart),
+        isMarker: false,
+        isHighlight: false
+      })
+    }
+
+    // 添加高亮文字
+    parts.push({
+      text: text.substring(localStart, localEnd),
+      isMarker: false,
+      isHighlight: true,
+      isCurrent: match.matchIndex === currentMatchIndex.value
+    })
+
+    lastIndex = localEnd
+  }
+
+  // 添加剩餘的普通文字
+  if (lastIndex < text.length) {
+    parts.push({
+      text: text.substring(lastIndex),
+      isMarker: false,
+      isHighlight: false
+    })
+  }
+
+  // 如果沒有任何分割，返回原始文字
+  if (parts.length === 0) {
+    return [{ text, isMarker: false, isHighlight: false }]
+  }
+
+  return parts
+}
+
+// 分割文字並添加搜尋高亮（用於標記內的文字）
+function splitTextWithHighlight(text, segmentIndex) {
+  if (!searchText.value || !text) {
+    return [{ text, isHighlight: false }]
+  }
+
+  const parts = []
+  let lastIndex = 0
+
+  try {
+    let escapedText = searchText.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    if (matchWholeWord.value) {
+      escapedText = `\\b${escapedText}\\b`
+    }
+    const flags = matchCase.value ? 'g' : 'gi'
+    const regex = new RegExp(escapedText, flags)
+    let match
+
+    // 計算這個 segment 的全局起始位置
+    let globalOffset = 0
+    const sortedMarkers = [...segmentMarkers.value].sort((a, b) => a.textStartIndex - b.textStartIndex)
+    const marker = sortedMarkers.find(m => m.segmentIndex === segmentIndex)
+    if (marker) {
+      globalOffset = marker.textStartIndex
+    }
+
+    while ((match = regex.exec(text)) !== null) {
+      // 添加匹配之前的普通文字
+      if (match.index > lastIndex) {
+        parts.push({
+          text: text.substring(lastIndex, match.index),
+          isHighlight: false
+        })
+      }
+
+      // 判斷是否是當前選中的匹配項
+      const globalMatchStart = globalOffset + match.index
+      const isCurrent = searchMatches.value.some((m, idx) =>
+        m.start === globalMatchStart && idx === currentMatchIndex.value
+      )
+
+      // 添加高亮文字
+      parts.push({
+        text: match[0],
+        isHighlight: true,
+        isCurrent
+      })
+
+      lastIndex = match.index + match[0].length
+    }
+  } catch (e) {
+    // 無效的正則表達式，返回原始文字
+    return [{ text, isHighlight: false }]
+  }
+
+  // 添加剩餘的普通文字
+  if (lastIndex < text.length) {
+    parts.push({
+      text: text.substring(lastIndex),
+      isHighlight: false
+    })
+  }
+
+  // 如果沒有任何分割，返回原始文字
+  if (parts.length === 0) {
+    return [{ text, isHighlight: false }]
   }
 
   return parts
@@ -1220,7 +1493,7 @@ onUnmounted(() => {
   scrollRestoreTimers = []
 
   window.removeEventListener('beforeunload', handleBeforeUnload)
-  // 移除 Alt 鍵監聽
+  // 移除 Alt 鍵監聯
   window.removeEventListener('keydown', handleKeyDown)
   window.removeEventListener('keyup', handleKeyUp)
   window.removeEventListener('blur', handleBlur)
@@ -1268,10 +1541,9 @@ watch(
 </script>
 
 <style scoped>
+/* Header 高度變數 */
 .transcript-detail-container {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 20px;
+  --header-height: 70px;
   height: 100vh;
   box-sizing: border-box;
   overflow: hidden;
@@ -1282,180 +1554,33 @@ watch(
   display: grid;
   grid-template-columns: 320px 1fr;
   gap: 20px;
-  height: calc(100vh - 40px);
+  height: calc(100vh - var(--header-height) - 20px);
   align-items: start;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 20px 20px;
 }
 
 /* 左側控制面板 */
 .left-panel {
   position: sticky;
-  top: 20px;
+  top: 0;
   display: flex;
   flex-direction: column;
   gap: 5px;
   height: fit-content;
-  max-height: calc(100vh - 40px);
+  max-height: calc(100vh - var(--header-height) - 40px);
   overflow-y: auto;
   overflow-x: visible;
 }
 
 /* 右側文字區域 */
 .right-panel {
-  height: calc(100vh - 40px);
+  height: calc(100vh - var(--header-height) - 40px);
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
   overflow: hidden;
-}
-
-/* 返回按鈕 */
-.btn-back-icon {
-  width: 44px;
-  height: 44px;
-  border: none;
-  background: var(--main-bg);
-  border-radius: 12px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.3s ease;
-  color: var(--main-primary);
-}
-
-.btn-back-icon:hover {
-  transform: translateY(-2px);
-}
-
-.btn-back-icon:active {
-  transform: translateY(0);
-}
-
-/* 任務名稱區域 */
-.task-name-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.section-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--main-text-light);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.editable-title {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--main-text);
-  margin: 0;
-  cursor: pointer;
-  padding: 8px 12px;
-  border-radius: 8px;
-  transition: all 0.2s ease;
-  word-break: break-word;
-}
-
-.editable-title:hover {
-  background: rgba(163, 177, 198, 0.1);
-  color: var(--main-primary);
-}
-
-.title-input {
-  width: 100%;
-  padding: 8px 12px;
-  font-size: 1rem;
-  font-weight: 400;
-  border: 2px solid var(--main-primary);
-  border-radius: 8px;
-  background: var(--main-bg);
-  color: var(--main-text);
-}
-
-/* 段落模式控制項 */
-.paragraph-controls {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid rgba(163, 177, 198, 0.2);
-}
-
-.control-group {
-  margin-bottom: 16px;
-}
-
-/* Toggle 標籤 */
-.toggle-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.toggle-label.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.toggle-checkbox {
-  width: 16px;
-  height: 16px;
-  cursor: pointer;
-  accent-color: var(--main-primary);
-}
-
-.toggle-checkbox:disabled {
-  cursor: not-allowed;
-}
-
-.toggle-text {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--main-text);
-}
-
-/* 按鈕組 */
-.action-buttons {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: center;
-}
-
-/* 操作按鈕 */
-.btn-action {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 10px 20px;
-  border: none;
-  border-radius: 12px;
-  background: var(--main-bg);
-  color: var(--main-primary);
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 600;
-  transition: all 0.3s ease;
-  width: fit-content;
-  align-self: center;
-}
-
-.btn-action:hover {
-  color: var(--main-primary-dark);
-  transform: translateY(-2px);
-}
-
-.btn-action:active {
-  transform: translateY(0);
-}
-
-.btn-action svg {
-  stroke: currentColor;
-  flex-shrink: 0;
 }
 
 /* 逐字稿內容 */
@@ -1555,6 +1680,19 @@ watch(
 
 .text-part.clickable:hover {
   background-color: rgba(163, 177, 198, 0.25);
+}
+
+/* 搜尋高亮 */
+.search-highlight {
+  display: inline;
+  background-color: rgba(255, 235, 59, 0.4);
+  border-radius: 2px;
+  padding: 1px 0;
+}
+
+.search-highlight.current {
+  background-color: rgba(255, 152, 0, 0.6);
+  box-shadow: 0 0 0 1px rgba(255, 152, 0, 0.8);
 }
 
 /* 文字部分的 Timecode Tooltip */
@@ -1680,17 +1818,23 @@ watch(
 
 @media (max-width: 768px) {
   .transcript-detail-container {
-    padding: 16px;
+    --header-height: auto;
   }
 
   .transcript-layout {
     grid-template-columns: 1fr;
+    height: auto;
+    padding: 0 12px 12px;
   }
 
   .left-panel {
     position: relative;
     top: 0;
     max-height: none;
+  }
+
+  .right-panel {
+    height: calc(100vh - 200px);
   }
 }
 </style>

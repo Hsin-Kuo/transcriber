@@ -12,6 +12,7 @@
   /* 暖色系 - Warm Colors */
   --palette-cream: #EFE1C6;
   --palette-cream-light: #F4ECD5;
+  --palette-cream-lighter: #f8f4eb;
   --palette-cream-dark: #e5cea5;
   --palette-sand: #a0917c;
   --palette-brown: rgb(145, 106, 45);
@@ -58,7 +59,7 @@
   /* 黃橘色系 - Yellow/Orange Colors */
   --palette-yellow-amber: #f59e0b;
   --palette-yellow-light: #feca57;
-  --palette-yellow-orange: #f57c00;
+  --palette-yellow-orange: #ef7306;
   --palette-yellow-sienna: #a0522d;
   --palette-yellow-gold: #fdcb6e;
   --palette-yellow-cream: #ffeaa7;

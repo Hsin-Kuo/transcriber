@@ -1,7 +1,7 @@
 <template>
-  <div class="metadata-section">
+  <div class="metadata-section" :class="{ 'horizontal': layout === 'horizontal' }">
     <div v-if="createdAt" class="meta-item">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <svg v-if="showDateIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
         <line x1="16" y1="2" x2="16" y2="6"></line>
         <line x1="8" y1="2" x2="8" y2="6"></line>
@@ -34,7 +34,15 @@ const { locale } = useI18n()
 defineProps({
   createdAt: String,
   textLength: Number,
-  durationText: String
+  durationText: String,
+  layout: {
+    type: String,
+    default: 'vertical'
+  },
+  showDateIcon: {
+    type: Boolean,
+    default: true
+  }
 })
 
 function formatDate(dateString) {
@@ -77,5 +85,18 @@ function formatDate(dateString) {
 .meta-item svg {
   stroke: var(--main-primary);
   flex-shrink: 0;
+}
+
+/* 水平佈局 */
+.metadata-section.horizontal {
+  flex-direction: row;
+  background: transparent;
+  padding: 0;
+  gap: 16px;
+}
+
+.metadata-section.horizontal .meta-item {
+  font-size: 12px;
+  white-space: nowrap;
 }
 </style>

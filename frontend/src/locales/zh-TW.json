@@ -74,7 +74,7 @@
     "errorUpload": "上傳失敗"
   },
   "uploadZone": {
-    "clickToUpload": "點擊上傳或拖放檔案",
+    "clickToUpload": "點擊或拖放檔案",
     "supportedFormats": "支援 M4A、MP3、WAV、MP4 等音訊格式",
     "uploadingFile": "上傳檔案中..."
   },
@@ -220,7 +220,9 @@
     "autoSavingSpeaker": "自動儲存講者名稱",
     "segmentsAutoSaved": "Segments 已自動儲存",
     "errorSavingSegments": "儲存 segments 失敗",
-    "confirmLeave": "你有未儲存的編輯內容，確定要離開嗎？"
+    "confirmLeave": "你有未儲存的編輯內容，確定要離開嗎？",
+    "moreOptions": "更多選項",
+    "replacing": "正在取代..."
   },
   "audioPlayer": {
     "browserNotSupported": "您的瀏覽器不支援音訊播放。",
@@ -266,6 +268,22 @@
     "find": "尋找",
     "replaceWith": "取代為",
     "replaceAll": "取代全部"
+  },
+  "searchReplace": {
+    "search": "搜尋",
+    "searchPlaceholder": "搜尋文字...",
+    "replacePlaceholder": "取代為...",
+    "noResults": "無結果",
+    "previous": "上一個 (Shift+Enter)",
+    "next": "下一個 (Enter)",
+    "close": "關閉 (Esc)",
+    "replace": "取代",
+    "replaceOne": "取代當前項目",
+    "replaceAll": "全部取代",
+    "replaceAllTitle": "取代所有匹配項目",
+    "confirmReplaceAll": "找到 {count} 處「{search}」\n確定全部取代為「{replace}」嗎？",
+    "matchCase": "區分大小寫",
+    "matchWholeWord": "全字匹配"
   },
   "transcriptMetadata": {
     "characters": "字"

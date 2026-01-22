@@ -220,7 +220,9 @@
     "autoSavingSpeaker": "Auto-saving speaker names",
     "segmentsAutoSaved": "Segments auto-saved",
     "errorSavingSegments": "Failed to save segments",
-    "confirmLeave": "You have unsaved changes. Are you sure you want to leave?"
+    "confirmLeave": "You have unsaved changes. Are you sure you want to leave?",
+    "moreOptions": "More Options",
+    "replacing": "Replacing..."
   },
   "audioPlayer": {
     "browserNotSupported": "Your browser does not support audio playback.",
@@ -266,6 +268,22 @@
     "find": "Find",
     "replaceWith": "Replace with",
     "replaceAll": "Replace All"
+  },
+  "searchReplace": {
+    "search": "Search",
+    "searchPlaceholder": "Search text...",
+    "replacePlaceholder": "Replace with...",
+    "noResults": "No results",
+    "previous": "Previous (Shift+Enter)",
+    "next": "Next (Enter)",
+    "close": "Close (Esc)",
+    "replace": "Replace",
+    "replaceOne": "Replace current match",
+    "replaceAll": "Replace All",
+    "replaceAllTitle": "Replace all matches",
+    "confirmReplaceAll": "Found {count} occurrences of \"{search}\"\nReplace all with \"{replace}\"?",
+    "matchCase": "Match Case",
+    "matchWholeWord": "Match Whole Word"
   },
   "transcriptMetadata": {
     "characters": "characters"

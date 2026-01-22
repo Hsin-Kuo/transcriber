@@ -71,12 +71,9 @@
             :ref="el => setColorPickerButtonRef(tag, el)"
             class="btn-color-picker"
             :title="$t('taskList.setTagColor', { tag })"
+            :style="{ backgroundColor: getTagColor(tag) }"
             @click="handleToggleColorPicker(tag)"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
-            </svg>
-          </button>
+          ></button>
         </div>
       </div>
 
@@ -554,28 +551,27 @@ function handleColorSelected({ tag, color }) {
   transform: translateY(-2px);
 }
 
+.filter-tag-item.editing .filter-tag-btn {
+  padding: 6px 2px;
+}
+
 .tag-color-picker-wrapper {
   display: flex;
   align-items: center;
 }
 
 .btn-color-picker {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 16px;
+  height: 16px;
   padding: 0;
-  background: rgba(var(--color-primary-rgb), 0.1);
-  border: 1px solid rgba(var(--color-primary-rgb), 0.3);
-  border-radius: 4px;
-  color: var(--color-primary);
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 3px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .btn-color-picker:hover {
-  background: rgba(var(--color-primary-rgb), 0.2);
+  transform: scale(1.15);
 }
 
 .filter-header-actions {

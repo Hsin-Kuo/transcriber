@@ -478,7 +478,7 @@ onMounted(() => {
   display: flex;
   align-items: flex-end;
   gap: 4px;
-  margin-bottom: -15px;
+  margin-bottom: 0px;
   margin-top: 20px;
   padding-left: 0px;
   position: relative;
@@ -498,9 +498,11 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 40px 18px 40px;
+  padding: 6px 10px;
+  margin: 0px 20px 10px 20px;
+  left: 10px;
   border: none;
-  border-radius: 8px 8px 0 0;
+  /* border-radius: 8px; */
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   font-size: 14px;
@@ -529,15 +531,20 @@ onMounted(() => {
 
 /* 批次編輯頁籤顏色 */
 .tab-btn.tab-batch-edit {
-  padding: 6px 20px 18px 20px;
+  padding: 6px 10px;
+  margin: 0px 20px 10px 20px;
   background: #00000000;
+}
+
+.tab-btn.tab-batch-edit.active {
+  color: var(--color-nav-active-bg);
 }
 
 /* 批次編輯模式下，其他頁籤變成淺灰色 */
 .task-list.batch-edit-active .tab-btn.tab-all,
 .task-list.batch-edit-active .tab-btn.tab-paragraph,
 .task-list.batch-edit-active .tab-btn.tab-subtitle {
-  background: #e5e7eb !important;
+  border-bottom: none;
   color: rgba(var(--color-text-dark-rgb), 0.5) !important;
   opacity: 0.7;
 }
@@ -551,6 +558,7 @@ onMounted(() => {
   font-weight: 600;
   transform: translateY(-4px);
   z-index: 10 !important;
+  border-bottom: 1px solid var(--nav-text);
 }
 
 

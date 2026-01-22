@@ -428,27 +428,27 @@ function getKeepAudioTooltip() {
   color: var(--color-neutral-light);
 }
 
-.badge-task-type,
-.badge-diarize {
+.badge-task-type {
   padding: 2px 8px;
   border-radius: 4px;
+  
   font-size: 12px;
   font-weight: 500;
   transition: all 0.2s;
   border: 1px solid;
 }
 
-.badge-paragraph {
+/* .badge-paragraph {
   background: var(--color-teal-light);
   border-color: var(--color-teal-light);
   color: rgba(255, 255, 255, 0.95);
-}
-
+} */
+/* 
 .badge-subtitle {
   background: var(--color-teal);
   border-color: var(--color-teal);
   color: rgba(255, 255, 255, 0.95);
-}
+} */
 
 .badge-diarize {
   background: rgba(246, 156, 92, 0.1);
@@ -602,7 +602,7 @@ function getKeepAudioTooltip() {
 
 /* hover 效果 */
 .toggle-label:hover .toggle-input:not(:disabled):not(:checked) ~ .pin-icon {
-  transform: translate(-50%, -50%) rotate(-35deg) scale(1.08);
+  transform: translate(-50%, -50%) rotate(35deg) scale(1.08);
   color: #444;
 }
 
