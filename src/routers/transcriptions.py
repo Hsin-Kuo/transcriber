@@ -444,6 +444,11 @@ async def create_transcription(
             # 講者名稱對應（用於字幕模式）
             "speaker_names": {},
 
+            # 字幕模式設定
+            "subtitle_settings": {
+                "density_threshold": 3.0,  # 疏密度閾值（秒），範圍 0-120
+            },
+
             # 時間戳記
             "timestamps": {
                 "created_at": current_time,
@@ -1039,4 +1044,67 @@ async def update_speaker_names(
         "message": "講者名稱已更新",
         "task_id": task_id,
         "speaker_names": speaker_names
+    }
+
+
+@router.put("/{task_id}/subtitle-settings")
+async def update_subtitle_settings(
+    task_id: str,
+    settings: dict,
+    current_user: dict = Depends(get_current_user),
+    db = Depends(get_database)
+):
+    """更新字幕模式設定（疏密度等）
+
+    Args:
+        task_id: 任務 ID
+        settings: 字幕設定 {"density_threshold": 3.0}
+        current_user: 當前用戶
+        db: 資料庫實例
+
+    Returns:
+        更新結果
+
+    Raises:
+        HTTPException: 任務不存在、無權訪問或更新失敗
+    """
+    # 從資料庫獲取任務
+    task_repo = TaskRepository(db)
+    task = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
+
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="任務不存在或無權訪問"
+        )
+
+    # 準備更新數據
+    subtitle_settings = task.get("subtitle_settings", {})
+
+    # 更新 density_threshold
+    if "density_threshold" in settings:
+        density = settings["density_threshold"]
+        # 驗證範圍
+        if not isinstance(density, (int, float)) or density < 0 or density > 120:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="density_threshold 必須是 0-120 之間的數字"
+            )
+        subtitle_settings["density_threshold"] = float(density)
+
+    # 更新資料庫
+    success = await task_repo.update(task_id, {"subtitle_settings": subtitle_settings})
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="更新字幕設定失敗"
+        )
+
+    print(f"✅ 已更新任務 {task_id} 的字幕設定: {subtitle_settings}")
+
+    return {
+        "message": "字幕設定已更新",
+        "task_id": task_id,
+        "subtitle_settings": subtitle_settings
     }

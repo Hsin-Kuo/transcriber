@@ -45,7 +45,7 @@
           :class="{ active: showSearchPopup }"
           :title="$t('searchReplace.search')"
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="" stroke-linecap="round" stroke-linejoin="round">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="11" cy="11" r="8"/>
             <line x1="21" y1="21" x2="16.65" y2="16.65"/>
           </svg>
@@ -71,7 +71,7 @@
           @go-to-next="$emit('go-to-next')"
           @replace-current="$emit('replace-current', $event)"
           @replace-all="$emit('replace-all', $event)"
-          @close="showSearchPopup = false"
+          @close="closeSearch"
         />
       </div>
 
@@ -189,6 +189,7 @@
                   <label class="speaker-code">{{ speaker }}</label>
                   <input
                     type="text"
+                    :data-speaker="speaker"
                     :value="speakerNames[speaker] || ''"
                     @input="updateSpeakerName(speaker, $event.target.value)"
                     :placeholder="$t('subtitleTable.speakerPlaceholder', { number: speaker.replace('SPEAKER_', '') })"
@@ -318,11 +319,22 @@ const showSearchPopup = ref(false)
 
 // 切換搜尋浮窗
 function toggleSearch() {
-  showSearchPopup.value = !showSearchPopup.value
-  // 關閉更多選項
   if (showSearchPopup.value) {
+    // 關閉時清空內容
+    closeSearch()
+  } else {
+    // 打開時關閉更多選項
+    showSearchPopup.value = true
     showMoreOptions.value = false
   }
+}
+
+// 關閉搜尋浮窗並清空內容
+function closeSearch() {
+  showSearchPopup.value = false
+  emit('update:searchText', '')
+  emit('update:replaceText', '')
+  emit('search', '')  // 觸發搜尋以清除高亮
 }
 
 // 切換更多選項選單
@@ -337,6 +349,19 @@ function toggleMoreOptions() {
 // 點擊外部關閉選單（僅關閉更多選項，搜尋浮窗需手動關閉）
 function handleClickOutside(event) {
   if (moreOptionsRef.value && !moreOptionsRef.value.contains(event.target)) {
+    showMoreOptions.value = false
+  }
+}
+
+// 滾輪滾動時關閉選單（如果滾動發生在面板外部）
+function handleWheel(event) {
+  if (!showMoreOptions.value) return
+
+  // 找到面板元素
+  const panel = moreOptionsRef.value?.querySelector('.more-options-panel')
+
+  // 如果滾動的不是面板本身或面板內的元素，關閉面板
+  if (panel && event.target !== panel && !panel.contains(event.target)) {
     showMoreOptions.value = false
   }
 }
@@ -357,12 +382,49 @@ watch(() => props.isEditingTitle, (newVal) => {
   }
 })
 
+// 要 focus 的講者代碼
+const pendingFocusSpeaker = ref(null)
+
+// 打開更多選項面板（供外部調用）
+// speakerCode: 可選，指定要 focus 的講者輸入框
+function openMoreOptions(speakerCode = null) {
+  showMoreOptions.value = true
+  showSearchPopup.value = false
+
+  // 如果指定了講者代碼，等面板展開後 focus 到該輸入框
+  if (speakerCode) {
+    pendingFocusSpeaker.value = speakerCode
+    nextTick(() => {
+      const input = document.querySelector(`input[data-speaker="${speakerCode}"]`)
+      if (input) {
+        input.focus()
+        input.select()
+      }
+      pendingFocusSpeaker.value = null
+    })
+  }
+}
+
+// 關閉更多選項面板
+function closeMoreOptions() {
+  showMoreOptions.value = false
+}
+
+// 暴露方法給父組件
+defineExpose({
+  openMoreOptions,
+  closeMoreOptions
+})
+
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
+  // 使用 capture: true 在捕獲階段監聽滾輪事件
+  window.addEventListener('wheel', handleWheel, { capture: true, passive: true })
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+  window.removeEventListener('wheel', handleWheel, { capture: true })
 })
 </script>
 
@@ -568,6 +630,9 @@ onUnmounted(() => {
   top: calc(100% + 8px);
   right: 0;
   min-width: 280px;
+  max-height: 400px;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 12px;
   background: var(--color-white, #ffffff);
   border: 1px solid rgba(163, 177, 198, 0.2);
@@ -683,23 +748,27 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  overflow: hidden;
 }
 
 .speaker-item {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .speaker-code {
   font-size: 11px;
   font-weight: 600;
   color: var(--main-text-light);
-  min-width: 80px;
+  min-width: 70px;
+  flex-shrink: 0;
 }
 
 .speaker-input {
   flex: 1;
+  min-width: 0;
   padding: 6px 10px;
   border: 1px solid rgba(163, 177, 198, 0.3);
   border-radius: 6px;

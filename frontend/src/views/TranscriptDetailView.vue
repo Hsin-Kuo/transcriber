@@ -2,6 +2,7 @@
   <div class="transcript-detail-container">
     <!-- 固定頂部 Header -->
     <TranscriptHeader
+      ref="headerRef"
       :task-display-name="currentTranscript.custom_name || currentTranscript.filename || $t('transcriptDetail.transcript')"
       :created-at="currentTranscript.created_at"
       :text-length="currentTranscript.text_length"
@@ -106,15 +107,21 @@
             <div v-if="isReplacing" class="transcript-display replacing-state">
               <span class="replacing-indicator">{{ $t('transcriptDetail.replacing') || '正在替換...' }}</span>
             </div>
-            <!-- 正常的 contenteditable -->
+            <!-- 編輯模式：純文字 contenteditable，避免 Vue 更新 DOM 衝突 -->
+            <div
+              v-else-if="isEditing"
+              class="transcript-display editing"
+              contenteditable="true"
+              :key="`transcript-editing-${contentVersion}`"
+              ref="textareaRef"
+              @keydown="handleContentEditableKeyDown"
+            >{{ currentTranscript.content }}</div>
+            <!-- 非編輯模式：使用 v-for 渲染高亮和標記 -->
             <div
               v-else
               class="transcript-display"
-              :class="{ 'editing': isEditing }"
-              :contenteditable="isEditing"
-              :key="`transcript-${showTimecodeMarkers}-${isEditing}-${contentVersion}-${searchText}`"
+              :key="`transcript-${showTimecodeMarkers}-${contentVersion}`"
               ref="textareaRef"
-              @keydown="handleContentEditableKeyDown"
             >
               <template v-for="(part, index) in getContentPartsWithHighlight()" :key="`part-${contentVersion}-${index}`">
                 <span v-if="!part.isMarker && !part.isHighlight" class="text-part">{{ part.text }}</span>
@@ -171,6 +178,7 @@
             @seek-to-time="seekToTime"
             @update-row-content="updateRowContent"
             @update-segment-speaker="updateSegmentSpeaker"
+            @open-speaker-settings="handleOpenSpeakerSettings"
           />
         </div>
 
@@ -216,21 +224,24 @@ import { useTranscriptDownload } from '../composables/transcript/useTranscriptDo
 const route = useRoute()
 const router = useRouter()
 
-// 音訊播放器組件引用
+// 組件引用
 const audioPlayerRef = ref(null)
+const headerRef = ref(null)
 
 // ========== 數據管理 ==========
 const {
   currentTranscript,
   segments,
   speakerNames,
+  subtitleSettings,
   loadingTranscript,
   transcriptError,
   originalContent,
   loadTranscript: loadTranscriptData,
   saveTranscript,
   updateTaskName,
-  updateSpeakerNames
+  updateSpeakerNames,
+  updateSubtitleSettings
 } = useTranscriptData()
 
 // 顯示模式
@@ -382,10 +393,15 @@ const originalSegments = ref([])
 
 // 講者名稱自動儲存（debounced）
 let speakerNamesSaveTimer = null
+// 疏密度自動儲存（debounced）
+let densityThresholdSaveTimer = null
 // 用於追蹤滾動位置恢復的計時器（以便在 unmount 時清理）
 let scrollRestoreTimers = []
 // 追蹤組件是否已卸載
 let isMounted = true
+// 追蹤是否正在初始化（避免載入時觸發儲存）
+let isInitializing = true
+
 watch(speakerNames, (newValue) => {
   // 只有在字幕模式下才需要自動儲存
   if (displayMode.value !== 'subtitle') return
@@ -402,6 +418,26 @@ watch(speakerNames, (newValue) => {
     await updateSpeakerNames(newValue)
   }, 1000)
 }, { deep: true })
+
+// 疏密度自動儲存（僅在字幕模式下，且非初始化階段）
+watch(densityThreshold, (newValue) => {
+  // 只有在字幕模式下才需要自動儲存
+  if (displayMode.value !== 'subtitle') return
+  // 初始化階段不儲存
+  if (isInitializing) return
+
+  // 清除之前的計時器
+  if (densityThresholdSaveTimer) {
+    clearTimeout(densityThresholdSaveTimer)
+  }
+
+  // 設定新的計時器（1秒後儲存）
+  densityThresholdSaveTimer = setTimeout(async () => {
+    if (!isMounted) return // 如果組件已卸載，不執行
+    console.log('🔄 自動儲存疏密度設定:', newValue)
+    await updateSubtitleSettings({ density_threshold: newValue })
+  }, 1000)
+})
 
 // ========== 下載功能 ==========
 const {
@@ -432,6 +468,9 @@ useKeyboardShortcuts(
 
 // 載入逐字稿的包裝函數
 async function loadTranscript(taskId) {
+  // 標記為初始化階段
+  isInitializing = true
+
   const result = await loadTranscriptData(
     taskId,
     getAudioUrl,
@@ -448,7 +487,20 @@ async function loadTranscript(taskId) {
     if (displayMode.value === 'paragraph' && segments.value && currentTranscript.value.content) {
       generateSegmentMarkers(segments.value, currentTranscript.value.content)
     }
+
+    // 應用已儲存的字幕設定（僅在字幕模式下）
+    if (displayMode.value === 'subtitle' && subtitleSettings.value) {
+      if (subtitleSettings.value.density_threshold !== undefined) {
+        densityThreshold.value = subtitleSettings.value.density_threshold
+        console.log('✅ 已應用儲存的疏密度設定:', densityThreshold.value)
+      }
+    }
   }
+
+  // 延遲結束初始化狀態，確保 watch 不會在載入階段觸發
+  nextTick(() => {
+    isInitializing = false
+  })
 }
 
 // 開始編輯的包裝函數（保存滾動位置）
@@ -484,10 +536,23 @@ function handleStartEditing() {
     }, 100)
     scrollRestoreTimers.push(timerId)
   }
+
+  // 如果有搜尋結果，應用 CSS 高亮
+  if (displayMode.value === 'paragraph' && searchMatches.value.length > 0) {
+    nextTick(() => {
+      applySearchHighlightsWithCSS()
+    })
+  }
 }
 
 // 取消編輯的包裝函數（保存滾動位置）
 function handleCancelEditing() {
+  // 清除 CSS 高亮
+  if (CSS.highlights) {
+    CSS.highlights.delete('search-highlight')
+    CSS.highlights.delete('search-highlight-current')
+  }
+
   // 保存滾動位置（段落模式）
   let savedScrollTop = 0
   if (displayMode.value === 'paragraph' && textareaRef.value) {
@@ -519,10 +584,23 @@ function handleCancelEditing() {
     }, 100)
     scrollRestoreTimers.push(timerId)
   }
+
+  // 如果有搜尋內容，重新搜尋以更新匹配位置
+  if (searchText.value) {
+    nextTick(() => {
+      handleSearch(searchText.value)
+    })
+  }
 }
 
 // 儲存編輯的包裝函數
 async function saveEditing() {
+  // 清除 CSS 高亮
+  if (CSS.highlights) {
+    CSS.highlights.delete('search-highlight')
+    CSS.highlights.delete('search-highlight-current')
+  }
+
   let contentToSave = ''
   let segmentsToSave = null
 
@@ -608,6 +686,13 @@ async function saveEditing() {
       }, 100)
       scrollRestoreTimers.push(timerId)
     }
+
+    // 如果有搜尋內容，重新搜尋以更新匹配位置
+    if (searchText.value) {
+      nextTick(() => {
+        handleSearch(searchText.value)
+      })
+    }
   }
 }
 
@@ -676,6 +761,15 @@ function updateSegmentSpeaker({ groupId, newSpeaker }) {
 
   // 自動儲存到後端
   saveSegmentsToBackend()
+}
+
+// 打開講者設置面板（從 SubtitleTable 的重新命名按鈕觸發）
+function handleOpenSpeakerSettings(speakerCode) {
+  console.log('🔧 打開講者設置面板，當前講者:', speakerCode)
+  // 打開 Header 的更多選項面板，並 focus 到該講者的輸入框
+  if (headerRef.value) {
+    headerRef.value.openMoreOptions(speakerCode)
+  }
 }
 
 // 儲存 segments 到後端
@@ -874,10 +968,27 @@ function extractTextContentWithSegments(element) {
 
 // 執行搜尋
 function handleSearch(text) {
+  const wasSearching = searchText.value && searchMatches.value.length > 0
   searchText.value = text
+
   if (!text) {
-    searchMatches.value = []
-    currentMatchIndex.value = 0
+    // 清除 CSS 高亮
+    if (CSS.highlights) {
+      CSS.highlights.delete('search-highlight')
+      CSS.highlights.delete('search-highlight-current')
+    }
+
+    // 在編輯模式下，只清除狀態而不觸發 Vue 重新渲染
+    // 使用 nextTick 確保狀態更新後再清空 matches，避免 DOM 衝突
+    if (isEditing.value && wasSearching) {
+      nextTick(() => {
+        searchMatches.value = []
+        currentMatchIndex.value = 0
+      })
+    } else {
+      searchMatches.value = []
+      currentMatchIndex.value = 0
+    }
     return
   }
 
@@ -912,6 +1023,13 @@ function handleSearch(text) {
   searchMatches.value = matches
   currentMatchIndex.value = matches.length > 0 ? 0 : 0
 
+  // 編輯模式下使用 CSS Custom Highlight API
+  if (isEditing.value && displayMode.value === 'paragraph') {
+    nextTick(() => {
+      applySearchHighlightsWithCSS()
+    })
+  }
+
   // 滾動到第一個匹配項
   if (matches.length > 0) {
     scrollToMatch(0)
@@ -938,10 +1056,138 @@ function getSearchableContent() {
   return ''
 }
 
+// 使用 CSS Custom Highlight API 應用搜尋高亮（編輯模式專用）
+function applySearchHighlightsWithCSS() {
+  // 檢查瀏覽器是否支援 CSS Custom Highlight API
+  if (!CSS.highlights) {
+    return
+  }
+
+  // 清除之前的高亮
+  CSS.highlights.delete('search-highlight')
+  CSS.highlights.delete('search-highlight-current')
+
+  if (!textareaRef.value || searchMatches.value.length === 0) {
+    return
+  }
+
+  const ranges = []
+  const currentRanges = []
+
+  // 遍歷 contenteditable 元素中的文字節點，建立字符位置映射
+  // 邏輯需與 extractTextContent 保持一致
+  const textNodes = []
+  let charIndex = 0
+  let lastCharWasNewline = false
+
+  function collectTextNodes(node) {
+    // 跳過 segment-marker 和 tooltip 元素
+    if (node.classList && (node.classList.contains('segment-marker') || node.classList.contains('text-timecode-tooltip'))) {
+      return
+    }
+
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent || ''
+      if (text.length > 0) {
+        // 移除零寬度空格，與 extractTextContent 保持一致
+        const cleanText = text.replace(/\u200B/g, '')
+        if (cleanText.length > 0) {
+          textNodes.push({
+            node,
+            start: charIndex,
+            end: charIndex + cleanText.length,
+            // 記錄原始文字長度，用於計算偏移
+            originalLength: text.length,
+            cleanLength: cleanText.length
+          })
+          charIndex += cleanText.length
+          lastCharWasNewline = cleanText.endsWith('\n')
+        }
+      }
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      // 處理 BR 標籤作為換行
+      if (node.nodeName === 'BR') {
+        charIndex += 1
+        lastCharWasNewline = true
+        return
+      }
+
+      // 處理 DIV - 在前面添加換行（與 extractTextContent 一致）
+      if (node.nodeName === 'DIV' && charIndex > 0 && !lastCharWasNewline) {
+        charIndex += 1
+        lastCharWasNewline = true
+      }
+
+      // 遞歸處理子節點
+      for (const child of node.childNodes) {
+        collectTextNodes(child)
+      }
+
+      // 處理 DIV - 在後面添加換行（與 extractTextContent 一致）
+      if (node.nodeName === 'DIV' && node.childNodes.length > 0) {
+        const hasOnlyBr = node.childNodes.length === 1 && node.childNodes[0].nodeName === 'BR'
+        if (!hasOnlyBr && !lastCharWasNewline) {
+          charIndex += 1
+          lastCharWasNewline = true
+        }
+      }
+    }
+  }
+
+  // 從根元素的子節點開始遍歷
+  for (const child of textareaRef.value.childNodes) {
+    collectTextNodes(child)
+  }
+
+  // 為每個匹配項創建 Range
+  searchMatches.value.forEach((match, matchIndex) => {
+    const matchStart = match.start
+    const matchEnd = match.end
+
+    // 找到匹配開始和結束位置對應的文字節點
+    for (const textNode of textNodes) {
+      // 檢查這個文字節點是否與匹配範圍重疊
+      if (textNode.end <= matchStart || textNode.start >= matchEnd) {
+        continue
+      }
+
+      // 計算在這個文字節點中的範圍
+      const rangeStart = Math.max(0, matchStart - textNode.start)
+      const rangeEnd = Math.min(textNode.node.textContent.length, matchEnd - textNode.start)
+
+      try {
+        const range = new Range()
+        range.setStart(textNode.node, rangeStart)
+        range.setEnd(textNode.node, rangeEnd)
+
+        if (matchIndex === currentMatchIndex.value) {
+          currentRanges.push(range)
+        } else {
+          ranges.push(range)
+        }
+      } catch (e) {
+        // 忽略無效的範圍
+      }
+    }
+  })
+
+  // 註冊高亮
+  if (ranges.length > 0) {
+    CSS.highlights.set('search-highlight', new Highlight(...ranges))
+  }
+  if (currentRanges.length > 0) {
+    CSS.highlights.set('search-highlight-current', new Highlight(...currentRanges))
+  }
+}
+
 // 跳到上一個匹配項
 function goToPreviousMatch() {
   if (searchMatches.value.length === 0) return
   currentMatchIndex.value = (currentMatchIndex.value - 1 + searchMatches.value.length) % searchMatches.value.length
+  // 編輯模式下更新 CSS 高亮
+  if (isEditing.value && displayMode.value === 'paragraph') {
+    applySearchHighlightsWithCSS()
+  }
   scrollToMatch(currentMatchIndex.value)
 }
 
@@ -949,17 +1195,33 @@ function goToPreviousMatch() {
 function goToNextMatch() {
   if (searchMatches.value.length === 0) return
   currentMatchIndex.value = (currentMatchIndex.value + 1) % searchMatches.value.length
+  // 編輯模式下更新 CSS 高亮
+  if (isEditing.value && displayMode.value === 'paragraph') {
+    applySearchHighlightsWithCSS()
+  }
   scrollToMatch(currentMatchIndex.value)
 }
 
 // 滾動到指定的匹配項
 function scrollToMatch(index) {
   if (displayMode.value === 'paragraph') {
-    // 段落模式：查找並滾動到匹配文字
     nextTick(() => {
-      const highlightedElements = document.querySelectorAll('.search-highlight')
-      if (highlightedElements[index]) {
-        highlightedElements[index].scrollIntoView({ behavior: 'smooth', block: 'center' })
+      // 編輯模式下使用 CSS Custom Highlight API，需要手動計算滾動位置
+      if (isEditing.value && textareaRef.value && searchMatches.value[index]) {
+        const match = searchMatches.value[index]
+        const range = findRangeForMatch(match)
+        if (range) {
+          const rect = range.getBoundingClientRect()
+          const containerRect = textareaRef.value.getBoundingClientRect()
+          const scrollTop = textareaRef.value.scrollTop + rect.top - containerRect.top - containerRect.height / 2
+          textareaRef.value.scrollTo({ top: scrollTop, behavior: 'smooth' })
+        }
+      } else {
+        // 非編輯模式：使用 DOM 元素
+        const highlightedElements = document.querySelectorAll('.search-highlight')
+        if (highlightedElements[index]) {
+          highlightedElements[index].scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }
       }
     })
   } else if (displayMode.value === 'subtitle') {
@@ -971,6 +1233,75 @@ function scrollToMatch(index) {
       }
     })
   }
+}
+
+// 找到匹配項對應的 Range（用於編輯模式下的滾動）
+function findRangeForMatch(match) {
+  if (!textareaRef.value) return null
+
+  const textNodes = []
+  let charIndex = 0
+  let lastCharWasNewline = false
+
+  function collectTextNodes(node) {
+    if (node.classList && (node.classList.contains('segment-marker') || node.classList.contains('text-timecode-tooltip'))) {
+      return
+    }
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent || ''
+      if (text.length > 0) {
+        const cleanText = text.replace(/\u200B/g, '')
+        if (cleanText.length > 0) {
+          textNodes.push({ node, start: charIndex, end: charIndex + cleanText.length })
+          charIndex += cleanText.length
+          lastCharWasNewline = cleanText.endsWith('\n')
+        }
+      }
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      if (node.nodeName === 'BR') {
+        charIndex += 1
+        lastCharWasNewline = true
+        return
+      }
+      // 處理 DIV - 在前面添加換行
+      if (node.nodeName === 'DIV' && charIndex > 0 && !lastCharWasNewline) {
+        charIndex += 1
+        lastCharWasNewline = true
+      }
+      for (const child of node.childNodes) {
+        collectTextNodes(child)
+      }
+      // 處理 DIV - 在後面添加換行
+      if (node.nodeName === 'DIV' && node.childNodes.length > 0) {
+        const hasOnlyBr = node.childNodes.length === 1 && node.childNodes[0].nodeName === 'BR'
+        if (!hasOnlyBr && !lastCharWasNewline) {
+          charIndex += 1
+          lastCharWasNewline = true
+        }
+      }
+    }
+  }
+
+  for (const child of textareaRef.value.childNodes) {
+    collectTextNodes(child)
+  }
+
+  // 找到匹配開始位置對應的文字節點
+  for (const textNode of textNodes) {
+    if (match.start >= textNode.start && match.start < textNode.end) {
+      try {
+        const range = new Range()
+        const startOffset = match.start - textNode.start
+        const endOffset = Math.min(textNode.node.textContent.length, match.end - textNode.start)
+        range.setStart(textNode.node, startOffset)
+        range.setEnd(textNode.node, endOffset)
+        return range
+      } catch (e) {
+        return null
+      }
+    }
+  }
+  return null
 }
 
 // 取代當前匹配項
@@ -996,8 +1327,23 @@ function handleReplaceCurrent(newReplaceText) {
     updateContentAfterReplace(replacedContent)
 
     // 重新搜尋並跳到下一個（如果有）
+    // 需要等待 updateContentAfterReplace 的多層 nextTick 完成後再應用高亮
+    const previousIndex = currentMatchIndex.value
     nextTick(() => {
-      handleSearch(searchText.value)
+      nextTick(() => {
+        nextTick(() => {
+          handleSearch(searchText.value)
+          // 取代後自動跳到下一個匹配項（保持在同一位置，因為前面的已被取代）
+          if (searchMatches.value.length > 0) {
+            const nextIndex = Math.min(previousIndex, searchMatches.value.length - 1)
+            currentMatchIndex.value = nextIndex
+            if (isEditing.value && displayMode.value === 'paragraph') {
+              applySearchHighlightsWithCSS()
+            }
+            scrollToMatch(nextIndex)
+          }
+        })
+      })
     })
   } else if (displayMode.value === 'subtitle') {
     // 字幕模式：找到匹配項並取代
@@ -1020,9 +1366,16 @@ function handleReplaceCurrent(newReplaceText) {
       }
     }
 
-    // 重新搜尋
+    // 重新搜尋並跳到下一個（如果有）
+    const previousIndex = currentMatchIndex.value
     nextTick(() => {
       handleSearch(searchText.value)
+      // 取代後自動跳到下一個匹配項
+      if (searchMatches.value.length > 0) {
+        const nextIndex = Math.min(previousIndex, searchMatches.value.length - 1)
+        currentMatchIndex.value = nextIndex
+        scrollToMatch(nextIndex)
+      }
     })
   }
 }
@@ -1181,8 +1534,9 @@ function getContentParts() {
 function getContentPartsWithHighlight() {
   const parts = getContentParts()
 
+  // 在編輯模式下不渲染搜尋高亮，避免 Vue 更新 contenteditable 導致內容丟失
   // 如果沒有搜尋文字，直接返回原始 parts
-  if (!searchText.value || searchMatches.value.length === 0) {
+  if (isEditing.value || !searchText.value || searchMatches.value.length === 0) {
     return parts
   }
 
@@ -1445,6 +1799,39 @@ function fixSubtitleScrolling() {
   })
 }
 
+// 處理內容區域滾動（關閉 Header 的設置面板）
+function handleContentAreaScroll() {
+  if (headerRef.value) {
+    headerRef.value.closeMoreOptions()
+  }
+}
+
+// 設置滾動監聽器
+function setupScrollListeners() {
+  // 監聽段落模式的滾動（.transcript-display）
+  if (textareaRef.value) {
+    textareaRef.value.addEventListener('scroll', handleContentAreaScroll)
+  }
+
+  // 監聽字幕模式的滾動（.subtitle-table-wrapper）
+  const subtitleWrapper = document.querySelector('.subtitle-table-wrapper')
+  if (subtitleWrapper) {
+    subtitleWrapper.addEventListener('scroll', handleContentAreaScroll)
+  }
+}
+
+// 移除滾動監聽器
+function removeScrollListeners() {
+  if (textareaRef.value) {
+    textareaRef.value.removeEventListener('scroll', handleContentAreaScroll)
+  }
+
+  const subtitleWrapper = document.querySelector('.subtitle-table-wrapper')
+  if (subtitleWrapper) {
+    subtitleWrapper.removeEventListener('scroll', handleContentAreaScroll)
+  }
+}
+
 // 路由離開前的警告
 onBeforeRouteLeave((_to, _from, next) => {
   if (hasUnsavedChanges.value) {
@@ -1463,7 +1850,7 @@ onBeforeRouteLeave((_to, _from, next) => {
 onMounted(() => {
   document.body.classList.add('transcript-detail-page')
   window.addEventListener('beforeunload', handleBeforeUnload)
-  // 註冊 Alt 鍵監聽
+  // 註冊 Alt 鍵監聯
   window.addEventListener('keydown', handleKeyDown)
   window.addEventListener('keyup', handleKeyUp)
   window.addEventListener('blur', handleBlur)
@@ -1474,6 +1861,7 @@ onMounted(() => {
   const timerId = setTimeout(() => {
     if (!isMounted) return
     fixSubtitleScrolling()
+    setupScrollListeners()
   }, 100)
   scrollRestoreTimers.push(timerId)
 })
@@ -1488,9 +1876,18 @@ onUnmounted(() => {
     speakerNamesSaveTimer = null
   }
 
+  // 清除疏密度自動儲存計時器
+  if (densityThresholdSaveTimer) {
+    clearTimeout(densityThresholdSaveTimer)
+    densityThresholdSaveTimer = null
+  }
+
   // 清除所有滾動位置恢復計時器
   scrollRestoreTimers.forEach(timer => clearTimeout(timer))
   scrollRestoreTimers = []
+
+  // 移除滾動監聽器
+  removeScrollListeners()
 
   window.removeEventListener('beforeunload', handleBeforeUnload)
   // 移除 Alt 鍵監聯
@@ -1538,6 +1935,14 @@ watch(
   },
   { deep: true }
 )
+
+// 監聽 displayMode 變化，重新設置滾動監聽器
+watch(displayMode, () => {
+  nextTick(() => {
+    removeScrollListeners()
+    setupScrollListeners()
+  })
+})
 </script>
 
 <style scoped>
@@ -1693,6 +2098,15 @@ watch(
 .search-highlight.current {
   background-color: rgba(255, 152, 0, 0.6);
   box-shadow: 0 0 0 1px rgba(255, 152, 0, 0.8);
+}
+
+/* CSS Custom Highlight API 樣式（用於編輯模式） */
+::highlight(search-highlight) {
+  background-color: rgba(255, 235, 59, 0.4);
+}
+
+::highlight(search-highlight-current) {
+  background-color: rgba(255, 152, 0, 0.6);
 }
 
 /* 文字部分的 Timecode Tooltip */

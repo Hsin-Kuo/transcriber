@@ -640,7 +640,7 @@ defineExpose({
   -webkit-appearance: none;
   appearance: none;
   background: var(--main-bg);
-  border: var(--main-primary) 0.5px solid;
+  border: var(--nav-bg) 0.5px solid;
   border-radius: 2px;
   outline: none;
   cursor: pointer;
@@ -651,10 +651,12 @@ defineExpose({
 .volume-slider-horizontal::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 5px;
+  width: 6px;
   height: 14px;
-  background: var(--main-primary);
-  border-radius: 30%;
+  background: #fff;
+  border-left: 1px solid var(--nav-active-bg);
+  border-right: 1px solid var(--nav-active-bg);
+  /* border-radius: 30%; */
   cursor: pointer;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }

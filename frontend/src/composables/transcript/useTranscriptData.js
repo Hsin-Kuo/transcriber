@@ -22,6 +22,7 @@ export function useTranscriptData() {
   const currentTranscript = ref({})
   const segments = ref([])
   const speakerNames = ref({})
+  const subtitleSettings = ref({})  // 字幕模式設定（包含 density_threshold）
   const loadingTranscript = ref(false)
   const transcriptError = ref(null)
   const originalContent = ref('')
@@ -63,6 +64,12 @@ export function useTranscriptData() {
         hasAudio: !!(task.result?.audio_file || task.audio_file),
         task_type: task.task_type || 'paragraph',
         content: ''
+      }
+
+      // 載入字幕設定（用於字幕模式）
+      if (task.subtitle_settings) {
+        subtitleSettings.value = task.subtitle_settings
+        console.log('✅ 載入字幕設定:', subtitleSettings.value)
       }
 
       console.log('📋 任務類型:', currentTranscript.value.task_type)
@@ -248,11 +255,43 @@ export function useTranscriptData() {
     }
   }
 
+  /**
+   * 更新字幕設定
+   * @param {Object} newSettings - 字幕設定（如 { density_threshold: 3.0 }）
+   * @returns {Promise<boolean>} 更新是否成功
+   */
+  async function updateSubtitleSettings(newSettings) {
+    try {
+      await api.put(
+        NEW_ENDPOINTS.transcriptions.updateSubtitleSettings(currentTranscript.value.task_id),
+        newSettings
+      )
+
+      subtitleSettings.value = { ...subtitleSettings.value, ...newSettings }
+      console.log('✅ 字幕設定已更新:', newSettings)
+      return true
+
+    } catch (error) {
+      console.error('更新字幕設定失敗:', error)
+
+      if (showNotification) {
+        showNotification({
+          title: t('transcriptData.updateFailed'),
+          message: t('transcriptData.cannotUpdateSubtitleSettings') || '無法更新字幕設定',
+          type: 'error'
+        })
+      }
+
+      return false
+    }
+  }
+
   return {
     // 狀態
     currentTranscript,
     segments,
     speakerNames,
+    subtitleSettings,
     loadingTranscript,
     transcriptError,
     originalContent,
@@ -261,6 +300,7 @@ export function useTranscriptData() {
     loadTranscript,
     saveTranscript,
     updateTaskName,
-    updateSpeakerNames
+    updateSpeakerNames,
+    updateSubtitleSettings
   }
 }

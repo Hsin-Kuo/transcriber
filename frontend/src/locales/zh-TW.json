@@ -16,7 +16,8 @@
     "clickToChangeSpeaker": "點擊更換講者",
     "clickToJumpToTime": "點擊跳轉到此時間",
     "speakerPlaceholder": "講者 {number}",
-    "toggleSettings": "顯示/隱藏設置"
+    "toggleSettings": "顯示/隱藏設置",
+    "rename": "重新命名"
   },
   "userSettings": {
     "title": "使用者設定",

@@ -14,8 +14,7 @@
           :placeholder="$t('searchReplace.searchPlaceholder')"
           class="search-input"
           @input="handleSearchInput"
-          @keydown.enter.prevent="goToNext"
-          @keydown.shift.enter.prevent="goToPrevious"
+          @keydown.enter="handleSearchKeydown"
           @keydown.esc="$emit('close')"
         />
         <!-- 搜尋選項按鈕 -->
@@ -98,7 +97,7 @@
           type="text"
           :placeholder="$t('searchReplace.replacePlaceholder')"
           class="replace-input"
-          @keydown.enter.prevent="replaceCurrent"
+          @keydown.enter="handleReplaceKeydown"
           @keydown.esc="$emit('close')"
         />
       </div>
@@ -200,6 +199,20 @@ function handleSearchInput() {
   }, 300)
 }
 
+// 處理搜尋輸入框的 Enter 鍵（忽略 IME 選字時的 Enter）
+function handleSearchKeydown(event) {
+  // 如果正在使用輸入法組合，忽略 Enter
+  if (event.isComposing) {
+    return
+  }
+  event.preventDefault()
+  if (event.shiftKey) {
+    goToPrevious()
+  } else {
+    goToNext()
+  }
+}
+
 // 跳到上一個
 function goToPrevious() {
   emit('go-to-previous')
@@ -224,6 +237,16 @@ function toggleMatchWholeWord() {
   emit('update:matchWholeWord', localMatchWholeWord.value)
   // 重新搜尋
   emit('search', localSearchText.value)
+}
+
+// 處理取代輸入框的 Enter 鍵（忽略 IME 選字時的 Enter）
+function handleReplaceKeydown(event) {
+  // 如果正在使用輸入法組合，忽略 Enter
+  if (event.isComposing) {
+    return
+  }
+  event.preventDefault()
+  replaceCurrent()
 }
 
 // 取代當前

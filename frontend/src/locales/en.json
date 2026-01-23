@@ -16,7 +16,8 @@
     "clickToChangeSpeaker": "Click to change speaker",
     "clickToJumpToTime": "Click to jump to this time",
     "speakerPlaceholder": "Speaker {number}",
-    "toggleSettings": "Show/Hide Settings"
+    "toggleSettings": "Show/Hide Settings",
+    "rename": "Rename"
   },
   "userSettings": {
     "title": "User Settings",

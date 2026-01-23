@@ -350,6 +350,7 @@ def filter_task_for_list(task: Dict[str, Any]) -> Dict[str, Any]:
         "tags": task.get("tags", []),
         "keep_audio": task.get("keep_audio", False),
         "speaker_names": task.get("speaker_names", {}),
+        "subtitle_settings": task.get("subtitle_settings", {}),
         "timestamps": task.get("timestamps", {}),
     }
 
