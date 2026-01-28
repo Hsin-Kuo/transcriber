@@ -51,6 +51,13 @@ export const NEW_ENDPOINTS = {
     merge: '/audio/merge',
     download: (filename) => `/audio/download/${filename}`,
   },
+
+  // AI 摘要
+  summaries: {
+    generate: (taskId) => `/summaries/${taskId}`,
+    get: (taskId) => `/summaries/${taskId}`,
+    delete: (taskId) => `/summaries/${taskId}`,
+  },
 }
 
 /**

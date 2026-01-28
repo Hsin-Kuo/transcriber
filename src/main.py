@@ -31,6 +31,7 @@ from src.routers import tasks as tasks_router
 from src.routers import transcriptions as transcriptions_router
 from src.routers import tags as tags_router
 from src.routers import audio as audio_router
+from src.routers import summaries as summaries_router
 
 # Services
 from src.services.utils.diarization_processor import DiarizationProcessor
@@ -102,6 +103,7 @@ app.include_router(tasks_router.router)
 app.include_router(transcriptions_router.router)
 app.include_router(tags_router.router)
 app.include_router(audio_router.router)
+app.include_router(summaries_router.router)
 
 
 # ========== 進程清理工具函數 ==========
@@ -196,6 +198,10 @@ async def startup_event():
     try:
         await task_repo.create_indexes()
         await audit_log_repo.create_indexes()
+        # 建立 Summaries 索引
+        from src.database.repositories.summary_repo import SummaryRepository
+        summary_repo = SummaryRepository(db)
+        await summary_repo.create_indexes()
         print(f"✅ 資料庫索引建立完成")
     except Exception as e:
         print(f"⚠️  索引建立失敗: {e}")

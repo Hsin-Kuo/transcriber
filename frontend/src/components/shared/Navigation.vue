@@ -42,7 +42,7 @@
         <circle cx="26" cy="18" r="1.5" fill="currentColor"/>
         <circle cx="26" cy="22" r="1.5" fill="currentColor"/>
       </svg>
-      <h2 v-if="!isCollapsed">Soundtime</h2>
+      <h2 v-if="!isCollapsed">SoundThing</h2>
     </div>
 
     <div class="nav-links">

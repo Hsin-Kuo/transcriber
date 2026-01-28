@@ -115,6 +115,14 @@
         class="right-panel card"
         :style="{ '--content-font-size': contentFontSize + 'px', '--content-font-weight': contentFontWeight, '--content-font-family': contentFontFamily === 'serif' ? 'Georgia, Times New Roman, serif' : '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif' }"
       >
+        <!-- AI 摘要組件 -->
+        <AISummary
+          v-if="currentTranscript.task_id"
+          :task-id="currentTranscript.task_id"
+          :initial-summary-status="currentTranscript.summary_status"
+          @summary-updated="handleSummaryUpdated"
+        />
+
         <!-- 逐字稿內容區域 -->
         <div class="transcript-content-wrapper">
           <div v-if="loadingTranscript" class="loading-state">
@@ -250,6 +258,7 @@ import SubtitleTable from '../components/transcript/SubtitleTable.vue'
 import DownloadDialog from '../components/transcript/DownloadDialog.vue'
 import TaskInfoCard from '../components/transcript/TaskInfoCard.vue'
 import DisplaySettingsCard from '../components/transcript/DisplaySettingsCard.vue'
+import AISummary from '../components/transcript/AISummary.vue'
 
 // API 服務
 import { taskService } from '../api/services.js'
@@ -2053,6 +2062,15 @@ async function handleTagsUpdated({ taskId, tags }) {
   }
 }
 
+// 處理 AI 摘要更新
+function handleSummaryUpdated({ taskId, status }) {
+  console.log(`✅ AI 摘要已更新: ${taskId}, 狀態: ${status}`)
+  // 更新本地狀態
+  if (currentTranscript.value.task_id === taskId) {
+    currentTranscript.value.summary_status = status
+  }
+}
+
 // 初始載入
 onMounted(() => {
   document.body.classList.add('transcript-detail-page')
@@ -2165,7 +2183,7 @@ watch(displayMode, () => {
 /* 雙欄佈局 */
 .transcript-layout {
   display: grid;
-  grid-template-columns: 300px 1fr;
+  grid-template-columns: 280px 1fr;
   gap: 20px;
   height: calc(100vh - var(--header-height) - 20px);
   align-items: start;
@@ -2183,7 +2201,8 @@ watch(displayMode, () => {
   gap: 5px;
   height: fit-content;
   border: 0.5px solid;
-  border-radius: 15px;
+  border-radius: 13px;
+  padding: 20px 10px;
   max-height: calc(100vh - var(--header-height) - 40px);
   overflow-y: auto;
   overflow-x: visible;

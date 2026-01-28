@@ -342,6 +342,41 @@ export const audioService = {
 }
 
 /**
+ * AI 摘要服務
+ */
+export const summaryService = {
+  /**
+   * 生成 AI 摘要
+   * @param {string} taskId - 任務 ID
+   * @returns {Promise} 生成結果
+   */
+  async generate(taskId) {
+    const response = await api.post(NEW_ENDPOINTS.summaries.generate(taskId))
+    return response.data
+  },
+
+  /**
+   * 獲取摘要
+   * @param {string} taskId - 任務 ID
+   * @returns {Promise} 摘要資料
+   */
+  async get(taskId) {
+    const response = await api.get(NEW_ENDPOINTS.summaries.get(taskId))
+    return response.data
+  },
+
+  /**
+   * 刪除摘要
+   * @param {string} taskId - 任務 ID
+   * @returns {Promise} API 響應
+   */
+  async delete(taskId) {
+    const response = await api.delete(NEW_ENDPOINTS.summaries.delete(taskId))
+    return response.data
+  }
+}
+
+/**
  * 匯出所有服務
  */
 export default {
@@ -350,4 +385,5 @@ export default {
   tagService,
   legacyService,
   audioService,
+  summaryService,
 }

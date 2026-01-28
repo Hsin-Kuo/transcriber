@@ -19,24 +19,81 @@
         </div>
       </div>
 
-      <!-- 語言設定 -->
-      <div class="card language-card">
-        <h2>{{ $t('userSettings.language') }}</h2>
-        <p class="language-description">{{ $t('userSettings.languageDescription') }}</p>
-        <div class="language-select-wrapper">
-          <select
-            v-model="currentLanguage"
-            @change="changeLanguage"
-            class="language-select"
-          >
-            <option
-              v-for="lang in availableLanguages"
-              :key="lang.code"
-              :value="lang.code"
-            >
-              {{ lang.name }}
-            </option>
-          </select>
+      <!-- 介面設定 -->
+      <div class="card interface-card">
+        <h2>{{ $t('userSettings.interface') }}</h2>
+
+        <!-- 語言 -->
+        <div class="setting-item">
+          <span class="setting-label">{{ $t('userSettings.language') }}</span>
+          <div class="custom-select" :class="{ open: languageDropdownOpen }">
+            <div class="select-trigger" @click="toggleLanguageDropdown">
+              <span>{{ currentLanguageLabel }}</span>
+              <svg class="select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+            <div class="select-dropdown">
+              <div
+                v-for="lang in availableLanguages"
+                :key="lang.code"
+                class="select-option"
+                :class="{ active: currentLanguage === lang.code }"
+                @click="selectLanguage(lang.code)"
+              >
+                {{ lang.name }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 時區 -->
+        <div class="setting-item">
+          <span class="setting-label">{{ $t('userSettings.timezone') }}</span>
+          <div class="custom-select" :class="{ open: timezoneDropdownOpen }">
+            <div class="select-trigger" @click="toggleTimezoneDropdown">
+              <span>{{ currentTimezoneLabel }}</span>
+              <svg class="select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+            <div class="select-dropdown">
+              <div
+                v-for="tz in availableTimezones"
+                :key="tz.code"
+                class="select-option"
+                :class="{ active: currentTimezone === tz.code }"
+                @click="selectTimezone(tz.code)"
+              >
+                {{ tz.name }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 色調 -->
+        <div class="setting-item">
+          <span class="setting-label">{{ $t('userSettings.theme') }}</span>
+          <div class="theme-toggle">
+            <svg class="theme-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="5"></circle>
+              <line x1="12" y1="1" x2="12" y2="3"></line>
+              <line x1="12" y1="21" x2="12" y2="23"></line>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+              <line x1="1" y1="12" x2="3" y2="12"></line>
+              <line x1="21" y1="12" x2="23" y2="12"></line>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+            </svg>
+            <label class="toggle-switch" :class="{ active: currentTheme === 'dark' }">
+              <input type="checkbox" :checked="currentTheme === 'dark'" @change="currentTheme = $event.target.checked ? 'dark' : 'light'; changeTheme()" />
+              <span class="toggle-slider"></span>
+            </label>
+            <svg class="theme-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+          </div>
         </div>
       </div>
 
@@ -111,7 +168,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useI18n } from 'vue-i18n'
 
@@ -122,13 +179,82 @@ const { t: $t, locale } = useI18n()
 const availableLanguages = [
   { code: 'zh-TW', name: '繁體中文' },
   { code: 'en', name: 'English' }
-  // 未來可以在這裡新增更多語言
-  // { code: 'ja', name: '日本語' },
-  // { code: 'ko', name: '한국어' },
 ]
 
 // 當前語言
 const currentLanguage = ref(locale.value)
+
+// 可用時區列表
+const availableTimezones = [
+  { code: 'Asia/Taipei', name: 'UTC+8 台北' },
+  { code: 'Asia/Tokyo', name: 'UTC+9 東京' },
+  { code: 'Asia/Shanghai', name: 'UTC+8 上海' },
+  { code: 'Asia/Hong_Kong', name: 'UTC+8 香港' },
+  { code: 'America/New_York', name: 'UTC-5 紐約' },
+  { code: 'America/Los_Angeles', name: 'UTC-8 洛杉磯' },
+  { code: 'Europe/London', name: 'UTC+0 倫敦' }
+]
+
+// 當前時區
+const currentTimezone = ref(localStorage.getItem('timezone') || 'Asia/Taipei')
+
+// 當前色調
+const currentTheme = ref(localStorage.getItem('theme') || 'light')
+
+// 下拉選單狀態
+const languageDropdownOpen = ref(false)
+const timezoneDropdownOpen = ref(false)
+
+// 當前選項的顯示文字
+const currentLanguageLabel = computed(() => {
+  const lang = availableLanguages.find(l => l.code === currentLanguage.value)
+  return lang ? lang.name : ''
+})
+
+const currentTimezoneLabel = computed(() => {
+  const tz = availableTimezones.find(t => t.code === currentTimezone.value)
+  return tz ? tz.name : ''
+})
+
+// 切換下拉選單
+function toggleLanguageDropdown() {
+  languageDropdownOpen.value = !languageDropdownOpen.value
+  timezoneDropdownOpen.value = false
+}
+
+function toggleTimezoneDropdown() {
+  timezoneDropdownOpen.value = !timezoneDropdownOpen.value
+  languageDropdownOpen.value = false
+}
+
+// 選擇選項
+function selectLanguage(code) {
+  currentLanguage.value = code
+  changeLanguage()
+  languageDropdownOpen.value = false
+}
+
+function selectTimezone(code) {
+  currentTimezone.value = code
+  changeTimezone()
+  timezoneDropdownOpen.value = false
+}
+
+// 點擊外部關閉下拉選單
+function handleClickOutside(event) {
+  if (!event.target.closest('.custom-select')) {
+    languageDropdownOpen.value = false
+    timezoneDropdownOpen.value = false
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', handleClickOutside)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside)
+})
 
 // 配額層級名稱
 const quotaTierName = computed(() => {
@@ -155,6 +281,17 @@ function formatBytes(bytes) {
 function changeLanguage() {
   locale.value = currentLanguage.value
   localStorage.setItem('locale', currentLanguage.value)
+}
+
+// 切換時區
+function changeTimezone() {
+  localStorage.setItem('timezone', currentTimezone.value)
+}
+
+// 切換色調
+function changeTheme() {
+  localStorage.setItem('theme', currentTheme.value)
+  document.documentElement.setAttribute('data-theme', currentTheme.value)
 }
 </script>
 
@@ -195,7 +332,7 @@ function changeLanguage() {
 }
 
 .user-info-card h2,
-.language-card h2 {
+.interface-card h2 {
   font-size: 1.25rem;
   color: var(--main-primary);
   margin: 0 0 20px 0;
@@ -226,47 +363,154 @@ function changeLanguage() {
   font-weight: 600;
 }
 
-/* 語言設定樣式 */
-.language-description {
-  font-size: 0.9rem;
+/* 介面設定樣式 */
+.setting-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(163, 177, 198, 0.2);
+}
+
+.setting-item:last-child {
+  border-bottom: none;
+}
+
+.setting-label {
+  font-size: 0.95rem;
   color: var(--main-text-light);
-  margin: 0 0 16px 0;
-}
-
-.language-select-wrapper {
-  position: relative;
-}
-
-.language-select {
-  width: 100%;
-  padding: 12px 16px;
-  border: none;
-  border-radius: 8px;
-  background: var(--main-bg);
-  color: var(--main-text);
-  font-size: 14px;
   font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  appearance: none;
-  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236c8ba3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  background-size: 20px;
-  padding-right: 40px;
 }
 
-
-
-.language-select:focus {
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(108, 139, 163, 0.2);
+/* 自訂下拉選單 */
+.custom-select {
+  position: relative;
+  min-width: 140px;
 }
 
-.language-select option {
+.select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
   background: var(--main-bg);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
   color: var(--main-text);
-  padding: 10px;
+  transition: all 0.2s ease;
+}
+
+.select-trigger:hover {
+  background: rgba(163, 177, 198, 0.15);
+}
+
+.select-arrow {
+  color: var(--main-text-light);
+  transition: transform 0.2s ease;
+}
+
+.custom-select.open .select-arrow {
+  transform: rotate(180deg);
+}
+
+.select-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 100%;
+  background: var(--card-bg, #fff);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-8px);
+  transition: all 0.2s ease;
+  z-index: 100;
+  overflow: hidden;
+}
+
+.custom-select.open .select-dropdown {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.select-option {
+  padding: 10px 14px;
+  font-size: 14px;
+  color: var(--main-text);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.select-option:hover {
+  background: rgba(163, 177, 198, 0.15);
+}
+
+.select-option.active {
+  background: var(--nav-active-bg);
+  color: white;
+}
+
+/* 色調開關 */
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.theme-icon {
+  color: var(--main-text-light);
+  opacity: 0.6;
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  cursor: pointer;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #dedede;
+  border-radius: 22px;
+  transition: all 0.3s ease;
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
+  background: white;
+  border-radius: 50%;
+  transition: all 0.3s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.toggle-switch.active .toggle-slider {
+  background: var(--nav-active-bg);
+}
+
+.toggle-switch.active .toggle-slider::before {
+  transform: translateX(18px);
 }
 
 /* 配額卡片樣式 */
