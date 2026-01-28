@@ -118,7 +118,8 @@
         <!-- 疏 icon: 間距較大的橫線 -->
         <svg class="density-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" :title="$t('subtitleTable.sparse')">
           <line x1="4" y1="6" x2="20" y2="6"></line>
-          <line x1="4" y1="18" x2="20" y2="18"></line>
+          <line x1="4" y1="13" x2="12" y2="13"></line>
+          <line x1="4" y1="20" x2="17" y2="20"></line>
         </svg>
         <input
           type="range"
@@ -133,7 +134,7 @@
         <svg class="density-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" :title="$t('subtitleTable.dense')">
           <line x1="4" y1="5" x2="20" y2="5"></line>
           <line x1="4" y1="10" x2="20" y2="10"></line>
-          <line x1="4" y1="15" x2="20" y2="15"></line>
+          <line x1="4" y1="15" x2="15" y2="15"></line>
           <line x1="4" y1="20" x2="20" y2="20"></line>
         </svg>
       </div>
