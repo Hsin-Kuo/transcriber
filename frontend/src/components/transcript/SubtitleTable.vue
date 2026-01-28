@@ -639,7 +639,9 @@ onUnmounted(() => {
 /* 內容欄 */
 .col-content {
   padding: 12px;
-  font-size: 15px;
+  font-size: var(--content-font-size, 15px);
+  font-weight: var(--content-font-weight, 400);
+  font-family: var(--content-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
   line-height: 1.6;
   color: var(--main-text);
   min-height: 48px;

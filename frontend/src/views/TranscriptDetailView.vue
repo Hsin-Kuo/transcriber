@@ -32,6 +32,7 @@
       @save-editing="saveEditing"
       @cancel-editing="handleCancelEditing"
       @download="downloadTranscript"
+      @delete-task="deleteTask"
       @update:show-timecode-markers="showTimecodeMarkers = $event"
       @update:time-format="timeFormat = $event"
       @update:density-threshold="densityThreshold = $event"
@@ -51,6 +52,28 @@
     <div class="transcript-layout">
       <!-- 左側控制面板 -->
       <div class="left-panel card">
+        <!-- 任務資訊卡片 -->
+        <TaskInfoCard
+          :task-id="currentTranscript.task_id"
+          :updated-at="currentTranscript.updated_at"
+          :content="currentTranscript.content"
+          :tags="currentTranscript.tags"
+          :all-tags="allTags"
+          @tags-updated="handleTagsUpdated"
+        />
+
+        <!-- 顯示設定卡片 -->
+        <DisplaySettingsCard
+          :display-mode="displayMode"
+          v-model:show-timecode-markers="showTimecodeMarkers"
+          v-model:time-format="timeFormat"
+          v-model:is-dark-mode="isDarkMode"
+          v-model:font-size="contentFontSize"
+          v-model:font-weight="contentFontWeight"
+          v-model:font-family="contentFontFamily"
+          v-model:density-threshold="densityThreshold"
+        />
+
         <!-- 音訊播放器組件 -->
         <AudioPlayer
           v-if="currentTranscript.hasAudio"
@@ -88,7 +111,10 @@
       </div>
 
       <!-- 右側文字區域 -->
-      <div class="right-panel card">
+      <div
+        class="right-panel card"
+        :style="{ '--content-font-size': contentFontSize + 'px', '--content-font-weight': contentFontWeight, '--content-font-family': contentFontFamily === 'serif' ? 'Georgia, Times New Roman, serif' : '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif' }"
+      >
         <!-- 逐字稿內容區域 -->
         <div class="transcript-content-wrapper">
           <div v-if="loadingTranscript" class="loading-state">
@@ -123,7 +149,7 @@
                 :data-start-time="part.start"
                 @click="handleTextClick(part.start, $event)"
               >{{ part.text }}<span
-                  v-if="isAltPressed && currentTranscript.hasAudio"
+                  v-if="isAltPressed"
                   class="text-timecode-tooltip"
                   contenteditable="false"
                 >{{ formatTime(part.start) }}</span></span></template></div>
@@ -166,7 +192,7 @@
                       :data-segment-index="part.segmentIndex"
                       :data-start-time="part.start"
                       @click="handleTextClick(part.start, $event)"
-                    >{{ subPart.text }}<span v-if="isAltPressed && currentTranscript.hasAudio && subIndex === 0" class="text-timecode-tooltip">
+                    >{{ subPart.text }}<span v-if="isAltPressed && subIndex === 0" class="text-timecode-tooltip">
                         {{ formatTime(part.start) }}
                       </span></span>
                   </template>
@@ -222,6 +248,11 @@ import TranscriptHeader from '../components/transcript/TranscriptHeader.vue'
 import AudioPlayer from '../components/transcript/AudioPlayer.vue'
 import SubtitleTable from '../components/transcript/SubtitleTable.vue'
 import DownloadDialog from '../components/transcript/DownloadDialog.vue'
+import TaskInfoCard from '../components/transcript/TaskInfoCard.vue'
+import DisplaySettingsCard from '../components/transcript/DisplaySettingsCard.vue'
+
+// API 服務
+import { taskService } from '../api/services.js'
 
 // Composables
 import { useTranscriptData } from '../composables/transcript/useTranscriptData'
@@ -231,6 +262,7 @@ import { useTranscriptEditor } from '../composables/transcript/useTranscriptEdit
 import { useSegmentMarkers } from '../composables/transcript/useSegmentMarkers'
 import { useKeyboardShortcuts } from '../composables/transcript/useKeyboardShortcuts'
 import { useTranscriptDownload } from '../composables/transcript/useTranscriptDownload'
+import { useTaskTags } from '../composables/task/useTaskTags'
 
 const route = useRoute()
 const router = useRouter()
@@ -252,8 +284,15 @@ const {
   saveTranscript,
   updateTaskName,
   updateSpeakerNames,
-  updateSubtitleSettings
+  updateSubtitleSettings,
+  updateTags
 } = useTranscriptData()
+
+// 標籤管理
+const { fetchTagColors, customTagOrder } = useTaskTags($t)
+
+// 所有可用標籤（按順序排列）
+const allTags = computed(() => customTagOrder.value)
 
 // 顯示模式
 const displayMode = computed(() => {
@@ -374,6 +413,21 @@ const {
 
 // 控制是否顯示 timecode 標記
 const showTimecodeMarkers = ref(false)
+
+// 顯示設定
+const isDarkMode = ref(document.documentElement.getAttribute('data-theme') === 'dark')
+const contentFontSize = ref(16)
+const contentFontWeight = ref(400)
+const contentFontFamily = ref('sans-serif')
+
+// 監聽暗色模式變化，切換全局主題
+watch(isDarkMode, (dark) => {
+  if (dark) {
+    document.documentElement.setAttribute('data-theme', 'dark')
+  } else {
+    document.documentElement.removeAttribute('data-theme')
+  }
+})
 
 // 保存編輯前的 timecode markers 狀態
 const savedTimecodeMarkersState = ref(true)
@@ -623,23 +677,32 @@ async function saveEditing() {
   }
 
   if (displayMode.value === 'paragraph') {
-    // 從 contenteditable div 中提取純文字內容
+    // 從 contenteditable div 中提取純文字內容和 segment 文字
     if (textareaRef.value) {
-      contentToSave = extractTextContent(textareaRef.value)
+      const { fullText, segmentTexts } = extractTextContentWithSegments(textareaRef.value)
+      contentToSave = fullText
 
       // 更新到 currentTranscript
       currentTranscript.value.content = contentToSave
 
-      // 如果有 segments 資料，使用差異比對來更新 segments
-      if (segments.value && segments.value.length > 0 && segmentMarkers.value.length > 0) {
-        const updatedSegments = updateSegmentsFromTextDiff(
-          originalContent.value,
-          contentToSave,
-          segments.value,
-          segmentMarkers.value
-        )
+      // 如果有 segments 資料，直接從 DOM 提取的 segment 文字來更新
+      if (segments.value && segments.value.length > 0 && segmentTexts.length > 0) {
+        const updatedSegments = segments.value.map((seg) => ({ ...seg }))
+        let hasChanges = false
 
-        if (updatedSegments) {
+        // 使用從 DOM 直接提取的 segment 文字來更新
+        segmentTexts.forEach(({ segmentIndex, text }) => {
+          if (segmentIndex >= 0 && segmentIndex < updatedSegments.length) {
+            const originalText = updatedSegments[segmentIndex].text?.trim() || ''
+            if (text !== originalText) {
+              updatedSegments[segmentIndex].text = text
+              hasChanges = true
+              console.log(`✏️ Segment ${segmentIndex} 已修改: "${originalText}" → "${text}"`)
+            }
+          }
+        })
+
+        if (hasChanges) {
           segmentsToSave = updatedSegments
         }
       }
@@ -761,9 +824,9 @@ function updateSegmentSpeaker({ groupId, newSpeaker }) {
 // 打開講者設置面板（從 SubtitleTable 的重新命名按鈕觸發）
 function handleOpenSpeakerSettings(speakerCode) {
   console.log('🔧 打開講者設置面板，當前講者:', speakerCode)
-  // 打開 Header 的更多選項面板，並 focus 到該講者的輸入框
+  // 打開 Header 的講者設定面板，並 focus 到該講者的輸入框
   if (headerRef.value) {
-    headerRef.value.openMoreOptions(speakerCode)
+    headerRef.value.openSpeakerSettings(speakerCode)
   }
 }
 
@@ -784,6 +847,21 @@ async function saveSegmentsToBackend() {
 // 返回
 function goBack() {
   router.back()
+}
+
+// 刪除任務
+async function deleteTask() {
+  if (!confirm($t('tasksView.confirmDeleteTask'))) {
+    return
+  }
+
+  try {
+    await taskService.delete(currentTranscript.value.task_id)
+    router.push('/')
+  } catch (error) {
+    console.error('Delete failed:', error)
+    alert($t('tasksView.deleteFailed'))
+  }
 }
 
 // 從 contenteditable div 中提取純文字內容（排除標記元素）
@@ -969,8 +1047,34 @@ function extractTextContentWithSegments(element) {
   const clone = element.cloneNode(true)
   let fullText = ''
   const segmentTexts = []
-  let currentSegmentIndex = null
-  let currentSegmentText = ''
+
+  /**
+   * 從節點中提取純文字（用於 segment 內部）
+   */
+  function extractTextFromNode(node) {
+    let text = ''
+
+    // 跳過 segment-marker 和 tooltip 元素
+    if (node.classList && (node.classList.contains('segment-marker') || node.classList.contains('text-timecode-tooltip'))) {
+      return ''
+    }
+
+    if (node.nodeType === Node.TEXT_NODE) {
+      return node.textContent
+    }
+
+    if (node.nodeName === 'BR') {
+      return '\n'
+    }
+
+    // 遞歸處理子節點
+    const children = Array.from(node.childNodes)
+    for (let child of children) {
+      text += extractTextFromNode(child)
+    }
+
+    return text
+  }
 
   function traverseNode(node) {
     // 跳過 segment-marker 元素及其內容
@@ -985,46 +1089,37 @@ function extractTextContentWithSegments(element) {
 
     // 檢查是否是帶有 data-segment-index 的節點
     if (node.nodeType === Node.ELEMENT_NODE && node.hasAttribute && node.hasAttribute('data-segment-index')) {
-      // 如果之前有累積的 segment 文字，先保存
-      if (currentSegmentIndex !== null && currentSegmentText) {
+      const segmentIndex = parseInt(node.getAttribute('data-segment-index'), 10)
+      // 直接提取這個 segment span 內的所有文字
+      const segmentText = extractTextFromNode(node)
+
+      fullText += segmentText
+
+      if (segmentText) {
         segmentTexts.push({
-          segmentIndex: currentSegmentIndex,
-          text: currentSegmentText
+          segmentIndex: segmentIndex,
+          text: segmentText
         })
       }
-
-      // 開始新的 segment
-      currentSegmentIndex = parseInt(node.getAttribute('data-segment-index'), 10)
-      currentSegmentText = ''
+      // 已處理完這個 segment，不需要再遞歸
+      return
     }
 
     // 處理文字節點
     if (node.nodeType === Node.TEXT_NODE) {
-      const text = node.textContent
-      fullText += text
-
-      // 如果當前在某個 segment 中，累積文字
-      if (currentSegmentIndex !== null) {
-        currentSegmentText += text
-      }
+      fullText += node.textContent
       return
     }
 
     // 處理 <br> 標籤
     if (node.nodeName === 'BR') {
       fullText += '\n'
-      if (currentSegmentIndex !== null) {
-        currentSegmentText += '\n'
-      }
       return
     }
 
     // 處理塊級元素（div）
     if (node.nodeName === 'DIV' && fullText.length > 0 && !fullText.endsWith('\n')) {
       fullText += '\n'
-      if (currentSegmentIndex !== null) {
-        currentSegmentText += '\n'
-      }
     }
 
     // 遞歸處理子節點
@@ -1038,9 +1133,6 @@ function extractTextContentWithSegments(element) {
       const hasOnlyBr = node.childNodes.length === 1 && node.childNodes[0].nodeName === 'BR'
       if (!hasOnlyBr && !fullText.endsWith('\n')) {
         fullText += '\n'
-        if (currentSegmentIndex !== null) {
-          currentSegmentText += '\n'
-        }
       }
     }
   }
@@ -1049,14 +1141,6 @@ function extractTextContentWithSegments(element) {
   const children = Array.from(clone.childNodes)
   for (let child of children) {
     traverseNode(child)
-  }
-
-  // 保存最後一個 segment
-  if (currentSegmentIndex !== null && currentSegmentText) {
-    segmentTexts.push({
-      segmentIndex: currentSegmentIndex,
-      text: currentSegmentText
-    })
   }
 
   // 移除零寬度空格
@@ -1955,6 +2039,20 @@ onBeforeRouteLeave((_to, _from, next) => {
   }
 })
 
+// 載入所有可用標籤（包含顏色和順序）
+async function loadAllTags() {
+  await fetchTagColors()
+}
+
+// 處理標籤更新
+async function handleTagsUpdated({ taskId, tags }) {
+  const success = await updateTags(tags)
+  if (success) {
+    // 重新載入標籤列表以獲取最新的標籤
+    await loadAllTags()
+  }
+}
+
 // 初始載入
 onMounted(() => {
   document.body.classList.add('transcript-detail-page')
@@ -1965,6 +2063,7 @@ onMounted(() => {
   window.addEventListener('blur', handleBlur)
 
   loadTranscript(route.params.taskId)
+  loadAllTags()
 
   // 延遲執行以確保 DOM 已渲染
   const timerId = setTimeout(() => {
@@ -2066,7 +2165,7 @@ watch(displayMode, () => {
 /* 雙欄佈局 */
 .transcript-layout {
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: 300px 1fr;
   gap: 20px;
   height: calc(100vh - var(--header-height) - 20px);
   align-items: start;
@@ -2078,11 +2177,13 @@ watch(displayMode, () => {
 /* 左側控制面板 */
 .left-panel {
   position: sticky;
-  top: 0;
+  margin-top: 23px;
   display: flex;
   flex-direction: column;
   gap: 5px;
   height: fit-content;
+  border: 0.5px solid;
+  border-radius: 15px;
   max-height: calc(100vh - var(--header-height) - 40px);
   overflow-y: auto;
   overflow-x: visible;
@@ -2146,9 +2247,10 @@ watch(displayMode, () => {
   border-radius: 12px;
   background: var(--main-bg);
   color: var(--main-text);
-  font-size: 1rem;
+  font-size: var(--content-font-size, 1rem);
+  font-weight: var(--content-font-weight, 400);
   line-height: 1.8;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--content-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
   overflow-y: auto;
   overflow-x: hidden;
   white-space: pre-wrap;
@@ -2157,6 +2259,7 @@ watch(displayMode, () => {
   outline: none;
   cursor: text;
 }
+
 
 .transcript-display.editing {
   background: var(--upload-bg);

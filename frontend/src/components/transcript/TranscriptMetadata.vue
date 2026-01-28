@@ -32,7 +32,7 @@ import { useI18n } from 'vue-i18n'
 const { locale } = useI18n()
 
 defineProps({
-  createdAt: String,
+  createdAt: [String, Number],
   textLength: Number,
   durationText: String,
   layout: {
@@ -45,20 +45,35 @@ defineProps({
   }
 })
 
-function formatDate(dateString) {
-  if (!dateString) return ''
+function formatDate(dateValue) {
+  if (!dateValue) return ''
   try {
-    const date = new Date(dateString)
+    // 處理 Unix timestamp (秒) 或 ISO 字串
+    let date
+    if (typeof dateValue === 'number') {
+      date = new Date(dateValue * 1000)
+    } else {
+      date = new Date(dateValue)
+    }
+
+    if (isNaN(date.getTime())) return String(dateValue)
+
     const localeCode = locale.value === 'zh-TW' ? 'zh-TW' : 'en-US'
-    return date.toLocaleString(localeCode, {
+
+    const datePart = date.toLocaleDateString(localeCode, {
       year: 'numeric',
       month: '2-digit',
-      day: '2-digit',
+      day: '2-digit'
+    })
+
+    const timePart = date.toLocaleTimeString(localeCode, {
       hour: '2-digit',
       minute: '2-digit'
     })
+
+    return `${datePart} ${timePart}`
   } catch {
-    return dateString
+    return String(dateValue)
   }
 }
 </script>

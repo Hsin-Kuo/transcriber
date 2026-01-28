@@ -18,7 +18,7 @@ import gc
 import os
 
 from src.database.repositories.task_repo import TaskRepository
-from src.services.utils.async_utils import get_current_time
+from src.utils.time_utils import get_current_time, get_utc_timestamp
 from src.utils import shared_state
 
 try:
@@ -360,8 +360,8 @@ class TaskService:
 
         # 更新資料庫
         updates = {
-            "text_length": text_length,
-            "updated_at": datetime.utcnow()
+            "text_length": text_length
+            # updated_at 由 task_repo.update() 自動設置
         }
         return await self.task_repo.update(task_id, updates)
 
@@ -386,7 +386,7 @@ class TaskService:
         if not task:
             return False
 
-        updates = {"updated_at": datetime.utcnow()}
+        updates = {}
 
         # 驗證檔名（業務邏輯：移除非法字符）
         if custom_name is not None:
@@ -394,6 +394,7 @@ class TaskService:
             safe_name = re.sub(r'[<>:"/\\|?*]', '_', custom_name)
             updates["custom_name"] = safe_name
 
+        # updated_at 由 task_repo.update() 自動設置
         return await self.task_repo.update(task_id, updates)
 
     async def update_task_tags(self, task_id: str, user_id: str, tags: List[str]) -> bool:
@@ -413,8 +414,8 @@ class TaskService:
             return False
 
         updates = {
-            "tags": tags,
-            "updated_at": datetime.utcnow()
+            "tags": tags
+            # updated_at 由 task_repo.update() 自動設置
         }
         return await self.task_repo.update(task_id, updates)
 
@@ -435,8 +436,8 @@ class TaskService:
             return False
 
         updates = {
-            "keep_audio": keep_audio,
-            "updated_at": datetime.utcnow()
+            "keep_audio": keep_audio
+            # updated_at 由 task_repo.update() 自動設置
         }
         return await self.task_repo.update(task_id, updates)
 
@@ -461,8 +462,8 @@ class TaskService:
 
         # 更新資料庫狀態
         updates = {
-            "status": "cancelled",
-            "updated_at": datetime.utcnow()
+            "status": "cancelled"
+            # updated_at 由 task_repo.update() 自動設置
         }
         return await self.task_repo.update(task_id, updates)
 
@@ -662,20 +663,16 @@ class TaskService:
             for task in orphaned_tasks:
                 task_id = task.get("task_id", "unknown")
 
-                # 更新任務狀態
+                # 更新任務狀態（同步更新根層級和巢狀結構的時間戳）
                 update_data = {
                     "status": "failed",
                     "progress": "伺服器重啟，任務已中斷",
-                    "error": "任務執行期間伺服器重啟，任務已被標記為失敗"
+                    "error": "任務執行期間伺服器重啟，任務已被標記為失敗",
+                    "updated_at": current_time,
+                    "completed_at": current_time,
+                    "timestamps.updated_at": current_time,
+                    "timestamps.completed_at": current_time
                 }
-
-                # 支援巢狀結構的時間戳更新
-                if "timestamps" in task:
-                    update_data["timestamps.updated_at"] = current_time
-                    update_data["timestamps.completed_at"] = current_time
-                else:
-                    update_data["updated_at"] = current_time
-                    update_data["completed_at"] = current_time
 
                 await self.task_repo.collection.update_one(
                     {"_id": task["_id"]},

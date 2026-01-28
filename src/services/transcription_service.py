@@ -19,10 +19,8 @@ from .task_service import TaskService
 from .utils.whisper_processor import WhisperProcessor
 from .utils.punctuation_processor import PunctuationProcessor
 from .utils.diarization_processor import DiarizationProcessor
-
-
-# 時區設定 (UTC+8 台北時間)
-TZ_UTC8 = timezone(timedelta(hours=8))
+from src.utils.time_utils import get_utc_timestamp
+from src.utils.text_utils import convert_segments_punctuation
 
 
 class TranscriptionService:
@@ -324,7 +322,9 @@ class TranscriptionService:
                 return
 
             # 4. 保存轉錄結果到 MongoDB
-            self._save_transcription_results(task_id, final_text, segments)
+            # 將 segments 中的半形標點符號轉換為全形（中文適用）
+            converted_segments = convert_segments_punctuation(segments)
+            self._save_transcription_results(task_id, final_text, converted_segments)
 
             # 5. 標記完成
             self._mark_completed(
@@ -488,8 +488,8 @@ class TranscriptionService:
             client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
             db = client[db_name]
 
-            # 添加 updated_at
-            updates["updated_at"] = datetime.utcnow()
+            # 添加 updated_at (UTC timestamp)
+            updates["updated_at"] = get_utc_timestamp()
 
             # 執行更新
             result = db.tasks.update_one(
@@ -521,7 +521,6 @@ class TranscriptionService:
         """
         try:
             from pymongo import MongoClient
-            from datetime import datetime
             import os
 
             # 連接 MongoDB（使用同步客戶端）
@@ -531,7 +530,7 @@ class TranscriptionService:
             db = client[db_name]
 
             # 1. 保存轉錄文本到 transcriptions collection
-            now = datetime.utcnow()
+            now = get_utc_timestamp()
             transcription_doc = {
                 "_id": task_id,
                 "content": transcription_text,
@@ -599,7 +598,7 @@ class TranscriptionService:
             "result.text_length": text_length,  # 字符數
             "result.word_count": word_count,    # 詞數
             "config.language": language,
-            "timestamps.completed_at": datetime.now(TZ_UTC8).strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamps.completed_at": get_utc_timestamp(),
             "progress": "轉錄完成"
         }
 
@@ -647,7 +646,7 @@ class TranscriptionService:
                                         "usage.total_duration_minutes": audio_duration_seconds / 60
                                     },
                                     "$set": {
-                                        "updated_at": datetime.utcnow()
+                                        "updated_at": get_utc_timestamp()
                                     }
                                 }
                             )

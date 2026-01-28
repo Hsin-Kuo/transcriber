@@ -3,6 +3,8 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 from bson import ObjectId
 
+from ...utils.time_utils import get_utc_timestamp
+
 
 class TaskRepository:
     """任務資料庫操作"""
@@ -36,7 +38,9 @@ class TaskRepository:
 
     async def update(self, task_id: str, updates: Dict[str, Any]) -> bool:
         """更新任務資料"""
-        updates["updated_at"] = datetime.utcnow()
+        now = get_utc_timestamp()
+        updates["updated_at"] = now
+        updates["timestamps.updated_at"] = now  # 同步更新巢狀結構
         result = await self.collection.update_one(
             {"_id": task_id},
             {"$set": updates}
@@ -56,6 +60,7 @@ class TaskRepository:
 
     async def soft_delete(self, task_id: str, user_id: str) -> bool:
         """軟刪除任務（標記為已刪除，保留記錄供統計）"""
+        now = get_utc_timestamp()
         result = await self.collection.update_one(
             {
                 "_id": task_id,
@@ -67,8 +72,9 @@ class TaskRepository:
             {
                 "$set": {
                     "deleted": True,
-                    "deleted_at": datetime.utcnow(),
-                    "updated_at": datetime.utcnow()
+                    "deleted_at": now,
+                    "updated_at": now,
+                    "timestamps.updated_at": now  # 同步更新巢狀結構
                 }
             }
         )
@@ -227,6 +233,7 @@ class TaskRepository:
 
     async def bulk_update_tags_add(self, task_ids: List[str], user_id: str, tags_to_add: List[str]) -> int:
         """批次添加標籤"""
+        now = get_utc_timestamp()
         result = await self.collection.update_many(
             {
                 "_id": {"$in": task_ids},
@@ -237,13 +244,17 @@ class TaskRepository:
             },
             {
                 "$addToSet": {"tags": {"$each": tags_to_add}},
-                "$set": {"updated_at": datetime.utcnow()}
+                "$set": {
+                    "updated_at": now,
+                    "timestamps.updated_at": now  # 同步更新巢狀結構
+                }
             }
         )
         return result.modified_count
 
     async def bulk_update_tags_remove(self, task_ids: List[str], user_id: str, tags_to_remove: List[str]) -> int:
         """批次移除標籤"""
+        now = get_utc_timestamp()
         result = await self.collection.update_many(
             {
                 "_id": {"$in": task_ids},
@@ -254,7 +265,10 @@ class TaskRepository:
             },
             {
                 "$pullAll": {"tags": tags_to_remove},
-                "$set": {"updated_at": datetime.utcnow()}
+                "$set": {
+                    "updated_at": now,
+                    "timestamps.updated_at": now  # 同步更新巢狀結構
+                }
             }
         )
         return result.modified_count
@@ -296,13 +310,15 @@ class TaskRepository:
         deletable_ids = [task["_id"] for task in deletable]
 
         if deletable_ids:
+            now = get_utc_timestamp()
             result = await self.collection.update_many(
                 {"_id": {"$in": deletable_ids}},
                 {
                     "$set": {
                         "deleted": True,
-                        "deleted_at": datetime.utcnow(),
-                        "updated_at": datetime.utcnow()
+                        "deleted_at": now,
+                        "updated_at": now,
+                        "timestamps.updated_at": now  # 同步更新巢狀結構
                     }
                 }
             )
@@ -448,6 +464,7 @@ class TaskRepository:
 
     async def clear_audio_files_except_kept(self, user_id: str) -> int:
         """清除未勾選保留的音檔記錄"""
+        now = get_utc_timestamp()
         result = await self.collection.update_many(
             {
                 "user_id": user_id,
@@ -461,7 +478,8 @@ class TaskRepository:
                 },
                 "$set": {
                     "keep_audio": False,
-                    "updated_at": datetime.utcnow()
+                    "updated_at": now,
+                    "timestamps.updated_at": now  # 同步更新巢狀結構
                 }
             }
         )

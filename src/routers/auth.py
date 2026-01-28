@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from datetime import datetime, timedelta
 import secrets
+from ..utils.time_utils import get_utc_timestamp
 from ..models.auth import (
     UserRegister,
     UserLogin,
@@ -50,7 +51,8 @@ async def register(
 
     # 生成驗證 token (使用 secrets 生成安全的隨機字符串)
     verification_token = secrets.token_urlsafe(32)
-    verification_expires = datetime.utcnow() + timedelta(hours=24)
+    now = get_utc_timestamp()
+    verification_expires = now + (24 * 60 * 60)  # 24 小時後過期
 
     # 建立新用戶 (未激活狀態)
     user = await user_repo.create({
@@ -75,13 +77,13 @@ async def register(
         "usage": {
             "transcriptions": 0,
             "duration_minutes": 0,
-            "last_reset": datetime.utcnow(),
+            "last_reset": now,
             "total_transcriptions": 0,
             "total_duration_minutes": 0
         },
         "refresh_tokens": [],
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow()
+        "created_at": now,
+        "updated_at": now
     })
 
     # 發送驗證郵件
@@ -133,19 +135,24 @@ async def verify_email(
         )
 
     # 檢查 token 是否過期
-    if user.get("verification_expires") and user["verification_expires"] < datetime.utcnow():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="驗證連結已過期，請重新申請驗證郵件"
-        )
+    verification_expires = user.get("verification_expires")
+    if verification_expires:
+        # 處理舊格式（datetime）和新格式（timestamp）
+        if hasattr(verification_expires, 'timestamp'):
+            verification_expires = int(verification_expires.timestamp())
+        if verification_expires < get_utc_timestamp():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="驗證連結已過期，請重新申請驗證郵件"
+            )
 
     # 更新用戶狀態
     await user_repo.update(str(user["_id"]), {
         "is_active": True,
         "email_verified": True,
         "verification_token": None,  # 清除 token
-        "verification_expires": None,
-        "updated_at": datetime.utcnow()
+        "verification_expires": None
+        # updated_at 由 user_repo.update() 自動設置
     })
 
     return {
@@ -190,13 +197,13 @@ async def resend_verification_email(
 
     # 生成新的驗證 token
     verification_token = secrets.token_urlsafe(32)
-    verification_expires = datetime.utcnow() + timedelta(hours=24)
+    verification_expires = get_utc_timestamp() + (24 * 60 * 60)  # 24 小時後過期
 
     # 更新用戶的驗證 token
     await user_repo.update(str(user["_id"]), {
         "verification_token": verification_token,
-        "verification_expires": verification_expires,
-        "updated_at": datetime.utcnow()
+        "verification_expires": verification_expires
+        # updated_at 由 user_repo.update() 自動設置
     })
 
     # 發送驗證郵件
@@ -399,12 +406,25 @@ async def get_current_user_info(
             detail="用戶不存在"
         )
 
+    # 處理 created_at（可能是 datetime 或 int）
+    created_at = full_user["created_at"]
+    if hasattr(created_at, 'timestamp'):
+        # datetime 對象，轉換為 timestamp
+        created_at = int(created_at.timestamp())
+
+    # 處理 usage.last_reset（可能是 datetime 或 int）
+    usage = full_user.get("usage", {})
+    if usage and "last_reset" in usage:
+        last_reset = usage["last_reset"]
+        if hasattr(last_reset, 'timestamp'):
+            usage = {**usage, "last_reset": int(last_reset.timestamp())}
+
     return UserResponse(
         id=str(full_user["_id"]),
         email=full_user["email"],
         role=full_user["role"],
         is_active=full_user["is_active"],
         quota=full_user["quota"],
-        usage=full_user["usage"],
-        created_at=full_user["created_at"].isoformat()
+        usage=usage,
+        created_at=created_at
     )

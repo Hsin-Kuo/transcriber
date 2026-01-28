@@ -65,11 +65,11 @@ class TaskStats(BaseModel):
 
 
 class Timestamps(BaseModel):
-    """時間戳記"""
-    created_at: str = Field(..., description="建立時間")
-    updated_at: Optional[str] = Field(None, description="更新時間")
-    started_at: Optional[str] = Field(None, description="開始時間")
-    completed_at: Optional[str] = Field(None, description="完成時間")
+    """時間戳記（UTC Unix timestamp 秒）"""
+    created_at: int = Field(..., description="建立時間（UTC Unix timestamp）")
+    updated_at: Optional[int] = Field(None, description="更新時間（UTC Unix timestamp）")
+    started_at: Optional[int] = Field(None, description="開始時間（UTC Unix timestamp）")
+    completed_at: Optional[int] = Field(None, description="完成時間（UTC Unix timestamp）")
 
 
 class TaskInDB(BaseModel):
@@ -130,9 +130,9 @@ class TaskResponse(BaseModel):
     filename: str
     file_size_mb: float
     progress: Optional[str] = None
-    created_at: str
-    updated_at: Optional[str] = None
-    completed_at: Optional[str] = None
+    created_at: int  # UTC Unix timestamp
+    updated_at: Optional[int] = None  # UTC Unix timestamp
+    completed_at: Optional[int] = None  # UTC Unix timestamp
     result_file: Optional[str] = None
     result_filename: Optional[str] = None
     text_length: Optional[int] = None

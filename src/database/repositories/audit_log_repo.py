@@ -5,6 +5,8 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone, timedelta
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
+from ...utils.time_utils import get_utc_timestamp
+
 
 class AuditLogRepository:
     """操作記錄 Repository"""
@@ -56,9 +58,7 @@ class AuditLogRepository:
         Returns:
             日誌 ID
         """
-        # 使用 UTC+8 時區
-        TZ_UTC8 = timezone(timedelta(hours=8))
-        timestamp = datetime.now(TZ_UTC8).strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = get_utc_timestamp()
 
         log_entry = {
             "user_id": user_id,
@@ -165,11 +165,10 @@ class AuditLogRepository:
         Returns:
             失敗操作記錄列表
         """
-        TZ_UTC8 = timezone(timedelta(hours=8))
-        days_ago = (datetime.now(TZ_UTC8) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+        days_ago_ts_ts = get_utc_timestamp() - (days * 24 * 60 * 60)
 
         query = {
-            "timestamp": {"$gte": days_ago},
+            "timestamp": {"$gte": days_ago_ts_ts},
             "status_code": {"$gte": 400}
         }
 
@@ -188,15 +187,14 @@ class AuditLogRepository:
         Returns:
             統計資料
         """
-        TZ_UTC8 = timezone(timedelta(hours=8))
-        days_ago = (datetime.now(TZ_UTC8) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+        days_ago_ts_ts = get_utc_timestamp() - (days * 24 * 60 * 60)
 
         # 總操作數
-        total = await self.collection.count_documents({"timestamp": {"$gte": days_ago}})
+        total = await self.collection.count_documents({"timestamp": {"$gte": days_ago_ts_ts}})
 
         # 按類型統計
         type_pipeline = [
-            {"$match": {"timestamp": {"$gte": days_ago}}},
+            {"$match": {"timestamp": {"$gte": days_ago_ts}}},
             {"$group": {"_id": "$log_type", "count": {"$sum": 1}}},
             {"$sort": {"count": -1}}
         ]
@@ -205,7 +203,7 @@ class AuditLogRepository:
 
         # 按操作統計
         action_pipeline = [
-            {"$match": {"timestamp": {"$gte": days_ago}}},
+            {"$match": {"timestamp": {"$gte": days_ago_ts}}},
             {"$group": {"_id": "$action", "count": {"$sum": 1}}},
             {"$sort": {"count": -1}},
             {"$limit": 10}
@@ -215,7 +213,7 @@ class AuditLogRepository:
 
         # 失敗操作統計
         failed = await self.collection.count_documents({
-            "timestamp": {"$gte": days_ago},
+            "timestamp": {"$gte": days_ago_ts},
             "status_code": {"$gte": 400}
         })
 

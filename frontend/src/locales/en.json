@@ -210,12 +210,13 @@
     "save": "Save",
     "cancel": "Cancel",
     "download": "Download",
+    "delete": "Delete",
     "viewMode": "View Mode",
     "paragraph": "Paragraph",
     "subtitle": "Subtitle",
     "saving": "Saving",
     "editMode": "Edit Mode",
-    "timecodeMarkers": "Timecode Markers",
+    "timecodeMarkers": "Time Marks",
     "transcript": "Transcript",
     "goBack": "Go Back",
     "autoSavingSpeaker": "Auto-saving speaker names",
@@ -300,6 +301,21 @@
     "unknownError": "An unknown error occurred",
     "updateFailed": "Update Failed",
     "cannotUpdateTaskName": "Cannot update task name",
-    "cannotUpdateSpeakerNames": "Cannot update speaker names"
+    "cannotUpdateSpeakerNames": "Cannot update speaker names",
+    "cannotUpdateTags": "Cannot update tags"
+  },
+  "taskInfo": {
+    "lastEdited": "Last Updated",
+    "words": "words",
+    "tags": "Tags"
+  },
+  "displaySettings": {
+    "timecodeMarkers": "Time Marks",
+    "darkMode": "Dark Mode",
+    "fontSize": "Font Size",
+    "fontWeight": "Font Weight",
+    "fontFamily": "Font",
+    "sansSerif": "Sans-serif",
+    "serif": "Serif"
   }
 }

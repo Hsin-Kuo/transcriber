@@ -2,7 +2,7 @@
   <header class="detail-header">
     <div class="header-left">
       <!-- 返回按鈕 -->
-      <button @click="$emit('go-back')" class="btn-back-icon" :title="$t('transcriptDetail.goBack')">
+      <button @click="$emit('go-back')" class="btn-back-icon">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M19 12H5M12 19l-7-7 7-7"/>
         </svg>
@@ -21,7 +21,7 @@
           @keyup.enter="$emit('save-task-name')"
           @keyup.esc="$emit('cancel-title-edit')"
         />
-        <h1 v-else @click="$emit('start-title-edit')" class="editable-title" :title="$t('transcriptDetail.edit')">
+        <h1 v-else @click="$emit('start-title-edit')" class="editable-title">
           {{ taskDisplayName }}
         </h1>
       </div>
@@ -29,7 +29,6 @@
       <!-- 元數據 -->
       <TranscriptMetadata
         :created-at="createdAt"
-        :text-length="textLength"
         :duration-text="durationText"
         layout="horizontal"
         :show-date-icon="false"
@@ -43,7 +42,6 @@
           @click.stop="toggleSearch"
           class="btn btn-header btn-icon search-btn btn-expandable"
           :class="{ active: showSearchPopup }"
-          :title="$t('searchReplace.search')"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="11" cy="11" r="8"/>
@@ -76,36 +74,70 @@
       </div>
 
       <!-- 編輯/儲存按鈕 -->
-      <button v-if="!isEditing" @click="$emit('start-editing')" class="btn btn-header btn-expandable" :title="$t('transcriptDetail.edit')">
+      <button v-if="!isEditing" @click="$emit('start-editing')" class="btn btn-header btn-expandable">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
           <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
         </svg>
         <span class="btn-text">{{ $t('transcriptDetail.edit') }}</span>
       </button>
-      <button v-else @click="$emit('save-editing')" class="btn btn-header btn-primary btn-expandable" :title="$t('transcriptDetail.save')">
+      <button v-else @click="$emit('save-editing')" class="btn btn-header btn-primary btn-expandable">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="20 6 9 17 4 12"></polyline>
         </svg>
         <span class="btn-text">{{ $t('transcriptDetail.save') }}</span>
       </button>
       <!-- 取消按鈕（編輯模式） -->
-      <button v-if="isEditing" @click="$emit('cancel-editing')" class="btn btn-header btn-expandable" :title="$t('transcriptDetail.cancel')">
+      <button v-if="isEditing" @click="$emit('cancel-editing')" class="btn btn-header btn-expandable">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="18" y1="6" x2="6" y2="18"></line>
           <line x1="6" y1="6" x2="18" y2="18"></line>
         </svg>
         <span class="btn-text">{{ $t('transcriptDetail.cancel') }}</span>
       </button>
-      <!-- 下載按鈕 -->
-      <button v-if="!isEditing" @click="$emit('download')" class="btn btn-header btn-expandable" :title="$t('transcriptDetail.download')">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-          <polyline points="7 10 12 15 17 10"></polyline>
-          <line x1="12" y1="15" x2="12" y2="3"></line>
-        </svg>
-        <span class="btn-text">{{ $t('transcriptDetail.download') }}</span>
-      </button>
+
+      <!-- 講者設定按鈕（僅字幕模式且有講者資訊時顯示） -->
+      <div
+        v-if="displayMode === 'subtitle' && hasSpeakerInfo && uniqueSpeakers.length > 0"
+        class="speaker-settings-container"
+        ref="speakerSettingsRef"
+      >
+        <button
+          @click.stop="toggleSpeakerSettings"
+          class="btn btn-header btn-icon btn-expandable"
+          :class="{ active: showSpeakerSettings }"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+            <circle cx="9" cy="7" r="4"></circle>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+          </svg>
+          <span class="btn-text">{{ $t('subtitleTable.speakerNames') }}</span>
+        </button>
+
+        <!-- 講者設定下拉面板 -->
+        <div v-if="showSpeakerSettings" class="speaker-settings-panel">
+          <label class="panel-title">{{ $t('subtitleTable.speakerNames') }}</label>
+          <div class="speaker-mappings">
+            <div
+              v-for="speaker in uniqueSpeakers"
+              :key="speaker"
+              class="speaker-item"
+            >
+              <label class="speaker-code">{{ speaker }}</label>
+              <input
+                type="text"
+                :data-speaker="speaker"
+                :value="speakerNames[speaker] || ''"
+                @input="updateSpeakerName(speaker, $event.target.value)"
+                :placeholder="$t('subtitleTable.speakerPlaceholder', { number: speaker.replace('SPEAKER_', '') })"
+                class="speaker-input"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
 
       <!-- 更多選項按鈕 -->
       <div class="more-options-container" ref="moreOptionsRef">
@@ -113,7 +145,6 @@
           @click.stop="toggleMoreOptions"
           class="btn btn-header btn-icon"
           :class="{ active: showMoreOptions }"
-          :title="$t('transcriptDetail.moreOptions')"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
             <circle cx="12" cy="5" r="2"/>
@@ -124,81 +155,26 @@
 
         <!-- 下拉選單 -->
         <div v-if="showMoreOptions" class="more-options-panel">
-          <!-- 段落模式設定 -->
-          <template v-if="displayMode === 'paragraph'">
-            <div class="option-group">
-              <label class="option-label toggle-label" :class="{ 'disabled': isEditing }">
-                <input
-                  type="checkbox"
-                  :checked="showTimecodeMarkers"
-                  @change="$emit('update:showTimecodeMarkers', $event.target.checked)"
-                  class="toggle-checkbox"
-                  :disabled="isEditing"
-                />
-                <span>{{ $t('transcriptDetail.timecodeMarkers') }}</span>
-              </label>
-            </div>
-          </template>
+          <!-- 下載按鈕 -->
+          <button class="action-btn" @click="handleDownload">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            <span>{{ $t('transcriptDetail.download') }}</span>
+          </button>
 
-          <!-- 字幕模式設定 -->
-          <template v-if="displayMode === 'subtitle'">
-            <!-- 時間格式切換 -->
-            <div class="option-group">
-              <label class="option-label">{{ $t('subtitleTable.timeFormat') }}</label>
-              <div class="time-format-toggle">
-                <button
-                  @click="$emit('update:timeFormat', 'start')"
-                  :class="{ active: timeFormat === 'start' }"
-                  class="format-btn"
-                >{{ $t('subtitleTable.startTime') }}</button>
-                <button
-                  @click="$emit('update:timeFormat', 'range')"
-                  :class="{ active: timeFormat === 'range' }"
-                  class="format-btn"
-                >{{ $t('subtitleTable.timeRange') }}</button>
-              </div>
-            </div>
-
-            <!-- 疏密度滑桿 -->
-            <div class="option-group">
-              <label class="option-label">{{ $t('subtitleTable.contentDensity') }}</label>
-              <input
-                type="range"
-                :value="densityThreshold"
-                @input="$emit('update:densityThreshold', Number($event.target.value))"
-                min="0"
-                max="120"
-                step="1"
-                class="density-slider"
-              />
-              <div class="slider-labels">
-                <span>{{ $t('subtitleTable.sparse') }}</span>
-                <span>{{ $t('subtitleTable.dense') }}</span>
-              </div>
-            </div>
-
-            <!-- 講者名稱設定 -->
-            <div v-if="hasSpeakerInfo && uniqueSpeakers.length > 0" class="option-group">
-              <label class="option-label">{{ $t('subtitleTable.speakerNames') }}</label>
-              <div class="speaker-mappings">
-                <div
-                  v-for="speaker in uniqueSpeakers"
-                  :key="speaker"
-                  class="speaker-item"
-                >
-                  <label class="speaker-code">{{ speaker }}</label>
-                  <input
-                    type="text"
-                    :data-speaker="speaker"
-                    :value="speakerNames[speaker] || ''"
-                    @input="updateSpeakerName(speaker, $event.target.value)"
-                    :placeholder="$t('subtitleTable.speakerPlaceholder', { number: speaker.replace('SPEAKER_', '') })"
-                    class="speaker-input"
-                  />
-                </div>
-              </div>
-            </div>
-          </template>
+          <!-- 刪除按鈕 -->
+          <button class="action-btn" @click="handleDeleteTask">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              <line x1="10" y1="11" x2="10" y2="17"></line>
+              <line x1="14" y1="11" x2="14" y2="17"></line>
+            </svg>
+            <span>{{ $t('transcriptDetail.delete') }}</span>
+          </button>
         </div>
       </div>
     </div>
@@ -215,8 +191,7 @@ const props = defineProps({
     type: String,
     default: ''
   },
-  createdAt: String,
-  textLength: Number,
+  createdAt: [String, Number],
   durationText: String,
   isEditing: {
     type: Boolean,
@@ -295,6 +270,7 @@ const emit = defineEmits([
   'save-editing',
   'cancel-editing',
   'download',
+  'delete-task',
   'update:showTimecodeMarkers',
   'update:timeFormat',
   'update:densityThreshold',
@@ -314,8 +290,10 @@ const emit = defineEmits([
 // Refs
 const titleInputRef = ref(null)
 const moreOptionsRef = ref(null)
+const speakerSettingsRef = ref(null)
 const showMoreOptions = ref(false)
 const showSearchPopup = ref(false)
+const showSpeakerSettings = ref(false)
 
 // 切換搜尋浮窗
 function toggleSearch() {
@@ -340,29 +318,48 @@ function closeSearch() {
 // 切換更多選項選單
 function toggleMoreOptions() {
   showMoreOptions.value = !showMoreOptions.value
-  // 關閉搜尋浮窗
+  // 關閉其他面板
   if (showMoreOptions.value) {
     showSearchPopup.value = false
+    showSpeakerSettings.value = false
   }
 }
 
-// 點擊外部關閉選單（僅關閉更多選項，搜尋浮窗需手動關閉）
+// 切換講者設定面板
+function toggleSpeakerSettings() {
+  showSpeakerSettings.value = !showSpeakerSettings.value
+  // 關閉其他面板
+  if (showSpeakerSettings.value) {
+    showSearchPopup.value = false
+    showMoreOptions.value = false
+  }
+}
+
+// 點擊外部關閉選單（僅關閉更多選項和講者設定，搜尋浮窗需手動關閉）
 function handleClickOutside(event) {
   if (moreOptionsRef.value && !moreOptionsRef.value.contains(event.target)) {
     showMoreOptions.value = false
+  }
+  if (speakerSettingsRef.value && !speakerSettingsRef.value.contains(event.target)) {
+    showSpeakerSettings.value = false
   }
 }
 
 // 滾輪滾動時關閉選單（如果滾動發生在面板外部）
 function handleWheel(event) {
-  if (!showMoreOptions.value) return
-
-  // 找到面板元素
-  const panel = moreOptionsRef.value?.querySelector('.more-options-panel')
-
-  // 如果滾動的不是面板本身或面板內的元素，關閉面板
-  if (panel && event.target !== panel && !panel.contains(event.target)) {
-    showMoreOptions.value = false
+  // 處理更多選項面板
+  if (showMoreOptions.value) {
+    const panel = moreOptionsRef.value?.querySelector('.more-options-panel')
+    if (panel && event.target !== panel && !panel.contains(event.target)) {
+      showMoreOptions.value = false
+    }
+  }
+  // 處理講者設定面板
+  if (showSpeakerSettings.value) {
+    const panel = speakerSettingsRef.value?.querySelector('.speaker-settings-panel')
+    if (panel && event.target !== panel && !panel.contains(event.target)) {
+      showSpeakerSettings.value = false
+    }
   }
 }
 
@@ -386,10 +383,23 @@ watch(() => props.isEditingTitle, (newVal) => {
 const pendingFocusSpeaker = ref(null)
 
 // 打開更多選項面板（供外部調用）
-// speakerCode: 可選，指定要 focus 的講者輸入框
-function openMoreOptions(speakerCode = null) {
+function openMoreOptions() {
   showMoreOptions.value = true
   showSearchPopup.value = false
+  showSpeakerSettings.value = false
+}
+
+// 關閉更多選項面板
+function closeMoreOptions() {
+  showMoreOptions.value = false
+}
+
+// 打開講者設定面板（供外部調用）
+// speakerCode: 可選，指定要 focus 的講者輸入框
+function openSpeakerSettings(speakerCode = null) {
+  showSpeakerSettings.value = true
+  showSearchPopup.value = false
+  showMoreOptions.value = false
 
   // 如果指定了講者代碼，等面板展開後 focus 到該輸入框
   if (speakerCode) {
@@ -405,15 +415,29 @@ function openMoreOptions(speakerCode = null) {
   }
 }
 
-// 關閉更多選項面板
-function closeMoreOptions() {
+// 關閉講者設定面板
+function closeSpeakerSettings() {
+  showSpeakerSettings.value = false
+}
+
+// 下載
+function handleDownload() {
   showMoreOptions.value = false
+  emit('download')
+}
+
+// 刪除任務
+function handleDeleteTask() {
+  showMoreOptions.value = false
+  emit('delete-task')
 }
 
 // 暴露方法給父組件
 defineExpose({
   openMoreOptions,
-  closeMoreOptions
+  closeMoreOptions,
+  openSpeakerSettings,
+  closeSpeakerSettings
 })
 
 onMounted(() => {
@@ -620,12 +644,12 @@ onUnmounted(() => {
   fill: none !important;
 }
 
-/* 更多選項容器 */
-.more-options-container {
+/* 講者設定容器 */
+.speaker-settings-container {
   position: relative;
 }
 
-.more-options-panel {
+.speaker-settings-panel {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
@@ -641,7 +665,37 @@ onUnmounted(() => {
   z-index: 1000;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
+}
+
+.panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--main-text-light);
+}
+
+/* 更多選項容器 */
+.more-options-container {
+  position: relative;
+}
+
+.more-options-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: auto;
+  max-height: 400px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px;
+  background: var(--color-white, #ffffff);
+  border: 1px solid rgba(163, 177, 198, 0.2);
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .option-group {
@@ -780,6 +834,67 @@ onUnmounted(() => {
 .speaker-input:focus {
   outline: none;
   border-color: var(--main-primary);
+}
+
+/* 操作按鈕區塊 */
+.action-section {
+  border-top: 1px solid rgba(163, 177, 198, 0.2);
+  padding-top: 12px;
+  margin-top: 4px;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--main-text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.action-btn:hover {
+  background: rgba(163, 177, 198, 0.15);
+  color: var(--main-primary);
+}
+
+.action-btn svg {
+  flex-shrink: 0;
+}
+
+/* 刪除任務區塊 */
+.delete-section {
+  padding-top: 8px;
+}
+
+.delete-task-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-danger, #ef4444);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.delete-task-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.delete-task-btn svg {
+  flex-shrink: 0;
 }
 
 /* 響應式 */

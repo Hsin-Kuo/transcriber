@@ -210,6 +210,7 @@
     "save": "儲存",
     "cancel": "取消",
     "download": "下載",
+    "delete": "刪除",
     "viewMode": "檢視模式",
     "paragraph": "段落",
     "subtitle": "字幕",
@@ -300,6 +301,21 @@
     "unknownError": "發生未知錯誤",
     "updateFailed": "更新失敗",
     "cannotUpdateTaskName": "無法更新任務名稱",
-    "cannotUpdateSpeakerNames": "無法更新講者名稱"
+    "cannotUpdateSpeakerNames": "無法更新講者名稱",
+    "cannotUpdateTags": "無法更新標籤"
+  },
+  "taskInfo": {
+    "lastEdited": "完成時間",
+    "words": "字",
+    "tags": "標籤"
+  },
+  "displaySettings": {
+    "timecodeMarkers": "時間標記",
+    "darkMode": "深色模式",
+    "fontSize": "字體大小",
+    "fontWeight": "字重",
+    "fontFamily": "字體",
+    "sansSerif": "無襯線體",
+    "serif": "襯線體"
   }
 }

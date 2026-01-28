@@ -653,7 +653,7 @@ defineExpose({
   appearance: none;
   width: 6px;
   height: 14px;
-  background: #fff;
+  background: var(--nav-bg);
   border-left: 1px solid var(--nav-active-bg);
   border-right: 1px solid var(--nav-active-bg);
   /* border-radius: 30%; */

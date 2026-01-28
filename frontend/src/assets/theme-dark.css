@@ -46,7 +46,7 @@
      ======================================== */
   --color-nav-bg: var(--palette-gray-800);
   --color-nav-text: var(--palette-cream-light);
-  --color-nav-active-bg: var(--palette-gray-600);
+  --color-nav-active-bg: var(--palette-yellow-orange);
   --color-nav-recent-bg: var(--palette-orange-dark);
   --color-nav-recent-text: var(--palette-cream-light);
   --color-nav-recent-btn: var(--palette-orange-primary);

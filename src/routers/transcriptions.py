@@ -389,13 +389,9 @@ async def create_transcription(
                 task_tags = []
 
         # 創建任務記錄
-        from datetime import datetime, timezone, timedelta
-        TZ_UTC8 = timezone(timedelta(hours=8))
+        from ..utils.time_utils import get_utc_timestamp
 
-        def get_current_time():
-            return datetime.now(TZ_UTC8).strftime("%Y-%m-%d %H:%M:%S")
-
-        current_time = get_current_time()
+        current_time = get_utc_timestamp()
         task_data = {
             "_id": task_id,
             "task_id": task_id,
@@ -477,8 +473,8 @@ async def create_transcription(
 
             # ✅ 關鍵修復：立即更新狀態為 processing，防止隊列處理器重複啟動
             await task_repo.update(task_id, {
-                "status": "processing",
-                "updated_at": datetime.now(timezone.utc)
+                "status": "processing"
+                # updated_at 由 task_repo.update() 自動設置
             })
             transcription_service.task_service.update_memory_state(task_id, {
                 "status": "processing",
@@ -891,6 +887,7 @@ async def update_content(
     # 更新 MongoDB collections（新方式）
     from src.database.repositories.transcription_repo import TranscriptionRepository
     from src.database.repositories.segment_repo import SegmentRepository
+    from src.utils.time_utils import get_utc_timestamp
 
     try:
         # 1. 更新 transcriptions collection
@@ -918,6 +915,10 @@ async def update_content(
             else:
                 await segment_repo.create(task_id, new_segments)
                 print(f"✅ 已建立 segments collection (task_id: {task_id}, count: {len(new_segments)})")
+
+        # 3. 更新 tasks collection 的時間戳（task_repo.update 會自動同步 updated_at 和 timestamps.updated_at）
+        await task_repo.update(task_id, {})
+        print(f"✅ 已更新 tasks 時間戳 (task_id: {task_id})")
 
         response_message = "轉錄內容已更新"
         if new_segments is not None:

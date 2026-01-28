@@ -17,9 +17,9 @@ class TagInDB(BaseModel):
     color: Optional[str] = Field(None, description="標籤顏色（HEX 格式）")
     order: int = Field(0, description="顯示順序（數字越小越前面）")
 
-    # 時間戳記
-    created_at: str = Field(..., description="建立時間")
-    updated_at: Optional[str] = Field(None, description="更新時間")
+    # 時間戳記 (UTC Unix timestamp)
+    created_at: int = Field(..., description="建立時間")
+    updated_at: Optional[int] = Field(None, description="更新時間")
 
     class Config:
         populate_by_name = True
@@ -51,8 +51,8 @@ class TagResponse(BaseModel):
     name: str
     color: Optional[str] = None
     order: int
-    created_at: str
-    updated_at: Optional[str] = None
+    created_at: int  # UTC Unix timestamp
+    updated_at: Optional[int] = None  # UTC Unix timestamp
 
     class Config:
         from_attributes = True

@@ -399,7 +399,7 @@ onMounted(() => {
 .task-list {
   --color-primary-rgb: 221, 132, 72;
   --color-teal-rgb: 119, 150, 154;
-  --color-text-dark-rgb: 45, 45, 45;
+  /* --color-text-dark-rgb: 45, 45, 45; */
   --color-success-rgb: 16, 185, 129;
   --color-danger-rgb: 239, 68, 68;
   --color-primary: rgb(var(--color-primary-rgb));
@@ -503,31 +503,32 @@ onMounted(() => {
   left: 10px;
   border: none;
   /* border-radius: 8px; */
+  background: #00000000;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   font-size: 14px;
   font-weight: 500;
-  color: rgba(var(--color-text-dark-rgb), 0.8);
+  color: var(--nav-text);
   position: relative;
   z-index: 1;
 }
 
 /* 全部頁籤顏色 */
-.tab-btn.tab-all {
+/* .tab-btn.tab-all {
   background: #00000000;
-}
+} */
 
-/* 段落頁籤顏色 */
-.tab-btn.tab-paragraph {
+段落頁籤顏色
+/* .tab-btn.tab-paragraph {
   background: #00000000;
   color: var(--nav-text);
-}
+} */
 
 /* 字幕頁籤顏色 */
-.tab-btn.tab-subtitle {
+/* .tab-btn.tab-subtitle {
   background: #00000000;
   color: var(--nav-text);
-}
+} */
 
 /* 批次編輯頁籤顏色 */
 .tab-btn.tab-batch-edit {

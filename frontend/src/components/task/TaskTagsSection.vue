@@ -160,7 +160,7 @@ const { getTagColor } = useTaskTags($t)
 const props = defineProps({
   taskId: {
     type: String,
-    required: true
+    default: ''
   },
   tags: {
     type: Array,

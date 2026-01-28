@@ -44,9 +44,9 @@ export function useTranscriptData() {
     transcriptError.value = null
 
     try {
-      // 獲取任務資訊
-      const taskResponse = await api.get(NEW_ENDPOINTS.tasks.list)
-      const task = taskResponse.data.tasks?.find(t => (t._id || t.task_id) === taskId)
+      // 獲取單一任務資訊
+      const taskResponse = await api.get(NEW_ENDPOINTS.tasks.get(taskId))
+      const task = taskResponse.data
 
       if (!task) {
         transcriptError.value = t('transcriptData.taskNotFound')
@@ -58,11 +58,13 @@ export function useTranscriptData() {
         task_id: task.task_id,
         filename: task.file?.filename || task.filename,
         custom_name: task.custom_name,
-        created_at: task.timestamps?.completed_at || task.timestamps?.created_at,
+        created_at: task.timestamps?.completed_at || task.timestamps?.created_at,  // Header 用（完成時間）
+        updated_at: task.timestamps?.updated_at || task.updated_at,  // TaskInfoCard 用（編輯時間）
         text_length: task.result?.text_length || task.text_length,
         duration_text: task.duration_text,
         hasAudio: !!(task.result?.audio_file || task.audio_file),
         task_type: task.task_type || 'paragraph',
+        tags: task.tags || [],
         content: ''
       }
 
@@ -286,6 +288,37 @@ export function useTranscriptData() {
     }
   }
 
+  /**
+   * 更新任務標籤
+   * @param {Array} newTags - 新的標籤陣列
+   * @returns {Promise<boolean>} 更新是否成功
+   */
+  async function updateTags(newTags) {
+    try {
+      await api.put(
+        NEW_ENDPOINTS.tasks.updateTags(currentTranscript.value.task_id),
+        { tags: newTags }
+      )
+
+      currentTranscript.value.tags = newTags
+      console.log('✅ 標籤已更新:', newTags)
+      return true
+
+    } catch (error) {
+      console.error('更新標籤失敗:', error)
+
+      if (showNotification) {
+        showNotification({
+          title: t('transcriptData.updateFailed'),
+          message: t('transcriptData.cannotUpdateTags') || '無法更新標籤',
+          type: 'error'
+        })
+      }
+
+      return false
+    }
+  }
+
   return {
     // 狀態
     currentTranscript,
@@ -301,6 +334,7 @@ export function useTranscriptData() {
     saveTranscript,
     updateTaskName,
     updateSpeakerNames,
-    updateSubtitleSettings
+    updateSubtitleSettings,
+    updateTags
   }
 }

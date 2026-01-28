@@ -5,19 +5,15 @@
 
 import asyncio
 from datetime import datetime, timezone, timedelta
-from typing import Any, Coroutine
+from typing import Any, Coroutine, Union
 
-# 時區設定 (UTC+8 台北時間)
-TZ_UTC8 = timezone(timedelta(hours=8))
-
-
-def get_current_time() -> str:
-    """取得 UTC+8 當前時間
-
-    Returns:
-        格式化的時間字串 (YYYY-MM-DD HH:MM:SS)
-    """
-    return datetime.now(TZ_UTC8).strftime("%Y-%m-%d %H:%M:%S")
+# 從 time_utils 重新導出時間函數，保持向後相容
+from src.utils.time_utils import (
+    get_utc_timestamp,
+    get_current_time,
+    timestamp_to_datetime,
+    format_timestamp
+)
 
 
 def run_async_in_thread(coro: Coroutine) -> Any:

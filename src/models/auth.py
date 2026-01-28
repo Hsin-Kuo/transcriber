@@ -40,7 +40,7 @@ class UserResponse(BaseModel):
     is_active: bool
     quota: dict
     usage: dict
-    created_at: str
+    created_at: int  # UTC Unix timestamp
 
     class Config:
         from_attributes = True
