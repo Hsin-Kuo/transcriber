@@ -42,6 +42,7 @@
             class="col-content"
             :contenteditable="isEditing"
             @blur="$emit('update-row-content', group.id, $event)"
+            @paste="handlePaste"
           >
             <span
               v-for="(segment, idx) in group.segments"
@@ -163,6 +164,15 @@ const speakerPickerPosition = ref({ top: 0, left: 0 })
 const currentEditingGroup = ref(null)
 const newSpeakerName = ref('')
 const speakerPickerRef = ref(null)
+
+// 處理貼上事件，只允許純文字
+function handlePaste(e) {
+  e.preventDefault()
+  const text = e.clipboardData?.getData('text/plain') || ''
+  if (text) {
+    document.execCommand('insertText', false, text)
+  }
+}
 
 // 處理 wrapper 滾動事件（關閉講者選擇浮窗）
 function handleWrapperScroll() {

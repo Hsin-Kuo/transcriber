@@ -31,14 +31,18 @@ export function useKeyboardShortcuts(
                           event.target.tagName === 'TEXTAREA' ||
                           event.target.isContentEditable
 
-    // Alt + 鍵組合（編輯和非編輯模式都可用，即使焦點在輸入框內也可用）
-    // 因為 Alt 組合鍵不太會與正常打字衝突
-    if (event.altKey && !event.ctrlKey && !event.metaKey) {
+    // Ctrl + Alt（單純）：播放/暫停
+    if (event.ctrlKey && event.altKey && !event.metaKey) {
+      if (event.key === 'Alt' || event.key === 'Control') {
+        event.preventDefault()
+        togglePlayPause()
+        return
+      }
+    }
+
+    // Ctrl + 鍵組合（編輯和非編輯模式都可用，即使焦點在輸入框內也可用）
+    if (event.ctrlKey && !event.metaKey) {
       switch(event.key) {
-        case ' ':  // Alt + 空白鍵：播放/暫停
-          event.preventDefault()
-          togglePlayPause()
-          break
         case 'ArrowLeft':
           event.preventDefault()
           skipBackward()
@@ -47,14 +51,14 @@ export function useKeyboardShortcuts(
           event.preventDefault()
           skipForward()
           break
-        case 'ArrowUp':  // Alt + 上鍵：加速播放（+0.25x）
+        case 'ArrowUp':  // Ctrl + 上鍵：加速播放（+0.25x）
           event.preventDefault()
           if (setPlaybackRate && playbackRate) {
             const newRate = Math.min(2, playbackRate.value + 0.25)
             setPlaybackRate(newRate)
           }
           break
-        case 'ArrowDown':  // Alt + 下鍵：減速播放（-0.25x）
+        case 'ArrowDown':  // Ctrl + 下鍵：減速播放（-0.25x）
           event.preventDefault()
           if (setPlaybackRate && playbackRate) {
             const newRate = Math.max(0.25, playbackRate.value - 0.25)

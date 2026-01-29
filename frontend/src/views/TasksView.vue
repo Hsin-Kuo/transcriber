@@ -29,7 +29,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, inject, computed } from 'vue'
+import { ref, onBeforeUnmount, inject, computed } from 'vue'
 import api, { TokenManager } from '../utils/api'
 import TaskList from '../components/task/TaskListContainer.vue'
 import RulerPagination from '../components/common/RulerPagination.vue'
@@ -84,10 +84,8 @@ const {
   generateVTTText
 } = useSubtitleMode(segments)
 
-// 初始化時載入任務
-onMounted(async () => {
-  await refreshTasks()
-})
+// 初始化由 TaskListContainer 的 filter-change 事件觸發
+// 這確保篩選狀態恢復後才請求數據
 
 // 刷新任務列表
 async function refreshTasks() {

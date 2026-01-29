@@ -149,6 +149,7 @@
               :key="`transcript-editing-${contentVersion}`"
               ref="textareaRef"
               @keydown="handleContentEditableKeyDown"
+              @paste="handlePaste"
             ><template v-for="(part, index) in getContentPartsForEditing()" :key="`edit-${index}`"><span v-if="!part.isMarker">{{ part.text }}</span><span
                 v-else
                 class="segment-text"
@@ -339,7 +340,8 @@ const {
   setPlaybackRate,
   startDragArc,
   dragArc,
-  stopDragArc
+  stopDragArc,
+  cleanup: cleanupAudioPlayer
 } = useAudioPlayer()
 
 // 同步 audioElement 引用（用於播放控制）
@@ -1648,35 +1650,33 @@ function updateContentAfterReplace(replacedContent) {
   // 設置替換狀態
   isReplacing.value = true
 
-  nextTick(() => {
+  // 清空標記
+  segmentMarkers.value = []
+
+  // 更新內容
+  currentTranscript.value.content = replacedContent
+
+  // 增加版本號
+  contentVersion.value++
+
+  // 重新生成標記
+  if (segments.value && currentTranscript.value.content) {
+    generateSegmentMarkers(segments.value, currentTranscript.value.content)
+  }
+
+  // 使用 setTimeout 給 Vue 足夠時間完成 DOM 清理，避免 insertBefore 錯誤
+  const timerId = setTimeout(() => {
     if (!isMounted) return
-
-    // 清空標記
-    segmentMarkers.value = []
-
-    // 更新內容
-    currentTranscript.value.content = replacedContent
-
-    // 增加版本號
-    contentVersion.value++
-
-    // 重新生成標記
-    if (segments.value && currentTranscript.value.content) {
-      generateSegmentMarkers(segments.value, currentTranscript.value.content)
-    }
+    isReplacing.value = false
 
     nextTick(() => {
       if (!isMounted) return
-      isReplacing.value = false
-
-      nextTick(() => {
-        if (!isMounted) return
-        if (savedScrollTop > 0 && textareaRef.value) {
-          textareaRef.value.scrollTop = savedScrollTop
-        }
-      })
+      if (savedScrollTop > 0 && textareaRef.value) {
+        textareaRef.value.scrollTop = savedScrollTop
+      }
     })
-  })
+  }, 50)
+  scrollRestoreTimers.push(timerId)
 }
 
 // 將文字內容分割成帶有標記的片段
@@ -1912,10 +1912,10 @@ function handleTextClick(startTime, event) {
 
 // 鍵盤事件處理
 function handleKeyDown(e) {
-  if (e.altKey) {
+  if (e.ctrlKey) {
     isAltPressed.value = true
 
-    // 防止 Alt 組合鍵的預設瀏覽器行為（如輸入特殊字符）
+    // 防止 Ctrl 組合鍵的預設瀏覽器行為
     // 只針對我們有定義快捷鍵的按鍵
     const shortcutKeys = [' ', 'm', 'M', ',', '.', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']
     if (shortcutKeys.includes(e.key)) {
@@ -1926,21 +1926,30 @@ function handleKeyDown(e) {
 }
 
 function handleKeyUp(e) {
-  if (!e.altKey) {
+  if (!e.ctrlKey) {
     isAltPressed.value = false
   }
 }
 
-// 處理視窗失焦（確保 Alt 鍵狀態重置）
+// 處理視窗失焦（確保 Ctrl 鍵狀態重置）
 function handleBlur() {
   isAltPressed.value = false
 }
 
+// 處理貼上事件，只允許純文字
+function handlePaste(e) {
+  e.preventDefault()
+  const text = e.clipboardData?.getData('text/plain') || ''
+  if (text) {
+    document.execCommand('insertText', false, text)
+  }
+}
+
 // 處理 contenteditable 區域的按鍵事件
 function handleContentEditableKeyDown(e) {
-  if (!e.altKey) return
+  if (!e.ctrlKey) return
 
-  // Alt + Space: 播放/暫停
+  // Ctrl + Space: 播放/暫停
   if (e.key === ' ') {
     e.preventDefault()
     e.stopPropagation()
@@ -2123,6 +2132,9 @@ onUnmounted(() => {
 
   document.body.classList.remove('editing-transcript')
   document.body.classList.remove('transcript-detail-page')
+
+  // 清理音訊播放器資源（停止 token 自動刷新定時器）
+  cleanupAudioPlayer()
 })
 
 // 監聽路由參數變化

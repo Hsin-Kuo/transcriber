@@ -192,13 +192,17 @@ watch(selectedTaskType, (newType) => {
   }
 })
 
-// 監聽篩選條件變化，通知父組件
-watch([selectedTaskType, selectedFilterTags], () => {
+// 發送篩選變更事件的函數
+const emitFilterChange = () => {
   emit('filter-change', {
     taskType: selectedTaskType.value === 'all' ? null : selectedTaskType.value,
     tags: selectedFilterTags.value
   })
-}, { deep: true })
+}
+
+// 監聽篩選條件變化，通知父組件
+// 注意：不使用 immediate，初始觸發由 onMounted 控制
+watch([selectedTaskType, selectedFilterTags], emitFilterChange, { deep: true })
 
 // Computed
 // 從 API 獲取的所有標籤
@@ -389,6 +393,9 @@ async function fetchAllTags() {
 // Lifecycle
 onMounted(() => {
   restoreFilterState()
+  // 在恢復篩選狀態後，手動觸發一次 filter-change 來載入數據
+  // 這確保使用恢復後的篩選條件，而非初始值
+  emitFilterChange()
   fetchTagColors()
   fetchTagOrder()
   fetchAllTags()
