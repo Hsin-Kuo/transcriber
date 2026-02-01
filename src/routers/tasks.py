@@ -130,6 +130,7 @@ async def get_tasks(
     status: str = None,
     task_type: str = None,
     tags: str = None,
+    has_audio: bool = None,
     limit: int = 100,
     skip: int = 0,
     task_service: TaskService = Depends(get_task_service),
@@ -141,6 +142,7 @@ async def get_tasks(
         status: 過濾狀態（可選：pending, processing, completed, failed, cancelled, active）
         task_type: 過濾任務類型（可選：paragraph, subtitle）
         tags: 過濾標籤（逗號分隔，例如：tag1,tag2）
+        has_audio: 過濾是否有音檔（可選：true 只顯示有音檔的任務）
         limit: 限制數量（預設 100）
         skip: 跳過數量（預設 0）
         task_service: TaskService 實例
@@ -162,7 +164,8 @@ async def get_tasks(
             limit=limit,
             task_type=task_type,
             tags=tags_list,
-            include_deleted=False
+            include_deleted=False,
+            has_audio=has_audio
         )
 
         # 過濾出進行中的任務
@@ -191,7 +194,8 @@ async def get_tasks(
             status=status,
             task_type=task_type,
             tags=tags_list,
-            include_deleted=False
+            include_deleted=False,
+            has_audio=has_audio
         )
 
         # 合併記憶體狀態並過濾數據
@@ -210,7 +214,8 @@ async def get_tasks(
             status=status,
             task_type=task_type,
             tags=tags_list,
-            include_deleted=False
+            include_deleted=False,
+            has_audio=has_audio
         )
 
         return {
@@ -350,6 +355,7 @@ def filter_task_for_list(task: Dict[str, Any]) -> Dict[str, Any]:
         "tags": task.get("tags", []),
         "keep_audio": task.get("keep_audio", False),
         "speaker_names": task.get("speaker_names", {}),
+        "subtitle_settings": task.get("subtitle_settings", {}),
         "timestamps": task.get("timestamps", {}),
     }
 

@@ -113,7 +113,7 @@ async function resendVerification() {
 
   try {
     const response = await fetch(
-      `${import.meta.env.VITE_API_URL || 'http://192.168.0.59:8000'}/auth/resend-verification`,
+      `${import.meta.env.VITE_API_URL || 'http://100.66.247.23:8000'}/auth/resend-verification`,
       {
         method: 'POST',
         headers: {
@@ -149,7 +149,7 @@ async function resendVerification() {
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   position: relative;
 }
 
@@ -234,13 +234,13 @@ async function resendVerification() {
   font-size: 2rem;
   margin: 0 0 10px 0;
   text-align: center;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   font-weight: 700;
 }
 
 .auth-subtitle {
   text-align: center;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   margin: 0 0 30px 0;
   font-size: 0.9rem;
 }
@@ -259,7 +259,7 @@ async function resendVerification() {
 
 .form-group label {
   font-size: 0.9rem;
-  color: var(--neu-text);
+  color: var(--main-text);
   font-weight: 600;
 }
 
@@ -268,21 +268,21 @@ async function resendVerification() {
   border: 2px solid rgba(var(--color-divider-rgb), 0.3);
   border-radius: 8px;
   background: var(--color-white);
-  color: var(--neu-text);
+  color: var(--main-text);
   font-size: 1rem;
   transition: all 0.2s ease;
 }
 
 .form-group input:focus {
   outline: none;
-  border-color: var(--neu-primary);
+  border-color: var(--main-primary);
   box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.1);
 }
 
 .form-group input:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-  background: var(--neu-bg);
+  background: var(--main-bg);
 }
 
 .error-message {
@@ -309,8 +309,8 @@ async function resendVerification() {
 .btn-resend {
   padding: 10px 20px;
   background: var(--color-white);
-  color: var(--neu-primary);
-  border: 2px solid var(--neu-primary);
+  color: var(--main-primary);
+  border: 2px solid var(--main-primary);
   border-radius: 8px;
   font-size: 0.85rem;
   font-weight: 600;
@@ -320,7 +320,7 @@ async function resendVerification() {
 }
 
 .btn-resend:hover:not(:disabled) {
-  background: var(--neu-primary);
+  background: var(--main-primary);
   color: var(--color-white);
 }
 
@@ -345,7 +345,7 @@ async function resendVerification() {
 
 .btn-primary {
   padding: 14px 24px;
-  background: var(--neu-primary-dark);
+  background: var(--main-primary-dark);
   color: var(--color-white);
   border: none;
   border-radius: 8px;
@@ -375,19 +375,19 @@ async function resendVerification() {
 .auth-footer {
   margin-top: 30px;
   text-align: center;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   font-size: 0.9rem;
 }
 
 .auth-footer a {
-  color: var(--neu-primary);
+  color: var(--main-primary);
   text-decoration: none;
   font-weight: 600;
   transition: color 0.2s ease;
 }
 
 .auth-footer a:hover {
-  color: var(--neu-primary-dark);
+  color: var(--main-primary-dark);
   text-decoration: underline;
 }
 </style>

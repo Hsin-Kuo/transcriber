@@ -2,6 +2,8 @@
 from datetime import datetime, timedelta
 from fastapi import HTTPException, status
 
+from src.utils.time_utils import timestamp_to_datetime
+
 
 class QuotaManager:
     """配額管理器"""
@@ -127,6 +129,10 @@ class QuotaManager:
 
         if not last_reset:
             return usage
+
+        # 轉換 Unix timestamp 為 datetime（如果需要）
+        if isinstance(last_reset, (int, float)):
+            last_reset = timestamp_to_datetime(last_reset)
 
         # 檢查是否跨月
         now = datetime.utcnow()

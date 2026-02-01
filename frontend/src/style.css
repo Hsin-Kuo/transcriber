@@ -3,6 +3,59 @@
  * 顏色定義請參見 assets/colors.css
  */
 
+/* === Responsive Breakpoints ===
+ * sm: 480px  - 小手機 (iPhone SE, small phones)
+ * md: 768px  - 大手機/平板直式 (large phones, tablets portrait)
+ * lg: 1024px - 平板橫式/小筆電 (tablets landscape, small laptops)
+ *
+ * 使用方式：
+ * @media (max-width: 1024px) { ... } - lg 以下
+ * @media (max-width: 768px) { ... }  - md 以下
+ * @media (max-width: 480px) { ... }  - sm 以下
+ */
+
+:root {
+  /* 響應式間距變數 */
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 1.5rem;
+  --spacing-xl: 2rem;
+
+  /* 響應式字體大小 (桌面版) */
+  --font-size-xs: 0.6875rem;  /* 11px */
+  --font-size-sm: 0.8125rem;  /* 13px */
+  --font-size-base: 0.9375rem; /* 15px */
+  --font-size-lg: 1.125rem;   /* 18px */
+  --font-size-xl: 1.5rem;     /* 24px */
+
+  /* 觸控友好的最小尺寸 */
+  --touch-target-min: 2.75rem; /* 44px */
+}
+
+/* 平板以下調整 */
+@media (max-width: 768px) {
+  :root {
+    --spacing-lg: 1.25rem;
+    --spacing-xl: 1.5rem;
+    /* 手機版字體稍大，提升可讀性 */
+    --font-size-xs: 0.75rem;    /* 12px */
+    --font-size-sm: 0.875rem;   /* 14px */
+    --font-size-base: 1rem;     /* 16px */
+    --font-size-lg: 1.125rem;   /* 18px */
+    --font-size-xl: 1.25rem;    /* 20px */
+  }
+}
+
+/* 小手機進一步調整 */
+@media (max-width: 480px) {
+  :root {
+    --spacing-md: 0.75rem;
+    --spacing-lg: 1rem;
+    --spacing-xl: 1.25rem;
+  }
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -12,14 +65,14 @@
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   /*  背景 - 使用純色 */
-  background-color: var(--neu-bg);
+  background-color: var(--main-bg);
   min-height: 100vh;
   padding: 0;
   position: relative;
 }
 
 /* 為 body 添加紋理（粗細與間距變化） */
-body::before {
+bodyd::before {
   content: '';
   position: fixed;
   top: 0;
@@ -99,35 +152,14 @@ body::before {
 
 /* 通用樣式 */
 .card {
-  background: var(--neu-bg);
+  background: var(--main-bg);
   border-radius: 20px;
   padding: 24px;
-  box-shadow: var(--neu-shadow-raised);
   margin-bottom: 20px;
   position: relative;
-  color: var(--neu-text);
+  color: var(--main-text);
   border: none;
 }
-
-/*  卡片效果樣式 */
-/* .electric-card {
-  padding: 0;
-  border-radius: 20px;
-  position: relative;
-  background: var(--neu-bg);
-  box-shadow: var(--neu-shadow-raised);
-  border: none;
-}
-
-.electric-inner {
-  position: relative;
-}
-
-.electric-border-outer {
-  border-radius: 20px;
-  padding: 0;
-} */
-
 
 .btn {
   padding: 12px 24px;
@@ -137,25 +169,14 @@ body::before {
   font-size: 14px;
   font-weight: 600;
   transition: all 0.3s ease;
-  background: var(--neu-bg);
-  color: var(--neu-text);
-  /* box-shadow: var(--neu-shadow-btn); */
+  background: var(--main-bg);
+  color: var(--main-text);
   position: relative;
   overflow: hidden;
 }
 
-/* .btn:hover:not(:disabled) {
-  box-shadow: var(--neu-shadow-btn-hover);
-  transform: translateY(-2px);
-} */
-
-/* .btn:active:not(:disabled) {
-  box-shadow: var(--neu-shadow-btn-active);
-  transform: translateY(0);
-} */
-
 .btn-primary {
-  background: var(--neu-primary-dark);
+  background: var(--main-primary-dark);
   color: white;
   border: none;
 }
@@ -173,9 +194,9 @@ body::before {
 }
 
 .btn-secondary {
-  background: var(--neu-bg);
-  color: var(--neu-primary-light);
-  /* border: 2px solid var(--neu-primary); */
+  background: var(--main-bg);
+  color: var(--main-primary-light);
+  /* border: 2px solid var(--main-primary); */
 }
 
 /* .btn-secondary:hover:not(:disabled) {
@@ -186,9 +207,8 @@ body::before {
 } */
 
 .btn-danger {
-  background: var(--neu-bg);
+  background: var(--main-bg);
   color: var(--color-danger-alt);
-  /* box-shadow: var(--neu-shadow-btn); */
 }
 
 .btn-danger:hover:not(:disabled) {
@@ -208,7 +228,6 @@ body::before {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
-  /* box-shadow: var(--neu-shadow-btn); */
 }
 
 .badge {
@@ -227,7 +246,7 @@ body::before {
 
 .badge-processing {
   background: transparent;
-  color: var(--neu-primary);
+  color: var(--main-primary);
 }
 
 .badge-completed {

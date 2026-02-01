@@ -6,9 +6,10 @@
     <!-- 上傳區域（含三角形合併按鈕） -->
     <UploadZone
       @file-selected="handleFileUpload"
+      @files-selected="handleFilesUpload"
       @open-merge="openMergeModal"
       :uploading="uploading"
-      :disabled="!!pendingFile || mergeMode.isActive"
+      :disabled="!!pendingFile || mergeMode.isActive || batchMode.isActive"
     />
 
     <!-- 合併對話窗 -->
@@ -16,6 +17,15 @@
       :visible="showMergeModal"
       @close="closeMergeModal"
       @confirm="handleMergeConfirm"
+    />
+
+    <!-- 批次上傳面板 -->
+    <BatchUploadPanel
+      v-if="batchMode.isActive"
+      :initial-files="batchMode.files"
+      :existing-tags="allTags"
+      @close="cancelBatchUpload"
+      @submit="confirmBatchUpload"
     />
 
     <!-- 確認表單（在上傳區下方） -->
@@ -198,6 +208,7 @@ import { useI18n } from 'vue-i18n'
 import ElectricBorder from '../components/shared/ElectricBorder.vue'
 import UploadZone from '../components/UploadZone.vue'
 import MergeModal from '../components/merge/MergeModal.vue'
+import BatchUploadPanel from '../components/batch/BatchUploadPanel.vue'
 
 // 新 API 服務層
 import { transcriptionService, taskService } from '../api/services'
@@ -222,6 +233,12 @@ const mergeMode = reactive({
 })
 const mergeTaskName = ref('')
 const showMergeModal = ref(false)  // 合併對話窗顯示狀態
+
+// 批次模式狀態
+const batchMode = reactive({
+  isActive: false,      // 是否處於批次模式
+  files: []             // 待上傳的檔案列表
+})
 
 // 預設任務名稱（第一個檔案的檔名，去掉副檔名）
 const defaultMergeTaskName = computed(() => {
@@ -253,9 +270,33 @@ const availableQuickTags = computed(() => {
   return allTags.value.filter(tag => !selectedTags.value.includes(tag))
 })
 
-// 選擇檔案後顯示確認表單
+// 選擇檔案後顯示確認表單（單檔）
 function handleFileUpload(file) {
   pendingFile.value = file
+}
+
+// 選擇多個檔案後進入批次模式
+function handleFilesUpload(files) {
+  if (!files || files.length === 0) return
+
+  // 檢查檔案數量上限
+  const MAX_BATCH_FILES = 10
+  if (files.length > MAX_BATCH_FILES) {
+    if (showNotification) {
+      showNotification({
+        title: $t('batchUpload.tooManyFiles'),
+        message: $t('batchUpload.maxFilesMessage', { max: MAX_BATCH_FILES, count: files.length }),
+        type: 'warning',
+        duration: 5000
+      })
+    }
+    // 只取前 10 個檔案
+    batchMode.files = files.slice(0, MAX_BATCH_FILES)
+  } else {
+    batchMode.files = files
+  }
+
+  batchMode.isActive = true
 }
 
 // 標籤管理
@@ -415,6 +456,60 @@ function handleShowTranscriptionForm(files) {
   mergeTaskName.value = ''  // 重置任務名稱
 }
 
+// 取消批次上傳
+function cancelBatchUpload() {
+  batchMode.isActive = false
+  batchMode.files = []
+}
+
+// 確認批次上傳
+async function confirmBatchUpload(formData) {
+  uploading.value = true
+
+  try {
+    const result = await transcriptionService.createBatch(formData)
+
+    // 顯示結果通知
+    if (showNotification) {
+      if (result.failed > 0) {
+        showNotification({
+          title: $t('batchUpload.partialSuccess'),
+          message: $t('batchUpload.partialSuccessMessage', {
+            created: result.created,
+            failed: result.failed
+          }),
+          type: 'warning',
+          duration: 8000
+        })
+      } else {
+        showNotification({
+          title: $t('batchUpload.success'),
+          message: $t('batchUpload.successMessage', { count: result.created }),
+          type: 'success',
+          duration: 5000
+        })
+      }
+    }
+
+    // 刷新任務列表
+    await refreshTasks()
+
+  } catch (error) {
+    console.error('批次上傳失敗:', error)
+    if (showNotification) {
+      showNotification({
+        title: $t('batchUpload.failed'),
+        message: error.response?.data?.detail || error.message,
+        type: 'error',
+        duration: 5000
+      })
+    }
+  } finally {
+    uploading.value = false
+    cancelBatchUpload()
+  }
+}
+
 
 
 
@@ -454,8 +549,7 @@ onUnmounted(() => {
   margin: 20px auto 0;
   padding: 0;
   border-radius: 20px;
-  background: var(--neu-bg);
-  box-shadow: var(--neu-shadow-raised);
+  background: var(--main-bg);
   border: none;
   animation: slideDown 0.3s ease;
 }
@@ -544,7 +638,7 @@ onUnmounted(() => {
   border-top: 1px solid rgba(var(--color-divider-rgb), 0.2);
   font-size: 11px;
   line-height: 1.5;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   font-style: italic;
 }
 
@@ -646,7 +740,7 @@ onUnmounted(() => {
 
 .toggle-text {
   font-size: 14px;
-  color: var(--neu-text);
+  color: var(--main-text);
   font-weight: 500;
 }
 
@@ -674,7 +768,7 @@ onUnmounted(() => {
 
 .radio-label {
   font-size: 14px;
-  color: var(--neu-text);
+  color: var(--main-text);
   font-weight: 500;
 }
 
@@ -893,19 +987,14 @@ onUnmounted(() => {
 
 /* 開始轉錄按鈕 - 使用者頭貼風格 */
 .modal-actions .btn-start {
-  background: var(--neu-bg);
-  color: var(--neu-primary);
-  box-shadow: var(--neu-shadow-btn);
+  background: var(--main-bg);
+  color: var(--main-primary);
 }
 
 .modal-actions .btn-start:hover {
-  box-shadow: var(--neu-shadow-btn-hover);
-  color: var(--neu-primary-dark);
+  color: var(--main-primary-dark);
 }
 
-.modal-actions .btn-start:active {
-  box-shadow: var(--neu-shadow-btn-active);
-}
 
 /* 合併模式樣式 */
 .merge-info-header {
@@ -1008,4 +1097,196 @@ onUnmounted(() => {
   color: rgba(var(--color-text-dark-rgb), 0.5);
 }
 
+/* === 響應式設計 === */
+
+/* 平板以下已有 768px 的 .confirm-row 樣式 */
+
+/* 小手機 */
+@media (max-width: 480px) {
+  .container {
+    padding: 0 8px;
+  }
+
+  /* 確認表單區域 */
+  .confirm-section {
+    margin: 12px auto 0;
+    border-radius: 16px;
+  }
+
+  .modal-body {
+    padding: 16px 12px;
+  }
+
+  .confirm-row {
+    gap: 0;
+  }
+
+  .confirm-row .modal-section {
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid rgba(var(--color-divider-rgb), 0.15);
+  }
+
+  .confirm-row .modal-section:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+  }
+
+  .section-label {
+    font-size: 12px;
+    margin-bottom: 8px;
+  }
+
+  /* Radio 群組垂直排列 */
+  .radio-group {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .radio-item {
+    min-height: 44px;
+  }
+
+  .radio-item input[type="radio"] {
+    width: 20px;
+    height: 20px;
+  }
+
+  .radio-label {
+    font-size: 14px;
+  }
+
+  /* 檔案資訊 */
+  .file-info {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    font-size: 13px;
+  }
+
+  .file-note {
+    font-size: 10px;
+    margin-top: 10px;
+    padding-top: 10px;
+  }
+
+  /* Toggle 開關 */
+  .toggle-label {
+    gap: 12px;
+  }
+
+  .toggle-switch-wrapper {
+    width: 48px;
+    height: 26px;
+  }
+
+  .toggle-slider:before {
+    height: 20px;
+    width: 20px;
+  }
+
+  .toggle-input:checked + .toggle-slider:before {
+    transform: translateX(22px);
+  }
+
+  .toggle-text {
+    font-size: 14px;
+  }
+
+  /* 子設定 */
+  .sub-setting {
+    padding-left: 0;
+    margin-top: 12px;
+  }
+
+  .number-input {
+    width: 100%;
+    padding: 12px;
+    font-size: 16px; /* 防止 iOS 縮放 */
+    min-height: 44px;
+  }
+
+  /* 標籤輸入 */
+  .tag-input-wrapper {
+    flex-direction: column;
+  }
+
+  .tag-input-wrapper .text-input {
+    max-width: none;
+    width: 100%;
+    padding: 12px;
+    font-size: 16px; /* 防止 iOS 縮放 */
+    min-height: 44px;
+  }
+
+  .btn-add-tag {
+    width: 100%;
+    padding: 12px 20px;
+    min-height: 44px;
+  }
+
+  .quick-tags-section {
+    padding: 8px;
+  }
+
+  .quick-tag-btn {
+    padding: 8px 14px;
+    font-size: 13px;
+    min-height: 36px;
+  }
+
+  .selected-tags {
+    gap: 6px;
+  }
+
+  .selected-tag {
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+
+  .remove-tag {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* 動作按鈕 */
+  .modal-actions {
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 20px;
+  }
+
+  .modal-actions .btn {
+    width: 100%;
+    padding: 14px 24px;
+    font-size: 15px;
+    min-height: 48px;
+  }
+
+  .modal-actions .btn-cancel {
+    padding: 12px 20px;
+    font-size: 14px;
+  }
+
+  /* 合併模式樣式 */
+  .merge-info-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .merge-file-list {
+    max-height: 100px;
+  }
+
+  .merge-file-item {
+    font-size: 12px;
+    padding: 8px 0;
+  }
+
+  .task-name-input {
+    padding: 12px;
+    font-size: 16px; /* 防止 iOS 縮放 */
+    min-height: 44px;
+  }
+}
 </style>

@@ -10,12 +10,14 @@ export const NEW_ENDPOINTS = {
   // 轉錄相關
   transcriptions: {
     create: '/transcriptions',
+    createBatch: '/transcriptions/batch',
     download: (taskId) => `/transcriptions/${taskId}/download`,
     audio: (taskId) => `/transcriptions/${taskId}/audio`,
     segments: (taskId) => `/transcriptions/${taskId}/segments`,
     updateContent: (taskId) => `/transcriptions/${taskId}/content`,
     updateMetadata: (taskId) => `/transcriptions/${taskId}/metadata`,
     updateSpeakerNames: (taskId) => `/transcriptions/${taskId}/speaker-names`,
+    updateSubtitleSettings: (taskId) => `/transcriptions/${taskId}/subtitle-settings`,
   },
 
   // 任務管理
@@ -49,6 +51,13 @@ export const NEW_ENDPOINTS = {
   audio: {
     merge: '/audio/merge',
     download: (filename) => `/audio/download/${filename}`,
+  },
+
+  // AI 摘要
+  summaries: {
+    generate: (taskId) => `/summaries/${taskId}`,
+    get: (taskId) => `/summaries/${taskId}`,
+    delete: (taskId) => `/summaries/${taskId}`,
   },
 }
 

@@ -3,6 +3,8 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
+from ...utils.time_utils import get_utc_timestamp
+
 
 class SegmentRepository:
     """Segments 資料存取層"""
@@ -21,7 +23,7 @@ class SegmentRepository:
         Returns:
             建立的文檔
         """
-        now = datetime.utcnow()
+        now = get_utc_timestamp()
         doc = {
             "_id": task_id,
             "segments": segments,
@@ -59,7 +61,7 @@ class SegmentRepository:
                 "$set": {
                     "segments": segments,
                     "segment_count": len(segments),
-                    "updated_at": datetime.utcnow()
+                    "updated_at": get_utc_timestamp()
                 }
             }
         )

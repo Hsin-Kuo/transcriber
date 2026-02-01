@@ -50,6 +50,13 @@
       >
         <span>{{ $t('taskList.subtitle') }}</span>
       </button>
+      <button
+        class="tab-btn tab-has-audio"
+        :class="{ active: selectedTaskType === 'has_audio' }"
+        @click="selectedTaskType = 'has_audio'"
+      >
+        <span>{{ $t('taskList.hasAudio') }}</span>
+      </button>
 
       <button
         class="tab-btn tab-batch-edit"
@@ -169,7 +176,7 @@ const restoreFilterState = () => {
 
 // State
 const selectedFilterTags = ref([])
-const selectedTaskType = ref('all') // 任務類型篩選：'all', 'paragraph', 'subtitle'
+const selectedTaskType = ref('all') // 任務類型篩選：'all', 'paragraph', 'subtitle', 'has_audio'
 const isEditingFilterTags = ref(false)
 const customTagOrder = ref([])
 const isBatchEditMode = ref(false)
@@ -192,13 +199,27 @@ watch(selectedTaskType, (newType) => {
   }
 })
 
+// 發送篩選變更事件的函數
+const emitFilterChange = () => {
+  const filterData = {
+    taskType: null,
+    tags: selectedFilterTags.value,
+    hasAudio: null
+  }
+
+  // 根據選擇的類型設置篩選條件
+  if (selectedTaskType.value === 'has_audio') {
+    filterData.hasAudio = true
+  } else if (selectedTaskType.value !== 'all') {
+    filterData.taskType = selectedTaskType.value
+  }
+
+  emit('filter-change', filterData)
+}
+
 // 監聽篩選條件變化，通知父組件
-watch([selectedTaskType, selectedFilterTags], () => {
-  emit('filter-change', {
-    taskType: selectedTaskType.value === 'all' ? null : selectedTaskType.value,
-    tags: selectedFilterTags.value
-  })
-}, { deep: true })
+// 注意：不使用 immediate，初始觸發由 onMounted 控制
+watch([selectedTaskType, selectedFilterTags], emitFilterChange, { deep: true })
 
 // Computed
 // 從 API 獲取的所有標籤
@@ -389,6 +410,9 @@ async function fetchAllTags() {
 // Lifecycle
 onMounted(() => {
   restoreFilterState()
+  // 在恢復篩選狀態後，手動觸發一次 filter-change 來載入數據
+  // 這確保使用恢復後的篩選條件，而非初始值
+  emitFilterChange()
   fetchTagColors()
   fetchTagOrder()
   fetchAllTags()
@@ -399,18 +423,14 @@ onMounted(() => {
 .task-list {
   --color-primary-rgb: 221, 132, 72;
   --color-teal-rgb: 119, 150, 154;
-  --color-text-dark-rgb: 45, 45, 45;
+  /* --color-text-dark-rgb: 45, 45, 45; */
   --color-success-rgb: 16, 185, 129;
   --color-danger-rgb: 239, 68, 68;
   --color-primary: rgb(var(--color-primary-rgb));
   --electric-primary: #dd8448;
   --electric-card-bg: linear-gradient(135deg, #f5f5f5 0%, #ffffff 100%);
   --electric-card-shadow-hover: 0 8px 24px rgba(0, 0, 0, 0.12);
-  --neu-bg: #e6e6e6;
-  --neu-shadow-btn: 6px 6px 12px rgba(0, 0, 0, 0.1), -6px -6px 12px rgba(255, 255, 255, 0.8);
-  --neu-shadow-btn-hover: 8px 8px 16px rgba(0, 0, 0, 0.12), -8px -8px 16px rgba(255, 255, 255, 0.9);
-  --neu-shadow-btn-active: inset 4px 4px 8px rgba(0, 0, 0, 0.1), inset -4px -4px 8px rgba(255, 255, 255, 0.8);
-  --neu-shadow-inset: inset 4px 4px 8px rgba(0, 0, 0, 0.08), inset -4px -4px 8px rgba(255, 255, 255, 0.6);
+  --main-bg: #e6e6e6;
   --nav-recent-bg: #77969A;
 }
 
@@ -421,7 +441,7 @@ onMounted(() => {
 
 /* 根據任務類型設置任務列表容器背景色 */
 .task-list.task-type-all :deep(.tasks) {
-  background-color: var(--upload-bg);
+  /* background-color: var(--upload-bg); */
   padding: 10px;
   border-radius: 8px;
   position: relative;
@@ -429,7 +449,7 @@ onMounted(() => {
 }
 
 .task-list.task-type-paragraph :deep(.tasks) {
-  background-color: var(--color-teal-light);
+  /* background-color: var(--color-teal-light); */
   padding: 10px;
   border-radius: 8px;
   position: relative;
@@ -437,7 +457,14 @@ onMounted(() => {
 }
 
 .task-list.task-type-subtitle :deep(.tasks) {
-  background-color: var(--color-teal);
+  /* background-color: var(--color-teal); */
+  padding: 10px;
+  border-radius: 8px;
+  position: relative;
+  z-index: 5;
+}
+
+.task-list.task-type-has_audio :deep(.tasks) {
   padding: 10px;
   border-radius: 8px;
   position: relative;
@@ -466,6 +493,13 @@ onMounted(() => {
   z-index: 3;
 }
 
+.task-list.task-type-has_audio :deep(.empty-state) {
+  background-color: var(--upload-bg);
+  border-radius: 8px;
+  position: relative;
+  z-index: 3;
+}
+
 /* 批次編輯模式優先 - 覆蓋任務類型的背景色 */
 .task-list :deep(.tasks.batch-mode) {
   background: var(--nav-bg) !important;
@@ -482,7 +516,7 @@ onMounted(() => {
   display: flex;
   align-items: flex-end;
   gap: 4px;
-  margin-bottom: -15px;
+  margin-bottom: 0px;
   margin-top: 20px;
   padding-left: 0px;
   position: relative;
@@ -502,46 +536,55 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 40px 18px 40px;
+  padding: 6px 10px;
+  margin: 0px 20px 10px 20px;
+  left: 10px;
   border: none;
-  border-radius: 8px 8px 0 0;
+  /* border-radius: 8px; */
+  background: #00000000;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   font-size: 14px;
   font-weight: 500;
-  color: rgba(var(--color-text-dark-rgb), 0.8);
+  color: var(--nav-text);
   position: relative;
   z-index: 1;
 }
 
 /* 全部頁籤顏色 */
-.tab-btn.tab-all {
-  background: var(--upload-bg);
-}
+/* .tab-btn.tab-all {
+  background: #00000000;
+} */
 
-/* 段落頁籤顏色 */
-.tab-btn.tab-paragraph {
-  background: var(--color-teal-light);
-  color: rgba(255, 255, 255, 0.95);
-}
+段落頁籤顏色
+/* .tab-btn.tab-paragraph {
+  background: #00000000;
+  color: var(--nav-text);
+} */
 
 /* 字幕頁籤顏色 */
-.tab-btn.tab-subtitle {
-  background: var(--color-teal);
-  color: rgba(255, 255, 255, 0.95);
-}
+/* .tab-btn.tab-subtitle {
+  background: #00000000;
+  color: var(--nav-text);
+} */
 
 /* 批次編輯頁籤顏色 */
 .tab-btn.tab-batch-edit {
-  padding: 6px 20px 18px 20px;
-  background: var(--nav-bg);
+  padding: 6px 10px;
+  margin: 0px 20px 10px 20px;
+  background: #00000000;
+}
+
+.tab-btn.tab-batch-edit.active {
+  color: var(--color-nav-active-bg);
 }
 
 /* 批次編輯模式下，其他頁籤變成淺灰色 */
 .task-list.batch-edit-active .tab-btn.tab-all,
 .task-list.batch-edit-active .tab-btn.tab-paragraph,
-.task-list.batch-edit-active .tab-btn.tab-subtitle {
-  background: #e5e7eb !important;
+.task-list.batch-edit-active .tab-btn.tab-subtitle,
+.task-list.batch-edit-active .tab-btn.tab-has-audio {
+  border-bottom: none;
   color: rgba(var(--color-text-dark-rgb), 0.5) !important;
   opacity: 0.7;
 }
@@ -555,6 +598,7 @@ onMounted(() => {
   font-weight: 600;
   transform: translateY(-4px);
   z-index: 10 !important;
+  border-bottom: 1px solid var(--nav-text);
 }
 
 
@@ -597,5 +641,82 @@ onMounted(() => {
 
 .btn-batch-edit {
   gap: 8px;
+}
+
+/* === 響應式設計 === */
+
+/* 平板以下 (768px) */
+@media (max-width: 768px) {
+  /* 任務類型頁籤換行排列 */
+  .task-type-tabs {
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .tab-btn {
+    padding: 8px 12px;
+    margin: 0 8px 8px 8px;
+    font-size: 13px;
+    /* 確保觸控友好 */
+    min-height: 44px;
+  }
+
+  /* 分頁控制在小屏時佔滿整行 */
+  .pagination-wrapper {
+    width: 100%;
+    margin-left: 0;
+    margin-top: 8px;
+    justify-content: center;
+  }
+
+  /* FilterBar 間距調整 */
+  .task-list :deep(.filter-section) {
+    margin-top: 20px;
+  }
+
+  /* 任務網格間距調整 */
+  .task-list.task-type-all :deep(.tasks),
+  .task-list.task-type-paragraph :deep(.tasks),
+  .task-list.task-type-subtitle :deep(.tasks),
+  .task-list.task-type-has_audio :deep(.tasks) {
+    padding: 8px;
+  }
+}
+
+/* 小手機 (480px) */
+@media (max-width: 480px) {
+  .task-type-tabs {
+    gap: 4px;
+    margin-top: 8px;
+  }
+
+  .tab-btn {
+    padding: 6px 8px;
+    margin: 0 4px 6px 4px;
+    font-size: 12px;
+  }
+
+  /* 批次編輯按鈕在小屏隱藏文字 */
+  .tab-btn.tab-batch-edit span {
+    display: none;
+  }
+
+  .tab-btn.tab-batch-edit {
+    padding: 8px;
+  }
+
+  /* 任務網格更緊湊 */
+  .task-list.task-type-all :deep(.tasks),
+  .task-list.task-type-paragraph :deep(.tasks),
+  .task-list.task-type-subtitle :deep(.tasks),
+  .task-list.task-type-has_audio :deep(.tasks) {
+    padding: 4px;
+  }
+
+  /* 批次編輯模式調整 */
+  .task-list :deep(.tasks.batch-mode) {
+    padding: 12px !important;
+  }
 }
 </style>

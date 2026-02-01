@@ -16,17 +16,25 @@
     "clickToChangeSpeaker": "Click to change speaker",
     "clickToJumpToTime": "Click to jump to this time",
     "speakerPlaceholder": "Speaker {number}",
-    "toggleSettings": "Show/Hide Settings"
+    "toggleSettings": "Show/Hide Settings",
+    "rename": "Rename"
   },
   "userSettings": {
     "title": "User Settings",
     "description": "Manage your account information and quota usage",
     "accountInfo": "Account Information",
+    "account": "Account",
+    "plan": "Plan",
     "email": "Email",
     "accountType": "Account Type",
-    "language": "Interface Language",
-    "languageDescription": "Select your preferred interface language",
+    "interface": "Interface",
+    "language": "Language",
+    "timezone": "Timezone",
+    "theme": "Theme",
+    "themeLight": "Light",
+    "themeDark": "Dark",
     "quotaUsage": "Quota Usage",
+    "tasks": "Tasks",
     "transcriptions": "Transcriptions",
     "duration": "Duration",
     "storage": "Storage",
@@ -75,7 +83,7 @@
   },
   "uploadZone": {
     "clickToUpload": "Click to upload or drag and drop",
-    "supportedFormats": "Support M4A, MP3, WAV, MP4 and other audio formats",
+    "supportedFormats": "Supports audio (M4A, MP3, WAV) and video (MP4, MOV, AVI) formats",
     "uploadingFile": "Uploading file..."
   },
   "tasksView": {
@@ -90,6 +98,7 @@
     "all": "All",
     "paragraph": "Doc",
     "subtitle": "Subs",
+    "hasAudio": "Audio",
     "taskName": "Task Name",
     "status": "Status",
     "type": "Type",
@@ -209,18 +218,21 @@
     "save": "Save",
     "cancel": "Cancel",
     "download": "Download",
+    "delete": "Delete",
     "viewMode": "View Mode",
     "paragraph": "Paragraph",
     "subtitle": "Subtitle",
     "saving": "Saving",
     "editMode": "Edit Mode",
-    "timecodeMarkers": "Timecode Markers",
+    "timecodeMarkers": "Time Marks",
     "transcript": "Transcript",
     "goBack": "Go Back",
     "autoSavingSpeaker": "Auto-saving speaker names",
     "segmentsAutoSaved": "Segments auto-saved",
     "errorSavingSegments": "Failed to save segments",
-    "confirmLeave": "You have unsaved changes. Are you sure you want to leave?"
+    "confirmLeave": "You have unsaved changes. Are you sure you want to leave?",
+    "moreOptions": "More Options",
+    "replacing": "Replacing..."
   },
   "audioPlayer": {
     "browserNotSupported": "Your browser does not support audio playback.",
@@ -267,6 +279,22 @@
     "replaceWith": "Replace with",
     "replaceAll": "Replace All"
   },
+  "searchReplace": {
+    "search": "Search",
+    "searchPlaceholder": "Search text...",
+    "replacePlaceholder": "Replace with...",
+    "noResults": "No results",
+    "previous": "Previous (Shift+Enter)",
+    "next": "Next (Enter)",
+    "close": "Close (Esc)",
+    "replace": "Replace",
+    "replaceOne": "Replace current match",
+    "replaceAll": "Replace All",
+    "replaceAllTitle": "Replace all matches",
+    "confirmReplaceAll": "Found {count} occurrences of \"{search}\"\nReplace all with \"{replace}\"?",
+    "matchCase": "Match Case",
+    "matchWholeWord": "Match Whole Word"
+  },
   "transcriptMetadata": {
     "characters": "characters"
   },
@@ -281,6 +309,69 @@
     "unknownError": "An unknown error occurred",
     "updateFailed": "Update Failed",
     "cannotUpdateTaskName": "Cannot update task name",
-    "cannotUpdateSpeakerNames": "Cannot update speaker names"
+    "cannotUpdateSpeakerNames": "Cannot update speaker names",
+    "cannotUpdateTags": "Cannot update tags"
+  },
+  "taskInfo": {
+    "lastEdited": "Last Updated",
+    "words": "words",
+    "tags": "Tags"
+  },
+  "displaySettings": {
+    "timecodeMarkers": "Time Marks",
+    "darkMode": "Dark Mode",
+    "fontSize": "Font Size",
+    "fontWeight": "Font Weight",
+    "fontFamily": "Font",
+    "sansSerif": "Sans-serif",
+    "serif": "Serif"
+  },
+  "batchUpload": {
+    "title": "Batch Upload ({count} files)",
+    "close": "Close",
+    "expandSettings": "Expand Settings",
+    "removeFile": "Remove File",
+    "customName": "Custom Name",
+    "additionalTags": "Additional Tags",
+    "tagPlaceholder": "Enter tag and press Enter",
+    "add": "Add",
+    "maxFilesReached": "Maximum file limit reached (max {max})",
+    "commonSettings": "Common Settings",
+    "addMoreFiles": "Add More Files",
+    "createTasks": "Create {count} Tasks",
+    "tooManyFiles": "Too Many Files",
+    "maxFilesMessage": "Batch upload supports up to {max} files, you selected {count}, only the first {max} will be uploaded",
+    "success": "Batch Created",
+    "successMessage": "Successfully created {count} transcription tasks",
+    "partialSuccess": "Partially Successful",
+    "partialSuccessMessage": "Created {created} tasks, {failed} failed",
+    "failed": "Batch Creation Failed"
+  },
+  "aiSummary": {
+    "title": "AI Summary",
+    "processing": "Processing",
+    "completed": "Generated",
+    "generating": "Generating AI summary...",
+    "generate": "Generate AI Summary",
+    "regenerate": "Regenerate",
+    "retry": "Retry",
+    "executiveSummary": "Executive Summary",
+    "keyPoints": "Key Points",
+    "contentSegments": "Content Segments",
+    "actionItems": "Action Items",
+    "highlights": "Highlights",
+    "summary": "Summary",
+    "keywords": "Keywords",
+    "model": "Model",
+    "emptyHint": "Click the button below to generate an AI summary of the transcript",
+    "loadError": "Failed to load summary, please try again later",
+    "generateError": "Failed to generate summary, please try again later",
+    "typeMeeting": "Meeting",
+    "typeLecture": "Lecture",
+    "typeInterview": "Interview",
+    "typeGeneral": "General",
+    "sentimentPositive": "Positive",
+    "sentimentNeutral": "Neutral",
+    "sentimentNegative": "Negative"
   }
 }

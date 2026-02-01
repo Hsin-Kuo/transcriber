@@ -19,10 +19,8 @@ from .task_service import TaskService
 from .utils.whisper_processor import WhisperProcessor
 from .utils.punctuation_processor import PunctuationProcessor
 from .utils.diarization_processor import DiarizationProcessor
-
-
-# 時區設定 (UTC+8 台北時間)
-TZ_UTC8 = timezone(timedelta(hours=8))
+from src.utils.time_utils import get_utc_timestamp
+from src.utils.text_utils import convert_segments_punctuation
 
 
 class TranscriptionService:
@@ -284,13 +282,14 @@ class TranscriptionService:
 
             # 3. 標點處理（可選）
             punctuation_model = None
+            punctuation_token_usage = None
             if use_punctuation:
                 self._update_progress(task_id, "正在添加標點符號...", {
                     "punctuation_started": True
                 })
 
                 try:
-                    punctuated_text, punctuation_model = self.punctuation.process(
+                    punctuated_text, punctuation_model, punctuation_token_usage = self.punctuation.process(
                         full_text,
                         provider=punctuation_provider,
                         language=detected_language or language or "zh",
@@ -324,14 +323,17 @@ class TranscriptionService:
                 return
 
             # 4. 保存轉錄結果到 MongoDB
-            self._save_transcription_results(task_id, final_text, segments)
+            # 將 segments 中的半形標點符號轉換為全形（中文適用）
+            converted_segments = convert_segments_punctuation(segments)
+            self._save_transcription_results(task_id, final_text, converted_segments)
 
             # 5. 標記完成
             self._mark_completed(
                 task_id,
                 detected_language or language,
                 final_text,  # 传递文本用于计算字数
-                punctuation_model  # 传递标点符号模型信息
+                punctuation_model,  # 传递标点符号模型信息
+                punctuation_token_usage  # 传递 token 使用量
             )
 
             # 6. 清理臨時檔案（包含保存音檔）
@@ -376,12 +378,16 @@ class TranscriptionService:
 
         subprocess.run([
             'ffmpeg', '-y', '-i', str(audio_path),
+            '-vn',  # 不處理視頻（支援影片檔輸入）
             '-acodec', 'libmp3lame',  # MP3 編碼器
             '-b:a', '128k',  # 128kbps（語音品質足夠）
             '-ar', '16000',  # 16kHz 採樣率（Whisper 推薦）
             '-ac', '1',  # 單聲道
             str(mp3_path)
         ], check=True, capture_output=True, timeout=300)
+
+        # 轉換成功後立即刪除原始檔案，釋放儲存空間
+        audio_path.unlink()
 
         return mp3_path
 
@@ -488,8 +494,8 @@ class TranscriptionService:
             client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
             db = client[db_name]
 
-            # 添加 updated_at
-            updates["updated_at"] = datetime.utcnow()
+            # 添加 updated_at (UTC timestamp)
+            updates["updated_at"] = get_utc_timestamp()
 
             # 執行更新
             result = db.tasks.update_one(
@@ -521,7 +527,6 @@ class TranscriptionService:
         """
         try:
             from pymongo import MongoClient
-            from datetime import datetime
             import os
 
             # 連接 MongoDB（使用同步客戶端）
@@ -531,7 +536,7 @@ class TranscriptionService:
             db = client[db_name]
 
             # 1. 保存轉錄文本到 transcriptions collection
-            now = datetime.utcnow()
+            now = get_utc_timestamp()
             transcription_doc = {
                 "_id": task_id,
                 "content": transcription_text,
@@ -577,7 +582,8 @@ class TranscriptionService:
         task_id: str,
         language: Optional[str],
         transcription_text: str = "",
-        punctuation_model: Optional[str] = None
+        punctuation_model: Optional[str] = None,
+        punctuation_token_usage: Optional[Dict[str, int]] = None
     ) -> None:
         """標記任務完成
 
@@ -586,6 +592,7 @@ class TranscriptionService:
             language: 偵測到的語言
             transcription_text: 轉錄文本（用於計算字數）
             punctuation_model: 使用的標點符號模型
+            punctuation_token_usage: 標點處理的 token 使用量
         """
         from src.services.utils.async_utils import run_async_in_thread
 
@@ -599,13 +606,23 @@ class TranscriptionService:
             "result.text_length": text_length,  # 字符數
             "result.word_count": word_count,    # 詞數
             "config.language": language,
-            "timestamps.completed_at": datetime.now(TZ_UTC8).strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamps.completed_at": get_utc_timestamp(),
             "progress": "轉錄完成"
         }
 
         # 如果有標點符號模型信息，保存到 models.punctuation
         if punctuation_model:
             update_data["models.punctuation"] = punctuation_model
+
+        # 如果有 token 使用量，保存到 stats.token_usage
+        if punctuation_token_usage:
+            update_data["stats.token_usage"] = {
+                "total": punctuation_token_usage.get("total", 0),
+                "prompt": punctuation_token_usage.get("prompt", 0),
+                "completion": punctuation_token_usage.get("completion", 0),
+                "model": punctuation_model or "unknown"
+            }
+            print(f"📊 保存 Token 使用量: {punctuation_token_usage}")
 
         # 1. 使用同步方法更新任務狀態
         self._update_task_sync(task_id, update_data)
@@ -647,7 +664,7 @@ class TranscriptionService:
                                         "usage.total_duration_minutes": audio_duration_seconds / 60
                                     },
                                     "$set": {
-                                        "updated_at": datetime.utcnow()
+                                        "updated_at": get_utc_timestamp()
                                     }
                                 }
                             )

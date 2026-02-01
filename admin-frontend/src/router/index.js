@@ -2,6 +2,10 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import AdminDashboard from '../views/AdminDashboard.vue'
 import AuditLogsView from '../views/AuditLogsView.vue'
+import UsersView from '../views/UsersView.vue'
+import UserDetailView from '../views/UserDetailView.vue'
+import AdminTasksView from '../views/AdminTasksView.vue'
+import AdminTaskDetailView from '../views/AdminTaskDetailView.vue'
 import LoginView from '../views/auth/LoginView.vue'
 
 const routes = [
@@ -10,7 +14,43 @@ const routes = [
     name: 'admin',
     component: AdminDashboard,
     meta: {
-      title: '系統統計後台',
+      title: '系統統計',
+      requiresAuth: true
+    }
+  },
+  {
+    path: '/users',
+    name: 'users',
+    component: UsersView,
+    meta: {
+      title: '用戶管理',
+      requiresAuth: true
+    }
+  },
+  {
+    path: '/users/:id',
+    name: 'user-detail',
+    component: UserDetailView,
+    meta: {
+      title: '用戶詳情',
+      requiresAuth: true
+    }
+  },
+  {
+    path: '/tasks',
+    name: 'admin-tasks',
+    component: AdminTasksView,
+    meta: {
+      title: '任務管理',
+      requiresAuth: true
+    }
+  },
+  {
+    path: '/tasks/:id',
+    name: 'admin-task-detail',
+    component: AdminTaskDetailView,
+    meta: {
+      title: '任務詳情',
       requiresAuth: true
     }
   },

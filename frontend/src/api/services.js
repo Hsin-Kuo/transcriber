@@ -41,7 +41,7 @@ export const transcriptionService = {
    * @returns {string} 音檔 URL
    */
   getAudioUrl(taskId, token) {
-    const API_BASE = import.meta.env.VITE_API_URL || 'http://192.168.0.59:8000'
+    const API_BASE = import.meta.env.VITE_API_URL || 'http://100.66.247.23:8000'
     return `${API_BASE}${NEW_ENDPOINTS.transcriptions.audio(taskId)}?token=${encodeURIComponent(token)}`
   },
 
@@ -76,6 +76,21 @@ export const transcriptionService = {
    */
   async updateMetadata(taskId, metadata) {
     const response = await api.put(NEW_ENDPOINTS.transcriptions.updateMetadata(taskId), metadata)
+    return response.data
+  },
+
+  /**
+   * 批次建立轉錄任務
+   * @param {FormData} formData - 包含多個音檔和配置的表單資料
+   *   - files: 多個音檔
+   *   - default_config: JSON 字串，包含 taskType, diarize, maxSpeakers, language, tags
+   *   - overrides: JSON 字串，格式 {"0": {tags, customName}, ...}
+   * @returns {Promise} 批次建立結果
+   */
+  async createBatch(formData) {
+    const response = await api.post(NEW_ENDPOINTS.transcriptions.createBatch, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
     return response.data
   },
 }
@@ -158,7 +173,7 @@ export const taskService = {
    * @returns {string} SSE URL
    */
   getEventsUrl(taskId, token) {
-    const API_BASE = import.meta.env.VITE_API_URL || 'http://192.168.0.59:8000'
+    const API_BASE = import.meta.env.VITE_API_URL || 'http://100.66.247.23:8000'
     return `${API_BASE}${NEW_ENDPOINTS.tasks.events(taskId)}?token=${token}`
   },
 
@@ -342,6 +357,41 @@ export const audioService = {
 }
 
 /**
+ * AI 摘要服務
+ */
+export const summaryService = {
+  /**
+   * 生成 AI 摘要
+   * @param {string} taskId - 任務 ID
+   * @returns {Promise} 生成結果
+   */
+  async generate(taskId) {
+    const response = await api.post(NEW_ENDPOINTS.summaries.generate(taskId))
+    return response.data
+  },
+
+  /**
+   * 獲取摘要
+   * @param {string} taskId - 任務 ID
+   * @returns {Promise} 摘要資料
+   */
+  async get(taskId) {
+    const response = await api.get(NEW_ENDPOINTS.summaries.get(taskId))
+    return response.data
+  },
+
+  /**
+   * 刪除摘要
+   * @param {string} taskId - 任務 ID
+   * @returns {Promise} API 響應
+   */
+  async delete(taskId) {
+    const response = await api.delete(NEW_ENDPOINTS.summaries.delete(taskId))
+    return response.data
+  }
+}
+
+/**
  * 匯出所有服務
  */
 export default {
@@ -350,4 +400,5 @@ export default {
   tagService,
   legacyService,
   audioService,
+  summaryService,
 }

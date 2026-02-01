@@ -3,6 +3,8 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
+from ...utils.time_utils import get_utc_timestamp
+
 
 class TranscriptionRepository:
     """轉錄內容資料存取層"""
@@ -21,7 +23,7 @@ class TranscriptionRepository:
         Returns:
             建立的文檔
         """
-        now = datetime.utcnow()
+        now = get_utc_timestamp()
         doc = {
             "_id": task_id,
             "content": content,
@@ -59,7 +61,7 @@ class TranscriptionRepository:
                 "$set": {
                     "content": content,
                     "text_length": len(content),
-                    "updated_at": datetime.utcnow()
+                    "updated_at": get_utc_timestamp()
                 }
             }
         )

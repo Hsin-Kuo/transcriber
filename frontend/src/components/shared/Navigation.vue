@@ -13,8 +13,29 @@
     </button>
 
     <div class="nav-brand">
-      <h2 v-if="!isCollapsed">🎙️ Soundtime</h2>
-      <h2 v-else class="brand-icon">🎙️</h2>
+      <svg class="brand-icon" width="28" height="28" viewBox="0 0 28 28">
+        <!-- 橘色方框 -->
+        <rect x="0" y="0" width="28" height="28" rx="4" fill="currentColor"/>
+        <!-- 中心點 (白色) -->
+        <circle cx="14" cy="14" r="2" fill="#f4ecd5"/>
+        <!-- 內圈 (6 dots, 白色) -->
+        <circle cx="14" cy="9" r="1.5" fill="#f4ecd5"/>
+        <circle cx="18.3" cy="11.5" r="1.5" fill="#f4ecd5"/>
+        <circle cx="18.3" cy="16.5" r="1.5" fill="#f4ecd5"/>
+        <circle cx="14" cy="19" r="1.5" fill="#f4ecd5"/>
+        <circle cx="9.7" cy="16.5" r="1.5" fill="#f4ecd5"/>
+        <circle cx="9.7" cy="11.5" r="1.5" fill="#f4ecd5"/>
+        <!-- 外圈 (8 dots, 白色) -->
+        <circle cx="14" cy="4" r="1.5" fill="#f4ecd5"/>
+        <circle cx="21" cy="7" r="1.5" fill="#f4ecd5"/>
+        <circle cx="24" cy="14" r="1.5" fill="#f4ecd5"/>
+        <circle cx="21" cy="21" r="1.5" fill="#f4ecd5"/>
+        <circle cx="14" cy="24" r="1.5" fill="#f4ecd5"/>
+        <circle cx="7" cy="21" r="1.5" fill="#f4ecd5"/>
+        <circle cx="4" cy="14" r="1.5" fill="#f4ecd5"/>
+        <circle cx="7" cy="7" r="1.5" fill="#f4ecd5"/>
+      </svg>
+      <h2 v-if="!isCollapsed">TRACKing</h2>
     </div>
 
     <div class="nav-links">
@@ -35,11 +56,26 @@
         <span v-if="!isCollapsed">{{ $t('navigation.audioEditor') }}</span>
       </router-link> -->
 
-      <!-- 所有任務按鈕（收合時顯示） -->
-      <router-link v-if="authStore.isAuthenticated && isCollapsed" to="/tasks" class="nav-link" active-class="active" :title="$t('navigation.allTasks')" @click="clearTaskFilters">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+      <!-- 所有任務按鈕 -->
+      <router-link v-if="authStore.isAuthenticated" to="/tasks" class="nav-link" active-class="active" :title="isCollapsed ? $t('navigation.allTasks') : ''" @click="clearTaskFilters">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <!-- 9條-45度斜線構成的正方形 -->
+          <!-- 線 2 -->
+          <line x1="0.8" y1="5.4" x2="5.4" y2="0.8"/>
+          <!-- 線 3 -->
+          <line x1="0.8" y1="10" x2="10" y2="0.8"/>
+          <!-- 線 4 -->
+          <line x1="0.8" y1="14.6" x2="14.6" y2="0.8"/>
+          <!-- 線 5：反對角線 -->
+          <line x1="0.8" y1="19.2" x2="19.2" y2="0.8"/>
+          <!-- 線 6 -->
+          <line x1="5.4" y1="19.2" x2="19.2" y2="5.4"/>
+          <!-- 線 7 -->
+          <line x1="10" y1="19.2" x2="19.2" y2="10"/>
+          <!-- 線 8 -->
+          <line x1="14.6" y1="19.2" x2="19.2" y2="14.6"/>
         </svg>
+        <span v-if="!isCollapsed">{{ $t('navigation.allTasks') }}</span>
       </router-link>
     </div>
 
@@ -47,9 +83,6 @@
     <div v-if="authStore.isAuthenticated && !isCollapsed" class="recent-tasks">
       <div class="recent-tasks-header">
         <h3>{{ $t('navigation.recent') }}</h3>
-        <router-link to="/tasks" class="all-tasks-btn" active-class="active" @click="clearTaskFilters">
-          {{ $t('navigation.allTasks') }}
-        </router-link>
       </div>
 
       <div class="recent-tasks-list">
@@ -111,6 +144,16 @@ const isCollapsed = ref(false)
 function toggleCollapse() {
   isCollapsed.value = !isCollapsed.value
   localStorage.setItem('navCollapsed', JSON.stringify(isCollapsed.value))
+  updateNavWidth()
+}
+
+// 更新導航欄寬度
+function updateNavWidth() {
+  if (isCollapsed.value) {
+    document.body.classList.add('nav-collapsed')
+  } else {
+    document.body.classList.remove('nav-collapsed')
+  }
 }
 
 // 載入最近任務
@@ -161,6 +204,7 @@ onMounted(() => {
   if (saved !== null) {
     isCollapsed.value = JSON.parse(saved)
   }
+  updateNavWidth()
 
   // 載入最近任務
   if (authStore.isAuthenticated) {
@@ -189,13 +233,13 @@ watch(() => route.path, (newPath, oldPath) => {
 <style scoped>
 /* CSS 變數 */
 .navigation {
-  --texture-pattern:
+  /* --texture-pattern:
     repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(255, 255, 255, 0.018) 3px, rgba(255, 255, 255, 0.018) 4px),
     repeating-linear-gradient(0deg, transparent, transparent 9px, rgba(255, 255, 255, 0.028) 9px, rgba(255, 255, 255, 0.028) 11px),
     repeating-linear-gradient(0deg, transparent, transparent 19px, rgba(255, 255, 255, 0.038) 19px, rgba(255, 255, 255, 0.038) 21px),
     repeating-linear-gradient(90deg, transparent, transparent 5px, rgba(0, 0, 0, 0.018) 5px, rgba(0, 0, 0, 0.018) 6px),
     repeating-linear-gradient(90deg, transparent, transparent 13px, rgba(0, 0, 0, 0.028) 13px, rgba(0, 0, 0, 0.028) 15px),
-    repeating-linear-gradient(90deg, transparent, transparent 31px, rgba(0, 0, 0, 0.038) 31px, rgba(0, 0, 0, 0.038) 33px);
+    repeating-linear-gradient(90deg, transparent, transparent 31px, rgba(0, 0, 0, 0.038) 31px, rgba(0, 0, 0, 0.038) 33px); */
   --color-divider-rgb: 163, 177, 198;
 }
 
@@ -203,16 +247,17 @@ watch(() => route.path, (newPath, oldPath) => {
   width: 240px;
   min-width: 240px;
   height: 100vh;
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
   display: flex;
   flex-direction: column;
   gap: 24px;
   padding: 28px 20px;
   background: var(--nav-bg);
   border-radius: 0;
-  box-shadow: var(--neu-shadow-raised);
   transition: all 0.3s ease;
+  z-index: 100;
 }
 
 .navigation::after {
@@ -246,7 +291,6 @@ watch(() => route.path, (newPath, oldPath) => {
   border: none;
   background: transparent;
   border-radius: 6px;
-  box-shadow: var(--neu-shadow-btn-sm);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -256,21 +300,23 @@ watch(() => route.path, (newPath, oldPath) => {
 }
 
 .toggle-btn:hover {
-  box-shadow: var(--neu-shadow-btn-hover-sm);
   transform: translateX(-2px);
 }
 
 .toggle-btn:active {
-  box-shadow: var(--neu-shadow-btn-active-sm);
   transform: translateX(0);
 }
 
 .toggle-btn svg {
-  stroke: var(--neu-primary);
+  stroke: var(--main-primary);
   transition: all 0.2s ease;
 }
 
 .nav-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   padding-bottom: 20px;
   position: relative;
 }
@@ -300,7 +346,8 @@ watch(() => route.path, (newPath, oldPath) => {
 }
 
 .brand-icon {
-  font-size: 1.8rem;
+  color: var(--nav-active-bg);
+  flex-shrink: 0;
 }
 
 .nav-links {
@@ -318,19 +365,16 @@ watch(() => route.path, (newPath, oldPath) => {
   text-decoration: none;
   font-weight: 600;
   color: var(--nav-text);
-  background: var(--nav-bg);
-  box-shadow: var(--neu-shadow-btn);
+  /* background: var(--nav-bg); */
   transition: all 0.3s ease;
 }
 
 .nav-link:hover {
-  box-shadow: var(--neu-shadow-btn-hover);
-  color: var(--neu-primary);
+  color: var(--main-primary);
   transform: translateX(4px);
 }
 
 .nav-link.active {
-  box-shadow: var(--neu-shadow-btn-active);
   color: var(--nav-recent-text);
   background: var(--nav-active-bg);
 }
@@ -395,7 +439,7 @@ watch(() => route.path, (newPath, oldPath) => {
   gap: 12px;
   padding: 20px 20px 28px 20px;
   margin: 0 -20px -28px -20px;
-  background: var(--nav-recent-bg);
+  /* background: var(--nav-recent-bg); */
   border-top: 1px solid rgba(var(--color-divider-rgb), 0.2);
   transition: all 0.3s ease;
   position: relative;
@@ -447,7 +491,6 @@ watch(() => route.path, (newPath, oldPath) => {
   height: 48px;
   border-radius: 50%;
   background: var(--nav-bg);
-  box-shadow: var(--neu-shadow-btn);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -459,13 +502,9 @@ watch(() => route.path, (newPath, oldPath) => {
 }
 
 .avatar-circle:hover {
-  box-shadow: var(--neu-shadow-btn-hover);
-  color: var(--neu-primary-dark);
+  color: var(--main-primary-dark);
 }
 
-.avatar-circle:active {
-  box-shadow: var(--neu-shadow-btn-active);
-}
 
 .logout-btn {
   display: flex;
@@ -480,20 +519,17 @@ watch(() => route.path, (newPath, oldPath) => {
   font-weight: 600;
   font-size: 0.9rem;
   color: var(--nav-text);
-  box-shadow: var(--neu-shadow-btn);
   transition: all 0.3s ease;
   position: relative;
   z-index: 1;
 }
 
 .logout-btn:hover {
-  box-shadow: var(--neu-shadow-btn-hover);
-  color: var(--neu-primary);
+  color: var(--main-primary);
   transform: translateY(-2px);
 }
 
 .logout-btn:active {
-  box-shadow: var(--neu-shadow-btn-active);
   transform: translateY(0);
 }
 
@@ -525,7 +561,7 @@ watch(() => route.path, (newPath, oldPath) => {
   gap: 8px;
   min-height: 0;
   overflow: hidden;
-  background: var(--nav-recent-bg);
+  /* background: var(--nav-bg); */
   margin: 0 -20px -24px -20px;
   border-radius: 0;
   position: relative;
@@ -544,32 +580,8 @@ watch(() => route.path, (newPath, oldPath) => {
 .recent-tasks-header h3 {
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--neu-text-lighter);
+  color: var(--nav-text);
   margin: 0;
-}
-
-.all-tasks-btn {
-  padding: 4px 10px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--neu-text-lighter);
-  text-decoration: none;
-  background: var(--nav-recent-btn);
-  box-shadow: var(--neu-shadow-btn-sm);
-  border-radius: 8px;
-  transition: all 0.2s ease;
-  white-space: nowrap;
-}
-
-.all-tasks-btn:hover {
-  box-shadow: var(--neu-shadow-btn-hover-sm);
-  color: var(--neu-primary);
-  transform: translateY(-1px);
-}
-
-.all-tasks-btn.active {
-  box-shadow: var(--neu-shadow-btn-active-sm);
-  color: var(--neu-text-lighter);
 }
 
 .recent-tasks-list {
@@ -619,48 +631,158 @@ watch(() => route.path, (newPath, oldPath) => {
 .task-name {
   font-size: 0.8rem;
   font-weight: 400;
-  color: var(--neu-text-lighter);
+  color: var(--nav-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1.3;
 }
 
+/* === 響應式設計：底部 Tab Bar === */
 @media (max-width: 768px) {
   .navigation {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    top: auto;
     width: 100%;
     min-width: 100%;
     height: auto;
-    position: relative;
-    top: 0;
-    padding: 20px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-around;
+    gap: 0;
+    padding: 8px 12px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    border-radius: 0;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
   }
 
+  .navigation::after {
+    display: none;
+  }
+
+  /* 隱藏收合按鈕 */
+  .toggle-btn {
+    display: none;
+  }
+
+  /* 隱藏 brand */
+  .nav-brand {
+    display: none;
+  }
+
+  /* 導航連結：水平排列 */
   .nav-links {
     flex-direction: row;
-    flex-wrap: wrap;
-    justify-content: center;
+    gap: 0;
+    flex: 1;
+    justify-content: space-around;
   }
 
   .nav-link {
-    flex: 1;
-    min-width: 140px;
+    flex-direction: column;
+    align-items: center;
     justify-content: center;
+    gap: 4px;
+    padding: 8px 16px;
+    min-width: 64px;
+    border-radius: 8px;
+  }
+
+  .nav-link span {
+    font-size: 10px;
+    font-weight: 500;
+  }
+
+  .nav-link svg {
+    width: 22px;
+    height: 22px;
   }
 
   .nav-link:hover {
-    transform: translateY(-2px);
+    transform: none;
   }
 
-  .nav-user {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    padding-top: 16px;
+  .nav-link.active {
+    background: var(--nav-active-bg);
   }
 
+  /* 隱藏最近任務 */
   .recent-tasks {
     display: none;
+  }
+
+  /* 隱藏 spacer */
+  .nav-spacer {
+    display: none;
+  }
+
+  /* 用戶區域 */
+  .nav-user {
+    flex-direction: row;
+    gap: 8px;
+    padding: 0;
+    margin: 0;
+    border-top: none;
+    background: transparent;
+  }
+
+  .nav-user::before {
+    display: none;
+  }
+
+  .avatar-circle {
+    width: 36px;
+    height: 36px;
+    font-size: 1rem;
+  }
+
+  /* 隱藏登出按鈕 */
+  .logout-btn {
+    display: none;
+  }
+}
+
+/* 小手機進一步調整 */
+@media (max-width: 480px) {
+  .navigation {
+    padding: 6px 8px;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .nav-link {
+    padding: 6px 12px;
+    min-width: 56px;
+  }
+
+  .nav-link span {
+    font-size: 9px;
+  }
+
+  .nav-link svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .avatar-circle {
+    width: 32px;
+    height: 32px;
+    font-size: 0.9rem;
+  }
+
+  .logout-btn {
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+    padding: 6px;
+  }
+
+  .logout-btn svg {
+    width: 16px;
+    height: 16px;
   }
 }
 </style>

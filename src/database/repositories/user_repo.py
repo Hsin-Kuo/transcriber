@@ -1,7 +1,9 @@
 """用戶資料存取層"""
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from bson import ObjectId
+
+from ...utils.time_utils import get_utc_timestamp
 
 
 class UserRepository:
@@ -42,7 +44,7 @@ class UserRepository:
 
     async def update(self, user_id: str, updates: Dict[str, Any]) -> bool:
         """更新用戶資料"""
-        updates["updated_at"] = datetime.utcnow()
+        updates["updated_at"] = get_utc_timestamp()
         result = await self.collection.update_one(
             {"_id": ObjectId(user_id)},
             {"$set": updates}
@@ -55,12 +57,11 @@ class UserRepository:
 
     async def save_refresh_token(self, user_id: str, token: str) -> bool:
         """保存 Refresh Token"""
-        from datetime import timedelta
-
+        now = get_utc_timestamp()
         token_data = {
             "token": token,
-            "created_at": datetime.utcnow(),
-            "expires_at": datetime.utcnow() + timedelta(days=30),
+            "created_at": now,
+            "expires_at": now + (30 * 24 * 60 * 60),  # 30 天（秒）
             "revoked": False
         }
 
@@ -78,7 +79,7 @@ class UserRepository:
                 "$elemMatch": {
                     "token": token,
                     "revoked": False,
-                    "expires_at": {"$gt": datetime.utcnow()}
+                    "expires_at": {"$gt": get_utc_timestamp()}
                 }
             }
         })

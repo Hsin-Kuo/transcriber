@@ -16,17 +16,25 @@
     "clickToChangeSpeaker": "點擊更換講者",
     "clickToJumpToTime": "點擊跳轉到此時間",
     "speakerPlaceholder": "講者 {number}",
-    "toggleSettings": "顯示/隱藏設置"
+    "toggleSettings": "顯示/隱藏設置",
+    "rename": "重新命名"
   },
   "userSettings": {
     "title": "使用者設定",
     "description": "管理您的帳戶資訊和配額使用情況",
     "accountInfo": "帳戶資訊",
+    "account": "帳戶",
+    "plan": "方案",
     "email": "電子郵件",
     "accountType": "帳戶類型",
-    "language": "介面語言",
-    "languageDescription": "選擇您偏好的介面語言",
+    "interface": "介面",
+    "language": "語言",
+    "timezone": "時區",
+    "theme": "色調",
+    "themeLight": "淺色",
+    "themeDark": "深色",
     "quotaUsage": "配額使用情況",
+    "tasks": "任務數",
     "transcriptions": "轉錄次數",
     "duration": "轉錄時長",
     "storage": "儲存空間",
@@ -74,8 +82,8 @@
     "errorUpload": "上傳失敗"
   },
   "uploadZone": {
-    "clickToUpload": "點擊上傳或拖放檔案",
-    "supportedFormats": "支援 M4A、MP3、WAV、MP4 等音訊格式",
+    "clickToUpload": "點擊或拖放檔案",
+    "supportedFormats": "支援音訊（M4A、MP3、WAV）及影片（MP4、MOV、AVI）格式",
     "uploadingFile": "上傳檔案中..."
   },
   "tasksView": {
@@ -90,6 +98,7 @@
     "all": "全部",
     "paragraph": "段落",
     "subtitle": "字幕",
+    "hasAudio": "音檔",
     "taskName": "任務名稱",
     "status": "狀態",
     "type": "類型",
@@ -209,6 +218,7 @@
     "save": "儲存",
     "cancel": "取消",
     "download": "下載",
+    "delete": "刪除",
     "viewMode": "檢視模式",
     "paragraph": "段落",
     "subtitle": "字幕",
@@ -220,7 +230,9 @@
     "autoSavingSpeaker": "自動儲存講者名稱",
     "segmentsAutoSaved": "Segments 已自動儲存",
     "errorSavingSegments": "儲存 segments 失敗",
-    "confirmLeave": "你有未儲存的編輯內容，確定要離開嗎？"
+    "confirmLeave": "你有未儲存的編輯內容，確定要離開嗎？",
+    "moreOptions": "更多選項",
+    "replacing": "正在取代..."
   },
   "audioPlayer": {
     "browserNotSupported": "您的瀏覽器不支援音訊播放。",
@@ -267,6 +279,22 @@
     "replaceWith": "取代為",
     "replaceAll": "取代全部"
   },
+  "searchReplace": {
+    "search": "搜尋",
+    "searchPlaceholder": "搜尋文字...",
+    "replacePlaceholder": "取代為...",
+    "noResults": "無結果",
+    "previous": "上一個 (Shift+Enter)",
+    "next": "下一個 (Enter)",
+    "close": "關閉 (Esc)",
+    "replace": "取代",
+    "replaceOne": "取代當前項目",
+    "replaceAll": "全部取代",
+    "replaceAllTitle": "取代所有匹配項目",
+    "confirmReplaceAll": "找到 {count} 處「{search}」\n確定全部取代為「{replace}」嗎？",
+    "matchCase": "區分大小寫",
+    "matchWholeWord": "全字匹配"
+  },
   "transcriptMetadata": {
     "characters": "字"
   },
@@ -281,6 +309,69 @@
     "unknownError": "發生未知錯誤",
     "updateFailed": "更新失敗",
     "cannotUpdateTaskName": "無法更新任務名稱",
-    "cannotUpdateSpeakerNames": "無法更新講者名稱"
+    "cannotUpdateSpeakerNames": "無法更新講者名稱",
+    "cannotUpdateTags": "無法更新標籤"
+  },
+  "taskInfo": {
+    "lastEdited": "完成時間",
+    "words": "字",
+    "tags": "標籤"
+  },
+  "displaySettings": {
+    "timecodeMarkers": "時間標記",
+    "darkMode": "深色模式",
+    "fontSize": "字體大小",
+    "fontWeight": "字重",
+    "fontFamily": "字體",
+    "sansSerif": "無襯線體",
+    "serif": "襯線體"
+  },
+  "batchUpload": {
+    "title": "批次上傳（{count} 個檔案）",
+    "close": "關閉",
+    "expandSettings": "展開設定",
+    "removeFile": "移除檔案",
+    "customName": "自訂名稱",
+    "additionalTags": "額外標籤",
+    "tagPlaceholder": "輸入標籤後按 Enter",
+    "add": "新增",
+    "maxFilesReached": "已達檔案數量上限（最多 {max} 個）",
+    "commonSettings": "統一設定",
+    "addMoreFiles": "新增更多檔案",
+    "createTasks": "建立 {count} 個任務",
+    "tooManyFiles": "檔案數量過多",
+    "maxFilesMessage": "批次上傳最多支援 {max} 個檔案，您選擇了 {count} 個，將只上傳前 {max} 個",
+    "success": "批次建立成功",
+    "successMessage": "成功建立 {count} 個轉錄任務",
+    "partialSuccess": "部分建立成功",
+    "partialSuccessMessage": "成功建立 {created} 個任務，{failed} 個失敗",
+    "failed": "批次建立失敗"
+  },
+  "aiSummary": {
+    "title": "AI 摘要",
+    "processing": "生成中",
+    "completed": "已生成",
+    "generating": "正在生成 AI 摘要...",
+    "generate": "生成 AI 摘要",
+    "regenerate": "重新生成",
+    "retry": "重試",
+    "executiveSummary": "執行摘要",
+    "keyPoints": "重點",
+    "contentSegments": "內容段落",
+    "actionItems": "待辦事項",
+    "highlights": "重點",
+    "summary": "摘要",
+    "keywords": "關鍵詞",
+    "model": "模型",
+    "emptyHint": "點擊下方按鈕，讓 AI 為您生成逐字稿的重點摘要",
+    "loadError": "載入摘要失敗，請稍後再試",
+    "generateError": "生成摘要失敗，請稍後再試",
+    "typeMeeting": "會議",
+    "typeLecture": "講座",
+    "typeInterview": "訪談",
+    "typeGeneral": "一般",
+    "sentimentPositive": "正面",
+    "sentimentNeutral": "中性",
+    "sentimentNegative": "負面"
   }
 }

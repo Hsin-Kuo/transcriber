@@ -52,7 +52,7 @@
                 <circle cx="12" cy="12" r="10"></circle>
                 <polyline points="12 6 12 12 16 14"></polyline>
               </svg>
-              {{ task.timestamps?.created_at || task.created_at }}
+              {{ formatTimestamp(task.timestamps?.created_at || task.created_at) }}
             </span>
 
             <!-- 任務類型 -->
@@ -94,65 +94,62 @@
 
         <!-- 操作按鈕區域 -->
         <div class="task-actions" @click.stop>
-          <!-- Keep Audio 切換開關 -->
-          <div
-            v-if="task.status === 'completed' && (task.result?.audio_file || task.audio_file)"
-            class="keep-audio-toggle"
-            :title="getKeepAudioTooltip()"
-          >
-            <label class="toggle-label">
-              <div class="toggle-switch-wrapper">
-                <input
-                  type="checkbox"
-                  :checked="task.keep_audio"
-                  @change="handleToggleKeepAudio"
-                  :disabled="!task.keep_audio && keepAudioCount >= 3"
-                  class="toggle-input"
-                />
-                <span class="toggle-slider">
-                  <!-- 解鎖圖標（未選中時顯示） -->
-                  <svg class="lock-icon unlock-icon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                    <path d="M7 11V7a5 5 0 0 1 9.9-1"></path>
+          <!-- 已完成任務的按鈕行 -->
+          <div v-if="task.status === 'completed'" class="completed-actions-row">
+            <!-- Keep Audio 切換開關 -->
+            <div
+              v-if="task.result?.audio_file || task.audio_file"
+              class="keep-audio-toggle"
+              :title="getKeepAudioTooltip()"
+            >
+              <label class="toggle-label">
+                <div class="toggle-pin-wrapper">
+                  <input
+                    type="checkbox"
+                    :checked="task.keep_audio"
+                    @change="handleToggleKeepAudio"
+                    :disabled="!task.keep_audio && keepAudioCount >= 3"
+                    class="toggle-input"
+                  />
+                  <!-- 圖釘（線條風格） -->
+                  <svg class="pin-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M9 4v6l-2 4v2h10v-2l-2-4V4"/>
+                    <line x1="12" y1="16" x2="12" y2="21"/>
+                    <line x1="8" y1="4" x2="16" y2="4"/>
                   </svg>
-                  <!-- 上鎖圖標（選中時顯示） -->
-                  <svg class="lock-icon locked-icon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                  </svg>
+                </div>
+                <span v-if="isNewest" class="newest-badge" :title="$t('taskList.newestTaskAudioKept')">
+                  {{ $t('taskList.newestBadge') }}
                 </span>
-              </div>
-              <span v-if="isNewest" class="newest-badge" :title="$t('taskList.newestTaskAudioKept')">
-                {{ $t('taskList.newestBadge') }}
-              </span>
-            </label>
-          </div>
+              </label>
+            </div>
 
-          <!-- 已完成任務的雙聯按鈕組 -->
-          <div v-if="task.status === 'completed'" class="btn-group">
-            <button
-              class="btn btn-download btn-group-left btn-icon"
-              @click.stop="emit('download', task)"
-              :title="$t('taskList.downloadTranscript')"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-              </svg>
-            </button>
-            <button
-              class="btn btn-danger btn-group-right btn-icon"
-              @click.stop="emit('delete', task.task_id)"
-              :title="$t('taskList.deleteTask')"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="3 6 5 6 21 6"></polyline>
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                <line x1="10" y1="11" x2="10" y2="17"></line>
-                <line x1="14" y1="11" x2="14" y2="17"></line>
-              </svg>
-            </button>
+            <!-- 雙聯按鈕組 -->
+            <div class="btn-group">
+              <button
+                class="btn btn-download btn-group-left btn-icon"
+                @click.stop="emit('download', task)"
+                :title="$t('taskList.downloadTranscript')"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+              </button>
+              <button
+                class="btn btn-danger btn-group-right btn-icon"
+                @click.stop="emit('delete', task.task_id)"
+                :title="$t('taskList.deleteTask')"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                  <line x1="10" y1="11" x2="10" y2="17"></line>
+                  <line x1="14" y1="11" x2="14" y2="17"></line>
+                </svg>
+              </button>
+            </div>
           </div>
 
           <!-- 進行中任務的取消按鈕 -->
@@ -187,7 +184,31 @@ import { useI18n } from 'vue-i18n'
 import { useTaskHelpers } from '../../composables/task/useTaskHelpers'
 import TaskTagsSection from './TaskTagsSection.vue'
 
-const { t: $t } = useI18n()
+const { t: $t, locale } = useI18n()
+
+// 格式化時間戳
+function formatTimestamp(value) {
+  if (!value) return ''
+  try {
+    let date
+    if (typeof value === 'number') {
+      date = new Date(value * 1000)
+    } else {
+      date = new Date(value)
+    }
+    if (isNaN(date.getTime())) return String(value)
+    const localeCode = locale.value === 'zh-TW' ? 'zh-TW' : 'en-US'
+    return date.toLocaleString(localeCode, {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  } catch {
+    return String(value)
+  }
+}
 const {
   getStatusText,
   getAudioDuration,
@@ -265,7 +286,7 @@ function getKeepAudioTooltip() {
 
 .electric-card.task-wrapper {
   position: relative;
-  margin-bottom: -40px;
+  /* margin-bottom: -40px; */
   filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.12));
 }
 
@@ -281,11 +302,11 @@ function getKeepAudioTooltip() {
 .electric-card.task-wrapper:nth-child(10) { z-index: 100; }
 
 .task-item {
-  padding: 28px 20px 48px 20px;
+  padding: 28px 20px 28px 20px;
   /* margin-left: 10px; */
   transition: all 0.3s;
   position: relative;
-  background: var(--upload-bg);
+  /* background: var(--upload-bg); */
   background-image:
     repeating-linear-gradient(0deg, transparent, transparent 9px, rgba(0, 0, 0, 0.015) 9px, rgba(0, 0, 0, 0.015) 10px),
     repeating-linear-gradient(90deg, transparent, transparent 9px, rgba(0, 0, 0, 0.015) 9px, rgba(0, 0, 0, 0.015) 10px);
@@ -306,12 +327,8 @@ function getKeepAudioTooltip() {
 }
 
 .task-wrapper:hover .task-item {
-  filter: drop-shadow(0 6px 12px rgba(var(--color-primary-rgb), 0.2));
+  /* filter: drop-shadow(0 6px 12px rgba(var(--color-primary-rgb), 0.2)); */
   transform: translateY(-2px);
-}
-
-.task-wrapper:hover .task-item.clickable {
-  filter: drop-shadow(0 8px 16px rgba(var(--color-primary-rgb), 0.25));
 }
 
 .task-item.batch-edit-mode {
@@ -369,7 +386,8 @@ function getKeepAudioTooltip() {
 
 .task-header h3 {
   font-size: 16px;
-  color: var(--color-text-dark);
+  font-weight: 450;
+  color: var(--nav-text);
   margin: 0;
 }
 
@@ -434,27 +452,27 @@ function getKeepAudioTooltip() {
   color: var(--color-neutral-light);
 }
 
-.badge-task-type,
-.badge-diarize {
+.badge-task-type {
   padding: 2px 8px;
   border-radius: 4px;
+  
   font-size: 12px;
   font-weight: 500;
   transition: all 0.2s;
   border: 1px solid;
 }
 
-.badge-paragraph {
+/* .badge-paragraph {
   background: var(--color-teal-light);
   border-color: var(--color-teal-light);
   color: rgba(255, 255, 255, 0.95);
-}
-
+} */
+/* 
 .badge-subtitle {
   background: var(--color-teal);
   border-color: var(--color-teal);
   color: rgba(255, 255, 255, 0.95);
-}
+} */
 
 .badge-diarize {
   background: rgba(246, 156, 92, 0.1);
@@ -531,6 +549,14 @@ function getKeepAudioTooltip() {
   flex-shrink: 0;
 }
 
+/* 已完成任務的按鈕行 */
+.completed-actions-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  /* gap: 12px; */
+}
+
 /* Keep Audio 切換開關 */
 .keep-audio-toggle {
   display: flex;
@@ -544,122 +570,69 @@ function getKeepAudioTooltip() {
   gap: 10px;
   cursor: pointer;
   user-select: none;
-  padding-right: 5px;
+  padding: 0px 5px;
   position: relative;
+  /* border: 2px solid var(--nav-text); */
+  border-radius: 10%;
 }
 
-.toggle-label:hover .toggle-slider {
-  transform: scale(1.05);
-}
-
-.toggle-switch-wrapper {
+/* 圖釘式切換開關 */
+.toggle-pin-wrapper {
   position: relative;
-  width: 44px;
-  height: 24px;
+  width: 32px;
+  height: 32px;
   display: inline-block;
 }
 
-.toggle-input {
+.toggle-pin-wrapper .toggle-input {
   opacity: 0;
   width: 0;
   height: 0;
   position: absolute;
 }
 
-.toggle-slider {
+/* 圖釘圖標 */
+.pin-icon {
   position: absolute;
+  width: 24px;
+  height: 24px;
+  top: 50%;
+  left: 50%;
+  color: #555;
   cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: var(--color-gray-100);
   transition: all 0.3s ease;
-  border-radius: 24px;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  transform-origin: center 30%;
 }
 
-.toggle-slider:before {
-  position: absolute;
-  content: "";
-  height: 18px;
-  width: 18px;
-  left: 3px;
-  bottom: 3px;
-  background-color: white;
-  transition: 0.3s;
-  border-radius: 50%;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-}
-
-.toggle-input:checked + .toggle-slider {
-  background: linear-gradient(135deg, var(--electric-primary) 0%, #b8762d 100%);
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1), 0 0 8px rgba(var(--color-primary-rgb), 0.3);
-}
-
-.toggle-input:checked + .toggle-slider:before {
-  transform: translateX(20px);
-}
-
-.toggle-input:disabled + .toggle-slider {
-  opacity: 0.5;
-  cursor: not-allowed;
-  background-color: var(--color-gray-100);
-}
-
-.toggle-input:disabled + .toggle-slider:before {
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
-}
-
-.toggle-label:hover .toggle-slider:not(.toggle-input:disabled + .toggle-slider) {
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2), 0 0 4px rgba(0, 0, 0, 0.1);
-}
-
-.toggle-label:hover .toggle-input:checked + .toggle-slider {
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1), 0 0 12px rgba(var(--color-primary-rgb), 0.4);
-}
-
-.lock-icon {
-  position: absolute;
-  transition: all 0.3s ease;
-  z-index: 1;
-  pointer-events: none;
-}
-
-.unlock-icon {
-  left: 6px;
-  color: var(--color-gray-300);
+/* 未選中狀態 - 傾斜 */
+.toggle-input:not(:checked) ~ .pin-icon {
+  transform: translate(-50%, -50%) rotate(35deg);
+  color: var(--nav-text);
   opacity: 1;
 }
 
-.locked-icon {
-  right: 6px;
-  color: rgb(177, 79, 22);
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
-  opacity: 0;
-}
-
-.toggle-input:not(:checked) + .toggle-slider .unlock-icon {
+/* 選中狀態 - 垂直插入 */
+.toggle-input:checked ~ .pin-icon {
+  transform: translate(-50%, -50%) rotate(0deg);
+  color: #e67216;
   opacity: 1;
 }
 
-.toggle-input:not(:checked) + .toggle-slider .locked-icon {
-  opacity: 0;
-}
-
-.toggle-input:checked + .toggle-slider .unlock-icon {
-  opacity: 0;
-}
-
-.toggle-input:checked + .toggle-slider .locked-icon {
-  opacity: 1;
-}
-
-.toggle-input:disabled + .toggle-slider .lock-icon {
+/* 禁用狀態 */
+.toggle-input:disabled ~ .pin-icon {
   opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* hover 效果 */
+.toggle-label:hover .toggle-input:not(:disabled):not(:checked) ~ .pin-icon {
+  transform: translate(-50%, -50%) rotate(35deg) scale(1.08);
+  color: #444;
+}
+
+.toggle-label:hover .toggle-input:not(:disabled):checked ~ .pin-icon {
+  transform: translate(-50%, -50%) rotate(0deg) scale(1.08);
+  color: #ff8c2a;
 }
 
 .newest-badge {
@@ -705,21 +678,21 @@ function getKeepAudioTooltip() {
 }
 
 .btn-download {
-  background: rgba(var(--color-primary-rgb), 0.15);
-  color: var(--color-primary);
+  background: #00000000;
+  color: var(--nav-text);
 }
 
 .btn-download:hover {
-  background: rgba(var(--color-primary-rgb), 0.25);
+  background: #00000000;
 }
 
 .btn-danger {
-  background: rgba(var(--color-danger-rgb), 0.15);
-  color: var(--color-danger);
+  background: #00000000;
+  color: var(--nav-text);
 }
 
 .btn-danger:hover {
-  background: rgba(var(--color-danger-rgb), 0.25);
+  background: #00000000;
 }
 
 .btn-warning {
@@ -738,17 +711,190 @@ function getKeepAudioTooltip() {
 }
 
 .btn-group-left {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
+  /* border: 1.5px solid var(--nav-text); */
+  border-radius: 10%;
+  /* border-top-right-radius: 0;
+  border-bottom-right-radius: 0; */
 }
 
 .btn-group-right {
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
-  border-left: 1px solid rgba(255, 255, 255, 0.3);
+  /* border-left: 1px solid rgba(255, 255, 255, 0.3); */
 }
 
 .btn-group .btn {
   box-shadow: none !important;
+}
+
+/* === 響應式設計 === */
+
+/* 平板以下 */
+@media (max-width: 768px) {
+  .task-item {
+    padding: 20px 16px;
+    clip-path: polygon(
+      20px 0,
+      100% 0,
+      100% 100%,
+      0 100%,
+      0 20px
+    );
+  }
+
+  /* 保持按鈕與標題同行 */
+  .task-main {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .task-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .task-header h3 {
+    font-size: var(--font-size-lg);
+    word-break: break-word;
+  }
+
+  .task-meta {
+    gap: 10px;
+    font-size: 12px;
+  }
+
+  .task-actions {
+    flex-shrink: 0;
+  }
+
+  /* 隱藏音檔、下載、刪除按鈕 */
+  .keep-audio-toggle,
+  .btn-group {
+    display: none;
+  }
+
+  .btn {
+    padding: 8px 12px;
+  }
+
+  .btn-icon {
+    padding: 8px;
+  }
+}
+
+/* 小手機 */
+@media (max-width: 480px) {
+  .task-item {
+    padding: 14px 10px;
+    gap: 6px;
+    clip-path: polygon(
+      14px 0,
+      100% 0,
+      100% 100%,
+      0 100%,
+      0 14px
+    );
+  }
+
+  .task-main {
+    gap: 8px;
+  }
+
+  .task-header {
+    margin-bottom: 6px;
+    padding-bottom: 4px;
+  }
+
+  .task-header h3 {
+    font-size: var(--font-size-lg);
+  }
+
+  .task-divider {
+    font-size: 11px;
+  }
+
+  .badge {
+    font-size: 10px;
+    padding: 1px 5px;
+  }
+
+  .task-meta {
+    gap: 6px;
+    font-size: 10px;
+    margin-bottom: 6px;
+  }
+
+  .task-meta .meta-item svg {
+    width: 11px;
+    height: 11px;
+  }
+
+  .badge-task-type {
+    font-size: 10px;
+    padding: 1px 5px;
+  }
+
+  /* 進度條 */
+  .task-progress {
+    margin-top: 6px;
+  }
+
+  .progress-text {
+    font-size: 11px;
+  }
+
+  /* 操作按鈕 - 更緊湊 */
+  .completed-actions-row {
+    gap: 2px;
+  }
+
+  .keep-audio-toggle {
+    gap: 2px;
+  }
+
+  .toggle-pin-wrapper {
+    width: 24px;
+    height: 24px;
+  }
+
+  .pin-icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  .newest-badge {
+    font-size: 9px;
+    top: -10px;
+    right: -6px;
+    padding: 0px 3px;
+  }
+
+  .btn {
+    padding: 6px;
+    font-size: 11px;
+    min-height: auto;
+  }
+
+  .btn-icon {
+    padding: 6px;
+  }
+
+  .btn-icon svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  /* 批次選擇框 */
+  .batch-checkbox {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* 錯誤訊息 */
+  .task-error {
+    font-size: 11px;
+    padding: 5px 8px;
+  }
 }
 </style>

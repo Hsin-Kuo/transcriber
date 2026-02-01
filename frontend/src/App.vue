@@ -64,12 +64,20 @@ provide('showNotification', (options) => {
   display: flex;
   gap: 20px;
   padding: 0 20px 20px 0;
+  padding-left: 240px;
   box-sizing: border-box;
+  transition: padding-left 0.3s ease;
+}
+
+body.nav-collapsed .app-container {
+  padding-left: 80px;
 }
 
 /* 沒有導航欄時的樣式調整 */
-.app-container.no-nav {
+.app-container.no-nav,
+body.nav-collapsed .app-container.no-nav {
   padding: 0;
+  padding-left: 0;
   gap: 0;
 }
 
@@ -116,11 +124,44 @@ body.transcript-detail-page .app-container {
 body.transcript-detail-page .content-wrapper {
   height: 100%;
   overflow: hidden;
+  max-width: none;
+}
+
+/* 手機版任務詳情頁面隱藏導航列 */
+@media (max-width: 768px) {
+  body.transcript-detail-page .navigation {
+    display: none;
+  }
+
+  body.transcript-detail-page .app-container {
+    padding-bottom: 0;
+  }
 }
 
 @media (max-width: 768px) {
   .app-container {
     flex-direction: column;
+    padding: 0 12px;
+    padding-left: 12px;
+    gap: 0;
+    /* 為底部固定導航留出空間 */
+    padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .content-wrapper {
+    padding-top: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-container {
+    padding: 0 8px;
+    padding-left: 8px;
+    padding-bottom: calc(52px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .content-wrapper {
+    padding-top: 8px;
   }
 }
 

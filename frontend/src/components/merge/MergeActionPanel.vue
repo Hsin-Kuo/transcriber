@@ -70,9 +70,8 @@ defineEmits(['start-transcription', 'download-merged', 'cancel'])
   max-width: 700px;
   margin: 20px auto;
   padding: 24px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   border-radius: 16px;
-  box-shadow: var(--neu-shadow-raised);
 }
 
 .action-description {
@@ -122,19 +121,16 @@ defineEmits(['start-transcription', 'download-merged', 'cancel'])
 }
 
 .btn-primary {
-  background: var(--neu-bg);
-  color: var(--neu-primary);
-  box-shadow: var(--neu-shadow-btn);
+  background: var(--main-bg);
+  color: var(--main-primary);
 }
 
 .btn-primary:hover:not(:disabled) {
-  box-shadow: var(--neu-shadow-btn-hover);
-  color: var(--neu-primary-dark);
+  color: var(--main-primary-dark);
   transform: translateY(-1px);
 }
 
 .btn-primary:active:not(:disabled) {
-  box-shadow: var(--neu-shadow-btn-active);
   transform: translateY(0);
 }
 

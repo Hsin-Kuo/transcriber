@@ -1,88 +1,11 @@
 <template>
-  <div class="subtitle-table-wrapper" tabindex="-1">
+  <div class="subtitle-table-wrapper" ref="wrapperRef" tabindex="-1" @scroll="handleWrapperScroll">
     <table class="subtitle-table">
       <thead>
         <tr>
           <th class="col-time" :class="{ 'time-start': timeFormat === 'start', 'time-range': timeFormat === 'range' }">{{ $t('subtitleTable.time') }}</th>
           <th v-if="hasSpeakerInfo" class="col-speaker">{{ $t('subtitleTable.speaker') }}</th>
-          <th class="col-content">
-            <div class="content-header">
-              <span>{{ $t('subtitleTable.content') }}</span>
-              <div class="settings-container" ref="settingsContainerRef">
-                <button
-                  @click.stop="toggleSettings"
-                  class="settings-btn"
-                  :class="{ active: showSettings }"
-                  :title="$t('subtitleTable.toggleSettings')"
-                >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                    <circle cx="8" cy="3" r="1.5"/>
-                    <circle cx="8" cy="8" r="1.5"/>
-                    <circle cx="8" cy="13" r="1.5"/>
-                  </svg>
-                </button>
-
-                <!-- 浮動設置面板 -->
-                <div v-if="showSettings" class="settings-panel">
-                  <!-- 時間格式切換 -->
-                  <div class="setting-group">
-                    <label class="setting-label">{{ $t('subtitleTable.timeFormat') }}</label>
-                    <div class="time-format-toggle">
-                      <button
-                        @click="$emit('update:timeFormat', 'start')"
-                        :class="{ active: timeFormat === 'start' }"
-                        class="format-btn"
-                      >{{ $t('subtitleTable.startTime') }}</button>
-                      <button
-                        @click="$emit('update:timeFormat', 'range')"
-                        :class="{ active: timeFormat === 'range' }"
-                        class="format-btn"
-                      >{{ $t('subtitleTable.timeRange') }}</button>
-                    </div>
-                  </div>
-
-                  <!-- 疏密度滑桿 -->
-                  <div class="setting-group">
-                    <label class="setting-label">{{ $t('subtitleTable.contentDensity') }}</label>
-                    <input
-                      type="range"
-                      :value="densityThreshold"
-                      @input="$emit('update:densityThreshold', Number($event.target.value))"
-                      min="0.0"
-                      max="120.0"
-                      step="1.0"
-                      class="density-slider"
-                    />
-                    <div class="slider-labels">
-                      <span>{{ $t('subtitleTable.sparse') }}</span>
-                      <span>{{ $t('subtitleTable.dense') }}</span>
-                    </div>
-                  </div>
-
-                  <!-- 講者名稱設定 -->
-                  <div v-if="hasSpeakerInfo && uniqueSpeakers.length > 0" class="setting-group">
-                    <label class="setting-label">{{ $t('subtitleTable.speakerNames') }}</label>
-                    <div class="speaker-mappings">
-                      <div
-                        v-for="speaker in uniqueSpeakers"
-                        :key="speaker"
-                        class="speaker-item"
-                      >
-                        <label class="speaker-code">{{ speaker }}</label>
-                        <input
-                          type="text"
-                          :value="speakerNames[speaker] || ''"
-                          @input="updateSpeakerName(speaker, $event.target.value)"
-                          :placeholder="$t('subtitleTable.speakerPlaceholder', { number: speaker.replace('SPEAKER_', '') })"
-                          class="speaker-input"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </th>
+          <th class="col-content">{{ $t('subtitleTable.content') }}</th>
         </tr>
       </thead>
       <tbody>
@@ -119,6 +42,7 @@
             class="col-content"
             :contenteditable="isEditing"
             @blur="$emit('update-row-content', group.id, $event)"
+            @paste="handlePaste"
           >
             <span
               v-for="(segment, idx) in group.segments"
@@ -152,7 +76,18 @@
           :class="{ 'current': currentEditingGroup?.speaker === speaker }"
           @click="selectSpeaker(speaker)"
         >
-          {{ getSpeakerDisplayName(speaker) }}
+          <span class="speaker-name">{{ getSpeakerDisplayName(speaker) }}</span>
+          <button
+            v-if="currentEditingGroup?.speaker === speaker"
+            class="btn-rename"
+            @click.stop="handleRename(speaker)"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+            </svg>
+            <span class="btn-tooltip">{{ $t('subtitleTable.rename') }}</span>
+          </button>
         </button>
       </div>
 
@@ -182,9 +117,6 @@ import { ref, computed, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const { t: $t } = useI18n()
-
-const showSettings = ref(false)
-const settingsContainerRef = ref(null)
 
 const props = defineProps({
   groupedSegments: {
@@ -221,7 +153,10 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['seek-to-time', 'update-row-content', 'update:timeFormat', 'update:densityThreshold', 'update:speakerNames', 'update-segment-speaker'])
+const emit = defineEmits(['seek-to-time', 'update-row-content', 'update:speakerNames', 'update-segment-speaker', 'open-speaker-settings'])
+
+// 元素引用
+const wrapperRef = ref(null)
 
 // 講者選擇浮窗狀態
 const showSpeakerPicker = ref(false)
@@ -229,6 +164,22 @@ const speakerPickerPosition = ref({ top: 0, left: 0 })
 const currentEditingGroup = ref(null)
 const newSpeakerName = ref('')
 const speakerPickerRef = ref(null)
+
+// 處理貼上事件，只允許純文字
+function handlePaste(e) {
+  e.preventDefault()
+  const text = e.clipboardData?.getData('text/plain') || ''
+  if (text) {
+    document.execCommand('insertText', false, text)
+  }
+}
+
+// 處理 wrapper 滾動事件（關閉講者選擇浮窗）
+function handleWrapperScroll() {
+  if (showSpeakerPicker.value) {
+    closeSpeakerPicker()
+  }
+}
 
 // 獲取所有唯一的講者代號
 const uniqueSpeakers = computed(() => {
@@ -241,12 +192,6 @@ const uniqueSpeakers = computed(() => {
   return Array.from(speakers).sort()
 })
 
-// 更新講者名稱
-function updateSpeakerName(speakerCode, name) {
-  const updated = { ...props.speakerNames, [speakerCode]: name }
-  emit('update:speakerNames', updated)
-}
-
 // 獲取講者顯示名稱
 function getSpeakerDisplayName(speakerCode) {
   if (!speakerCode) return '-'
@@ -256,28 +201,6 @@ function getSpeakerDisplayName(speakerCode) {
   }
   // 否則返回原始代號
   return speakerCode
-}
-
-// 點擊外部關閉面板
-function handleClickOutside(event) {
-  if (settingsContainerRef.value && !settingsContainerRef.value.contains(event.target)) {
-    showSettings.value = false
-  }
-}
-
-// 切換設置面板
-function toggleSettings() {
-  showSettings.value = !showSettings.value
-
-  if (showSettings.value) {
-    // 打開時，下一個 tick 添加全局監聽器
-    nextTick(() => {
-      document.addEventListener('click', handleClickOutside)
-    })
-  } else {
-    // 關閉時，移除監聽器
-    document.removeEventListener('click', handleClickOutside)
-  }
 }
 
 // 開啟講者選擇浮窗
@@ -330,6 +253,13 @@ function selectSpeaker(speakerCode) {
   closeSpeakerPicker()
 }
 
+// 處理重新命名講者
+function handleRename(speakerCode) {
+  closeSpeakerPicker()
+  // 通知父組件打開設置面板
+  emit('open-speaker-settings', speakerCode)
+}
+
 // 新增講者並設定名稱
 function addNewSpeaker() {
   const name = newSpeakerName.value.trim()
@@ -359,173 +289,11 @@ function addNewSpeaker() {
 
 // 組件卸載時清理監聽器
 onUnmounted(() => {
-  document.removeEventListener('click', handleClickOutside)
   document.removeEventListener('click', handleSpeakerPickerClickOutside)
 })
 </script>
 
 <style scoped>
-/* 設置容器 */
-.settings-container {
-  position: relative;
-}
-
-/* 浮動設置面板 */
-.settings-panel {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  min-width: 280px;
-  background: var(--upload-bg);
-  border-radius: 8px;
-  padding: 16px;
-  border: 1px solid rgba(163, 177, 198, 0.2);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-  z-index: 1000;
-  animation: slideDown 0.2s ease;
-}
-
-@keyframes slideDown {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.setting-group {
-  margin-bottom: 16px;
-}
-
-.setting-group:last-child {
-  margin-bottom: 0;
-}
-
-.setting-label {
-  display: block;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--neu-text-light);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 8px;
-}
-
-/* 時間格式切換 */
-.time-format-toggle {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-}
-
-.format-btn {
-  padding: 8px 12px;
-  border: none;
-  border-radius: 6px;
-  background: var(--upload-bg);
-  color: var(--neu-text-light);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.format-btn.active {
-  color: var(--neu-primary);
-  background: var(--neu-bg);
-}
-
-.format-btn:hover {
-  transform: translateY(-1px);
-}
-
-/* 疏密度滑桿 */
-.density-slider {
-  width: 100%;
-  height: 6px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: rgba(163, 177, 198, 0.25);
-  border-radius: 3px;
-  outline: none;
-  cursor: pointer;
-}
-
-.density-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 16px;
-  height: 16px;
-  background: var(--neu-primary);
-  border-radius: 50%;
-  cursor: pointer;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-}
-
-.density-slider::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
-  background: var(--neu-primary);
-  border-radius: 50%;
-  cursor: pointer;
-  border: none;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-}
-
-.slider-labels {
-  display: flex;
-  justify-content: space-between;
-  font-size: 10px;
-  color: var(--neu-text-light);
-  margin-top: 4px;
-}
-
-/* 講者名稱設定 */
-.speaker-mappings {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.speaker-item {
-  display: grid;
-  grid-template-columns: 100px 1fr;
-  gap: 8px;
-  align-items: center;
-}
-
-.speaker-code {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--neu-text-light);
-  font-family: 'Courier New', monospace;
-}
-
-.speaker-input {
-  width: 100%;
-  padding: 6px 10px;
-  border: 1px solid rgba(163, 177, 198, 0.2);
-  border-radius: 4px;
-  background: var(--neu-bg);
-  color: var(--neu-text);
-  font-size: 12px;
-  outline: none;
-  transition: all 0.2s ease;
-}
-
-.speaker-input:focus {
-  border-color: var(--neu-primary);
-  background: var(--upload-bg);
-}
-
-.speaker-input::placeholder {
-  color: var(--neu-text-light);
-  opacity: 0.5;
-}
-
 /* 字幕表格容器 */
 .subtitle-table-wrapper {
   width: 100%;
@@ -535,7 +303,7 @@ onUnmounted(() => {
   overflow-y: auto !important;
   overflow-x: hidden;
   border-radius: 12px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   padding: 12px;
   flex: 1;
   position: relative;
@@ -576,12 +344,12 @@ onUnmounted(() => {
 .subtitle-table thead th {
   position: sticky;
   top: -12px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   padding: 12px;
   text-align: left;
   font-size: 11px;
   font-weight: 700;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   z-index: 10;
@@ -599,39 +367,6 @@ onUnmounted(() => {
   margin-right: -12px;
 }
 
-/* 內容標題區 */
-.content-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.settings-btn {
-  width: 24px;
-  height: 24px;
-  border: none;
-  background: transparent;
-  border-radius: 6px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--neu-text-light);
-  transition: all 0.2s ease;
-  flex-shrink: 0;
-}
-
-.settings-btn:hover {
-  color: var(--neu-primary);
-  background: rgba(255, 145, 77, 0.1);
-}
-
-.settings-btn.active {
-  color: var(--neu-primary);
-  background: rgba(255, 145, 77, 0.15);
-}
-
 .subtitle-table thead {
   position: relative;
   z-index: 10;
@@ -643,7 +378,7 @@ onUnmounted(() => {
 }
 
 .subtitle-row {
-  background: var(--neu-bg);
+  background: var(--main-bg);
   transition: all 0.2s ease;
   position: relative;
   z-index: 1;
@@ -660,7 +395,7 @@ onUnmounted(() => {
   text-align: right;
   font-family: 'Courier New', monospace;
   font-size: 13px;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   white-space: nowrap;
   vertical-align: top;
   transition: width 0.3s ease;
@@ -685,7 +420,7 @@ onUnmounted(() => {
 
 .col-time.clickable:hover {
   background: rgba(255, 145, 77, 0.1);
-  color: var(--neu-primary);
+  color: var(--main-primary);
   transform: translateX(-2px);
 }
 
@@ -705,11 +440,11 @@ onUnmounted(() => {
 .speaker-badge {
   display: inline-block;
   padding: 4px 10px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   border-radius: 8px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   transition: all 0.2s ease;
 }
 
@@ -753,6 +488,7 @@ onUnmounted(() => {
 .speaker-list {
   max-height: 240px;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 8px 0;
 }
 
@@ -762,13 +498,14 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 10px 16px;
+  padding: 10px 12px;
   background: transparent;
   border: none;
   cursor: pointer;
   transition: all 0.15s ease;
   text-align: left;
-  color: var(--neu-text);
+  color: var(--main-text);
+  min-width: 0;
 }
 
 .speaker-option:hover {
@@ -776,8 +513,8 @@ onUnmounted(() => {
 }
 
 .speaker-option.current {
-  background: var(--neu-bg);
-  color: var(--neu-primary);
+  background: var(--main-bg);
+  color: var(--main-primary);
 }
 
 .speaker-code {
@@ -785,18 +522,79 @@ onUnmounted(() => {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
 }
 
 .speaker-option.current .speaker-code {
-  color: var(--neu-primary);
+  color: var(--main-primary);
 }
 
-.speaker-name {
+.speaker-option .speaker-name {
   font-size: 13px;
   font-weight: 500;
   flex: 1;
-  text-align: right;
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 重新命名按鈕 */
+.btn-rename {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--main-text-light);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.btn-rename:hover {
+  background: rgba(255, 145, 77, 0.15);
+  color: var(--main-primary);
+}
+
+/* 重新命名按鈕 tooltip */
+.btn-rename .btn-tooltip {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.85);
+  color: white;
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
+  z-index: 9999;
+}
+
+.btn-rename .btn-tooltip::before {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-bottom-color: rgba(0, 0, 0, 0.85);
+}
+
+.btn-rename:hover .btn-tooltip {
+  opacity: 1;
+  visibility: visible;
 }
 
 .speaker-new {
@@ -812,21 +610,21 @@ onUnmounted(() => {
   padding: 6px 10px;
   border: 1px solid rgba(163, 177, 198, 0.2);
   border-radius: 6px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   font-size: 13px;
-  color: var(--neu-text);
+  color: var(--main-text);
   transition: all 0.2s ease;
 }
 
 .speaker-input:focus {
   outline: none;
-  border-color: var(--neu-primary);
+  border-color: var(--main-primary);
   box-shadow: 0 0 0 2px rgba(255, 145, 77, 0.1);
 }
 
 .btn-add-speaker {
   padding: 6px 12px;
-  background: var(--neu-primary);
+  background: var(--main-primary);
   color: white;
   border: none;
   border-radius: 6px;
@@ -851,9 +649,11 @@ onUnmounted(() => {
 /* 內容欄 */
 .col-content {
   padding: 12px;
-  font-size: 15px;
+  font-size: var(--content-font-size, 15px);
+  font-weight: var(--content-font-weight, 400);
+  font-family: var(--content-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
   line-height: 1.6;
-  color: var(--neu-text);
+  color: var(--main-text);
   min-height: 48px;
   vertical-align: top;
 }
@@ -871,7 +671,7 @@ onUnmounted(() => {
 }
 
 .col-content[contenteditable="true"]:focus {
-  outline: 2px solid var(--neu-primary);
+  outline: 2px solid var(--main-primary);
   background: var(--upload-bg);
 }
 
@@ -901,6 +701,113 @@ onUnmounted(() => {
   }
 
   .subtitle-table .col-content {
+    font-size: 14px;
+  }
+
+  /* 講者選擇浮窗調整 */
+  .speaker-picker {
+    max-width: 180px;
+    min-width: 140px;
+  }
+}
+
+/* 小手機 - 進一步優化 */
+@media (max-width: 480px) {
+  .subtitle-table-wrapper {
+    padding: 8px;
+    border-radius: 8px;
+  }
+
+  .subtitle-table {
+    border-spacing: 0 4px;
+    font-size: 13px;
+  }
+
+  .subtitle-table thead th {
+    padding: 8px;
+    font-size: 10px;
+    top: -8px;
+  }
+
+  .subtitle-table thead th:first-child {
+    padding-left: 12px;
+  }
+
+  .subtitle-table thead th:last-child {
+    padding-right: 12px;
+  }
+
+  /* 時間欄進一步縮小 */
+  .subtitle-table .col-time {
+    width: 70px;
+    font-size: 10px;
+    padding: 8px 4px;
+  }
+
+  /* 時間格式調整 */
+  .col-time.time-start {
+    width: 60px;
+  }
+
+  .col-time.time-range {
+    width: 80px;
+  }
+
+  .subtitle-table .col-content {
+    padding: 8px;
+    font-size: 13px;
+    line-height: 1.5;
+    min-height: 40px;
+  }
+
+  /* contenteditable 在小屏上的觸控優化 */
+  .col-content[contenteditable="true"] {
+    padding: 10px;
+    min-height: 44px;
+  }
+
+  /* 講者選擇浮窗移動端優化 */
+  .speaker-picker {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    top: auto;
+    max-width: none;
+    min-width: auto;
+    border-radius: 16px 16px 0 0;
+    animation: slideUp 0.2s ease;
+  }
+
+  @keyframes slideUp {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+
+  .speaker-list {
+    max-height: 200px;
+  }
+
+  .speaker-option {
+    padding: 14px 16px;
+    min-height: 48px;
+  }
+
+  .speaker-new {
+    padding: 16px;
+  }
+
+  .speaker-input {
+    padding: 10px 12px;
+    font-size: 16px; /* 防止 iOS 縮放 */
+  }
+
+  .btn-add-speaker {
+    padding: 10px 16px;
     font-size: 14px;
   }
 }

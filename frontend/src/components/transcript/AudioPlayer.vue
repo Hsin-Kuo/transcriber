@@ -492,7 +492,7 @@ defineExpose({
   justify-content: center;
   gap: 8px;
   padding: 8px 16px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   color: var(--color-danger-dark);
   border: 1px solid var(--color-danger-dark);
   border-radius: 8px;
@@ -521,7 +521,7 @@ defineExpose({
 
 /* Circular player */
 .custom-audio-player.circular-player {
-  background: var(--neu-bg);
+  background: var(--main-bg);
   padding: 10px 5px 0px;
   border-radius: 20px;
   display: flex;
@@ -566,7 +566,7 @@ defineExpose({
 /* Time display */
 .time-display-center {
   font-size: 0.8rem;
-  color: var(--neu-text);
+  color: var(--main-text);
   font-weight: 500;
   text-align: center;
   margin-top: -90px;
@@ -626,7 +626,7 @@ defineExpose({
 }
 
 .mute-btn-volume:hover {
-  background: var(--neu-bg);
+  background: var(--main-bg);
   transform: translateY(-1px);
 }
 
@@ -639,8 +639,8 @@ defineExpose({
   height: 2.5px;
   -webkit-appearance: none;
   appearance: none;
-  background: var(--neu-bg);
-  border: var(--neu-primary) 0.5px solid;
+  background: var(--main-bg);
+  border: var(--nav-bg) 0.5px solid;
   border-radius: 2px;
   outline: none;
   cursor: pointer;
@@ -651,10 +651,12 @@ defineExpose({
 .volume-slider-horizontal::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 5px;
+  width: 6px;
   height: 14px;
-  background: var(--neu-primary);
-  border-radius: 30%;
+  background: var(--nav-bg);
+  border-left: 1px solid var(--nav-active-bg);
+  border-right: 1px solid var(--nav-active-bg);
+  /* border-radius: 30%; */
   cursor: pointer;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
@@ -662,7 +664,7 @@ defineExpose({
 .volume-slider-horizontal::-moz-range-thumb {
   width: 10px;
   height: 10px;
-  background: var(--neu-primary);
+  background: var(--main-primary);
   border-radius: 50%;
   cursor: pointer;
   border: none;
@@ -675,7 +677,7 @@ defineExpose({
   top: 5px;
   left: 15px;
   z-index: 5;
-  color: var(--neu-text);
+  color: var(--main-text);
   opacity: 0.6;
 }
 
@@ -697,8 +699,7 @@ defineExpose({
 }
 
 .info-btn:hover {
-  background: var(--neu-bg) !important;
-  box-shadow: var(--neu-shadow-btn) !important;
+  background: var(--main-bg) !important;
 }
 
 .shortcuts-tooltip {
@@ -706,7 +707,7 @@ defineExpose({
   bottom: 100%;
   right: 0;
   margin-bottom: 8px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   border-radius: 12px;
   padding: 12px;
   display: none;
@@ -724,7 +725,7 @@ defineExpose({
   top: 100%;
   right: 20px;
   border: 6px solid transparent;
-  border-top-color: var(--neu-bg);
+  border-top-color: var(--main-bg);
 }
 
 .keyboard-shortcuts-info:hover .shortcuts-tooltip,
@@ -735,7 +736,7 @@ defineExpose({
 .shortcuts-title {
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--neu-text);
+  color: var(--main-text);
   margin-bottom: 4px;
 }
 
@@ -748,7 +749,7 @@ defineExpose({
 .shortcuts-section-title {
   font-size: 0.7rem;
   font-weight: 600;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   margin-top: 4px;
   margin-bottom: 2px;
 }
@@ -758,30 +759,30 @@ defineExpose({
   align-items: center;
   gap: 12px;
   font-size: 0.75rem;
-  color: var(--neu-text);
+  color: var(--main-text);
 }
 
 .shortcut-item kbd {
-  background: var(--neu-bg);
+  background: var(--main-bg);
   padding: 3px 6px;
   border-radius: 6px;
   font-size: 0.7rem;
   font-weight: 600;
   font-family: monospace;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   min-width: 28px;
   text-align: center;
 }
 
 .shortcut-item span {
   flex: 1;
-  color: var(--neu-text);
+  color: var(--main-text);
   font-size: 0.75rem;
 }
 
 /* Control buttons */
 .audio-control-btn {
-  background: var(--neu-bg);
+  background: #ffffff00;
   border: none;
   border-radius: 50%;
   width: 40px;
@@ -790,7 +791,7 @@ defineExpose({
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: var(--neu-text);
+  color: var(--main-text);
   transition: all 0.2s ease;
   position: relative;
   flex-shrink: 0;
@@ -799,7 +800,7 @@ defineExpose({
 
 .audio-control-btn:hover {
   transform: translateY(-2px);
-  color: var(--neu-primary);
+  color: var(--main-primary);
 }
 
 .audio-control-btn:active {
@@ -821,7 +822,7 @@ defineExpose({
   font-size: 9px;
   font-weight: 700;
   bottom: 7px;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   font-family: inherit;
 }
 
@@ -849,14 +850,13 @@ defineExpose({
 }
 
 .speed-btn:hover {
-  background: var(--neu-bg) !important;
-  box-shadow: var(--neu-shadow-btn) !important;
+  background: var(--main-bg) !important;
 }
 
 .speed-label {
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--neu-text);
+  color: var(--main-text);
 }
 
 .speed-dropdown {
@@ -899,52 +899,213 @@ defineExpose({
   cursor: pointer;
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--neu-text);
+  color: var(--main-text);
   transition: all 0.2s ease;
   text-align: center;
 }
 
 .speed-option:hover {
   background: rgba(163, 177, 198, 0.15);
-  color: var(--neu-primary);
+  color: var(--main-primary);
 }
 
 .speed-option.active {
   background: rgba(163, 177, 198, 0.2);
-  color: var(--neu-primary);
+  color: var(--main-primary);
   font-weight: 700;
 }
 
+/* === 手機版：簡化橫向播放器 === */
 @media (max-width: 768px) {
-  .custom-audio-player.circular-player {
-    max-width: 100%;
-    padding: 20px 15px 15px;
+  .audio-player-container {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    margin: 0;
+    z-index: 150;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+    padding: 8px 12px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
   }
 
-  .circular-progress-container {
-    max-width: 200px;
+  /* 深色模式 */
+  :root[data-theme="dark"] .audio-player-container {
+    background: rgba(40, 40, 40, 0.95);
   }
 
-  .circular-controls-center {
-    margin-top: -30px;
+  .audio-error {
+    padding: 8px 12px;
+    margin-bottom: 0;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
   }
 
-  .audio-play-btn {
-    width: 54px;
-    height: 54px;
+  .error-message {
+    font-size: 0.8rem;
+    flex: 1;
   }
 
-  .audio-skip-btn {
-    width: 42px;
-    height: 42px;
-  }
-
-  .time-display-center {
+  .btn-retry {
+    padding: 6px 12px;
     font-size: 0.75rem;
   }
 
+  /* 隱藏圓形播放器的複雜元素 */
+  .custom-audio-player.circular-player {
+    max-width: 100%;
+    padding: 0;
+    background: transparent;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .circular-progress-container,
+  .decorative-element,
+  .keyboard-shortcuts-info {
+    display: none !important;
+  }
+
+  /* 時間顯示 */
+  .time-display-center {
+    font-size: 0.7rem;
+    margin: 0;
+    min-width: 70px;
+    text-align: center;
+    order: 2;
+  }
+
+  /* 控制按鈕橫向排列 */
+  .circular-controls-center {
+    margin: 0;
+    gap: 4px;
+    order: 1;
+  }
+
+  .audio-play-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  .audio-play-btn svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .audio-skip-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  .audio-skip-btn svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .audio-control-label {
+    font-size: 7px;
+    bottom: 5px;
+  }
+
+  .skip-backward .audio-control-label {
+    left: 6px;
+  }
+
+  .skip-forward .audio-control-label {
+    right: 6px;
+  }
+
+  /* 音量和速度控制 */
+  .volume-and-controls {
+    flex: 1;
+    margin: 0;
+    padding: 0;
+    gap: 8px;
+    order: 3;
+  }
+
+  .volume-control-center {
+    gap: 4px;
+  }
+
+  .mute-btn-volume {
+    width: 18px !important;
+    height: 18px !important;
+  }
+
+  .mute-btn-volume svg {
+    width: 16px;
+    height: 16px;
+  }
+
   .volume-slider-horizontal {
-    width: 100px;
+    width: 60px;
+  }
+
+  .speed-control {
+    order: 4;
+  }
+
+  .speed-btn {
+    width: 40px;
+    height: 24px;
+    border-radius: 8px;
+  }
+
+  .speed-label {
+    font-size: 0.75rem;
+  }
+
+  .speed-dropdown {
+    bottom: auto;
+    top: auto;
+    right: 0;
+    margin-bottom: 0;
+  }
+}
+
+/* 小手機進一步調整 */
+@media (max-width: 480px) {
+  .audio-player-container {
+    padding: 6px 8px;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .time-display-center {
+    font-size: 0.65rem;
+    min-width: 60px;
+  }
+
+  .audio-play-btn {
+    width: 36px;
+    height: 36px;
+  }
+
+  .audio-play-btn svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .audio-skip-btn {
+    width: 28px;
+    height: 28px;
+  }
+
+  .volume-slider-horizontal {
+    width: 50px;
+  }
+
+  .speed-btn {
+    width: 36px;
+  }
+
+  .speed-label {
+    font-size: 0.7rem;
   }
 }
 </style>

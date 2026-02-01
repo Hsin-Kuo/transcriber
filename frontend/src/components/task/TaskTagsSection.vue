@@ -160,7 +160,7 @@ const { getTagColor } = useTaskTags($t)
 const props = defineProps({
   taskId: {
     type: String,
-    required: true
+    default: ''
   },
   tags: {
     type: Array,
@@ -297,14 +297,14 @@ function handleCancel() {
   font-weight: 500;
   color: white;
   background: var(--color-purple);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  /* box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); */
   transition: all 0.2s ease;
   cursor: default;
 }
 
 .tag-badge:hover {
   transform: translateY(-1px);
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15);
+  /* box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15); */
 }
 
 .tag-badge.editable {
@@ -314,7 +314,7 @@ function handleCancel() {
 
 .tag-badge.editable:hover {
   opacity: 0.9;
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.2);
+  /* box-shadow: 0 3px 8px rgba(0, 0, 0, 0.2); */
 }
 
 /* 標籤文字編輯狀態 */
@@ -328,7 +328,7 @@ function handleCancel() {
   font-weight: 500;
   color: white;
   background: var(--color-purple);
-  box-shadow: 0 2px 8px rgba(var(--color-purple-rgb), 0.3);
+  /* box-shadow: 0 2px 8px rgba(var(--color-purple-rgb), 0.3); */
 }
 
 .tag-text-input {
@@ -581,5 +581,13 @@ function handleCancel() {
   transform: translateY(-1px);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
   opacity: 0.9;
+}
+
+/* 響應式：手機版隱藏編輯按鈕 */
+@media (max-width: 768px) {
+  .btn-edit-tags,
+  .btn-add-tags {
+    display: none;
+  }
 }
 </style>

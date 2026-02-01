@@ -22,6 +22,7 @@ export function useTranscriptData() {
   const currentTranscript = ref({})
   const segments = ref([])
   const speakerNames = ref({})
+  const subtitleSettings = ref({})  // 字幕模式設定（包含 density_threshold）
   const loadingTranscript = ref(false)
   const transcriptError = ref(null)
   const originalContent = ref('')
@@ -43,9 +44,9 @@ export function useTranscriptData() {
     transcriptError.value = null
 
     try {
-      // 獲取任務資訊
-      const taskResponse = await api.get(NEW_ENDPOINTS.tasks.list)
-      const task = taskResponse.data.tasks?.find(t => (t._id || t.task_id) === taskId)
+      // 獲取單一任務資訊
+      const taskResponse = await api.get(NEW_ENDPOINTS.tasks.get(taskId))
+      const task = taskResponse.data
 
       if (!task) {
         transcriptError.value = t('transcriptData.taskNotFound')
@@ -57,12 +58,20 @@ export function useTranscriptData() {
         task_id: task.task_id,
         filename: task.file?.filename || task.filename,
         custom_name: task.custom_name,
-        created_at: task.timestamps?.completed_at || task.timestamps?.created_at,
+        created_at: task.timestamps?.completed_at || task.timestamps?.created_at,  // Header 用（完成時間）
+        updated_at: task.timestamps?.updated_at || task.updated_at,  // TaskInfoCard 用（編輯時間）
         text_length: task.result?.text_length || task.text_length,
         duration_text: task.duration_text,
         hasAudio: !!(task.result?.audio_file || task.audio_file),
         task_type: task.task_type || 'paragraph',
+        tags: task.tags || [],
         content: ''
+      }
+
+      // 載入字幕設定（用於字幕模式）
+      if (task.subtitle_settings) {
+        subtitleSettings.value = task.subtitle_settings
+        console.log('✅ 載入字幕設定:', subtitleSettings.value)
       }
 
       console.log('📋 任務類型:', currentTranscript.value.task_type)
@@ -248,11 +257,74 @@ export function useTranscriptData() {
     }
   }
 
+  /**
+   * 更新字幕設定
+   * @param {Object} newSettings - 字幕設定（如 { density_threshold: 3.0 }）
+   * @returns {Promise<boolean>} 更新是否成功
+   */
+  async function updateSubtitleSettings(newSettings) {
+    try {
+      await api.put(
+        NEW_ENDPOINTS.transcriptions.updateSubtitleSettings(currentTranscript.value.task_id),
+        newSettings
+      )
+
+      subtitleSettings.value = { ...subtitleSettings.value, ...newSettings }
+      console.log('✅ 字幕設定已更新:', newSettings)
+      return true
+
+    } catch (error) {
+      console.error('更新字幕設定失敗:', error)
+
+      if (showNotification) {
+        showNotification({
+          title: t('transcriptData.updateFailed'),
+          message: t('transcriptData.cannotUpdateSubtitleSettings') || '無法更新字幕設定',
+          type: 'error'
+        })
+      }
+
+      return false
+    }
+  }
+
+  /**
+   * 更新任務標籤
+   * @param {Array} newTags - 新的標籤陣列
+   * @returns {Promise<boolean>} 更新是否成功
+   */
+  async function updateTags(newTags) {
+    try {
+      await api.put(
+        NEW_ENDPOINTS.tasks.updateTags(currentTranscript.value.task_id),
+        { tags: newTags }
+      )
+
+      currentTranscript.value.tags = newTags
+      console.log('✅ 標籤已更新:', newTags)
+      return true
+
+    } catch (error) {
+      console.error('更新標籤失敗:', error)
+
+      if (showNotification) {
+        showNotification({
+          title: t('transcriptData.updateFailed'),
+          message: t('transcriptData.cannotUpdateTags') || '無法更新標籤',
+          type: 'error'
+        })
+      }
+
+      return false
+    }
+  }
+
   return {
     // 狀態
     currentTranscript,
     segments,
     speakerNames,
+    subtitleSettings,
     loadingTranscript,
     transcriptError,
     originalContent,
@@ -261,6 +333,8 @@ export function useTranscriptData() {
     loadTranscript,
     saveTranscript,
     updateTaskName,
-    updateSpeakerNames
+    updateSpeakerNames,
+    updateSubtitleSettings,
+    updateTags
   }
 }

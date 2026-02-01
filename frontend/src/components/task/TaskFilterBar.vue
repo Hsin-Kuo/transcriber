@@ -1,9 +1,5 @@
 <template>
   <div v-if="allTags.length > 0" class="filter-section">
-    <!-- 篩選圖標 -->
-    <svg class="filter-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
-    </svg>
 
     <!-- 標籤列表 -->
     <div class="filter-tags">
@@ -71,12 +67,9 @@
             :ref="el => setColorPickerButtonRef(tag, el)"
             class="btn-color-picker"
             :title="$t('taskList.setTagColor', { tag })"
+            :style="{ backgroundColor: getTagColor(tag) }"
             @click="handleToggleColorPicker(tag)"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
-            </svg>
-          </button>
+          ></button>
         </div>
       </div>
 
@@ -465,10 +458,6 @@ function handleColorSelected({ tag, color }) {
   flex-wrap: wrap;
 }
 
-.filter-icon {
-  color: rgba(var(--color-teal-rgb), 0.8);
-  flex-shrink: 0;
-}
 
 .filter-tags {
   display: flex;
@@ -554,28 +543,27 @@ function handleColorSelected({ tag, color }) {
   transform: translateY(-2px);
 }
 
+.filter-tag-item.editing .filter-tag-btn {
+  padding: 6px 2px;
+}
+
 .tag-color-picker-wrapper {
   display: flex;
   align-items: center;
 }
 
 .btn-color-picker {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 16px;
+  height: 16px;
   padding: 0;
-  background: rgba(var(--color-primary-rgb), 0.1);
-  border: 1px solid rgba(var(--color-primary-rgb), 0.3);
-  border-radius: 4px;
-  color: var(--color-primary);
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 3px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .btn-color-picker:hover {
-  background: rgba(var(--color-primary-rgb), 0.2);
+  transform: scale(1.15);
 }
 
 .filter-header-actions {
@@ -628,5 +616,128 @@ function handleColorSelected({ tag, color }) {
 
 .btn-clear-filter:hover {
   background: rgba(var(--color-primary-rgb), 0.2);
+}
+
+/* === 響應式設計 === */
+
+/* 平板以下 */
+@media (max-width: 768px) {
+  .filter-section {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .filter-tags {
+    gap: 4px;
+  }
+
+  .filter-tag-btn {
+    padding: 4px 10px;
+    font-size: var(--font-size-sm);
+  }
+
+  .filter-tag-input {
+    padding: 4px 10px;
+    font-size: var(--font-size-sm);
+    min-width: 80px;
+  }
+
+  .drag-handle svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .btn-color-picker {
+    width: 14px;
+    height: 14px;
+  }
+
+  .filter-header-actions {
+    gap: 6px;
+  }
+
+  .btn-edit-filter,
+  .btn-save-filter,
+  .btn-clear-filter {
+    width: 26px;
+    height: 26px;
+  }
+
+  .btn-edit-filter svg,
+  .btn-clear-filter svg {
+    width: 12px;
+    height: 12px;
+  }
+}
+
+/* 小手機 */
+@media (max-width: 480px) {
+  .filter-section {
+    padding: 8px;
+    gap: 6px;
+  }
+
+  .filter-tags {
+    gap: 2px;
+  }
+
+  .filter-tag-item {
+    gap: 2px;
+  }
+
+  .filter-tag-btn {
+    padding: 3px 8px;
+    font-size: var(--font-size-sm);
+  }
+
+  .filter-tag-btn.active {
+    border-bottom-width: 1.5px;
+  }
+
+  .filter-tag-input {
+    padding: 3px 8px;
+    font-size: var(--font-size-sm);
+    min-width: 60px;
+    border-width: 1.5px;
+  }
+
+  .filter-tag-item.editing .filter-tag-btn {
+    padding: 3px 2px;
+  }
+
+  .drag-handle {
+    padding: 1px;
+  }
+
+  .drag-handle svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .btn-color-picker {
+    width: 12px;
+    height: 12px;
+  }
+
+  .filter-header-actions {
+    gap: 4px;
+  }
+
+  .btn-edit-filter,
+  .btn-save-filter,
+  .btn-clear-filter {
+    width: 24px;
+    height: 24px;
+  }
+
+  .btn-edit-filter svg,
+  .btn-clear-filter svg {
+    width: 10px;
+    height: 10px;
+  }
+
+  .btn-save-filter {
+    font-size: 14px;
+  }
 }
 </style>

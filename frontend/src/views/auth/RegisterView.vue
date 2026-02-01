@@ -223,7 +223,7 @@ async function handleRegister() {
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   position: relative;
 }
 
@@ -308,13 +308,13 @@ async function handleRegister() {
   font-size: 2rem;
   margin: 0 0 10px 0;
   text-align: center;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   font-weight: 700;
 }
 
 .auth-subtitle {
   text-align: center;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   margin: 0 0 30px 0;
   font-size: 0.9rem;
 }
@@ -333,7 +333,7 @@ async function handleRegister() {
 
 .form-group label {
   font-size: 0.9rem;
-  color: var(--neu-text);
+  color: var(--main-text);
   font-weight: 600;
 }
 
@@ -342,21 +342,21 @@ async function handleRegister() {
   border: 2px solid rgba(160, 145, 124, 0.3);
   border-radius: 8px;
   background: white;
-  color: var(--neu-text);
+  color: var(--main-text);
   font-size: 1rem;
   transition: all 0.2s ease;
 }
 
 .form-group input:focus {
   outline: none;
-  border-color: var(--neu-primary);
+  border-color: var(--main-primary);
   box-shadow: 0 0 0 3px rgba(68, 70, 91, 0.1);
 }
 
 .form-group input:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-  background: var(--neu-bg);
+  background: var(--main-bg);
 }
 
 .password-requirements {
@@ -372,13 +372,13 @@ async function handleRegister() {
 
 .requirement {
   font-size: 0.85rem;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   transition: color 0.2s ease;
   font-weight: 500;
 }
 
 .requirement.met {
-  color: var(--neu-primary);
+  color: var(--main-primary);
   font-weight: 600;
 }
 
@@ -437,7 +437,7 @@ async function handleRegister() {
 }
 
 .resend-link {
-  color: var(--neu-primary);
+  color: var(--main-primary);
   text-decoration: underline;
   font-weight: 600;
   cursor: pointer;
@@ -445,12 +445,12 @@ async function handleRegister() {
 }
 
 .resend-link:hover {
-  color: var(--neu-primary-dark);
+  color: var(--main-primary-dark);
 }
 
 .btn-primary {
   padding: 14px 24px;
-  background: var(--neu-primary-dark);
+  background: var(--main-primary-dark);
   color: white;
   border: none;
   border-radius: 8px;
@@ -480,8 +480,8 @@ async function handleRegister() {
 .btn-secondary {
   padding: 14px 24px;
   background: white;
-  color: var(--neu-primary);
-  border: 2px solid var(--neu-primary);
+  color: var(--main-primary);
+  border: 2px solid var(--main-primary);
   border-radius: 8px;
   font-size: 1rem;
   font-weight: 600;
@@ -491,7 +491,7 @@ async function handleRegister() {
 }
 
 .btn-secondary:hover {
-  background: var(--neu-primary);
+  background: var(--main-primary);
   color: white;
   transform: translateY(-1px);
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
@@ -505,19 +505,19 @@ async function handleRegister() {
 .auth-footer {
   margin-top: 30px;
   text-align: center;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   font-size: 0.9rem;
 }
 
 .auth-footer a {
-  color: var(--neu-primary);
+  color: var(--main-primary);
   text-decoration: none;
   font-weight: 600;
   transition: color 0.2s ease;
 }
 
 .auth-footer a:hover {
-  color: var(--neu-primary-dark);
+  color: var(--main-primary-dark);
   text-decoration: underline;
 }
 
@@ -531,7 +531,7 @@ async function handleRegister() {
 
 .quota-title {
   font-size: 0.95rem;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   margin: 0 0 15px 0;
   text-align: center;
   font-weight: 600;
@@ -552,13 +552,13 @@ async function handleRegister() {
 
 .quota-label {
   font-size: 0.85rem;
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   font-weight: 500;
 }
 
 .quota-value {
   font-size: 1.1rem;
-  color: var(--neu-text);
+  color: var(--main-text);
   font-weight: 700;
 }
 </style>

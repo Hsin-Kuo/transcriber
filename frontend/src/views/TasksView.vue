@@ -29,7 +29,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, inject, computed } from 'vue'
+import { ref, onBeforeUnmount, inject, computed } from 'vue'
 import api, { TokenManager } from '../utils/api'
 import TaskList from '../components/task/TaskListContainer.vue'
 import RulerPagination from '../components/common/RulerPagination.vue'
@@ -59,6 +59,7 @@ const totalTasks = ref(0)
 // 篩選條件
 const currentTaskType = ref(null)
 const currentTags = ref([])
+const currentHasAudio = ref(null)
 
 // 計算總頁數
 const totalPages = computed(() => Math.ceil(totalTasks.value / pageSize.value))
@@ -84,10 +85,8 @@ const {
   generateVTTText
 } = useSubtitleMode(segments)
 
-// 初始化時載入任務
-onMounted(async () => {
-  await refreshTasks()
-})
+// 初始化由 TaskListContainer 的 filter-change 事件觸發
+// 這確保篩選狀態恢復後才請求數據
 
 // 刷新任務列表
 async function refreshTasks() {
@@ -104,6 +103,11 @@ async function refreshTasks() {
     // 如果有 task_type 篩選，加入參數
     if (currentTaskType.value) {
       params.task_type = currentTaskType.value
+    }
+
+    // 如果有 has_audio 篩選，加入參數
+    if (currentHasAudio.value) {
+      params.has_audio = currentHasAudio.value
     }
 
     // 如果有 tags 篩選，加入參數（逗號分隔）
@@ -206,6 +210,7 @@ function handlePageChange(newPage) {
 function handleFilterChange(filter) {
   currentTaskType.value = filter.taskType
   currentTags.value = filter.tags
+  currentHasAudio.value = filter.hasAudio
   // 篩選條件改變時，重置到第一頁
   currentPage.value = 1
   refreshTasks()
@@ -458,8 +463,9 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .tasks-container {
-  max-width: 1400px;
+  max-width: 900px;
   margin: 0 auto;
+  padding: 0 var(--spacing-md, 16px);
 }
 
 .tasks-header {
@@ -469,14 +475,44 @@ onBeforeUnmount(() => {
 
 .tasks-header h1 {
   font-size: 2rem;
-  color: var(--neu-primary);
+  color: var(--main-primary);
   margin: 0 0 8px 0;
   font-weight: 700;
 }
 
 .tasks-header p {
-  color: var(--neu-text-light);
+  color: var(--main-text-light);
   margin: 0;
   font-size: 1rem;
+}
+
+/* 平板以下 */
+@media (max-width: 768px) {
+  .tasks-container {
+    padding: 0 var(--spacing-sm, 12px);
+  }
+
+  .tasks-header h1 {
+    font-size: 1.5rem;
+  }
+
+  .tasks-header p {
+    font-size: 0.9rem;
+  }
+}
+
+/* 小手機 */
+@media (max-width: 480px) {
+  .tasks-container {
+    padding: 0 var(--spacing-xs, 8px);
+  }
+
+  .tasks-header {
+    margin-bottom: 16px;
+  }
+
+  .tasks-header h1 {
+    font-size: 1.25rem;
+  }
 }
 </style>

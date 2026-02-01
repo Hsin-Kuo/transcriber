@@ -256,7 +256,7 @@ function handleConfirm() {
   width: 90%;
   max-width: 800px;
   max-height: 85vh;
-  background: var(--neu-bg);
+  background: var(--main-bg);
   border-radius: 20px;
   box-shadow: 0 20px 60px var(--color-overlay-light);
   display: flex;

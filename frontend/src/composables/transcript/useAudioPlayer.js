@@ -39,6 +39,13 @@ export function useAudioPlayer() {
   const audioUrl = ref('')
   const audioError = ref(null)
 
+  // 自動刷新相關
+  let currentTaskId = null
+  let tokenRefreshTimer = null
+  let retryCount = 0
+  const MAX_RETRY_COUNT = 2
+  const TOKEN_REFRESH_INTERVAL = 10 * 60 * 1000 // 10 分鐘（token 15 分鐘過期前刷新）
+
   // ========== 計算屬性 ==========
 
   /**
@@ -121,8 +128,68 @@ export function useAudioPlayer() {
    */
   function initAudioUrl(taskId) {
     if (!taskId) return
+    currentTaskId = taskId
+    retryCount = 0
     audioUrl.value = getAudioUrl(taskId)
     audioError.value = null
+    startTokenRefreshTimer()
+  }
+
+  /**
+   * 啟動 token 自動刷新定時器
+   */
+  function startTokenRefreshTimer() {
+    stopTokenRefreshTimer()
+    tokenRefreshTimer = setInterval(async () => {
+      if (currentTaskId) {
+        console.log('定時刷新音訊 token...')
+        await silentRefreshAudioUrl()
+      }
+    }, TOKEN_REFRESH_INTERVAL)
+  }
+
+  /**
+   * 停止 token 自動刷新定時器
+   */
+  function stopTokenRefreshTimer() {
+    if (tokenRefreshTimer) {
+      clearInterval(tokenRefreshTimer)
+      tokenRefreshTimer = null
+    }
+  }
+
+  /**
+   * 靜默刷新音訊 URL（不中斷播放）
+   */
+  async function silentRefreshAudioUrl() {
+    if (!currentTaskId) return
+
+    try {
+      // 刷新 token
+      const refreshToken = TokenManager.getRefreshToken()
+      if (refreshToken) {
+        const response = await fetch(`${API_BASE}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: refreshToken })
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          TokenManager.setTokens(data.access_token, data.refresh_token)
+          console.log('Token 刷新成功')
+
+          // 更新音訊 URL（但不重新載入，等下次播放或 seek 時自然使用新 URL）
+          // 如果音訊還在播放中，不立即更換 URL 以避免中斷
+          if (!isPlaying.value) {
+            const newUrl = getAudioUrl(currentTaskId)
+            audioUrl.value = newUrl
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('靜默刷新 token 失敗:', error)
+    }
   }
 
   /**
@@ -130,6 +197,9 @@ export function useAudioPlayer() {
    */
   async function reloadAudio(taskId) {
     if (!taskId) return
+
+    // 更新當前 taskId
+    currentTaskId = taskId
 
     // 保存當前播放位置
     const currentPosition = audioElement.value?.currentTime || 0
@@ -174,6 +244,9 @@ export function useAudioPlayer() {
       if (audioElement.value) {
         audioElement.value.load()
         audioElement.value.addEventListener('loadedmetadata', () => {
+          // 載入成功，重置重試計數
+          retryCount = 0
+
           if (audioElement.value && currentPosition > 0) {
             audioElement.value.currentTime = currentPosition
           }
@@ -195,6 +268,16 @@ export function useAudioPlayer() {
    */
   function handleAudioLoaded() {
     audioError.value = null
+    retryCount = 0 // 載入成功，重置重試計數
+  }
+
+  /**
+   * 清理資源（組件銷毀時調用）
+   */
+  function cleanup() {
+    stopTokenRefreshTimer()
+    currentTaskId = null
+    retryCount = 0
   }
 
   /**
@@ -229,6 +312,13 @@ export function useAudioPlayer() {
 
         if (!response.ok) {
           if (response.status === 401 || response.status === 403) {
+            // 自動重試：刷新 token 並重新載入音檔
+            if (retryCount < MAX_RETRY_COUNT && currentTaskId) {
+              retryCount++
+              console.log(`Token 過期，自動重試中... (${retryCount}/${MAX_RETRY_COUNT})`)
+              await reloadAudio(currentTaskId)
+              return // 不顯示錯誤，等待重試結果
+            }
             audioError.value = t('audioPlayer.authExpired')
           } else if (response.status === 404) {
             audioError.value = t('audioPlayer.audioNotFound')
@@ -244,6 +334,13 @@ export function useAudioPlayer() {
         console.error('診斷錯誤時發生問題:', fetchError)
         const token = TokenManager.getAccessToken()
         if (!token) {
+          // 自動重試
+          if (retryCount < MAX_RETRY_COUNT && currentTaskId) {
+            retryCount++
+            console.log(`Token 不存在，自動重試中... (${retryCount}/${MAX_RETRY_COUNT})`)
+            await reloadAudio(currentTaskId)
+            return
+          }
           audioError.value = t('audioPlayer.authTokenExpired')
         } else {
           audioError.value = t('audioPlayer.cannotAccessAudio')
@@ -536,6 +633,7 @@ export function useAudioPlayer() {
     getAudioUrl,
     initAudioUrl,
     reloadAudio,
+    cleanup,
 
     // 事件處理
     handleAudioLoaded,

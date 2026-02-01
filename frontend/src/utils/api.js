@@ -4,7 +4,7 @@
 import axios from 'axios'
 import router from '../router'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://192.168.0.59:8000'
+const API_BASE = import.meta.env.VITE_API_URL || 'http://100.66.247.23:8000'
 
 // 創建 axios 實例
 const api = axios.create({

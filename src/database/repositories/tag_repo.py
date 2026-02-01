@@ -1,16 +1,9 @@
 """標籤資料庫操作"""
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-import pytz
 import uuid
 
-
-TZ_UTC8 = pytz.timezone('Asia/Taipei')
-
-
-def get_current_time() -> str:
-    """取得當前時間（UTC+8）"""
-    return datetime.now(TZ_UTC8).strftime("%Y-%m-%d %H:%M:%S")
+from ...utils.time_utils import get_utc_timestamp
 
 
 class TagRepository:
@@ -56,7 +49,7 @@ class TagRepository:
             "color": color,
             "description": description,
             "order": next_order,
-            "created_at": get_current_time(),
+            "created_at": get_utc_timestamp(),
             "updated_at": None
         }
 
@@ -113,7 +106,7 @@ class TagRepository:
         Returns:
             是否更新成功
         """
-        updates = {"updated_at": get_current_time()}
+        updates = {"updated_at": get_utc_timestamp()}
 
         if name is not None:
             # 檢查新名稱是否與其他標籤衝突
@@ -164,7 +157,7 @@ class TagRepository:
             更新的標籤數量
         """
         updated_count = 0
-        current_time = get_current_time()
+        current_time = get_utc_timestamp()
 
         print(f"🔍 [tag_repo.update_order] user_id: {user_id}, tag_ids: {tag_ids}")
 
@@ -220,7 +213,7 @@ class TagRepository:
                 "tags": old_name
             },
             {
-                "$set": {"tags.$[elem]": new_name, "updated_at": get_current_time()}
+                "$set": {"tags.$[elem]": new_name, "updated_at": get_utc_timestamp()}
             },
             array_filters=[{"elem": old_name}]
         )
@@ -245,7 +238,7 @@ class TagRepository:
             },
             {
                 "$pull": {"tags": tag_name},
-                "$set": {"updated_at": get_current_time()}
+                "$set": {"updated_at": get_utc_timestamp()}
             }
         )
 
