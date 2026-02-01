@@ -16,7 +16,7 @@ class PunctuationProcessor:
     def __init__(
         self,
         default_provider: str = "gemini",
-        gemini_model: str = "gemini-2.0-flash",
+        gemini_model: str = "gemini-2.5-flash-lite",
         openai_model: str = "gpt-4o-mini"
     ):
         """初始化 PunctuationProcessor
@@ -32,10 +32,9 @@ class PunctuationProcessor:
 
         # Gemini 備援模型列表（按優先順序）
         self.gemini_fallback_models = [
-            "gemini-2.0-flash-lite",
-            "gemini-flash-lite-latest",
             "gemini-2.5-flash",
             "gemini-flash-latest",
+            "gemini-flash-lite-latest",
             "gemini-2.5-pro",
         ]
 
@@ -138,12 +137,12 @@ class PunctuationProcessor:
         """
         import google.generativeai as genai
 
-        # 自動決定 chunk_size
+        # 自動決定 chunk_size（考慮輸出限制 65,536 tokens）
         if chunk_size is None:
-            if language == "zh":
-                chunk_size = 4000  # 中文：4000 字
+            if language in ("zh", "ja", "ko"):
+                chunk_size = 20000  # 中日韓：每字約 1-1.5 tokens，需較小 chunk
             else:
-                chunk_size = 15000  # 其他語言：15000 字元
+                chunk_size = 60000  # 英文等拉丁語系：每字元約 0.3 tokens
 
         # 如果文字不長，直接處理
         if len(text) <= chunk_size:
@@ -464,7 +463,12 @@ class PunctuationProcessor:
         text: str,
         chunk_size: int
     ) -> list[str]:
-        """將文字分割成多個小段
+        """將文字分割成多個小段，盡量在合適的位置斷開
+
+        會優先在以下位置斷開（按優先順序）：
+        1. 說話者標籤前（如 [SPEAKER_00]）
+        2. 換行符
+        3. 空格（適用於英文等語言）
 
         Args:
             text: 要分割的文字
@@ -473,11 +477,48 @@ class PunctuationProcessor:
         Returns:
             分段列表
         """
+        import re
+
         chunks = []
         start = 0
 
         while start < len(text):
-            end = min(start + chunk_size, len(text))
+            # 如果剩餘文字不超過 chunk_size，直接加入
+            if start + chunk_size >= len(text):
+                chunks.append(text[start:])
+                break
+
+            # 預設結束位置
+            end = start + chunk_size
+
+            # 在 chunk 範圍內尋找最佳斷點（從後往前找）
+            search_start = max(start, end - min(2000, chunk_size // 4))  # 在最後 1/4 或 2000 字內尋找
+            search_region = text[search_start:end]
+
+            best_break = None
+
+            # 優先找說話者標籤（如 [SPEAKER_00]、[Speaker A] 等）
+            speaker_matches = list(re.finditer(r'\[SPEAKER[_\s]?\d*\]|\[Speaker\s*\w*\]', search_region, re.IGNORECASE))
+            if speaker_matches:
+                # 使用最後一個說話者標籤的位置作為斷點
+                best_break = search_start + speaker_matches[-1].start()
+
+            # 如果沒找到說話者標籤，找換行符
+            if best_break is None:
+                last_newline = search_region.rfind('\n')
+                if last_newline != -1:
+                    best_break = search_start + last_newline + 1  # 換行符後斷開
+
+            # 如果沒找到換行符，找空格（對英文有用）
+            if best_break is None:
+                last_space = search_region.rfind(' ')
+                if last_space != -1:
+                    best_break = search_start + last_space + 1  # 空格後斷開
+
+            # 如果找到合適斷點，使用它；否則使用原始 chunk_size
+            if best_break is not None and best_break > start:
+                end = best_break
+
             chunks.append(text[start:end])
             start = end
 

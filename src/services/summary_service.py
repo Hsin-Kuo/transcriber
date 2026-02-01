@@ -20,7 +20,7 @@ class SummaryService:
     def __init__(
         self,
         db: AsyncIOMotorDatabase,
-        default_model: str = "gemini-2.0-flash"
+        default_model: str = "gemini-2.5-flash"
     ):
         """初始化 SummaryService
 
@@ -35,10 +35,9 @@ class SummaryService:
 
         # Gemini 備援模型列表（按優先順序）
         self.fallback_models = [
-            "gemini-2.0-flash-lite",
-            "gemini-flash-lite-latest",
-            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
             "gemini-flash-latest",
+            "gemini-flash-lite-latest",
         ]
 
     async def generate_summary(
