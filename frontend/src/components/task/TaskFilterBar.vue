@@ -617,4 +617,127 @@ function handleColorSelected({ tag, color }) {
 .btn-clear-filter:hover {
   background: rgba(var(--color-primary-rgb), 0.2);
 }
+
+/* === 響應式設計 === */
+
+/* 平板以下 */
+@media (max-width: 768px) {
+  .filter-section {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .filter-tags {
+    gap: 4px;
+  }
+
+  .filter-tag-btn {
+    padding: 4px 10px;
+    font-size: var(--font-size-sm);
+  }
+
+  .filter-tag-input {
+    padding: 4px 10px;
+    font-size: var(--font-size-sm);
+    min-width: 80px;
+  }
+
+  .drag-handle svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .btn-color-picker {
+    width: 14px;
+    height: 14px;
+  }
+
+  .filter-header-actions {
+    gap: 6px;
+  }
+
+  .btn-edit-filter,
+  .btn-save-filter,
+  .btn-clear-filter {
+    width: 26px;
+    height: 26px;
+  }
+
+  .btn-edit-filter svg,
+  .btn-clear-filter svg {
+    width: 12px;
+    height: 12px;
+  }
+}
+
+/* 小手機 */
+@media (max-width: 480px) {
+  .filter-section {
+    padding: 8px;
+    gap: 6px;
+  }
+
+  .filter-tags {
+    gap: 2px;
+  }
+
+  .filter-tag-item {
+    gap: 2px;
+  }
+
+  .filter-tag-btn {
+    padding: 3px 8px;
+    font-size: var(--font-size-sm);
+  }
+
+  .filter-tag-btn.active {
+    border-bottom-width: 1.5px;
+  }
+
+  .filter-tag-input {
+    padding: 3px 8px;
+    font-size: var(--font-size-sm);
+    min-width: 60px;
+    border-width: 1.5px;
+  }
+
+  .filter-tag-item.editing .filter-tag-btn {
+    padding: 3px 2px;
+  }
+
+  .drag-handle {
+    padding: 1px;
+  }
+
+  .drag-handle svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .btn-color-picker {
+    width: 12px;
+    height: 12px;
+  }
+
+  .filter-header-actions {
+    gap: 4px;
+  }
+
+  .btn-edit-filter,
+  .btn-save-filter,
+  .btn-clear-filter {
+    width: 24px;
+    height: 24px;
+  }
+
+  .btn-edit-filter svg,
+  .btn-clear-filter svg {
+    width: 10px;
+    height: 10px;
+  }
+
+  .btn-save-filter {
+    font-size: 14px;
+  }
+}
 </style>

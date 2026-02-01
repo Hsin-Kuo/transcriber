@@ -782,7 +782,7 @@ defineExpose({
 
 /* Control buttons */
 .audio-control-btn {
-  background: var(--main-bg);
+  background: #ffffff00;
   border: none;
   border-radius: 50%;
   width: 40px;
@@ -915,36 +915,197 @@ defineExpose({
   font-weight: 700;
 }
 
+/* === 手機版：簡化橫向播放器 === */
 @media (max-width: 768px) {
-  .custom-audio-player.circular-player {
-    max-width: 100%;
-    padding: 20px 15px 15px;
+  .audio-player-container {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    margin: 0;
+    z-index: 150;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+    padding: 8px 12px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
   }
 
-  .circular-progress-container {
-    max-width: 200px;
+  /* 深色模式 */
+  :root[data-theme="dark"] .audio-player-container {
+    background: rgba(40, 40, 40, 0.95);
   }
 
-  .circular-controls-center {
-    margin-top: -30px;
+  .audio-error {
+    padding: 8px 12px;
+    margin-bottom: 0;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
   }
 
-  .audio-play-btn {
-    width: 54px;
-    height: 54px;
+  .error-message {
+    font-size: 0.8rem;
+    flex: 1;
   }
 
-  .audio-skip-btn {
-    width: 42px;
-    height: 42px;
-  }
-
-  .time-display-center {
+  .btn-retry {
+    padding: 6px 12px;
     font-size: 0.75rem;
   }
 
+  /* 隱藏圓形播放器的複雜元素 */
+  .custom-audio-player.circular-player {
+    max-width: 100%;
+    padding: 0;
+    background: transparent;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .circular-progress-container,
+  .decorative-element,
+  .keyboard-shortcuts-info {
+    display: none !important;
+  }
+
+  /* 時間顯示 */
+  .time-display-center {
+    font-size: 0.7rem;
+    margin: 0;
+    min-width: 70px;
+    text-align: center;
+    order: 2;
+  }
+
+  /* 控制按鈕橫向排列 */
+  .circular-controls-center {
+    margin: 0;
+    gap: 4px;
+    order: 1;
+  }
+
+  .audio-play-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  .audio-play-btn svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .audio-skip-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  .audio-skip-btn svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .audio-control-label {
+    font-size: 7px;
+    bottom: 5px;
+  }
+
+  .skip-backward .audio-control-label {
+    left: 6px;
+  }
+
+  .skip-forward .audio-control-label {
+    right: 6px;
+  }
+
+  /* 音量和速度控制 */
+  .volume-and-controls {
+    flex: 1;
+    margin: 0;
+    padding: 0;
+    gap: 8px;
+    order: 3;
+  }
+
+  .volume-control-center {
+    gap: 4px;
+  }
+
+  .mute-btn-volume {
+    width: 18px !important;
+    height: 18px !important;
+  }
+
+  .mute-btn-volume svg {
+    width: 16px;
+    height: 16px;
+  }
+
   .volume-slider-horizontal {
-    width: 100px;
+    width: 60px;
+  }
+
+  .speed-control {
+    order: 4;
+  }
+
+  .speed-btn {
+    width: 40px;
+    height: 24px;
+    border-radius: 8px;
+  }
+
+  .speed-label {
+    font-size: 0.75rem;
+  }
+
+  .speed-dropdown {
+    bottom: auto;
+    top: auto;
+    right: 0;
+    margin-bottom: 0;
+  }
+}
+
+/* 小手機進一步調整 */
+@media (max-width: 480px) {
+  .audio-player-container {
+    padding: 6px 8px;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .time-display-center {
+    font-size: 0.65rem;
+    min-width: 60px;
+  }
+
+  .audio-play-btn {
+    width: 36px;
+    height: 36px;
+  }
+
+  .audio-play-btn svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .audio-skip-btn {
+    width: 28px;
+    height: 28px;
+  }
+
+  .volume-slider-horizontal {
+    width: 50px;
+  }
+
+  .speed-btn {
+    width: 36px;
+  }
+
+  .speed-label {
+    font-size: 0.7rem;
   }
 }
 </style>

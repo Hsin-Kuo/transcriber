@@ -10,6 +10,7 @@ export const NEW_ENDPOINTS = {
   // 轉錄相關
   transcriptions: {
     create: '/transcriptions',
+    createBatch: '/transcriptions/batch',
     download: (taskId) => `/transcriptions/${taskId}/download`,
     audio: (taskId) => `/transcriptions/${taskId}/audio`,
     segments: (taskId) => `/transcriptions/${taskId}/segments`,

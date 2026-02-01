@@ -515,7 +515,7 @@ onUnmounted(() => {
   padding: 8px 14px;
   border: none;
   border-radius: 8px;
-  background: var(--main-bg);
+  background: #ffffff00;
   color: var(--main-text);
   cursor: pointer;
   font-size: 13px;
@@ -900,23 +900,48 @@ onUnmounted(() => {
 /* 響應式 */
 @media (max-width: 768px) {
   .detail-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 10px;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0px;
     height: auto;
-    padding: 12px 16px;
+    padding: 2px 0px;
   }
 
   .header-left {
-    width: 100%;
+    flex: 1;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 0px;
+    min-width: 0;
+  }
+
+  /* 讓標題區域佔滿剩餘空間，使 metadata 換行 */
+  .task-name-section {
+    flex: 1;
+    min-width: calc(100% - 44px); /* 減去返回按鈕寬度，強制 metadata 換行 */
+  }
+
+  /* Metadata 在標題下方、縮小字體 */
+  .header-left :deep(.metadata-section) {
+    width: 100%;
+    padding-left: 44px; /* 對齊標題 */
+    margin-top: -0.25rem;
+    margin-bottom: 0.25rem;
+  }
+
+  .header-left :deep(.metadata-section .meta-item) {
+    font-size: var(--font-size-xs);
+    gap: 0.25rem;
+  }
+
+  .header-left :deep(.metadata-section .meta-item svg) {
+    width: 0.75rem;
+    height: 0.75rem;
   }
 
   .header-right {
-    width: 100%;
-    padding-left: 52px;
-    gap: 8px;
+    flex-shrink: 0;
+    gap: 0px;
   }
 
   .editable-title {
@@ -924,7 +949,7 @@ onUnmounted(() => {
   }
 
   .btn-header {
-    padding: 6px 10px;
+    padding: 6px 2px;
     font-size: 12px;
   }
 

@@ -23,6 +23,8 @@
     "title": "User Settings",
     "description": "Manage your account information and quota usage",
     "accountInfo": "Account Information",
+    "account": "Account",
+    "plan": "Plan",
     "email": "Email",
     "accountType": "Account Type",
     "interface": "Interface",
@@ -32,6 +34,7 @@
     "themeLight": "Light",
     "themeDark": "Dark",
     "quotaUsage": "Quota Usage",
+    "tasks": "Tasks",
     "transcriptions": "Transcriptions",
     "duration": "Duration",
     "storage": "Storage",
@@ -80,7 +83,7 @@
   },
   "uploadZone": {
     "clickToUpload": "Click to upload or drag and drop",
-    "supportedFormats": "Support M4A, MP3, WAV, MP4 and other audio formats",
+    "supportedFormats": "Supports audio (M4A, MP3, WAV) and video (MP4, MOV, AVI) formats",
     "uploadingFile": "Uploading file..."
   },
   "tasksView": {
@@ -95,6 +98,7 @@
     "all": "All",
     "paragraph": "Doc",
     "subtitle": "Subs",
+    "hasAudio": "Audio",
     "taskName": "Task Name",
     "status": "Status",
     "type": "Type",
@@ -321,6 +325,27 @@
     "fontFamily": "Font",
     "sansSerif": "Sans-serif",
     "serif": "Serif"
+  },
+  "batchUpload": {
+    "title": "Batch Upload ({count} files)",
+    "close": "Close",
+    "expandSettings": "Expand Settings",
+    "removeFile": "Remove File",
+    "customName": "Custom Name",
+    "additionalTags": "Additional Tags",
+    "tagPlaceholder": "Enter tag and press Enter",
+    "add": "Add",
+    "maxFilesReached": "Maximum file limit reached (max {max})",
+    "commonSettings": "Common Settings",
+    "addMoreFiles": "Add More Files",
+    "createTasks": "Create {count} Tasks",
+    "tooManyFiles": "Too Many Files",
+    "maxFilesMessage": "Batch upload supports up to {max} files, you selected {count}, only the first {max} will be uploaded",
+    "success": "Batch Created",
+    "successMessage": "Successfully created {count} transcription tasks",
+    "partialSuccess": "Partially Successful",
+    "partialSuccessMessage": "Created {created} tasks, {failed} failed",
+    "failed": "Batch Creation Failed"
   },
   "aiSummary": {
     "title": "AI Summary",

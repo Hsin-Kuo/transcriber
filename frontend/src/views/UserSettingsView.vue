@@ -5,20 +5,80 @@
       <p>{{ $t('userSettings.description') }}</p>
     </div>
 
-    <div class="settings-grid">
-      <!-- 使用者資訊 -->
-      <div class="card user-info-card">
-        <h2>{{ $t('userSettings.accountInfo') }}</h2>
-        <div class="info-item">
-          <span class="info-label">{{ $t('userSettings.email') }}</span>
-          <span class="info-value">{{ authStore.user?.email }}</span>
-        </div>
-        <div class="info-item">
-          <span class="info-label">{{ $t('userSettings.accountType') }}</span>
-          <span class="info-value">{{ quotaTierName }}</span>
-        </div>
+    <!-- 使用者資訊顯示面板 -->
+    <div class="user-display-wrapper">
+      <!-- 左側標籤 -->
+      <div class="display-labels">
+        <span class="label-item">{{ $t('userSettings.account') }}</span>
+        <span class="label-item">{{ $t('userSettings.plan') }}</span>
+        <span class="label-item">{{ $t('userSettings.language') }}</span>
+        <span class="label-item">{{ $t('userSettings.timezone') }}</span>
+        <span class="label-item">{{ $t('userSettings.theme') }}</span>
+        <span class="label-item">{{ $t('userSettings.tasks') }}</span>
+        <span class="label-bar"></span>
+        <span class="label-item">{{ $t('userSettings.duration') }}</span>
+        <span class="label-bar"></span>
       </div>
 
+      <!-- 右側顯示面板 -->
+      <div class="user-display-panel">
+        <div class="display-row">
+          <span class="display-value">{{ authStore.user?.email || '---' }}</span>
+        </div>
+        <div class="display-row">
+          <span class="display-value plan-tiers">
+            <span :class="{ active: currentTier === 'free' }">FREE</span>
+            <span :class="{ active: currentTier === 'basic' }">BASIC</span>
+            <span :class="{ active: currentTier === 'pro' }">PRO</span>
+            <span :class="{ active: currentTier === 'enterprise' }">ENT</span>
+          </span>
+        </div>
+        <div class="display-row">
+          <span class="display-value">{{ currentLanguageLabel }}</span>
+        </div>
+        <div class="display-row">
+          <span class="display-value">{{ getTimezoneShort(currentTimezone) }}</span>
+        </div>
+        <div class="display-row">
+          <span class="display-value theme-icons">
+            <!-- 太陽 -->
+            <svg :class="{ active: currentTheme === 'light' }" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="5"></circle>
+              <line x1="12" y1="1" x2="12" y2="3"></line>
+              <line x1="12" y1="21" x2="12" y2="23"></line>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+              <line x1="1" y1="12" x2="3" y2="12"></line>
+              <line x1="21" y1="12" x2="23" y2="12"></line>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+            </svg>
+            <!-- 月亮 -->
+            <svg :class="{ active: currentTheme === 'dark' }" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+          </span>
+        </div>
+
+        <!-- 轉錄次數 -->
+        <div class="display-row usage-row">
+          <span class="display-value usage-value">{{ authStore.usage?.transcriptions || 0 }}/{{ authStore.quota?.max_transcriptions || 0 }}</span>
+        </div>
+        <div class="display-bar">
+          <span class="bar-fill" :style="{ width: (authStore.quotaPercentage?.transcriptions || 0) + '%' }"></span>
+        </div>
+
+        <!-- 時長 -->
+        <div class="display-row usage-row">
+          <span class="display-value usage-value">{{ Math.round(authStore.usage?.duration_minutes || 0) }}/{{ authStore.quota?.max_duration_minutes || 0 }}m</span>
+        </div>
+        <div class="display-bar">
+          <span class="bar-fill" :style="{ width: (authStore.quotaPercentage?.duration || 0) + '%' }"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-grid">
       <!-- 介面設定 -->
       <div class="card interface-card">
         <h2>{{ $t('userSettings.interface') }}</h2>
@@ -93,73 +153,6 @@
             <svg class="theme-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
             </svg>
-          </div>
-        </div>
-      </div>
-
-      <!-- 配額顯示 -->
-      <div class="quota-card electric-card">
-        <div class="electric-inner">
-          <div class="electric-border-outer">
-            <div class="electric-main quota-content">
-              <div class="quota-header">
-                <h3>{{ $t('userSettings.quotaUsage') }}</h3>
-                <span class="quota-tier">{{ quotaTierName }}</span>
-              </div>
-
-              <div class="quota-items">
-                <div class="quota-item">
-                  <div class="quota-label">
-                    <span>{{ $t('userSettings.transcriptions') }}</span>
-                    <span class="quota-value">{{ authStore.usage?.transcriptions || 0 }} / {{ authStore.quota?.max_transcriptions || 0 }}</span>
-                  </div>
-                  <div class="quota-bar">
-                    <div
-                      class="quota-progress"
-                      :class="{ 'quota-warning': authStore.quotaPercentage?.transcriptions > 80 }"
-                      :style="{ width: `${authStore.quotaPercentage?.transcriptions || 0}%` }"
-                    ></div>
-                  </div>
-                  <div class="quota-remaining">
-                    {{ $t('userSettings.remaining') }} {{ authStore.remainingQuota?.transcriptions || 0 }}
-                  </div>
-                </div>
-
-                <div class="quota-item">
-                  <div class="quota-label">
-                    <span>{{ $t('userSettings.duration') }}</span>
-                    <span class="quota-value">{{ Math.round(authStore.usage?.duration_minutes || 0) }} / {{ authStore.quota?.max_duration_minutes || 0 }} {{ $t('userSettings.minutes') }}</span>
-                  </div>
-                  <div class="quota-bar">
-                    <div
-                      class="quota-progress"
-                      :class="{ 'quota-warning': authStore.quotaPercentage?.duration > 80 }"
-                      :style="{ width: `${authStore.quotaPercentage?.duration || 0}%` }"
-                    ></div>
-                  </div>
-                  <div class="quota-remaining">
-                    {{ $t('userSettings.remaining') }} {{ Math.round(authStore.remainingQuota?.duration || 0) }} {{ $t('userSettings.minutes') }}
-                  </div>
-                </div>
-
-                <div class="quota-item">
-                  <div class="quota-label">
-                    <span>{{ $t('userSettings.storage') }}</span>
-                    <span class="quota-value">{{ formatBytes(authStore.usage?.storage_bytes || 0) }} / {{ formatBytes(authStore.quota?.max_storage_bytes || 0) }}</span>
-                  </div>
-                  <div class="quota-bar">
-                    <div
-                      class="quota-progress"
-                      :class="{ 'quota-warning': authStore.quotaPercentage?.storage > 80 }"
-                      :style="{ width: `${authStore.quotaPercentage?.storage || 0}%` }"
-                    ></div>
-                  </div>
-                  <div class="quota-remaining">
-                    {{ $t('userSettings.remaining') }} {{ formatBytes(authStore.remainingQuota?.storage || 0) }}
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -256,26 +249,8 @@ onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
 })
 
-// 配額層級名稱
-const quotaTierName = computed(() => {
-  const tier = authStore.quota?.tier || 'free'
-  const tierNames = {
-    free: '免費版',
-    basic: '基礎版',
-    pro: '專業版',
-    enterprise: '企業版'
-  }
-  return tierNames[tier] || '未知'
-})
-
-// 格式化位元組大小
-function formatBytes(bytes) {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i]
-}
+// 當前方案層級
+const currentTier = computed(() => authStore.quota?.tier || 'free')
 
 // 切換語言
 function changeLanguage() {
@@ -293,13 +268,188 @@ function changeTheme() {
   localStorage.setItem('theme', currentTheme.value)
   document.documentElement.setAttribute('data-theme', currentTheme.value)
 }
+
+// 取得時區簡短顯示
+function getTimezoneShort(tzCode) {
+  const tz = availableTimezones.find(t => t.code === tzCode)
+  if (!tz) return tzCode
+  // 從 "UTC+8 台北" 取出 "UTC+8"
+  const match = tz.name.match(/UTC[+-]?\d+/)
+  return match ? match[0] : tzCode
+}
 </script>
 
 <style scoped>
+@import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+
 .settings-container {
   max-width: 1200px;
   margin: 0 auto;
   padding: 0 20px;
+}
+
+/* 使用者資訊顯示面板 - 像素風格 */
+.user-display-wrapper {
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0 0 32px 22px;
+}
+
+/* 左側標籤 */
+.display-labels {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 0;
+  text-align: right;
+}
+
+.display-labels .label-item {
+  font-family: 'VT323', monospace;
+  font-size: 12px;
+  color: var(--main-text-light);
+  letter-spacing: 1px;
+  padding: 6px 0;
+  line-height: 18px;
+}
+
+
+.display-labels .label-bar {
+  height: 10px;
+  margin-bottom: 12px;
+}
+
+/* 右側顯示面板 */
+.user-display-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: 'VT323', monospace;
+  font-size: 18px;
+  color: #ffffff;
+  background: #101010;
+  padding: 16px 20px;
+  border-radius: 6px;
+  min-width: 280px;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.7);
+  border: 1px solid #333;
+  letter-spacing: 2.5px;
+}
+
+.user-display-panel .display-row {
+  display: flex;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.user-display-panel .display-row:last-child {
+  border-bottom: none;
+}
+
+.user-display-panel .display-value {
+  color: #e4e4e4;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 分隔線 */
+.user-display-panel .display-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #ff8c00, transparent);
+  margin: 8px 0;
+  opacity: 0.5;
+}
+
+/* 使用量行 */
+.user-display-panel .usage-row {
+  border-bottom: none;
+  padding-bottom: 2px;
+}
+
+.user-display-panel .usage-value {
+  font-size: 14px;
+  color: #ff8c00;
+}
+
+/* 進度條 */
+.user-display-panel .display-bar {
+  position: relative;
+  height: 10px;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 2px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.user-display-panel .display-bar:last-child {
+  margin-bottom: 0;
+}
+
+.user-display-panel .bar-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      #ff8c00 0px,
+      #ff8c00 4px,
+      #1a1a1a 4px,
+      #1a1a1a 6px
+    );
+  transition: width 0.3s ease;
+  box-shadow: 0 0 6px rgba(255, 140, 0, 0.4);
+}
+
+.user-display-panel .bar-text {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  color: #ff8c00;
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
+  z-index: 1;
+}
+
+/* 主題色 icons */
+.user-display-panel .theme-icons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user-display-panel .theme-icons svg {
+  color: #444;
+  transition: color 0.2s ease;
+}
+
+.user-display-panel .theme-icons svg.active {
+  color: #fff;
+}
+
+/* 方案層級 */
+.user-display-panel .plan-tiers {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+}
+
+.user-display-panel .plan-tiers span {
+  color: #444;
+  transition: color 0.2s ease;
+}
+
+.user-display-panel .plan-tiers span.active {
+  color: #fff;
 }
 
 .settings-header {
@@ -605,6 +755,16 @@ function changeTheme() {
     font-size: 1.75rem;
   }
 
+  .user-display-wrapper {
+    max-width: 100%;
+    margin-bottom: 24px;
+  }
+
+  .user-display-panel {
+    min-width: auto;
+    flex: 1;
+  }
+
   .settings-grid {
     grid-template-columns: 1fr;
   }
@@ -621,6 +781,132 @@ function changeTheme() {
 
   .quota-tier {
     align-self: flex-end;
+  }
+}
+
+/* 小手機 */
+@media (max-width: 480px) {
+  .settings-container {
+    padding: 0 12px;
+  }
+
+  .settings-header {
+    margin-top: 20px;
+    margin-bottom: 20px;
+  }
+
+  .settings-header h1 {
+    font-size: 1.5rem;
+  }
+
+  .settings-header p {
+    font-size: 0.9rem;
+  }
+
+  .user-display-wrapper {
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+
+  .display-labels .label-item {
+    font-size: 10px;
+  }
+
+  .user-display-panel {
+    font-size: 16px;
+    padding: 12px 14px;
+  }
+
+  .user-display-panel .display-value {
+    max-width: 160px;
+    font-size: 15px;
+  }
+
+  .settings-grid {
+    gap: 16px;
+  }
+
+  /* 卡片內間距調整 */
+  .user-info-card,
+  .interface-card {
+    padding: 16px;
+  }
+
+  .user-info-card h2,
+  .interface-card h2 {
+    font-size: 1.1rem;
+    margin-bottom: 16px;
+  }
+
+  .info-item,
+  .setting-item {
+    padding: 10px 0;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .info-label,
+  .setting-label,
+  .info-value {
+    font-size: 0.9rem;
+  }
+
+  /* 下拉選單在小屏優化 */
+  .custom-select {
+    min-width: 120px;
+  }
+
+  .select-trigger {
+    padding: 10px 12px;
+    font-size: 14px;
+    min-height: 44px;
+  }
+
+  .select-dropdown {
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .select-option {
+    padding: 12px 14px;
+    min-height: 44px;
+  }
+
+  /* 配額卡片調整 */
+  .quota-content {
+    padding: 16px;
+  }
+
+  .quota-header h3 {
+    font-size: 1.1rem;
+  }
+
+  .quota-tier {
+    padding: 4px 12px;
+    font-size: 0.8rem;
+  }
+
+  .quota-items {
+    gap: 16px;
+  }
+
+  .quota-label {
+    font-size: 0.85rem;
+    flex-wrap: wrap;
+  }
+
+  .quota-value {
+    font-size: 0.85rem;
+  }
+
+  .quota-remaining {
+    font-size: 0.8rem;
+  }
+
+  /* toggle 開關觸控優化 */
+  .toggle-switch {
+    width: 44px;
+    height: 24px;
   }
 }
 </style>

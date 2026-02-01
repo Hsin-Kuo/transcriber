@@ -92,8 +92,8 @@ function formatDate(dateValue) {
 .meta-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
+  gap: 0.5rem;
+  font-size: var(--font-size-sm);
   color: var(--main-text);
 }
 
@@ -111,7 +111,7 @@ function formatDate(dateValue) {
 }
 
 .metadata-section.horizontal .meta-item {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   white-space: nowrap;
 }
 </style>

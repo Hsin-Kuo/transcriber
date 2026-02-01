@@ -47,7 +47,12 @@ function subscribeTokenRefresh(callback) {
 }
 
 function onRefreshed(token) {
-  refreshSubscribers.forEach(callback => callback(token))
+  refreshSubscribers.forEach(callback => callback({ success: true, token }))
+  refreshSubscribers = []
+}
+
+function onRefreshFailed(error) {
+  refreshSubscribers.forEach(callback => callback({ success: false, error }))
   refreshSubscribers = []
 }
 
@@ -60,10 +65,14 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && !originalRequest._retry) {
       if (isRefreshing) {
         // 如果正在刷新,將請求加入隊列
-        return new Promise((resolve) => {
-          subscribeTokenRefresh((token) => {
-            originalRequest.headers.Authorization = `Bearer ${token}`
-            resolve(api(originalRequest))
+        return new Promise((resolve, reject) => {
+          subscribeTokenRefresh((result) => {
+            if (result.success) {
+              originalRequest.headers.Authorization = `Bearer ${result.token}`
+              resolve(api(originalRequest))
+            } else {
+              reject(result.error)
+            }
           })
         })
       }
@@ -88,15 +97,17 @@ api.interceptors.response.use(
         // 更新原請求的 header
         originalRequest.headers.Authorization = `Bearer ${access_token}`
 
-        // 通知所有等待的請求
+        // 通知所有等待的請求成功
         onRefreshed(access_token)
         isRefreshing = false
 
         // 重試原請求
         return api(originalRequest)
       } catch (refreshError) {
-        // 刷新失敗,清除 Token 並跳轉登入頁
+        // 刷新失敗,通知所有等待的請求
+        onRefreshFailed(refreshError)
         isRefreshing = false
+
         TokenManager.clearTokens()
         router.push('/login')
         return Promise.reject(refreshError)

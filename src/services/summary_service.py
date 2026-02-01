@@ -88,7 +88,7 @@ class SummaryService:
             language = self._detect_language(content)
 
             # 5. 調用 Gemini API 生成摘要
-            summary_data, model_used = await self._generate_with_gemini(content, language)
+            summary_data, model_used, token_usage = await self._generate_with_gemini(content, language)
 
             if not summary_data:
                 await self.task_repo.update(task_id, {"summary_status": "failed"})
@@ -104,6 +104,15 @@ class SummaryService:
                 "language": language,
                 "source_length": len(content)
             }
+
+            # 如果有 token 使用量，加入 metadata
+            if token_usage:
+                metadata["token_usage"] = {
+                    "total": token_usage.get("total", 0),
+                    "prompt": token_usage.get("prompt", 0),
+                    "completion": token_usage.get("completion", 0)
+                }
+                print(f"📊 保存摘要 Token 使用量: {token_usage}")
 
             doc = await self.summary_repo.upsert(task_id, summary_data, metadata)
 
@@ -258,7 +267,7 @@ class SummaryService:
         self,
         text: str,
         language: str
-    ) -> Tuple[Optional[Dict[str, Any]], str]:
+    ) -> Tuple[Optional[Dict[str, Any]], str, Optional[Dict[str, int]]]:
         """使用 Gemini API 生成摘要
 
         Args:
@@ -266,7 +275,7 @@ class SummaryService:
             language: 語言代碼
 
         Returns:
-            (摘要內容, 使用的模型名稱) 元組
+            (摘要內容, 使用的模型名稱, token_usage) 元組
         """
         import google.generativeai as genai
 
@@ -309,7 +318,21 @@ class SummaryService:
                 if summary_data:
                     if fallback_index >= 0:
                         print(f"✅ 使用備援模型 {current_model} 成功生成摘要")
-                    return summary_data, current_model
+
+                    # 提取 token 使用量
+                    token_usage = None
+                    if hasattr(resp, 'usage_metadata') and resp.usage_metadata:
+                        total = getattr(resp.usage_metadata, 'total_token_count', 0)
+                        prompt_tokens = getattr(resp.usage_metadata, 'prompt_token_count', 0)
+                        completion = getattr(resp.usage_metadata, 'candidates_token_count', 0)
+                        token_usage = {
+                            "total": total,
+                            "prompt": prompt_tokens,
+                            "completion": completion
+                        }
+                        print(f"📊 Token 使用: {total} (輸入: {prompt_tokens}, 輸出: {completion})")
+
+                    return summary_data, current_model, token_usage
 
             except Exception as e:
                 last_error = e
@@ -346,7 +369,7 @@ class SummaryService:
                     continue
 
         print(f"❌ 無法生成摘要。已嘗試模型: {', '.join(tried_models)}")
-        return None, ""
+        return None, "", None
 
     def _get_summary_prompt(self, language: str, text: str) -> str:
         """生成摘要的 prompt

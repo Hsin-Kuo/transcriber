@@ -1,14 +1,7 @@
 <template>
   <div class="admin-container">
     <!-- 導航 -->
-    <nav class="admin-nav">
-      <router-link to="/" class="nav-link" exact-active-class="active">
-        📊 系統統計
-      </router-link>
-      <router-link to="/audit-logs" class="nav-link" exact-active-class="active">
-        📝 操作記錄
-      </router-link>
-    </nav>
+    <AdminNav />
 
     <h1 class="admin-title">系統統計後台</h1>
 
@@ -48,30 +41,67 @@
       </div>
 
       <!-- Token 使用量卡片 -->
-      <div class="stat-card">
-        <h2>Token 使用量</h2>
-        <div class="stat-item">
-          <span class="label">總 Token：</span>
-          <span class="value highlight">{{ formatNumber(stats.token_usage.total_tokens) }}</span>
+      <div class="stat-card wide">
+        <h2>🔢 Token 使用量</h2>
+
+        <!-- 總計 -->
+        <div class="token-summary">
+          <div class="token-total">
+            <span class="total-label">總 Token</span>
+            <span class="total-value">{{ formatNumber(stats.token_usage.total_tokens) }}</span>
+          </div>
+          <div class="token-breakdown">
+            <span>輸入: {{ formatNumber(stats.token_usage.prompt_tokens) }}</span>
+            <span>輸出: {{ formatNumber(stats.token_usage.completion_tokens) }}</span>
+          </div>
+          <div class="cost-estimate">
+            預估成本: ${{ estimatedCost.toFixed(4) }} USD
+          </div>
         </div>
-        <div class="stat-item">
-          <span class="label">輸入 Token：</span>
-          <span class="value">{{ formatNumber(stats.token_usage.prompt_tokens) }}</span>
-        </div>
-        <div class="stat-item">
-          <span class="label">輸出 Token：</span>
-          <span class="value">{{ formatNumber(stats.token_usage.completion_tokens) }}</span>
-        </div>
-        <div class="stat-item">
-          <span class="label">使用任務數：</span>
-          <span class="value">{{ stats.token_usage.tasks_with_tokens }}</span>
-        </div>
-        <div class="stat-item">
-          <span class="label">平均每任務：</span>
-          <span class="value">{{ formatNumber(stats.token_usage.avg_tokens_per_task) }}</span>
-        </div>
-        <div class="cost-estimate">
-          預估成本: ${{ estimatedCost.toFixed(4) }} USD
+
+        <!-- 分類統計 -->
+        <div class="token-categories">
+          <!-- 標點符號 -->
+          <div class="token-category">
+            <h3>📝 標點符號</h3>
+            <div class="stat-item">
+              <span class="label">總 Token：</span>
+              <span class="value">{{ formatNumber(stats.token_usage.punctuation?.total_tokens || 0) }}</span>
+            </div>
+            <div class="stat-item">
+              <span class="label">輸入 / 輸出：</span>
+              <span class="value">{{ formatNumber(stats.token_usage.punctuation?.prompt_tokens || 0) }} / {{ formatNumber(stats.token_usage.punctuation?.completion_tokens || 0) }}</span>
+            </div>
+            <div class="stat-item">
+              <span class="label">任務數：</span>
+              <span class="value">{{ stats.token_usage.punctuation?.tasks_count || 0 }}</span>
+            </div>
+            <div class="stat-item">
+              <span class="label">平均每任務：</span>
+              <span class="value">{{ formatNumber(stats.token_usage.punctuation?.avg_tokens_per_task || 0) }}</span>
+            </div>
+          </div>
+
+          <!-- AI 總結 -->
+          <div class="token-category">
+            <h3>🤖 AI 總結</h3>
+            <div class="stat-item">
+              <span class="label">總 Token：</span>
+              <span class="value">{{ formatNumber(stats.token_usage.summary?.total_tokens || 0) }}</span>
+            </div>
+            <div class="stat-item">
+              <span class="label">輸入 / 輸出：</span>
+              <span class="value">{{ formatNumber(stats.token_usage.summary?.prompt_tokens || 0) }} / {{ formatNumber(stats.token_usage.summary?.completion_tokens || 0) }}</span>
+            </div>
+            <div class="stat-item">
+              <span class="label">摘要數：</span>
+              <span class="value">{{ stats.token_usage.summary?.summaries_count || 0 }}</span>
+            </div>
+            <div class="stat-item">
+              <span class="label">平均每摘要：</span>
+              <span class="value">{{ formatNumber(stats.token_usage.summary?.avg_tokens_per_summary || 0) }}</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -183,6 +213,35 @@
           </table>
         </div>
 
+        <!-- AI 總結模型 -->
+        <div v-if="stats.model_usage.summary && stats.model_usage.summary.length > 0" class="model-section">
+          <h3 class="model-type-title">🤖 AI 總結模型</h3>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>模型名稱</th>
+                <th>使用次數</th>
+                <th>佔比</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="model in stats.model_usage.summary" :key="'summary-' + model.model">
+                <td>{{ model.model }}</td>
+                <td>{{ model.count }}</td>
+                <td>
+                  <div class="progress-bar">
+                    <div
+                      class="progress-fill summary-fill"
+                      :style="{width: `${(model.count / totalSummaries * 100).toFixed(1)}%`}"
+                    ></div>
+                    <span class="progress-text">{{ (model.count / totalSummaries * 100).toFixed(1) }}%</span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
         <div v-if="!hasAnyModelUsage" class="no-data">
           暫無模型使用資料
         </div>
@@ -205,14 +264,20 @@
             <tr>
               <th>使用者 ID</th>
               <th>任務數</th>
-              <th>Token 使用量</th>
+              <th>摘要數</th>
+              <th>標點 Token</th>
+              <th>摘要 Token</th>
+              <th>總 Token</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="user in stats.top_users" :key="user.user_id">
               <td><code>{{ user.user_id }}</code></td>
               <td>{{ user.tasks_count }}</td>
-              <td>{{ formatNumber(user.tokens_used) }}</td>
+              <td>{{ user.summaries_count || 0 }}</td>
+              <td>{{ formatNumber(user.punctuation_tokens || 0) }}</td>
+              <td>{{ formatNumber(user.summary_tokens || 0) }}</td>
+              <td class="highlight">{{ formatNumber(user.total_tokens || 0) }}</td>
             </tr>
           </tbody>
         </table>
@@ -220,14 +285,14 @@
 
       <!-- 每日統計圖表 -->
       <div class="stat-card full-width">
-        <h2>每日統計（最近 30 天）</h2>
+        <h2>📊 每日統計（最近 30 天）</h2>
         <div class="chart-container">
           <div class="chart-bars">
             <div
               v-for="day in stats.daily_stats"
               :key="day.date"
               class="chart-bar-wrapper"
-              :title="`${day.date}: ${day.tasks_count} 任務, ${formatNumber(day.tokens_used)} tokens`"
+              :title="`${day.date}: ${day.tasks_count} 任務, ${day.summaries_count || 0} 摘要, ${formatNumber(day.total_tokens || 0)} tokens`"
             >
               <div class="chart-bar" :style="{height: `${(day.tasks_count / maxDailyTasks * 100)}%`}">
                 <span class="bar-value">{{ day.tasks_count }}</span>
@@ -249,6 +314,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import api from '../utils/api'
+import AdminNav from '../components/shared/AdminNav.vue'
 
 const stats = ref({
   overview: {
@@ -262,13 +328,26 @@ const stats = ref({
     total_tokens: 0,
     prompt_tokens: 0,
     completion_tokens: 0,
-    tasks_with_tokens: 0,
-    avg_tokens_per_task: 0
+    punctuation: {
+      total_tokens: 0,
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      tasks_count: 0,
+      avg_tokens_per_task: 0
+    },
+    summary: {
+      total_tokens: 0,
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      summaries_count: 0,
+      avg_tokens_per_summary: 0
+    }
   },
   model_usage: {
     punctuation: [],
     transcription: [],
-    diarization: []
+    diarization: [],
+    summary: []
   },
   daily_stats: [],
   top_users: [],
@@ -300,7 +379,13 @@ const maxDailyTasks = computed(() => {
 const hasAnyModelUsage = computed(() => {
   return (stats.value.model_usage.punctuation && stats.value.model_usage.punctuation.length > 0) ||
          (stats.value.model_usage.transcription && stats.value.model_usage.transcription.length > 0) ||
-         (stats.value.model_usage.diarization && stats.value.model_usage.diarization.length > 0)
+         (stats.value.model_usage.diarization && stats.value.model_usage.diarization.length > 0) ||
+         (stats.value.model_usage.summary && stats.value.model_usage.summary.length > 0)
+})
+
+// 計算總摘要數（用於 AI 總結模型佔比）
+const totalSummaries = computed(() => {
+  return stats.value.token_usage.summary?.summaries_count || 1
 })
 
 // 獲取統計資料
@@ -322,6 +407,7 @@ async function fetchStats() {
 
 // 格式化數字（加千分位）
 function formatNumber(num) {
+  if (num === undefined || num === null) return '0'
   return num.toLocaleString('zh-TW')
 }
 
@@ -350,81 +436,30 @@ onMounted(() => {
 .admin-container {
   max-width: 1400px;
   margin: 0 auto;
-  padding: 20px;
-}
-
-/* 導航 */
-.admin-nav {
-  display: flex;
-  gap: 15px;
-  margin-bottom: 30px;
-  background: var(--main-bg);
-  padding: 15px 20px;
-  border-radius: 20px;
-  justify-content: center;
-}
-
-.nav-link {
-  padding: 12px 24px;
-  background: linear-gradient(145deg, #e9eef5, #d1d9e6);
-  color: var(--main-text);
-  text-decoration: none;
-  border-radius: 12px;
-  font-weight: 600;
-  transition: all 0.3s;
-}
-
-.nav-link:hover {
-  transform: translateY(-2px);
-}
-
-.nav-link.active {
-  background: linear-gradient(145deg, var(--main-primary-light), var(--main-primary));
-  color: white;
+  padding: 0 20px 40px;
 }
 
 .admin-title {
   text-align: center;
-  color: var(--main-primary);
+  color: var(--color-text, rgb(145, 106, 45));
   margin-bottom: 30px;
   font-weight: 700;
-}
-
-.loading, .error-message {
-  text-align: center;
-  padding: 40px;
-  font-size: 18px;
-  color: var(--main-text);
-}
-
-.spinner {
-  border: 4px solid transparent;
-  border-top: 4px solid var(--main-primary);
-  border-right: 4px solid var(--main-primary-light);
-  border-radius: 50%;
-  width: 40px;
-  height: 40px;
-  animation: spin 1s linear infinite;
-  margin: 0 auto 20px;
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  font-size: 1.75rem;
 }
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 20px;
   margin-bottom: 30px;
 }
 
 .stat-card {
-  background: var(--main-bg);
-  border-radius: 20px;
+  background: white;
+  border-radius: 14px;
   padding: 24px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(163, 177, 198, 0.2);
 }
 
 .stat-card.wide {
@@ -436,17 +471,21 @@ onMounted(() => {
 }
 
 .stat-card h2 {
-  font-size: 18px;
-  margin-bottom: 15px;
-  color: var(--main-primary);
+  font-size: 16px;
+  margin-bottom: 16px;
+  color: var(--color-primary, #dd8448);
   font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .stat-item {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   padding: 10px 0;
-  border-bottom: 1px solid rgba(163, 177, 198, 0.2);
+  border-bottom: 1px solid rgba(163, 177, 198, 0.15);
 }
 
 .stat-item:last-child {
@@ -454,43 +493,35 @@ onMounted(() => {
 }
 
 .label {
-  color: var(--main-text-light);
+  color: var(--color-text-light, #a0917c);
   font-weight: 500;
+  font-size: 14px;
 }
 
 .value {
   font-weight: 700;
-  color: var(--main-text);
+  color: var(--color-text, rgb(145, 106, 45));
+  font-size: 15px;
 }
 
-.value.success {
-  color: #2e7d32;
-}
-
-.value.warning {
-  color: #f57c00;
-}
-
-.value.danger {
-  color: #c62828;
-}
-
+.value.success { color: #2e7d32; }
+.value.warning { color: #e9760c; }
+.value.danger { color: #c62828; }
 .value.highlight {
-  color: var(--main-primary);
-  font-size: 1.2em;
+  color: var(--color-primary, #dd8448);
+  font-size: 1.1em;
 }
 
 .cost-estimate {
-  margin-top: 15px;
-  padding: 12px;
-  background: linear-gradient(145deg, #f5d9c4, #e8c4a8);
-  border-radius: 12px;
+  margin-top: 16px;
+  padding: 12px 16px;
+  background: #fff8f3;
+  border: 1px solid rgba(221, 132, 72, 0.2);
+  border-radius: 10px;
   text-align: center;
   font-weight: 700;
-  color: #a0522d;
-  box-shadow:
-    inset 2px 2px 5px var(--main-shadow-dark),
-    inset -2px -2px 5px var(--main-shadow-light);
+  color: var(--color-primary-dark, #b8762d);
+  font-size: 14px;
 }
 
 .data-table {
@@ -502,47 +533,44 @@ onMounted(() => {
 .data-table td {
   padding: 12px;
   text-align: left;
-  border-bottom: 1px solid rgba(163, 177, 198, 0.2);
+  border-bottom: 1px solid rgba(163, 177, 198, 0.15);
 }
 
 .data-table th {
-  background: var(--main-bg);
-  font-weight: 700;
-  color: var(--main-primary);
-  box-shadow:
-    inset 2px 2px 4px var(--main-shadow-dark),
-    inset -2px -2px 4px var(--main-shadow-light);
+  background: #fafafa;
+  font-weight: 600;
+  color: var(--color-text, rgb(145, 106, 45));
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.data-table tbody tr:hover {
+  background: rgba(221, 132, 72, 0.04);
 }
 
 .data-table code {
-  background: var(--main-bg);
+  background: #f5f5f5;
   padding: 4px 8px;
-  border-radius: 8px;
-  font-size: 0.9em;
-  box-shadow:
-    inset 2px 2px 4px var(--main-shadow-dark),
-    inset -2px -2px 4px var(--main-shadow-light);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--color-text-muted, #4a6680);
 }
 
 .progress-bar {
   position: relative;
   width: 100%;
-  height: 24px;
-  background: var(--main-bg);
-  border-radius: 12px;
+  height: 22px;
+  background: #f0f0f0;
+  border-radius: 11px;
   overflow: hidden;
-  box-shadow:
-    inset 3px 3px 6px var(--main-shadow-dark),
-    inset -3px -3px 6px var(--main-shadow-light);
 }
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--main-primary), var(--main-primary-light));
+  background: linear-gradient(90deg, var(--color-primary, #dd8448), var(--color-primary-light, #f59e42));
+  border-radius: 11px;
   transition: width 0.3s;
-  box-shadow:
-    2px 2px 4px var(--main-shadow-dark),
-    -2px -2px 4px var(--main-shadow-light);
 }
 
 .progress-text {
@@ -550,22 +578,23 @@ onMounted(() => {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  font-size: 0.85em;
+  font-size: 11px;
   font-weight: 700;
-  color: var(--main-text);
+  color: var(--color-text, rgb(145, 106, 45));
 }
 
 .chart-container {
   padding: 20px 0;
-  min-height: 300px;
+  min-height: 280px;
 }
 
 .chart-bars {
   display: flex;
   align-items: flex-end;
   justify-content: space-around;
-  height: 250px;
+  height: 220px;
   gap: 6px;
+  padding: 0 10px;
 }
 
 .chart-bar-wrapper {
@@ -573,48 +602,42 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-width: 20px;
+  min-width: 16px;
+  max-width: 40px;
 }
 
 .chart-bar {
   width: 100%;
-  background: linear-gradient(180deg, var(--main-primary-light), var(--main-primary));
-  border-radius: 8px 8px 0 0;
+  background: var(--color-primary, #dd8448);
+  border-radius: 4px 4px 0 0;
   position: relative;
-  min-height: 20px;
-  transition: all 0.3s;
+  min-height: 4px;
+  transition: all 0.2s;
   cursor: pointer;
-  box-shadow:
-    3px 3px 6px var(--main-shadow-dark),
-    -3px -3px 6px var(--main-shadow-light);
 }
 
 .chart-bar:hover {
-  background: linear-gradient(180deg, #a5d6a7, #66bb6a);
-  transform: translateY(-3px);
-  box-shadow:
-    5px 5px 10px var(--main-shadow-dark),
-    -5px -5px 10px var(--main-shadow-light);
+  background: var(--color-primary-dark, #b8762d);
+  transform: scaleY(1.02);
 }
 
 .bar-value {
   position: absolute;
-  top: -20px;
+  top: -18px;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 0.75em;
+  font-size: 10px;
   font-weight: 700;
   white-space: nowrap;
-  color: var(--main-text);
+  color: var(--color-text, rgb(145, 106, 45));
 }
 
 .bar-label {
-  margin-top: 5px;
-  font-size: 0.7em;
-  color: var(--main-text-light);
-  writing-mode: horizontal-tb;
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--color-text-light, #a0917c);
   text-align: center;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .refresh-section {
@@ -623,33 +646,122 @@ onMounted(() => {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 20px;
+  gap: 16px;
 }
 
 .refresh-btn {
-  padding: 12px 24px;
-  background: linear-gradient(145deg, #e9eef5, #d1d9e6);
-  color: var(--main-primary);
+  padding: 10px 20px;
+  background: var(--color-primary, #dd8448);
+  color: white;
   border: none;
-  border-radius: 12px;
+  border-radius: 8px;
   cursor: pointer;
-  font-size: 16px;
-  font-weight: 700;
-  transition: all 0.3s;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.2s;
 }
 
 .refresh-btn:hover {
-  transform: translateY(-2px);
-}
-
-.refresh-btn:active {
-  transform: translateY(0);
+  background: var(--color-primary-dark, #b8762d);
+  transform: translateY(-1px);
 }
 
 .last-update {
-  color: var(--main-text-light);
+  color: var(--color-text-light, #a0917c);
+  font-size: 13px;
+}
+
+.model-section {
+  margin-bottom: 24px;
+}
+
+.model-section:last-child {
+  margin-bottom: 0;
+}
+
+.model-type-title {
   font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text, rgb(145, 106, 45));
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(163, 177, 198, 0.2);
+}
+
+.no-data {
+  text-align: center;
+  padding: 30px;
+  color: var(--color-text-light, #a0917c);
+}
+
+/* Token 使用量卡片樣式 */
+.token-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px;
+  background: linear-gradient(135deg, #fff8f3 0%, #fff 100%);
+  border-radius: 12px;
+  margin-bottom: 20px;
+  border: 1px solid rgba(221, 132, 72, 0.15);
+}
+
+.token-total {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.total-label {
+  font-size: 13px;
+  color: var(--color-text-light, #a0917c);
   font-weight: 500;
+}
+
+.total-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--color-primary, #dd8448);
+}
+
+.token-breakdown {
+  display: flex;
+  gap: 20px;
+  font-size: 13px;
+  color: var(--color-text-light, #a0917c);
+}
+
+.token-categories {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+.token-category {
+  padding: 16px;
+  background: #fafafa;
+  border-radius: 10px;
+  border: 1px solid rgba(163, 177, 198, 0.15);
+}
+
+.token-category h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text, rgb(145, 106, 45));
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(163, 177, 198, 0.2);
+}
+
+.data-table td.highlight {
+  font-weight: 700;
+  color: var(--color-primary, #dd8448);
+}
+
+/* AI 總結模型進度條 */
+.progress-fill.summary-fill {
+  background: linear-gradient(90deg, #6366f1, #8b5cf6);
 }
 
 @media (max-width: 768px) {
@@ -663,36 +775,28 @@ onMounted(() => {
   }
 
   .chart-bars {
-    gap: 2px;
+    gap: 3px;
   }
 
   .bar-label {
-    font-size: 0.6em;
+    font-size: 8px;
   }
-}
 
-/* 模型使用統計區塊 */
-.model-section {
-  margin-bottom: 30px;
-}
+  .bar-value {
+    font-size: 8px;
+  }
 
-.model-section:last-child {
-  margin-bottom: 0;
-}
+  .token-categories {
+    grid-template-columns: 1fr;
+  }
 
-.model-type-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--main-primary);
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 2px solid rgba(163, 177, 198, 0.3);
-}
+  .data-table {
+    font-size: 12px;
+  }
 
-.no-data {
-  text-align: center;
-  padding: 30px;
-  color: var(--main-text-light);
-  font-style: italic;
+  .data-table th,
+  .data-table td {
+    padding: 8px 4px;
+  }
 }
 </style>

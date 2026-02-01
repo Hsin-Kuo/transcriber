@@ -23,6 +23,8 @@
     "title": "使用者設定",
     "description": "管理您的帳戶資訊和配額使用情況",
     "accountInfo": "帳戶資訊",
+    "account": "帳戶",
+    "plan": "方案",
     "email": "電子郵件",
     "accountType": "帳戶類型",
     "interface": "介面",
@@ -32,6 +34,7 @@
     "themeLight": "淺色",
     "themeDark": "深色",
     "quotaUsage": "配額使用情況",
+    "tasks": "任務數",
     "transcriptions": "轉錄次數",
     "duration": "轉錄時長",
     "storage": "儲存空間",
@@ -80,7 +83,7 @@
   },
   "uploadZone": {
     "clickToUpload": "點擊或拖放檔案",
-    "supportedFormats": "支援 M4A、MP3、WAV、MP4 等音訊格式",
+    "supportedFormats": "支援音訊（M4A、MP3、WAV）及影片（MP4、MOV、AVI）格式",
     "uploadingFile": "上傳檔案中..."
   },
   "tasksView": {
@@ -95,6 +98,7 @@
     "all": "全部",
     "paragraph": "段落",
     "subtitle": "字幕",
+    "hasAudio": "音檔",
     "taskName": "任務名稱",
     "status": "狀態",
     "type": "類型",
@@ -321,6 +325,27 @@
     "fontFamily": "字體",
     "sansSerif": "無襯線體",
     "serif": "襯線體"
+  },
+  "batchUpload": {
+    "title": "批次上傳（{count} 個檔案）",
+    "close": "關閉",
+    "expandSettings": "展開設定",
+    "removeFile": "移除檔案",
+    "customName": "自訂名稱",
+    "additionalTags": "額外標籤",
+    "tagPlaceholder": "輸入標籤後按 Enter",
+    "add": "新增",
+    "maxFilesReached": "已達檔案數量上限（最多 {max} 個）",
+    "commonSettings": "統一設定",
+    "addMoreFiles": "新增更多檔案",
+    "createTasks": "建立 {count} 個任務",
+    "tooManyFiles": "檔案數量過多",
+    "maxFilesMessage": "批次上傳最多支援 {max} 個檔案，您選擇了 {count} 個，將只上傳前 {max} 個",
+    "success": "批次建立成功",
+    "successMessage": "成功建立 {count} 個轉錄任務",
+    "partialSuccess": "部分建立成功",
+    "partialSuccessMessage": "成功建立 {created} 個任務，{failed} 個失敗",
+    "failed": "批次建立失敗"
   },
   "aiSummary": {
     "title": "AI 摘要",

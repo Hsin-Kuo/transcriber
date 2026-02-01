@@ -50,6 +50,13 @@
       >
         <span>{{ $t('taskList.subtitle') }}</span>
       </button>
+      <button
+        class="tab-btn tab-has-audio"
+        :class="{ active: selectedTaskType === 'has_audio' }"
+        @click="selectedTaskType = 'has_audio'"
+      >
+        <span>{{ $t('taskList.hasAudio') }}</span>
+      </button>
 
       <button
         class="tab-btn tab-batch-edit"
@@ -169,7 +176,7 @@ const restoreFilterState = () => {
 
 // State
 const selectedFilterTags = ref([])
-const selectedTaskType = ref('all') // 任務類型篩選：'all', 'paragraph', 'subtitle'
+const selectedTaskType = ref('all') // 任務類型篩選：'all', 'paragraph', 'subtitle', 'has_audio'
 const isEditingFilterTags = ref(false)
 const customTagOrder = ref([])
 const isBatchEditMode = ref(false)
@@ -194,10 +201,20 @@ watch(selectedTaskType, (newType) => {
 
 // 發送篩選變更事件的函數
 const emitFilterChange = () => {
-  emit('filter-change', {
-    taskType: selectedTaskType.value === 'all' ? null : selectedTaskType.value,
-    tags: selectedFilterTags.value
-  })
+  const filterData = {
+    taskType: null,
+    tags: selectedFilterTags.value,
+    hasAudio: null
+  }
+
+  // 根據選擇的類型設置篩選條件
+  if (selectedTaskType.value === 'has_audio') {
+    filterData.hasAudio = true
+  } else if (selectedTaskType.value !== 'all') {
+    filterData.taskType = selectedTaskType.value
+  }
+
+  emit('filter-change', filterData)
 }
 
 // 監聽篩選條件變化，通知父組件
@@ -447,6 +464,13 @@ onMounted(() => {
   z-index: 5;
 }
 
+.task-list.task-type-has_audio :deep(.tasks) {
+  padding: 10px;
+  border-radius: 8px;
+  position: relative;
+  z-index: 5;
+}
+
 /* empty-state 根據任務類型設置背景色，在頁籤之上、.tasks 之下 */
 .task-list.task-type-all :deep(.empty-state) {
   background-color: var(--upload-bg);
@@ -464,6 +488,13 @@ onMounted(() => {
 
 .task-list.task-type-subtitle :deep(.empty-state) {
   background-color: var(--color-teal);
+  border-radius: 8px;
+  position: relative;
+  z-index: 3;
+}
+
+.task-list.task-type-has_audio :deep(.empty-state) {
+  background-color: var(--upload-bg);
   border-radius: 8px;
   position: relative;
   z-index: 3;
@@ -551,7 +582,8 @@ onMounted(() => {
 /* 批次編輯模式下，其他頁籤變成淺灰色 */
 .task-list.batch-edit-active .tab-btn.tab-all,
 .task-list.batch-edit-active .tab-btn.tab-paragraph,
-.task-list.batch-edit-active .tab-btn.tab-subtitle {
+.task-list.batch-edit-active .tab-btn.tab-subtitle,
+.task-list.batch-edit-active .tab-btn.tab-has-audio {
   border-bottom: none;
   color: rgba(var(--color-text-dark-rgb), 0.5) !important;
   opacity: 0.7;
@@ -609,5 +641,82 @@ onMounted(() => {
 
 .btn-batch-edit {
   gap: 8px;
+}
+
+/* === 響應式設計 === */
+
+/* 平板以下 (768px) */
+@media (max-width: 768px) {
+  /* 任務類型頁籤換行排列 */
+  .task-type-tabs {
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .tab-btn {
+    padding: 8px 12px;
+    margin: 0 8px 8px 8px;
+    font-size: 13px;
+    /* 確保觸控友好 */
+    min-height: 44px;
+  }
+
+  /* 分頁控制在小屏時佔滿整行 */
+  .pagination-wrapper {
+    width: 100%;
+    margin-left: 0;
+    margin-top: 8px;
+    justify-content: center;
+  }
+
+  /* FilterBar 間距調整 */
+  .task-list :deep(.filter-section) {
+    margin-top: 20px;
+  }
+
+  /* 任務網格間距調整 */
+  .task-list.task-type-all :deep(.tasks),
+  .task-list.task-type-paragraph :deep(.tasks),
+  .task-list.task-type-subtitle :deep(.tasks),
+  .task-list.task-type-has_audio :deep(.tasks) {
+    padding: 8px;
+  }
+}
+
+/* 小手機 (480px) */
+@media (max-width: 480px) {
+  .task-type-tabs {
+    gap: 4px;
+    margin-top: 8px;
+  }
+
+  .tab-btn {
+    padding: 6px 8px;
+    margin: 0 4px 6px 4px;
+    font-size: 12px;
+  }
+
+  /* 批次編輯按鈕在小屏隱藏文字 */
+  .tab-btn.tab-batch-edit span {
+    display: none;
+  }
+
+  .tab-btn.tab-batch-edit {
+    padding: 8px;
+  }
+
+  /* 任務網格更緊湊 */
+  .task-list.task-type-all :deep(.tasks),
+  .task-list.task-type-paragraph :deep(.tasks),
+  .task-list.task-type-subtitle :deep(.tasks),
+  .task-list.task-type-has_audio :deep(.tasks) {
+    padding: 4px;
+  }
+
+  /* 批次編輯模式調整 */
+  .task-list :deep(.tasks.batch-mode) {
+    padding: 12px !important;
+  }
 }
 </style>

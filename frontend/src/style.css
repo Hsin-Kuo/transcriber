@@ -3,6 +3,59 @@
  * 顏色定義請參見 assets/colors.css
  */
 
+/* === Responsive Breakpoints ===
+ * sm: 480px  - 小手機 (iPhone SE, small phones)
+ * md: 768px  - 大手機/平板直式 (large phones, tablets portrait)
+ * lg: 1024px - 平板橫式/小筆電 (tablets landscape, small laptops)
+ *
+ * 使用方式：
+ * @media (max-width: 1024px) { ... } - lg 以下
+ * @media (max-width: 768px) { ... }  - md 以下
+ * @media (max-width: 480px) { ... }  - sm 以下
+ */
+
+:root {
+  /* 響應式間距變數 */
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 1.5rem;
+  --spacing-xl: 2rem;
+
+  /* 響應式字體大小 (桌面版) */
+  --font-size-xs: 0.6875rem;  /* 11px */
+  --font-size-sm: 0.8125rem;  /* 13px */
+  --font-size-base: 0.9375rem; /* 15px */
+  --font-size-lg: 1.125rem;   /* 18px */
+  --font-size-xl: 1.5rem;     /* 24px */
+
+  /* 觸控友好的最小尺寸 */
+  --touch-target-min: 2.75rem; /* 44px */
+}
+
+/* 平板以下調整 */
+@media (max-width: 768px) {
+  :root {
+    --spacing-lg: 1.25rem;
+    --spacing-xl: 1.5rem;
+    /* 手機版字體稍大，提升可讀性 */
+    --font-size-xs: 0.75rem;    /* 12px */
+    --font-size-sm: 0.875rem;   /* 14px */
+    --font-size-base: 1rem;     /* 16px */
+    --font-size-lg: 1.125rem;   /* 18px */
+    --font-size-xl: 1.25rem;    /* 20px */
+  }
+}
+
+/* 小手機進一步調整 */
+@media (max-width: 480px) {
+  :root {
+    --spacing-md: 0.75rem;
+    --spacing-lg: 1rem;
+    --spacing-xl: 1.25rem;
+  }
+}
+
 * {
   margin: 0;
   padding: 0;

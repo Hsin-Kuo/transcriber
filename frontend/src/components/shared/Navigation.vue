@@ -13,36 +13,29 @@
     </button>
 
     <div class="nav-brand">
-      <svg class="brand-icon" width="28" height="24" viewBox="0 0 28 24">
-        <!-- 列1: 2個點 -->
-        <circle cx="2" cy="18" r="1.5" fill="currentColor"/>
-        <circle cx="2" cy="22" r="1.5" fill="currentColor"/>
-        <!-- 列2: 1個點 -->
-        <circle cx="6" cy="22" r="1.5" fill="currentColor"/>
-        <!-- 列3: 4個點 -->
-        <circle cx="10" cy="10" r="1.5" fill="currentColor"/>
-        <circle cx="10" cy="14" r="1.5" fill="currentColor"/>
-        <circle cx="10" cy="18" r="1.5" fill="currentColor"/>
-        <circle cx="10" cy="22" r="1.5" fill="currentColor"/>
-        <!-- 列4: 3個點 -->
-        <circle cx="14" cy="14" r="1.5" fill="currentColor"/>
-        <circle cx="14" cy="18" r="1.5" fill="currentColor"/>
-        <circle cx="14" cy="22" r="1.5" fill="currentColor"/>
-        <!-- 列5: 1個點 -->
-        <circle cx="18" cy="22" r="1.5" fill="currentColor"/>
-        <!-- 列6: 6個點 -->
-        <circle cx="22" cy="2" r="1.5" fill="currentColor"/>
-        <circle cx="22" cy="6" r="1.5" fill="currentColor"/>
-        <circle cx="22" cy="10" r="1.5" fill="currentColor"/>
-        <circle cx="22" cy="14" r="1.5" fill="currentColor"/>
-        <circle cx="22" cy="18" r="1.5" fill="currentColor"/>
-        <circle cx="22" cy="22" r="1.5" fill="currentColor"/>
-        <!-- 列7: 3個點 -->
-        <circle cx="26" cy="14" r="1.5" fill="currentColor"/>
-        <circle cx="26" cy="18" r="1.5" fill="currentColor"/>
-        <circle cx="26" cy="22" r="1.5" fill="currentColor"/>
+      <svg class="brand-icon" width="28" height="28" viewBox="0 0 28 28">
+        <!-- 橘色方框 -->
+        <rect x="0" y="0" width="28" height="28" rx="4" fill="currentColor"/>
+        <!-- 中心點 (白色) -->
+        <circle cx="14" cy="14" r="2" fill="#f4ecd5"/>
+        <!-- 內圈 (6 dots, 白色) -->
+        <circle cx="14" cy="9" r="1.5" fill="#f4ecd5"/>
+        <circle cx="18.3" cy="11.5" r="1.5" fill="#f4ecd5"/>
+        <circle cx="18.3" cy="16.5" r="1.5" fill="#f4ecd5"/>
+        <circle cx="14" cy="19" r="1.5" fill="#f4ecd5"/>
+        <circle cx="9.7" cy="16.5" r="1.5" fill="#f4ecd5"/>
+        <circle cx="9.7" cy="11.5" r="1.5" fill="#f4ecd5"/>
+        <!-- 外圈 (8 dots, 白色) -->
+        <circle cx="14" cy="4" r="1.5" fill="#f4ecd5"/>
+        <circle cx="21" cy="7" r="1.5" fill="#f4ecd5"/>
+        <circle cx="24" cy="14" r="1.5" fill="#f4ecd5"/>
+        <circle cx="21" cy="21" r="1.5" fill="#f4ecd5"/>
+        <circle cx="14" cy="24" r="1.5" fill="#f4ecd5"/>
+        <circle cx="7" cy="21" r="1.5" fill="#f4ecd5"/>
+        <circle cx="4" cy="14" r="1.5" fill="#f4ecd5"/>
+        <circle cx="7" cy="7" r="1.5" fill="#f4ecd5"/>
       </svg>
-      <h2 v-if="!isCollapsed">SoundThing</h2>
+      <h2 v-if="!isCollapsed">TRACKing</h2>
     </div>
 
     <div class="nav-links">
@@ -151,6 +144,16 @@ const isCollapsed = ref(false)
 function toggleCollapse() {
   isCollapsed.value = !isCollapsed.value
   localStorage.setItem('navCollapsed', JSON.stringify(isCollapsed.value))
+  updateNavWidth()
+}
+
+// 更新導航欄寬度
+function updateNavWidth() {
+  if (isCollapsed.value) {
+    document.body.classList.add('nav-collapsed')
+  } else {
+    document.body.classList.remove('nav-collapsed')
+  }
 }
 
 // 載入最近任務
@@ -201,6 +204,7 @@ onMounted(() => {
   if (saved !== null) {
     isCollapsed.value = JSON.parse(saved)
   }
+  updateNavWidth()
 
   // 載入最近任務
   if (authStore.isAuthenticated) {
@@ -243,8 +247,9 @@ watch(() => route.path, (newPath, oldPath) => {
   width: 240px;
   min-width: 240px;
   height: 100vh;
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
   display: flex;
   flex-direction: column;
   gap: 24px;
@@ -252,6 +257,7 @@ watch(() => route.path, (newPath, oldPath) => {
   background: var(--nav-bg);
   border-radius: 0;
   transition: all 0.3s ease;
+  z-index: 100;
 }
 
 .navigation::after {
@@ -340,7 +346,7 @@ watch(() => route.path, (newPath, oldPath) => {
 }
 
 .brand-icon {
-  color: var(--nav-text);
+  color: var(--nav-active-bg);
   flex-shrink: 0;
 }
 
@@ -632,41 +638,151 @@ watch(() => route.path, (newPath, oldPath) => {
   line-height: 1.3;
 }
 
+/* === 響應式設計：底部 Tab Bar === */
 @media (max-width: 768px) {
   .navigation {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    top: auto;
     width: 100%;
     min-width: 100%;
     height: auto;
-    position: relative;
-    top: 0;
-    padding: 20px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-around;
+    gap: 0;
+    padding: 8px 12px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    border-radius: 0;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
   }
 
+  .navigation::after {
+    display: none;
+  }
+
+  /* 隱藏收合按鈕 */
+  .toggle-btn {
+    display: none;
+  }
+
+  /* 隱藏 brand */
+  .nav-brand {
+    display: none;
+  }
+
+  /* 導航連結：水平排列 */
   .nav-links {
     flex-direction: row;
-    flex-wrap: wrap;
-    justify-content: center;
+    gap: 0;
+    flex: 1;
+    justify-content: space-around;
   }
 
   .nav-link {
-    flex: 1;
-    min-width: 140px;
+    flex-direction: column;
+    align-items: center;
     justify-content: center;
+    gap: 4px;
+    padding: 8px 16px;
+    min-width: 64px;
+    border-radius: 8px;
+  }
+
+  .nav-link span {
+    font-size: 10px;
+    font-weight: 500;
+  }
+
+  .nav-link svg {
+    width: 22px;
+    height: 22px;
   }
 
   .nav-link:hover {
-    transform: translateY(-2px);
+    transform: none;
   }
 
-  .nav-user {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    padding-top: 16px;
+  .nav-link.active {
+    background: var(--nav-active-bg);
   }
 
+  /* 隱藏最近任務 */
   .recent-tasks {
     display: none;
+  }
+
+  /* 隱藏 spacer */
+  .nav-spacer {
+    display: none;
+  }
+
+  /* 用戶區域 */
+  .nav-user {
+    flex-direction: row;
+    gap: 8px;
+    padding: 0;
+    margin: 0;
+    border-top: none;
+    background: transparent;
+  }
+
+  .nav-user::before {
+    display: none;
+  }
+
+  .avatar-circle {
+    width: 36px;
+    height: 36px;
+    font-size: 1rem;
+  }
+
+  /* 隱藏登出按鈕 */
+  .logout-btn {
+    display: none;
+  }
+}
+
+/* 小手機進一步調整 */
+@media (max-width: 480px) {
+  .navigation {
+    padding: 6px 8px;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .nav-link {
+    padding: 6px 12px;
+    min-width: 56px;
+  }
+
+  .nav-link span {
+    font-size: 9px;
+  }
+
+  .nav-link svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .avatar-circle {
+    width: 32px;
+    height: 32px;
+    font-size: 0.9rem;
+  }
+
+  .logout-btn {
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+    padding: 6px;
+  }
+
+  .logout-btn svg {
+    width: 16px;
+    height: 16px;
   }
 }
 </style>

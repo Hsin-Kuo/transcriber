@@ -297,3 +297,44 @@ def get_audit_logger() -> AuditLogger:
     if _audit_logger is None:
         raise RuntimeError("AuditLogger 尚未初始化")
     return _audit_logger
+
+
+async def log_admin_action(
+    admin_id: str,
+    action: str,
+    resource_type: str,
+    resource_id: Optional[str] = None,
+    details: Optional[Dict[str, Any]] = None
+):
+    """記錄管理員操作（便捷函數，不需要 Request 對象）
+
+    Args:
+        admin_id: 管理員用戶 ID
+        action: 操作動作 (enable_user, disable_user, change_role, update_quota, etc.)
+        resource_type: 資源類型 (user, task, etc.)
+        resource_id: 資源 ID
+        details: 操作詳情
+    """
+    if _audit_logger is None:
+        print(f"⚠️  AuditLogger 尚未初始化，跳過記錄: {action}")
+        return
+
+    message = f"{action} on {resource_type}"
+    if details:
+        # 只保留關鍵資訊
+        if "email" in details:
+            message += f" ({details['email']})"
+
+    await _audit_logger.repo.log(
+        user_id=admin_id,
+        log_type="admin",
+        action=action,
+        ip_address="admin-panel",
+        path=f"/api/admin/{resource_type}s/{resource_id or 'batch'}",
+        method="ADMIN",
+        status_code=200,
+        resource_id=resource_id,
+        response_message=message,
+        request_body=details,
+        user_agent="AdminPanel"
+    )

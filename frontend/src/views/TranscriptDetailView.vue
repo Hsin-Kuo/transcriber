@@ -50,8 +50,27 @@
 
     <!-- 雙欄佈局 -->
     <div class="transcript-layout">
-      <!-- 左側控制面板 -->
-      <div class="left-panel card">
+      <!-- 移動端底部抽屜切換按鈕 -->
+      <button
+        class="mobile-drawer-toggle"
+        @click="isMobileDrawerOpen = !isMobileDrawerOpen"
+        :class="{ 'drawer-open': isMobileDrawerOpen }"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
+
+      <!-- 移動端背景遮罩 -->
+      <div
+        v-if="isMobileDrawerOpen"
+        class="mobile-drawer-backdrop"
+        @click="isMobileDrawerOpen = false"
+      ></div>
+
+      <!-- 左側控制面板 / 移動端底部抽屜 -->
+      <div class="left-panel card" :class="{ 'drawer-open': isMobileDrawerOpen }">
         <!-- 任務資訊卡片 -->
         <TaskInfoCard
           :task-id="currentTranscript.task_id"
@@ -74,10 +93,11 @@
           v-model:density-threshold="densityThreshold"
         />
 
-        <!-- 音訊播放器組件 -->
+        <!-- 音訊播放器組件（桌面版在抽屜內） -->
         <AudioPlayer
           v-if="currentTranscript.hasAudio"
           ref="audioPlayerRef"
+          class="desktop-audio-player"
           :audio-url="audioUrl"
           :audio-error="audioError"
           :is-playing="isPlaying"
@@ -231,6 +251,41 @@
       </div>
     </div>
 
+    <!-- 手機版音訊播放器（固定在底部） -->
+    <AudioPlayer
+      v-if="currentTranscript.hasAudio"
+      class="mobile-audio-player"
+      :audio-url="audioUrl"
+      :audio-error="audioError"
+      :is-playing="isPlaying"
+      :volume="volume"
+      :is-muted="isMuted"
+      :playback-rate="playbackRate"
+      :arc-path="arcPath"
+      :arc-length="arcLength"
+      :thumb-position="thumbPosition"
+      :display-progress="displayProgress"
+      :display-time="displayTime"
+      :duration="duration"
+      @update:is-playing="isPlaying = $event"
+      @reload-audio="reloadAudio(currentTranscript.task_id)"
+      @toggle-play-pause="togglePlayPause"
+      @skip-backward="skipBackward"
+      @skip-forward="skipForward"
+      @toggle-mute="toggleMute"
+      @set-volume="setVolume"
+      @set-playback-rate="setPlaybackRate"
+      @start-drag-arc="startDragArc"
+      @drag-arc="dragArc"
+      @stop-drag-arc="stopDragArc"
+      @audio-loaded="handleAudioLoaded"
+      @audio-error="handleAudioError"
+      @update-progress="updateProgress"
+      @update-duration="(newDuration) => { duration = newDuration }"
+      @update-volume="updateVolume"
+      @update-playback-rate="updatePlaybackRate"
+    />
+
     <!-- 下載對話框組件 -->
     <DownloadDialog
       :show="showDownloadDialog"
@@ -280,6 +335,9 @@ const router = useRouter()
 // 組件引用
 const audioPlayerRef = ref(null)
 const headerRef = ref(null)
+
+// 移動端底部抽屜狀態
+const isMobileDrawerOpen = ref(false)
 
 // ========== 數據管理 ==========
 const {
@@ -2491,6 +2549,63 @@ watch(displayMode, () => {
   border-top-color: rgba(0, 0, 0, 0.85);
 }
 
+/* === 音訊播放器顯示控制 === */
+
+/* 手機版播放器：桌面隱藏 */
+.mobile-audio-player {
+  display: none;
+}
+
+/* === 移動端底部抽屜 === */
+
+/* 浮動切換按鈕 - 僅在移動端顯示 */
+.mobile-drawer-toggle {
+  display: none;
+  position: fixed;
+  bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+  right: 16px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--main-primary);
+  color: white;
+  border: none;
+  cursor: pointer;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  transition: all 0.3s ease;
+  align-items: center;
+  justify-content: center;
+}
+
+.mobile-drawer-toggle:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+}
+
+.mobile-drawer-toggle.drawer-open {
+  background: var(--main-text-light);
+}
+
+/* 背景遮罩 */
+.mobile-drawer-backdrop {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 199;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 平板以下響應式 */
 @media (max-width: 768px) {
   .transcript-detail-container {
     --header-height: auto;
@@ -2499,17 +2614,112 @@ watch(displayMode, () => {
   .transcript-layout {
     grid-template-columns: 1fr;
     height: auto;
-    padding: 0 12px 12px;
+    padding: 0 4px;
+    position: relative;
+  }
+
+  /* 顯示浮動按鈕 */
+  .mobile-drawer-toggle {
+    display: flex;
+  }
+
+  /* 背景遮罩在抽屜開啟時顯示 */
+  .mobile-drawer-backdrop {
+    display: block;
+  }
+
+  /* 左側面板轉為底部抽屜 */
+  .left-panel {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    top: auto;
+    margin-top: 0;
+    max-height: 70vh;
+    border-radius: 20px 20px 0 0;
+    z-index: 200;
+    transform: translateY(100%);
+    transition: transform 0.3s ease, visibility 0.3s ease;
+    overflow-y: auto;
+    padding: 20px 16px;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
+    visibility: hidden;
+  }
+
+  .left-panel.drawer-open {
+    transform: translateY(0);
+    visibility: visible;
+  }
+
+  /* 抽屜頂部拖曳指示條 */
+  .left-panel::before {
+    content: '';
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 40px;
+    height: 4px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 2px;
+  }
+
+  /* 為底部固定播放器留空間 */
+  .right-panel {
+    height: calc(100vh - 60px);
+    padding: 2px;
+    padding-bottom: 120px;
+    
+  }
+
+  /* 隱藏抽屜內的桌面版播放器 */
+  .desktop-audio-player {
+    display: none;
+  }
+
+  /* 顯示手機版播放器 */
+  .mobile-audio-player {
+    display: block;
+  }
+}
+
+/* 小手機進一步調整 */
+@media (max-width: 480px) {
+  .transcript-layout {
+    padding: 0 2px;
+    gap: 8px;
+  }
+
+  .mobile-drawer-toggle {
+    width: 48px;
+    height: 48px;
+    bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+    right: 12px;
+  }
+
+  .mobile-drawer-toggle svg {
+    width: 18px;
+    height: 18px;
   }
 
   .left-panel {
-    position: relative;
-    top: 0;
-    max-height: none;
+    max-height: 75vh;
+    padding: 16px 12px;
   }
 
+  /* 為底部固定播放器留空間 */
   .right-panel {
-    height: calc(100vh - 200px);
+    height: calc(100vh - 50px);
+    padding: 2px;
+    padding-bottom: 90px;
+  }
+
+  /* 文字顯示區域調整 */
+  .transcript-display {
+    padding: 12px;
+    /* 保留使用者設定的字體大小 */
+    line-height: 1.6;
   }
 }
 </style>

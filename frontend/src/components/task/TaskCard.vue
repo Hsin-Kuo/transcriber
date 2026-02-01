@@ -726,4 +726,175 @@ function getKeepAudioTooltip() {
 .btn-group .btn {
   box-shadow: none !important;
 }
+
+/* === 響應式設計 === */
+
+/* 平板以下 */
+@media (max-width: 768px) {
+  .task-item {
+    padding: 20px 16px;
+    clip-path: polygon(
+      20px 0,
+      100% 0,
+      100% 100%,
+      0 100%,
+      0 20px
+    );
+  }
+
+  /* 保持按鈕與標題同行 */
+  .task-main {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .task-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .task-header h3 {
+    font-size: var(--font-size-lg);
+    word-break: break-word;
+  }
+
+  .task-meta {
+    gap: 10px;
+    font-size: 12px;
+  }
+
+  .task-actions {
+    flex-shrink: 0;
+  }
+
+  /* 隱藏音檔、下載、刪除按鈕 */
+  .keep-audio-toggle,
+  .btn-group {
+    display: none;
+  }
+
+  .btn {
+    padding: 8px 12px;
+  }
+
+  .btn-icon {
+    padding: 8px;
+  }
+}
+
+/* 小手機 */
+@media (max-width: 480px) {
+  .task-item {
+    padding: 14px 10px;
+    gap: 6px;
+    clip-path: polygon(
+      14px 0,
+      100% 0,
+      100% 100%,
+      0 100%,
+      0 14px
+    );
+  }
+
+  .task-main {
+    gap: 8px;
+  }
+
+  .task-header {
+    margin-bottom: 6px;
+    padding-bottom: 4px;
+  }
+
+  .task-header h3 {
+    font-size: var(--font-size-lg);
+  }
+
+  .task-divider {
+    font-size: 11px;
+  }
+
+  .badge {
+    font-size: 10px;
+    padding: 1px 5px;
+  }
+
+  .task-meta {
+    gap: 6px;
+    font-size: 10px;
+    margin-bottom: 6px;
+  }
+
+  .task-meta .meta-item svg {
+    width: 11px;
+    height: 11px;
+  }
+
+  .badge-task-type {
+    font-size: 10px;
+    padding: 1px 5px;
+  }
+
+  /* 進度條 */
+  .task-progress {
+    margin-top: 6px;
+  }
+
+  .progress-text {
+    font-size: 11px;
+  }
+
+  /* 操作按鈕 - 更緊湊 */
+  .completed-actions-row {
+    gap: 2px;
+  }
+
+  .keep-audio-toggle {
+    gap: 2px;
+  }
+
+  .toggle-pin-wrapper {
+    width: 24px;
+    height: 24px;
+  }
+
+  .pin-icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  .newest-badge {
+    font-size: 9px;
+    top: -10px;
+    right: -6px;
+    padding: 0px 3px;
+  }
+
+  .btn {
+    padding: 6px;
+    font-size: 11px;
+    min-height: auto;
+  }
+
+  .btn-icon {
+    padding: 6px;
+  }
+
+  .btn-icon svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  /* 批次選擇框 */
+  .batch-checkbox {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* 錯誤訊息 */
+  .task-error {
+    font-size: 11px;
+    padding: 5px 8px;
+  }
+}
 </style>

@@ -338,7 +338,6 @@ onMounted(() => {
 <style scoped>
 .ai-summary-card {
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  padding-bottom: 12px;
   margin-bottom: 8px;
 }
 

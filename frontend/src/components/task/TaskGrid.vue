@@ -152,4 +152,43 @@ function isNewestTask(task) {
   transform: none;
   filter: none;
 }
+
+/* === 響應式設計 === */
+
+/* 平板以下 */
+@media (max-width: 768px) {
+  .empty-state {
+    padding: 40px 16px;
+    font-size: 12px;
+  }
+
+  .empty-state p:first-child {
+    font-size: 13px;
+  }
+
+  .tasks.batch-mode {
+    padding: 12px;
+    border-radius: 10px;
+  }
+
+  .tasks.batch-mode :deep(.task-wrapper) {
+    margin-bottom: -28px;
+  }
+}
+
+/* 小手機 */
+@media (max-width: 480px) {
+  .empty-state {
+    padding: 32px 12px;
+  }
+
+  .tasks.batch-mode {
+    padding: 8px;
+    border-radius: 8px;
+  }
+
+  .tasks.batch-mode :deep(.task-wrapper) {
+    margin-bottom: -24px;
+  }
+}
 </style>

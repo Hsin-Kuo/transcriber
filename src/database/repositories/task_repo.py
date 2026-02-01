@@ -89,7 +89,8 @@ class TaskRepository:
         task_type: Optional[str] = None,
         tags: Optional[List[str]] = None,
         sort: List[tuple] = None,
-        include_deleted: bool = False
+        include_deleted: bool = False,
+        has_audio: Optional[bool] = None
     ) -> List[Dict[str, Any]]:
         """查詢用戶的任務列表
 
@@ -99,6 +100,7 @@ class TaskRepository:
             include_deleted: 是否包含已刪除的任務（默認 False，過濾已刪除）
             task_type: 過濾任務類型（可選：paragraph, subtitle）
             tags: 過濾標籤列表（AND 邏輯，任務必須包含所有指定的標籤）
+            has_audio: 過濾是否有音檔（可選：True 只顯示有音檔的任務）
         """
         if sort is None:
             # 巢狀格式的排序欄位
@@ -120,6 +122,16 @@ class TaskRepository:
         if tags and len(tags) > 0:
             filters["tags"] = {"$all": tags}
 
+        # 音檔篩選
+        if has_audio is True:
+            filters["$and"] = filters.get("$and", [])
+            filters["$and"].append({
+                "$or": [
+                    {"result.audio_file": {"$exists": True, "$ne": None}},
+                    {"audio_file": {"$exists": True, "$ne": None}}
+                ]
+            })
+
         # 默認過濾已刪除的任務
         if not include_deleted:
             filters["deleted"] = {"$ne": True}
@@ -127,13 +139,14 @@ class TaskRepository:
         cursor = self.collection.find(filters).skip(skip).limit(limit).sort(sort)
         return await cursor.to_list(length=limit)
 
-    async def count_by_user(self, user_id: str, status: Optional[str] = None, task_type: Optional[str] = None, tags: Optional[List[str]] = None, include_deleted: bool = False) -> int:
+    async def count_by_user(self, user_id: str, status: Optional[str] = None, task_type: Optional[str] = None, tags: Optional[List[str]] = None, include_deleted: bool = False, has_audio: Optional[bool] = None) -> int:
         """計算用戶的任務數量
 
         Args:
             include_deleted: 是否包含已刪除的任務（默認 False，過濾已刪除）
             task_type: 過濾任務類型（可選：paragraph, subtitle）
             tags: 過濾標籤列表（AND 邏輯，任務必須包含所有指定的標籤）
+            has_audio: 過濾是否有音檔（可選：True 只顯示有音檔的任務）
         """
         filters = {
             "$or": [
@@ -150,6 +163,16 @@ class TaskRepository:
         # 標籤篩選（AND 邏輯：任務必須包含所有指定的標籤）
         if tags and len(tags) > 0:
             filters["tags"] = {"$all": tags}
+
+        # 音檔篩選
+        if has_audio is True:
+            filters["$and"] = filters.get("$and", [])
+            filters["$and"].append({
+                "$or": [
+                    {"result.audio_file": {"$exists": True, "$ne": None}},
+                    {"audio_file": {"$exists": True, "$ne": None}}
+                ]
+            })
 
         # 默認過濾已刪除的任務
         if not include_deleted:

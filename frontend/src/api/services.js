@@ -78,6 +78,21 @@ export const transcriptionService = {
     const response = await api.put(NEW_ENDPOINTS.transcriptions.updateMetadata(taskId), metadata)
     return response.data
   },
+
+  /**
+   * 批次建立轉錄任務
+   * @param {FormData} formData - 包含多個音檔和配置的表單資料
+   *   - files: 多個音檔
+   *   - default_config: JSON 字串，包含 taskType, diarize, maxSpeakers, language, tags
+   *   - overrides: JSON 字串，格式 {"0": {tags, customName}, ...}
+   * @returns {Promise} 批次建立結果
+   */
+  async createBatch(formData) {
+    const response = await api.post(NEW_ENDPOINTS.transcriptions.createBatch, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+    return response.data
+  },
 }
 
 /**

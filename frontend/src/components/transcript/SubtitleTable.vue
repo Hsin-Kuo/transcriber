@@ -703,5 +703,112 @@ onUnmounted(() => {
   .subtitle-table .col-content {
     font-size: 14px;
   }
+
+  /* 講者選擇浮窗調整 */
+  .speaker-picker {
+    max-width: 180px;
+    min-width: 140px;
+  }
+}
+
+/* 小手機 - 進一步優化 */
+@media (max-width: 480px) {
+  .subtitle-table-wrapper {
+    padding: 8px;
+    border-radius: 8px;
+  }
+
+  .subtitle-table {
+    border-spacing: 0 4px;
+    font-size: 13px;
+  }
+
+  .subtitle-table thead th {
+    padding: 8px;
+    font-size: 10px;
+    top: -8px;
+  }
+
+  .subtitle-table thead th:first-child {
+    padding-left: 12px;
+  }
+
+  .subtitle-table thead th:last-child {
+    padding-right: 12px;
+  }
+
+  /* 時間欄進一步縮小 */
+  .subtitle-table .col-time {
+    width: 70px;
+    font-size: 10px;
+    padding: 8px 4px;
+  }
+
+  /* 時間格式調整 */
+  .col-time.time-start {
+    width: 60px;
+  }
+
+  .col-time.time-range {
+    width: 80px;
+  }
+
+  .subtitle-table .col-content {
+    padding: 8px;
+    font-size: 13px;
+    line-height: 1.5;
+    min-height: 40px;
+  }
+
+  /* contenteditable 在小屏上的觸控優化 */
+  .col-content[contenteditable="true"] {
+    padding: 10px;
+    min-height: 44px;
+  }
+
+  /* 講者選擇浮窗移動端優化 */
+  .speaker-picker {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    top: auto;
+    max-width: none;
+    min-width: auto;
+    border-radius: 16px 16px 0 0;
+    animation: slideUp 0.2s ease;
+  }
+
+  @keyframes slideUp {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+
+  .speaker-list {
+    max-height: 200px;
+  }
+
+  .speaker-option {
+    padding: 14px 16px;
+    min-height: 48px;
+  }
+
+  .speaker-new {
+    padding: 16px;
+  }
+
+  .speaker-input {
+    padding: 10px 12px;
+    font-size: 16px; /* 防止 iOS 縮放 */
+  }
+
+  .btn-add-speaker {
+    padding: 10px 16px;
+    font-size: 14px;
+  }
 }
 </style>

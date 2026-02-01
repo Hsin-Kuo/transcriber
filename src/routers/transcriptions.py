@@ -1109,3 +1109,308 @@ async def update_subtitle_settings(
         "task_id": task_id,
         "subtitle_settings": subtitle_settings
     }
+
+
+@router.post("/batch")
+async def create_batch_transcriptions(
+    request: Request,
+    files: List[UploadFile] = File(..., description="多個音檔（最多10個）"),
+    default_config: str = Form(..., description="預設配置 JSON 字串"),
+    overrides: str = Form("{}", description="單檔覆蓋設定 JSON 字串，格式：{索引: {tags, customName}}"),
+    current_user: dict = Depends(get_current_user),
+    db = Depends(get_database)
+):
+    """批次建立轉錄任務
+
+    一次上傳多個音檔，建立多個獨立的轉錄任務。
+    每個檔案作為獨立任務加入佇列。
+
+    Args:
+        files: 多個音檔（最多10個）
+        default_config: 預設配置 JSON 字串，包含 taskType, diarize, maxSpeakers, language, tags
+        overrides: 單檔覆蓋設定 JSON 字串，格式：{"0": {"tags": [...], "customName": "..."}, ...}
+        current_user: 當前用戶
+        db: 資料庫實例
+
+    Returns:
+        批次建立結果
+
+    Raises:
+        HTTPException: 參數錯誤或服務未就緒
+    """
+    # 檢查檔案數量
+    MAX_BATCH_FILES = 10
+    if len(files) > MAX_BATCH_FILES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"批次上傳最多支援 {MAX_BATCH_FILES} 個檔案，您上傳了 {len(files)} 個"
+        )
+
+    if len(files) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="請至少上傳一個檔案"
+        )
+
+    # 解析配置
+    try:
+        config = json.loads(default_config)
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="default_config 格式錯誤，必須是有效的 JSON"
+        )
+
+    try:
+        file_overrides = json.loads(overrides)
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="overrides 格式錯誤，必須是有效的 JSON"
+        )
+
+    # 獲取服務
+    try:
+        transcription_service = get_transcription_service()
+    except RuntimeError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="轉錄服務尚未初始化"
+        )
+
+    # 從配置中提取參數
+    task_type = config.get("taskType", "paragraph")
+    diarize = config.get("diarize", True)
+    max_speakers = config.get("maxSpeakers")
+    language = config.get("language", "auto")
+    default_tags = config.get("tags", [])
+
+    # 驗證任務類型
+    if task_type not in ["paragraph", "subtitle"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="任務類型必須是 'paragraph' 或 'subtitle'"
+        )
+
+    # 字幕類型強制不使用標點符號
+    punct_provider = "gemini"
+    if task_type == "subtitle":
+        punct_provider = "none"
+
+    # 檢查 diarization 可用性
+    if diarize and not _diarization_processor:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Speaker diarization 功能未啟用"
+        )
+
+    # 獲取完整用戶資料
+    from src.database.repositories.user_repo import UserRepository
+    user_repo = UserRepository(db)
+    full_user_data = await user_repo.get_by_id(str(current_user["_id"]))
+
+    if not full_user_data:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="無法獲取用戶資訊"
+        )
+
+    # 導入必要的服務
+    from src.services.audio_service import AudioService
+    from src.auth.quota import QuotaManager
+    from ..utils.time_utils import get_utc_timestamp
+
+    audio_service = AudioService()
+    task_repo = TaskRepository(db)
+
+    # 批次結果
+    batch_id = str(uuid.uuid4())
+    results = []
+    created_count = 0
+    failed_count = 0
+
+    # 檢查當前處理中的任務數量
+    MAX_CONCURRENT_TASKS = 2
+    processing_count = await transcription_service.task_service.count_processing_tasks()
+    pending_count = await transcription_service.task_service.count_pending_tasks()
+
+    # 逐一處理每個檔案
+    for idx, upload_file in enumerate(files):
+        file_result = {
+            "index": idx,
+            "filename": upload_file.filename,
+            "task_id": None,
+            "status": "pending",
+            "error": None,
+            "queue_position": None
+        }
+
+        temp_dir = None
+        try:
+            # 建立臨時目錄
+            temp_dir = Path(tempfile.mkdtemp())
+            file_suffix = Path(upload_file.filename).suffix
+            temp_audio = temp_dir / f"input{file_suffix}"
+
+            # 保存檔案
+            content = await upload_file.read()
+            with temp_audio.open("wb") as f:
+                f.write(content)
+
+            # 獲取音檔資訊
+            try:
+                audio_duration_ms = audio_service.get_audio_duration(temp_audio)
+                audio_duration_seconds = audio_duration_ms / 1000.0
+                audio_size_mb = round(temp_audio.stat().st_size / 1024 / 1024, 2)
+            except Exception as e:
+                raise ValueError(f"無法讀取音檔資訊：{str(e)}")
+
+            # 檢查配額
+            try:
+                await QuotaManager.check_transcription_quota(
+                    full_user_data,
+                    audio_duration_seconds
+                )
+            except HTTPException as quota_error:
+                raise ValueError(quota_error.detail)
+
+            # 獲取單檔覆蓋設定
+            override = file_overrides.get(str(idx), {})
+            file_tags = override.get("tags", default_tags.copy())
+            custom_name = override.get("customName", None)
+            original_filename = upload_file.filename
+
+            # 生成任務 ID
+            task_id = str(uuid.uuid4())
+            current_time = get_utc_timestamp()
+
+            # 創建任務資料
+            task_data = {
+                "_id": task_id,
+                "task_id": task_id,
+                "task_type": task_type,
+                "user": {
+                    "user_id": str(current_user["_id"]),
+                    "user_email": current_user["email"]
+                },
+                "file": {
+                    "filename": original_filename,
+                    "size_mb": audio_size_mb
+                },
+                "config": {
+                    "punct_provider": punct_provider,
+                    "chunk_audio": True,
+                    "chunk_minutes": 10,
+                    "diarize": diarize,
+                    "max_speakers": max_speakers,
+                    "language": language
+                },
+                "status": "pending",
+                "stats": {
+                    "audio_duration_seconds": audio_duration_seconds,
+                },
+                "tags": file_tags,
+                "keep_audio": False,
+                "speaker_names": {},
+                "subtitle_settings": {
+                    "density_threshold": 3.0,
+                },
+                "timestamps": {
+                    "created_at": current_time,
+                    "updated_at": current_time,
+                },
+                "batch_id": batch_id,  # 關聯批次 ID
+            }
+
+            # 如果有自訂名稱
+            if custom_name:
+                task_data["custom_name"] = custom_name
+
+            # 保存到資料庫
+            await task_repo.create(task_data)
+
+            # 初始化記憶體狀態
+            transcription_service.task_service.update_memory_state(task_id, {
+                "status": "pending",
+                "progress": "等待處理中..."
+            })
+
+            # 記錄臨時目錄
+            transcription_service.task_service.set_temp_dir(task_id, temp_dir)
+
+            # 計算隊列位置
+            should_queue = (processing_count + created_count) >= MAX_CONCURRENT_TASKS
+            queue_position = pending_count + created_count + 1 if should_queue else 0
+
+            # 如果系統空閒，立即啟動
+            if not should_queue:
+                use_punctuation = punct_provider != "none"
+                language_code = None if language == "auto" else language
+
+                await task_repo.update(task_id, {"status": "processing"})
+                transcription_service.task_service.update_memory_state(task_id, {
+                    "status": "processing",
+                    "progress": "準備開始轉錄..."
+                })
+
+                await transcription_service.start_transcription(
+                    task_id=task_id,
+                    audio_file_path=temp_audio,
+                    language=language_code,
+                    use_chunking=True,
+                    use_punctuation=use_punctuation,
+                    punctuation_provider=punct_provider,
+                    use_diarization=diarize,
+                    max_speakers=max_speakers
+                )
+
+            file_result["task_id"] = task_id
+            file_result["status"] = "pending" if should_queue else "processing"
+            file_result["queue_position"] = queue_position
+            created_count += 1
+
+            print(f"✅ 批次任務 [{idx + 1}/{len(files)}] {upload_file.filename} -> {task_id}")
+
+        except Exception as e:
+            file_result["status"] = "failed"
+            file_result["error"] = str(e)
+            failed_count += 1
+
+            # 清理臨時目錄
+            if temp_dir and temp_dir.exists():
+                shutil.rmtree(temp_dir)
+
+            print(f"❌ 批次任務 [{idx + 1}/{len(files)}] {upload_file.filename} 失敗: {e}")
+
+        results.append(file_result)
+
+    # 記錄 audit log
+    try:
+        from ..utils.audit_logger import get_audit_logger
+        audit_logger = get_audit_logger()
+        await audit_logger.log_task_operation(
+            request=request,
+            action="batch_create",
+            user_id=str(current_user["_id"]),
+            task_id=batch_id,
+            status_code=200,
+            message=f"批次建立 {created_count} 個轉錄任務（失敗 {failed_count} 個）",
+            request_body={
+                "batch_id": batch_id,
+                "total": len(files),
+                "created": created_count,
+                "failed": failed_count,
+                "task_type": task_type,
+                "diarize": diarize,
+            }
+        )
+    except Exception as e:
+        print(f"⚠️ 記錄 audit log 失敗：{e}")
+
+    return {
+        "batch_id": batch_id,
+        "total": len(files),
+        "created": created_count,
+        "failed": failed_count,
+        "tasks": results
+    }

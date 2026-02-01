@@ -59,6 +59,7 @@ const totalTasks = ref(0)
 // 篩選條件
 const currentTaskType = ref(null)
 const currentTags = ref([])
+const currentHasAudio = ref(null)
 
 // 計算總頁數
 const totalPages = computed(() => Math.ceil(totalTasks.value / pageSize.value))
@@ -102,6 +103,11 @@ async function refreshTasks() {
     // 如果有 task_type 篩選，加入參數
     if (currentTaskType.value) {
       params.task_type = currentTaskType.value
+    }
+
+    // 如果有 has_audio 篩選，加入參數
+    if (currentHasAudio.value) {
+      params.has_audio = currentHasAudio.value
     }
 
     // 如果有 tags 篩選，加入參數（逗號分隔）
@@ -204,6 +210,7 @@ function handlePageChange(newPage) {
 function handleFilterChange(filter) {
   currentTaskType.value = filter.taskType
   currentTags.value = filter.tags
+  currentHasAudio.value = filter.hasAudio
   // 篩選條件改變時，重置到第一頁
   currentPage.value = 1
   refreshTasks()
@@ -458,6 +465,7 @@ onBeforeUnmount(() => {
 .tasks-container {
   max-width: 900px;
   margin: 0 auto;
+  padding: 0 var(--spacing-md, 16px);
 }
 
 .tasks-header {
@@ -476,5 +484,35 @@ onBeforeUnmount(() => {
   color: var(--main-text-light);
   margin: 0;
   font-size: 1rem;
+}
+
+/* 平板以下 */
+@media (max-width: 768px) {
+  .tasks-container {
+    padding: 0 var(--spacing-sm, 12px);
+  }
+
+  .tasks-header h1 {
+    font-size: 1.5rem;
+  }
+
+  .tasks-header p {
+    font-size: 0.9rem;
+  }
+}
+
+/* 小手機 */
+@media (max-width: 480px) {
+  .tasks-container {
+    padding: 0 var(--spacing-xs, 8px);
+  }
+
+  .tasks-header {
+    margin-bottom: 16px;
+  }
+
+  .tasks-header h1 {
+    font-size: 1.25rem;
+  }
 }
 </style>

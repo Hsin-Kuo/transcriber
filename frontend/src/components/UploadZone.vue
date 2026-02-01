@@ -16,7 +16,8 @@
       <input
         ref="fileInput"
         type="file"
-        accept="audio/*,video/*,.m4a,.mp3,.wav,.mp4"
+        accept="audio/*,video/*,.m4a,.mp3,.wav,.mp4,.mov,.avi,.mkv,.webm,.flv,.wmv"
+        multiple
         @change="handleFileChange"
         style="display: none"
       />
@@ -92,7 +93,7 @@ const props = defineProps({
   disabled: Boolean
 })
 
-const emit = defineEmits(['file-selected', 'open-merge'])
+const emit = defineEmits(['file-selected', 'files-selected', 'open-merge'])
 
 const fileInput = ref(null)
 const isDragOver = ref(false)
@@ -106,9 +107,16 @@ function triggerFileInput() {
 function handleFileChange(event) {
   if (props.disabled) return
 
-  const file = event.target.files?.[0]
-  if (file) {
-    emit('file-selected', file)
+  const fileList = event.target.files
+  if (fileList && fileList.length > 0) {
+    const filesArray = Array.from(fileList)
+    if (filesArray.length === 1) {
+      // 單檔：維持現有行為
+      emit('file-selected', filesArray[0])
+    } else {
+      // 多檔：發送檔案陣列
+      emit('files-selected', filesArray)
+    }
     event.target.value = '' // Reset input
   }
 }
@@ -117,9 +125,16 @@ function handleDrop(event) {
   isDragOver.value = false
   if (props.uploading || props.disabled) return
 
-  const file = event.dataTransfer.files?.[0]
-  if (file) {
-    emit('file-selected', file)
+  const fileList = event.dataTransfer.files
+  if (fileList && fileList.length > 0) {
+    const filesArray = Array.from(fileList)
+    if (filesArray.length === 1) {
+      // 單檔：維持現有行為
+      emit('file-selected', filesArray[0])
+    } else {
+      // 多檔：發送檔案陣列
+      emit('files-selected', filesArray)
+    }
   }
 }
 

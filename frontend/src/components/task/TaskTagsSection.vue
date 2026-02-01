@@ -582,4 +582,12 @@ function handleCancel() {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
   opacity: 0.9;
 }
+
+/* 響應式：手機版隱藏編輯按鈕 */
+@media (max-width: 768px) {
+  .btn-edit-tags,
+  .btn-add-tags {
+    display: none;
+  }
+}
 </style>
