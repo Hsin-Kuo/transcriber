@@ -79,6 +79,17 @@
     </div>
 
     <div class="settings-grid">
+      <!-- 帳戶安全 -->
+      <div class="card security-card">
+        <h2>{{ $t('userSettings.security') }}</h2>
+        <div class="setting-item">
+          <span class="setting-label">{{ $t('userSettings.password') }}</span>
+          <button class="change-password-btn" @click="showPasswordModal = true">
+            {{ $t('userSettings.changePassword') }}
+          </button>
+        </div>
+      </div>
+
       <!-- 介面設定 -->
       <div class="card interface-card">
         <h2>{{ $t('userSettings.interface') }}</h2>
@@ -157,16 +168,150 @@
         </div>
       </div>
     </div>
+
+    <!-- 更改密碼 Modal -->
+    <div v-if="showPasswordModal" class="modal-overlay" @click.self="closePasswordModal">
+      <div class="modal">
+        <h3>{{ $t('userSettings.changePassword') }}</h3>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>{{ $t('userSettings.currentPassword') }}</label>
+            <div class="password-input-wrapper">
+              <input
+                v-model="passwordForm.currentPassword"
+                :type="showCurrentPassword ? 'text' : 'password'"
+                class="form-input"
+                :placeholder="$t('userSettings.currentPasswordPlaceholder')"
+              />
+              <button type="button" class="password-toggle" @click="showCurrentPassword = !showCurrentPassword" tabindex="-1">
+                <svg v-if="showCurrentPassword" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+                <svg v-else xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                  <line x1="1" y1="1" x2="23" y2="23"></line>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>{{ $t('userSettings.newPassword') }}</label>
+            <div class="password-input-wrapper">
+              <input
+                v-model="passwordForm.newPassword"
+                :type="showNewPassword ? 'text' : 'password'"
+                class="form-input"
+                :placeholder="$t('userSettings.newPasswordPlaceholder')"
+                @input="validateNewPassword"
+              />
+              <button type="button" class="password-toggle" @click="showNewPassword = !showNewPassword" tabindex="-1">
+                <svg v-if="showNewPassword" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+                <svg v-else xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                  <line x1="1" y1="1" x2="23" y2="23"></line>
+                </svg>
+              </button>
+            </div>
+            <div v-if="passwordForm.newPassword" class="password-requirements">
+              <div class="requirement" :class="{ met: newPasswordChecks.length }">
+                {{ newPasswordChecks.length ? '✓' : '○' }} {{ $t('userSettings.reqLength') }}
+              </div>
+              <div class="requirement" :class="{ met: newPasswordChecks.hasUpper }">
+                {{ newPasswordChecks.hasUpper ? '✓' : '○' }} {{ $t('userSettings.reqUppercase') }}
+              </div>
+              <div class="requirement" :class="{ met: newPasswordChecks.hasLower }">
+                {{ newPasswordChecks.hasLower ? '✓' : '○' }} {{ $t('userSettings.reqLowercase') }}
+              </div>
+              <div class="requirement" :class="{ met: newPasswordChecks.hasNumber }">
+                {{ newPasswordChecks.hasNumber ? '✓' : '○' }} {{ $t('userSettings.reqNumber') }}
+              </div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>{{ $t('userSettings.confirmPassword') }}</label>
+            <div class="password-input-wrapper">
+              <input
+                v-model="passwordForm.confirmPassword"
+                :type="showConfirmPassword ? 'text' : 'password'"
+                class="form-input"
+                :placeholder="$t('userSettings.confirmPasswordPlaceholder')"
+              />
+              <button type="button" class="password-toggle" @click="showConfirmPassword = !showConfirmPassword" tabindex="-1">
+                <svg v-if="showConfirmPassword" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+                <svg v-else xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                  <line x1="1" y1="1" x2="23" y2="23"></line>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <p v-if="passwordError" class="error-text">{{ passwordError }}</p>
+          <p v-if="passwordSuccess" class="success-text">{{ passwordSuccess }}</p>
+        </div>
+        <div class="modal-footer">
+          <button @click="closePasswordModal" class="btn-cancel">{{ $t('userSettings.cancel') }}</button>
+          <button @click="changePassword" class="btn-confirm" :disabled="isChangingPassword">
+            {{ isChangingPassword ? $t('userSettings.changing') : $t('userSettings.confirm') }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useI18n } from 'vue-i18n'
+import api from '../utils/api'
 
 const authStore = useAuthStore()
 const { t: $t, locale } = useI18n()
+
+// 更改密碼相關狀態
+const showPasswordModal = ref(false)
+const isChangingPassword = ref(false)
+const passwordError = ref('')
+const passwordSuccess = ref('')
+const showCurrentPassword = ref(false)
+const showNewPassword = ref(false)
+const showConfirmPassword = ref(false)
+const passwordForm = ref({
+  currentPassword: '',
+  newPassword: '',
+  confirmPassword: ''
+})
+
+const newPasswordChecks = ref({
+  length: false,
+  hasUpper: false,
+  hasLower: false,
+  hasNumber: false
+})
+
+function validateNewPassword() {
+  const pwd = passwordForm.value.newPassword
+  newPasswordChecks.value = {
+    length: pwd.length >= 8,
+    hasUpper: /[A-Z]/.test(pwd),
+    hasLower: /[a-z]/.test(pwd),
+    hasNumber: /[0-9]/.test(pwd)
+  }
+}
+
+const isNewPasswordValid = computed(() => {
+  return newPasswordChecks.value.length &&
+         newPasswordChecks.value.hasUpper &&
+         newPasswordChecks.value.hasLower &&
+         newPasswordChecks.value.hasNumber
+})
 
 // 可用語言列表
 const availableLanguages = [
@@ -276,6 +421,58 @@ function getTimezoneShort(tzCode) {
   // 從 "UTC+8 台北" 取出 "UTC+8"
   const match = tz.name.match(/UTC[+-]?\d+/)
   return match ? match[0] : tzCode
+}
+
+// 關閉密碼對話框
+function closePasswordModal() {
+  showPasswordModal.value = false
+  passwordForm.value = { currentPassword: '', newPassword: '', confirmPassword: '' }
+  passwordError.value = ''
+  passwordSuccess.value = ''
+  showCurrentPassword.value = false
+  showNewPassword.value = false
+  showConfirmPassword.value = false
+  newPasswordChecks.value = { length: false, hasUpper: false, hasLower: false, hasNumber: false }
+}
+
+// 更改密碼
+async function changePassword() {
+  passwordError.value = ''
+  passwordSuccess.value = ''
+
+  // 驗證
+  if (!passwordForm.value.currentPassword) {
+    passwordError.value = $t('userSettings.errorCurrentPasswordRequired')
+    return
+  }
+
+  if (!isNewPasswordValid.value) {
+    passwordError.value = $t('userSettings.errorPasswordRequirements')
+    return
+  }
+
+  if (passwordForm.value.newPassword !== passwordForm.value.confirmPassword) {
+    passwordError.value = $t('userSettings.errorPasswordMismatch')
+    return
+  }
+
+  isChangingPassword.value = true
+
+  try {
+    await api.post('/auth/change-password', {
+      current_password: passwordForm.value.currentPassword,
+      new_password: passwordForm.value.newPassword
+    })
+    passwordSuccess.value = $t('userSettings.passwordChanged')
+    // 2 秒後自動關閉對話框
+    setTimeout(() => {
+      closePasswordModal()
+    }, 2000)
+  } catch (err) {
+    passwordError.value = err.response?.data?.detail || $t('userSettings.errorChangeFailed')
+  } finally {
+    isChangingPassword.value = false
+  }
 }
 </script>
 
@@ -482,7 +679,8 @@ function getTimezoneShort(tzCode) {
 }
 
 .user-info-card h2,
-.interface-card h2 {
+.interface-card h2,
+.security-card h2 {
   font-size: 1.25rem;
   color: var(--main-primary);
   margin: 0 0 20px 0;
@@ -661,6 +859,200 @@ function getTimezoneShort(tzCode) {
 
 .toggle-switch.active .toggle-slider::before {
   transform: translateX(18px);
+}
+
+/* 更改密碼按鈕 */
+.change-password-btn {
+  padding: 8px 16px;
+  background: var(--main-primary);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.change-password-btn:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+/* Modal 樣式 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--color-overlay, rgba(0, 0, 0, 0.5));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: var(--upload-bg);
+  border-radius: 16px;
+  padding: 24px;
+  min-width: 360px;
+  max-width: 90%;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--color-divider, rgba(163, 177, 198, 0.2));
+}
+
+.modal h3 {
+  color: var(--main-primary);
+  margin: 0 0 20px 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.modal-body {
+  margin-bottom: 20px;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: var(--main-text);
+  font-size: 14px;
+}
+
+.form-input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--color-divider, rgba(163, 177, 198, 0.3));
+  border-radius: 8px;
+  background: var(--color-bg);
+  font-size: 14px;
+  color: var(--main-text);
+  box-sizing: border-box;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--main-primary);
+  box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb), 0.15);
+}
+
+.form-input::placeholder {
+  color: var(--main-text-light);
+  opacity: 0.7;
+}
+
+.password-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.password-input-wrapper .form-input {
+  padding-right: 40px;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--main-text-light);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.password-toggle:hover {
+  color: var(--main-primary);
+  background: rgba(var(--color-primary-rgb), 0.1);
+}
+
+.password-requirements {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--color-bg);
+  border-radius: 8px;
+  border: 1px solid var(--color-divider, rgba(163, 177, 198, 0.2));
+}
+
+.requirement {
+  font-size: 0.8rem;
+  color: var(--main-text-light);
+  transition: color 0.2s ease;
+}
+
+.requirement.met {
+  color: var(--color-success, #28a745);
+  font-weight: 600;
+}
+
+.error-text {
+  color: var(--color-danger, #dc3545);
+  font-size: 14px;
+  margin: 0;
+}
+
+.success-text {
+  color: var(--color-success, #28a745);
+  font-size: 14px;
+  margin: 0;
+}
+
+.modal-footer {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.btn-cancel,
+.btn-confirm {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-cancel {
+  background: var(--color-bg);
+  color: var(--main-text);
+  border: 1px solid var(--color-divider, rgba(163, 177, 198, 0.3));
+}
+
+.btn-cancel:hover {
+  background: var(--color-bg-light, rgba(163, 177, 198, 0.15));
+}
+
+.btn-confirm {
+  background: var(--color-primary, var(--main-primary));
+  color: white;
+}
+
+.btn-confirm:hover {
+  opacity: 0.9;
+}
+
+.btn-confirm:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* 配額卡片樣式 */

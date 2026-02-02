@@ -8,6 +8,8 @@ import TranscriptDetailView from '../views/TranscriptDetailView.vue'
 import LoginView from '../views/auth/LoginView.vue'
 import RegisterView from '../views/auth/RegisterView.vue'
 import VerifyEmailView from '../views/auth/VerifyEmailView.vue'
+import ForgotPasswordView from '../views/auth/ForgotPasswordView.vue'
+import ResetPasswordView from '../views/auth/ResetPasswordView.vue'
 
 const routes = [
   {
@@ -79,6 +81,24 @@ const routes = [
     component: VerifyEmailView,
     meta: {
       title: 'Email 驗證',
+      guest: true
+    }
+  },
+  {
+    path: '/forgot-password',
+    name: 'forgotPassword',
+    component: ForgotPasswordView,
+    meta: {
+      title: '忘記密碼',
+      guest: true
+    }
+  },
+  {
+    path: '/reset-password',
+    name: 'resetPassword',
+    component: ResetPasswordView,
+    meta: {
+      title: '重設密碼',
       guest: true
     }
   }

@@ -34,6 +34,10 @@ class UserRepository:
         """根據驗證 token 獲取用戶"""
         return await self.collection.find_one({"verification_token": token})
 
+    async def get_by_password_reset_token(self, token: str) -> Optional[Dict[str, Any]]:
+        """根據密碼重設 token 獲取用戶"""
+        return await self.collection.find_one({"password_reset_token": token})
+
     async def delete(self, user_id: str) -> bool:
         """刪除用戶"""
         try:

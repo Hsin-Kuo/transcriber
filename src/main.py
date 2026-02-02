@@ -204,6 +204,10 @@ async def startup_event():
         from src.database.repositories.summary_repo import SummaryRepository
         summary_repo = SummaryRepository(db)
         await summary_repo.create_indexes()
+        # 建立 RateLimit 索引（用於忘記密碼等功能的速率限制）
+        from src.database.repositories.rate_limit_repo import RateLimitRepository
+        rate_limit_repo = RateLimitRepository(db)
+        await rate_limit_repo.ensure_indexes()
         print(f"✅ 資料庫索引建立完成")
     except Exception as e:
         print(f"⚠️  索引建立失敗: {e}")

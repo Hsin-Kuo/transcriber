@@ -32,6 +32,12 @@ class ResendVerificationRequest(BaseModel):
     email: EmailStr
 
 
+class ChangePasswordRequest(BaseModel):
+    """更改密碼請求"""
+    current_password: str = Field(..., description="目前密碼")
+    new_password: str = Field(..., min_length=8, description="新密碼至少 8 個字元")
+
+
 class UserResponse(BaseModel):
     """用戶資訊響應"""
     id: str
@@ -44,3 +50,14 @@ class UserResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ForgotPasswordRequest(BaseModel):
+    """忘記密碼請求"""
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    """重設密碼請求"""
+    token: str
+    new_password: str = Field(..., min_length=8, description="新密碼至少 8 個字元")

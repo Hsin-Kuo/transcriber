@@ -2,24 +2,33 @@
   <div class="auth-container">
     <div class="auth-card">
       <div class="auth-content">
-          <h1 class="auth-title">註冊帳號</h1>
+          <h1 class="auth-title">重設密碼</h1>
           <p class="auth-subtitle">Whisper 轉錄服務</p>
 
-          <form @submit.prevent="handleRegister" class="auth-form">
-            <div class="form-group">
-              <label for="email">Email</label>
-              <input
-                type="email"
-                id="email"
-                v-model="email"
-                required
-                placeholder="your@email.com"
-                :disabled="loading"
-              />
-            </div>
+          <!-- 無效 token 狀態 -->
+          <div v-if="invalidToken" class="error-state">
+            <div class="error-icon">⚠️</div>
+            <p class="error-title">連結無效或已過期</p>
+            <p class="error-subtitle">
+              此密碼重設連結可能已過期或無效。請重新申請密碼重設。
+            </p>
+            <button
+              type="button"
+              class="btn-primary"
+              @click="router.push('/forgot-password')"
+            >
+              重新申請重設密碼
+            </button>
+          </div>
+
+          <!-- 重設表單 -->
+          <form v-else-if="!success" @submit.prevent="handleSubmit" class="auth-form">
+            <p class="form-description">
+              請輸入您的新密碼。
+            </p>
 
             <div class="form-group">
-              <label for="password">密碼</label>
+              <label for="password">新密碼</label>
               <div class="password-input-wrapper">
                 <input
                   :type="showPassword ? 'text' : 'password'"
@@ -65,14 +74,14 @@
             </div>
 
             <div class="form-group">
-              <label for="confirmPassword">確認密碼</label>
+              <label for="confirmPassword">確認新密碼</label>
               <div class="password-input-wrapper">
                 <input
                   :type="showConfirmPassword ? 'text' : 'password'"
                   id="confirmPassword"
                   v-model="confirmPassword"
                   required
-                  placeholder="再次輸入密碼"
+                  placeholder="再次輸入新密碼"
                   minlength="8"
                   :disabled="loading"
                 />
@@ -102,53 +111,29 @@
               {{ error }}
             </div>
 
-            <div v-if="success" class="success-message">
-              <div class="success-icon">✉️</div>
-              <p class="success-title">{{ successMessage }}</p>
-              <p class="success-subtitle">
-                請查看您的郵箱 <strong>{{ email }}</strong>，點擊驗證連結完成註冊。
-              </p>
-              <p class="success-note">
-                沒收到郵件？請檢查垃圾郵件資料夾，或
-                <a href="#" @click.prevent="resendEmail" class="resend-link">重新發送驗證郵件</a>
-              </p>
-            </div>
-
             <button
-              v-if="!success"
               type="submit"
               class="btn-primary"
               :disabled="loading || !isPasswordValid || password !== confirmPassword"
             >
-              {{ loading ? '註冊中...' : '註冊' }}
-            </button>
-
-            <button
-              v-else
-              type="button"
-              class="btn-secondary"
-              @click="router.push('/login')"
-            >
-              前往登入頁面
+              {{ loading ? '重設中...' : '重設密碼' }}
             </button>
           </form>
 
-          <div v-if="!success" class="auth-footer">
-            <p>已有帳號？<router-link to="/login">立即登入</router-link></p>
-          </div>
-
-          <div class="quota-info">
-            <p class="quota-title">🎁 註冊即享免費配額</p>
-            <div class="quota-details">
-              <div class="quota-item">
-                <span class="quota-label">轉錄次數</span>
-                <span class="quota-value">10 次/月</span>
-              </div>
-              <div class="quota-item">
-                <span class="quota-label">轉錄時長</span>
-                <span class="quota-value">60 分鐘/月</span>
-              </div>
-            </div>
+          <!-- 成功狀態 -->
+          <div v-else class="success-message">
+            <div class="success-icon">✓</div>
+            <p class="success-title">密碼已重設成功！</p>
+            <p class="success-subtitle">
+              您現在可以使用新密碼登入。
+            </p>
+            <button
+              type="button"
+              class="btn-primary"
+              @click="router.push('/login')"
+            >
+              前往登入
+            </button>
           </div>
         </div>
     </div>
@@ -156,20 +141,23 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 
-const email = ref('')
+const token = ref('')
 const password = ref('')
 const confirmPassword = ref('')
 const showPassword = ref(false)
 const showConfirmPassword = ref(false)
 const loading = ref(false)
 const error = ref('')
+const success = ref(false)
+const invalidToken = ref(false)
 
 const passwordChecks = ref({
   length: false,
@@ -195,37 +183,15 @@ function validatePassword() {
   }
 }
 
-const success = ref(false)
-const successMessage = ref('')
-
-async function resendEmail() {
-  loading.value = true
-  error.value = ''
-
-  try {
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://100.66.247.23:8000'}/auth/resend-verification`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ email: email.value })
-    })
-
-    const data = await response.json()
-
-    if (response.ok) {
-      successMessage.value = data.message || '驗證郵件已重新發送'
-    } else {
-      error.value = data.detail || '重新發送失敗'
-    }
-  } catch (err) {
-    error.value = '網路錯誤，請稍後再試'
-  } finally {
-    loading.value = false
+onMounted(() => {
+  // 從 URL 獲取 token
+  token.value = route.query.token || ''
+  if (!token.value) {
+    invalidToken.value = true
   }
-}
+})
 
-async function handleRegister() {
+async function handleSubmit() {
   if (password.value !== confirmPassword.value) {
     error.value = '密碼不一致'
     return
@@ -238,16 +204,18 @@ async function handleRegister() {
 
   loading.value = true
   error.value = ''
-  success.value = false
 
-  const result = await authStore.register(email.value, password.value)
+  const result = await authStore.resetPassword(token.value, password.value)
 
   if (result.success) {
-    // 註冊成功，顯示驗證郵件提示
     success.value = true
-    successMessage.value = result.message || '註冊成功！請查看您的郵箱完成驗證'
   } else {
-    error.value = result.error
+    // 檢查是否為 token 無效錯誤
+    if (result.error && (result.error.includes('無效') || result.error.includes('過期'))) {
+      invalidToken.value = true
+    } else {
+      error.value = result.error
+    }
   }
 
   loading.value = false
@@ -273,7 +241,6 @@ async function handleRegister() {
   width: 100%;
   height: 100%;
   background-image:
-    /* 垂直 - 密集細線 */
     repeating-linear-gradient(
       0deg,
       transparent,
@@ -281,7 +248,6 @@ async function handleRegister() {
       rgba(255, 255, 255, 0.015) 2px,
       rgba(255, 255, 255, 0.015) 3px
     ),
-    /* 垂直 - 中等間距 */
     repeating-linear-gradient(
       0deg,
       transparent,
@@ -289,7 +255,6 @@ async function handleRegister() {
       rgba(255, 255, 255, 0.03) 8px,
       rgba(255, 255, 255, 0.03) 10px
     ),
-    /* 垂直 - 稀疏粗線 */
     repeating-linear-gradient(
       0deg,
       transparent,
@@ -297,7 +262,6 @@ async function handleRegister() {
       rgba(255, 255, 255, 0.04) 21px,
       rgba(255, 255, 255, 0.04) 23px
     ),
-    /* 水平 - 密集細線 */
     repeating-linear-gradient(
       90deg,
       transparent,
@@ -305,7 +269,6 @@ async function handleRegister() {
       rgba(0, 0, 0, 0.015) 4px,
       rgba(0, 0, 0, 0.015) 5px
     ),
-    /* 水平 - 中等間距 */
     repeating-linear-gradient(
       90deg,
       transparent,
@@ -313,7 +276,6 @@ async function handleRegister() {
       rgba(0, 0, 0, 0.03) 11px,
       rgba(0, 0, 0, 0.03) 13px
     ),
-    /* 水平 - 稀疏粗線 */
     repeating-linear-gradient(
       90deg,
       transparent,
@@ -328,12 +290,12 @@ async function handleRegister() {
 
 .auth-card {
   width: 100%;
-  max-width: 500px;
+  max-width: 450px;
   margin: 0 auto;
   background: var(--upload-bg);
   border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  border: 1px solid rgba(160, 145, 124, 0.2);
+  box-shadow: 0 4px 12px rgba(var(--color-text-dark-rgb), 0.08);
+  border: 1px solid rgba(var(--color-divider-rgb), 0.2);
   position: relative;
   z-index: 1;
 }
@@ -363,6 +325,13 @@ async function handleRegister() {
   gap: 20px;
 }
 
+.form-description {
+  font-size: 0.95rem;
+  color: var(--main-text-light);
+  margin: 0;
+  line-height: 1.6;
+}
+
 .form-group {
   display: flex;
   flex-direction: column;
@@ -377,9 +346,9 @@ async function handleRegister() {
 
 .form-group input {
   padding: 12px 16px;
-  border: 2px solid rgba(160, 145, 124, 0.3);
+  border: 2px solid rgba(var(--color-divider-rgb), 0.3);
   border-radius: 8px;
-  background: white;
+  background: var(--color-white);
   color: var(--main-text);
   font-size: 1rem;
   transition: all 0.2s ease;
@@ -388,7 +357,7 @@ async function handleRegister() {
 .form-group input:focus {
   outline: none;
   border-color: var(--main-primary);
-  box-shadow: 0 0 0 3px rgba(68, 70, 91, 0.1);
+  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.1);
 }
 
 .form-group input:disabled {
@@ -427,7 +396,7 @@ async function handleRegister() {
 
 .password-toggle:hover:not(:disabled) {
   color: var(--main-primary);
-  background: rgba(68, 70, 91, 0.1);
+  background: rgba(var(--color-primary-rgb), 0.1);
 }
 
 .password-toggle:disabled {
@@ -443,7 +412,7 @@ async function handleRegister() {
   padding: 12px 16px;
   background: rgba(255, 255, 255, 0.5);
   border-radius: 8px;
-  border: 1px solid rgba(160, 145, 124, 0.2);
+  border: 1px solid rgba(var(--color-divider-rgb), 0.2);
 }
 
 .requirement {
@@ -473,6 +442,30 @@ async function handleRegister() {
   margin-bottom: 4px;
 }
 
+.error-state {
+  text-align: center;
+  padding: 20px 0;
+}
+
+.error-icon {
+  font-size: 3rem;
+  margin-bottom: 16px;
+}
+
+.error-title {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--color-danger-dark);
+  margin: 0 0 12px 0;
+}
+
+.error-subtitle {
+  font-size: 0.95rem;
+  color: var(--main-text-light);
+  margin: 0 0 24px 0;
+  line-height: 1.6;
+}
+
 .success-message {
   padding: 24px;
   background: #d4edda;
@@ -484,10 +477,11 @@ async function handleRegister() {
 .success-icon {
   font-size: 3rem;
   margin-bottom: 12px;
+  color: #155724;
 }
 
 .success-title {
-  font-size: 1.1rem;
+  font-size: 1.2rem;
   font-weight: 700;
   color: #155724;
   margin: 0 0 12px 0;
@@ -496,38 +490,14 @@ async function handleRegister() {
 .success-subtitle {
   font-size: 0.95rem;
   color: #155724;
-  margin: 0 0 16px 0;
+  margin: 0 0 20px 0;
   line-height: 1.5;
-}
-
-.success-subtitle strong {
-  font-weight: 700;
-  color: #0d3f1a;
-}
-
-.success-note {
-  font-size: 0.85rem;
-  color: #155724;
-  margin: 0;
-  line-height: 1.6;
-}
-
-.resend-link {
-  color: var(--main-primary);
-  text-decoration: underline;
-  font-weight: 600;
-  cursor: pointer;
-  transition: color 0.2s ease;
-}
-
-.resend-link:hover {
-  color: var(--main-primary-dark);
 }
 
 .btn-primary {
   padding: 14px 24px;
   background: var(--main-primary-dark);
-  color: white;
+  color: var(--color-white);
   border: none;
   border-radius: 8px;
   font-size: 1rem;
@@ -535,106 +505,22 @@ async function handleRegister() {
   cursor: pointer;
   transition: all 0.2s ease;
   margin-top: 10px;
+  width: 100%;
 }
 
 .btn-primary:hover:not(:disabled) {
-  color: white;
+  color: var(--color-white);
   transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 8px rgba(var(--color-text-dark-rgb), 0.15);
 }
 
 .btn-primary:active:not(:disabled) {
   transform: translateY(0);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 4px rgba(var(--color-text-dark-rgb), 0.1);
 }
 
 .btn-primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.btn-secondary {
-  padding: 14px 24px;
-  background: white;
-  color: var(--main-primary);
-  border: 2px solid var(--main-primary);
-  border-radius: 8px;
-  font-size: 1rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  margin-top: 10px;
-}
-
-.btn-secondary:hover {
-  background: var(--main-primary);
-  color: white;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-}
-
-.btn-secondary:active {
-  transform: translateY(0);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.auth-footer {
-  margin-top: 30px;
-  text-align: center;
-  color: var(--main-text-light);
-  font-size: 0.9rem;
-}
-
-.auth-footer a {
-  color: var(--main-primary);
-  text-decoration: none;
-  font-weight: 600;
-  transition: color 0.2s ease;
-}
-
-.auth-footer a:hover {
-  color: var(--main-primary-dark);
-  text-decoration: underline;
-}
-
-.quota-info {
-  margin-top: 30px;
-  padding: 20px;
-  background: rgba(255, 255, 255, 0.5);
-  border-radius: 12px;
-  border: 1px solid rgba(160, 145, 124, 0.2);
-}
-
-.quota-title {
-  font-size: 0.95rem;
-  color: var(--main-primary);
-  margin: 0 0 15px 0;
-  text-align: center;
-  font-weight: 600;
-}
-
-.quota-details {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 15px;
-}
-
-.quota-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
-
-.quota-label {
-  font-size: 0.85rem;
-  color: var(--main-text-light);
-  font-weight: 500;
-}
-
-.quota-value {
-  font-size: 1.1rem;
-  color: var(--main-text);
-  font-weight: 700;
 }
 </style>

@@ -8,6 +8,7 @@ from pydantic import BaseModel, EmailStr
 from bson import ObjectId
 
 from ..auth.dependencies import get_current_admin, get_database
+from ..auth.password import hash_password
 from ..database.repositories.user_repo import UserRepository
 from ..database.repositories.task_repo import TaskRepository
 from ..database.repositories.audit_log_repo import AuditLogRepository
@@ -42,6 +43,11 @@ class UpdateUserQuotaRequest(BaseModel):
 class BatchDeleteTasksRequest(BaseModel):
     """批次刪除任務請求"""
     task_ids: List[str]
+
+
+class ResetPasswordRequest(BaseModel):
+    """重設用戶密碼請求"""
+    new_password: str
 
 
 # ========== 用戶管理 API ==========
@@ -361,6 +367,51 @@ async def reset_user_monthly_quota(
     return {
         "success": success,
         "message": "月配額使用量已重置"
+    }
+
+
+@router.post("/users/{user_id}/reset-password")
+async def reset_user_password(
+    user_id: str,
+    request: ResetPasswordRequest,
+    admin: dict = Depends(get_current_admin),
+    db = Depends(get_database)
+):
+    """重設用戶密碼（管理員）"""
+    user_repo = UserRepository(db)
+
+    user = await user_repo.get_by_id(user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="用戶不存在"
+        )
+
+    # 驗證密碼長度
+    if len(request.new_password) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="密碼長度至少需要 8 個字元"
+        )
+
+    # 加密新密碼
+    hashed_password = hash_password(request.new_password)
+
+    # 更新密碼
+    success = await user_repo.update(user_id, {"password_hash": hashed_password})
+
+    if success:
+        await log_admin_action(
+            admin_id=str(admin["_id"]),
+            action="reset_password",
+            resource_type="user",
+            resource_id=user_id,
+            details={"email": user.get("email")}
+        )
+
+    return {
+        "success": success,
+        "message": "密碼已重設"
     }
 
 
@@ -759,14 +810,24 @@ async def get_admin_statistics(
         summary_model_stats = await summary_model_cursor.to_list(length=None)
 
         # 4. 每日統計（最近 30 天）
-        thirty_days_ago = (datetime.now(TZ_UTC8) - timedelta(days=30)).strftime("%Y-%m-%d")
+        # 計算 30 天前的 UTC Unix timestamp（從當天 00:00:00 UTC+8 開始）
+        thirty_days_ago_dt = datetime.now(TZ_UTC8).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=30)
+        thirty_days_ago_timestamp = int(thirty_days_ago_dt.timestamp())
 
         # 4.1 每日任務統計（含標點符號 token）
+        # timestamps.created_at 是 Unix timestamp（秒），需要轉換為日期
         daily_tasks_pipeline = [
-            {"$match": {"timestamps.created_at": {"$gte": thirty_days_ago}}},
+            {"$match": {"timestamps.created_at": {"$gte": thirty_days_ago_timestamp}}},
             {
                 "$group": {
-                    "_id": {"$substr": ["$timestamps.created_at", 0, 10]},
+                    # 將 Unix timestamp 轉換為日期字串（UTC+8 時區）
+                    "_id": {
+                        "$dateToString": {
+                            "format": "%Y-%m-%d",
+                            "date": {"$toDate": {"$multiply": ["$timestamps.created_at", 1000]}},
+                            "timezone": "+08:00"
+                        }
+                    },
                     "tasks_count": {"$sum": 1},
                     "punctuation_tokens": {"$sum": {"$ifNull": ["$stats.token_usage.total", 0]}}
                 }
@@ -777,11 +838,18 @@ async def get_admin_statistics(
         daily_tasks_stats = await daily_tasks_cursor.to_list(length=None)
 
         # 4.2 每日 AI 總結統計
+        # summaries.created_at 也是 Unix timestamp（秒）
         daily_summaries_pipeline = [
-            {"$match": {"created_at": {"$gte": thirty_days_ago}}},
+            {"$match": {"created_at": {"$gte": thirty_days_ago_timestamp}}},
             {
                 "$group": {
-                    "_id": {"$substr": ["$created_at", 0, 10]},
+                    "_id": {
+                        "$dateToString": {
+                            "format": "%Y-%m-%d",
+                            "date": {"$toDate": {"$multiply": ["$created_at", 1000]}},
+                            "timezone": "+08:00"
+                        }
+                    },
                     "summaries_count": {"$sum": 1},
                     "summary_tokens": {"$sum": {"$ifNull": ["$metadata.token_usage.total", 0]}}
                 }

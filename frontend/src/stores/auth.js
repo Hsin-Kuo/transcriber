@@ -122,6 +122,51 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function forgotPassword(email) {
+    loading.value = true
+    error.value = null
+
+    try {
+      const response = await api.post('/auth/forgot-password', { email })
+      return {
+        success: true,
+        message: response.data.message
+      }
+    } catch (err) {
+      error.value = err.response?.data?.detail || '發送重設郵件失敗'
+      return {
+        success: false,
+        error: error.value
+      }
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function resetPassword(token, newPassword) {
+    loading.value = true
+    error.value = null
+
+    try {
+      const response = await api.post('/auth/reset-password', {
+        token,
+        new_password: newPassword
+      })
+      return {
+        success: true,
+        message: response.data.message
+      }
+    } catch (err) {
+      error.value = err.response?.data?.detail || '重設密碼失敗'
+      return {
+        success: false,
+        error: error.value
+      }
+    } finally {
+      loading.value = false
+    }
+  }
+
   return {
     // State
     user,
@@ -139,6 +184,8 @@ export const useAuthStore = defineStore('auth', () => {
     login,
     logout,
     fetchCurrentUser,
-    initialize
+    initialize,
+    forgotPassword,
+    resetPassword
   }
 })

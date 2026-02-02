@@ -3,19 +3,30 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from datetime import datetime, timedelta
 import secrets
 from ..utils.time_utils import get_utc_timestamp
+
+
+# ============================================
+# 忘記密碼 - 速率限制設定
+# ============================================
+FORGOT_PASSWORD_MAX_REQUESTS_PER_HOUR = 5   # 每 IP 每小時最多請求次數
+FORGOT_PASSWORD_COOLDOWN_SECONDS = 300       # 同一 Email 冷卻時間（秒）
 from ..models.auth import (
     UserRegister,
     UserLogin,
     TokenResponse,
     RefreshTokenRequest,
     ResendVerificationRequest,
-    UserResponse
+    ChangePasswordRequest,
+    UserResponse,
+    ForgotPasswordRequest,
+    ResetPasswordRequest
 )
 from ..auth.password import hash_password, verify_password
 from ..auth.jwt_handler import create_access_token, create_refresh_token, verify_token
 from ..auth.dependencies import get_current_user
 from ..database.mongodb import get_database
 from ..database.repositories.user_repo import UserRepository
+from ..database.repositories.rate_limit_repo import RateLimitRepository
 from ..utils.audit_logger import get_audit_logger
 from ..utils.email_service import get_email_service
 
@@ -381,6 +392,77 @@ async def logout(
     return {"message": "登出成功"}
 
 
+@router.post("/change-password")
+async def change_password(
+    request: ChangePasswordRequest,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database)
+):
+    """更改密碼
+
+    Args:
+        request: 更改密碼請求（current_password, new_password）
+        current_user: 當前用戶
+        db: 資料庫實例
+
+    Returns:
+        成功訊息
+
+    Raises:
+        HTTPException: 目前密碼錯誤或新密碼不符合要求
+    """
+    user_repo = UserRepository(db)
+
+    # 從資料庫獲取完整用戶資料（包含 password_hash）
+    user = await user_repo.get_by_id(str(current_user["_id"]))
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="用戶不存在"
+        )
+
+    # 驗證目前密碼
+    if not verify_password(request.current_password, user["password_hash"]):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="目前密碼錯誤"
+        )
+
+    # 檢查新密碼不能與舊密碼相同
+    if request.current_password == request.new_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="新密碼不能與目前密碼相同"
+        )
+
+    # 驗證密碼複雜度（與註冊時相同）
+    import re
+    new_pwd = request.new_password
+    if not re.search(r'[A-Z]', new_pwd):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="新密碼必須包含至少一個大寫字母"
+        )
+    if not re.search(r'[a-z]', new_pwd):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="新密碼必須包含至少一個小寫字母"
+        )
+    if not re.search(r'[0-9]', new_pwd):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="新密碼必須包含至少一個數字"
+        )
+
+    # 更新密碼
+    new_password_hash = hash_password(request.new_password)
+    await user_repo.update(str(current_user["_id"]), {
+        "password_hash": new_password_hash
+    })
+
+    return {"message": "密碼已更新成功"}
+
+
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_info(
     current_user: dict = Depends(get_current_user),
@@ -428,3 +510,170 @@ async def get_current_user_info(
         usage=usage,
         created_at=created_at
     )
+
+
+@router.post("/forgot-password")
+async def forgot_password(
+    request: ForgotPasswordRequest,
+    http_request: Request,
+    db=Depends(get_database)
+):
+    """發送密碼重設郵件
+
+    Args:
+        request: 忘記密碼請求（包含 email）
+        http_request: HTTP 請求物件（用於取得 IP）
+        db: 資料庫實例
+
+    Returns:
+        成功訊息（無論 email 是否存在都返回相同訊息，防止 email 枚舉攻擊）
+
+    Raises:
+        HTTPException: 超過速率限制
+    """
+    # 取得客戶端 IP（支援反向代理）
+    client_ip = http_request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+    if not client_ip:
+        client_ip = http_request.client.host if http_request.client else "unknown"
+
+    user_repo = UserRepository(db)
+    rate_limit_repo = RateLimitRepository(db)
+    email_service = get_email_service()
+
+    # 檢查 IP 速率限制（使用 MongoDB 存儲，支援多實例）
+    ip_allowed, ip_remaining = await rate_limit_repo.check_rate_limit(
+        limit_type="forgot_password_ip",
+        key=client_ip,
+        max_requests=FORGOT_PASSWORD_MAX_REQUESTS_PER_HOUR,
+        window_seconds=3600  # 1 小時
+    )
+    if not ip_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="請求過於頻繁，請稍後再試"
+        )
+
+    user = await user_repo.get_by_email(request.email)
+
+    # 無論 email 是否存在，都返回相同訊息（防止 email 枚舉攻擊）
+    success_message = {
+        "message": "如果該 Email 已註冊，您將會收到密碼重設郵件",
+        "email": request.email
+    }
+
+    # 記錄此 IP 的請求（無論 email 是否存在都記錄，防止探測）
+    await rate_limit_repo.record_request(
+        limit_type="forgot_password_ip",
+        key=client_ip,
+        ttl_seconds=3600
+    )
+
+    if not user:
+        return success_message
+
+    # 檢查帳號是否已激活
+    if not user.get("email_verified"):
+        return success_message
+
+    # 檢查 Email 冷卻時間
+    last_request = user.get("password_reset_requested_at")
+    cooldown_allowed, cooldown_remaining = await rate_limit_repo.check_cooldown(
+        last_request_timestamp=last_request,
+        cooldown_seconds=FORGOT_PASSWORD_COOLDOWN_SECONDS
+    )
+    if not cooldown_allowed:
+        remaining_minutes = (cooldown_remaining + 59) // 60  # 向上取整
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"請等待 {remaining_minutes} 分鐘後再試"
+        )
+
+    # 生成密碼重設 token
+    reset_token = secrets.token_urlsafe(32)
+    now = get_utc_timestamp()
+    reset_expires = now + (60 * 60)  # 1 小時後過期
+
+    # 更新用戶的重設 token 和請求時間
+    await user_repo.update(str(user["_id"]), {
+        "password_reset_token": reset_token,
+        "password_reset_expires": reset_expires,
+        "password_reset_requested_at": now
+    })
+
+    # 發送密碼重設郵件
+    await email_service.send_password_reset_email(
+        to_email=request.email,
+        reset_token=reset_token
+    )
+
+    return success_message
+
+
+@router.post("/reset-password")
+async def reset_password(
+    request: ResetPasswordRequest,
+    db=Depends(get_database)
+):
+    """重設密碼
+
+    Args:
+        request: 重設密碼請求（包含 token 和新密碼）
+        db: 資料庫實例
+
+    Returns:
+        成功訊息
+
+    Raises:
+        HTTPException: Token 無效、已過期或密碼不符合要求
+    """
+    import re
+    user_repo = UserRepository(db)
+
+    # 查找具有此重設 token 的用戶
+    user = await user_repo.get_by_password_reset_token(request.token)
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="重設連結無效或已過期"
+        )
+
+    # 檢查 token 是否過期
+    reset_expires = user.get("password_reset_expires")
+    if reset_expires:
+        if hasattr(reset_expires, 'timestamp'):
+            reset_expires = int(reset_expires.timestamp())
+        if reset_expires < get_utc_timestamp():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="重設連結已過期，請重新申請"
+            )
+
+    # 驗證密碼複雜度
+    new_pwd = request.new_password
+    if not re.search(r'[A-Z]', new_pwd):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="新密碼必須包含至少一個大寫字母"
+        )
+    if not re.search(r'[a-z]', new_pwd):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="新密碼必須包含至少一個小寫字母"
+        )
+    if not re.search(r'[0-9]', new_pwd):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="新密碼必須包含至少一個數字"
+        )
+
+    # 更新密碼並清除重設 token 和冷卻記錄
+    new_password_hash = hash_password(request.new_password)
+    await user_repo.update(str(user["_id"]), {
+        "password_hash": new_password_hash,
+        "password_reset_token": None,
+        "password_reset_expires": None,
+        "password_reset_requested_at": None
+    })
+
+    return {"message": "密碼已重設成功，請使用新密碼登入"}

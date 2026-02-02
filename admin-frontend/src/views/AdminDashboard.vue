@@ -157,7 +157,7 @@
 
         <!-- 轉錄模型 -->
         <div v-if="stats.model_usage.transcription && stats.model_usage.transcription.length > 0" class="model-section">
-          <h3 class="model-type-title">🎙️ 轉錄模型</h3>
+          <h3 class="model-type-title">轉錄模型</h3>
           <table class="data-table">
             <thead>
               <tr>
@@ -602,8 +602,10 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: flex-end;
   min-width: 16px;
   max-width: 40px;
+  height: 200px;
 }
 
 .chart-bar {

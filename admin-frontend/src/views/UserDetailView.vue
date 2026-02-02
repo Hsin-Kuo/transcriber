@@ -71,6 +71,13 @@
             <span class="label">註冊時間：</span>
             <span class="value">{{ formatTimestamp(user.created_at) }}</span>
           </div>
+          <div class="info-row">
+            <span class="label">密碼：</span>
+            <span class="value">••••••••</span>
+            <button @click="showPasswordModal = true" class="edit-btn">
+              重設密碼
+            </button>
+          </div>
         </div>
 
         <!-- 配額資訊 -->
@@ -238,6 +245,42 @@
         </div>
       </div>
     </div>
+
+    <!-- 重設密碼 Modal -->
+    <div v-if="showPasswordModal" class="modal-overlay" @click.self="closePasswordModal">
+      <div class="modal">
+        <h3>重設密碼</h3>
+        <div class="modal-body">
+          <p class="modal-user-email">用戶：{{ user.email }}</p>
+          <div class="form-group">
+            <label>新密碼：</label>
+            <input
+              v-model="passwordForm.newPassword"
+              type="password"
+              class="form-input"
+              placeholder="請輸入新密碼（至少 8 個字元）"
+              minlength="8"
+            />
+          </div>
+          <div class="form-group">
+            <label>確認密碼：</label>
+            <input
+              v-model="passwordForm.confirmPassword"
+              type="password"
+              class="form-input"
+              placeholder="請再次輸入新密碼"
+            />
+          </div>
+          <p v-if="passwordError" class="error-text">{{ passwordError }}</p>
+        </div>
+        <div class="modal-footer">
+          <button @click="closePasswordModal" class="btn-cancel">取消</button>
+          <button @click="resetPassword" class="btn-confirm" :disabled="isResettingPassword">
+            {{ isResettingPassword ? '重設中...' : '確認重設' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -254,9 +297,17 @@ const loading = ref(true)
 const error = ref(null)
 const showQuotaModal = ref(false)
 const showRoleModal = ref(false)
+const showPasswordModal = ref(false)
+const isResettingPassword = ref(false)
+const passwordError = ref('')
 
 const quotaForm = ref({
   tier: 'free'
+})
+
+const passwordForm = ref({
+  newPassword: '',
+  confirmPassword: ''
 })
 
 async function fetchUser() {
@@ -325,6 +376,41 @@ async function resetQuota() {
     alert('配額已重置')
   } catch (err) {
     alert(err.response?.data?.detail || '重置失敗')
+  }
+}
+
+function closePasswordModal() {
+  showPasswordModal.value = false
+  passwordForm.value = { newPassword: '', confirmPassword: '' }
+  passwordError.value = ''
+}
+
+async function resetPassword() {
+  passwordError.value = ''
+
+  // 驗證密碼
+  if (passwordForm.value.newPassword.length < 8) {
+    passwordError.value = '密碼長度至少需要 8 個字元'
+    return
+  }
+
+  if (passwordForm.value.newPassword !== passwordForm.value.confirmPassword) {
+    passwordError.value = '兩次輸入的密碼不一致'
+    return
+  }
+
+  isResettingPassword.value = true
+
+  try {
+    await api.post(`/api/admin/users/${user.value.id}/reset-password`, {
+      new_password: passwordForm.value.newPassword
+    })
+    closePasswordModal()
+    alert('密碼已重設成功')
+  } catch (err) {
+    passwordError.value = err.response?.data?.detail || '重設密碼失敗'
+  } finally {
+    isResettingPassword.value = false
   }
 }
 
@@ -715,5 +801,37 @@ code {
 .btn-confirm {
   background: var(--color-primary, #dd8448);
   color: white;
+}
+
+.btn-confirm:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.form-input {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid rgba(163, 177, 198, 0.3);
+  font-size: 14px;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--color-primary, #dd8448);
+}
+
+.modal-user-email {
+  color: var(--color-text, rgb(145, 106, 45));
+  font-weight: 600;
+  margin-bottom: 15px;
+}
+
+.error-text {
+  color: #c62828;
+  font-size: 14px;
+  margin-top: 10px;
 }
 </style>
