@@ -1,39 +1,134 @@
 # Whisper Transcriber
 
-> AI-powered Chinese audio transcription system with automatic punctuation
+> 企業級多語言語音轉錄系統，支援用戶認證、標籤管理、審計日誌與管理後台
 
 ## 專案簡介
 
-Whisper Transcriber 是一個基於 OpenAI Whisper 的中文語音轉錄系統，整合 Google Gemini 和 OpenAI API 自動添加標點符號與文字格式化，支援獨立使用或伺服器部署。
+Whisper Transcriber v3.0 是一個功能完整的多語言語音轉錄平台，基於 OpenAI Whisper 進行高精度語音辨識，支援中文、英文、日文、韓文等多種語言。系統整合 Google Gemini 和 OpenAI API 自動添加標點符號，採用前後端分離架構，提供完整的用戶認證、任務管理、標籤系統與管理後台。
 
 ## 主要功能
 
-- **語音轉文字**：使用 Whisper 模型進行高精度中文語音辨識
+### 核心轉錄功能
+- **語音轉文字**：使用 faster-whisper 進行高精度多語言語音辨識（支援 99+ 種語言）
 - **智慧音檔切割**：自動偵測靜音點分段處理長音檔（>10分鐘）
-- **標點符號服務**：整合 Google Gemini 或 OpenAI API 自動添加標點
-- **文稿精煉**：提供 4 種風格的文字後處理（書面化、精簡、正式化等）
-- **REST API**：FastAPI 伺服器支援遠端呼叫
-- **Docker 部署**：完整的容器化配置
+- **標點符號服務**：整合 Google Gemini（預設）或 OpenAI API，支援多 API Key 輪詢
+- **Speaker Diarization**：使用 pyannote.audio 自動識別多個說話者
+
+### 用戶系統
+- **用戶認證**：註冊 / 登入 / 登出，JWT Token 認證
+- **Email 驗證**：註冊後 Email 驗證流程
+- **密碼管理**：忘記密碼、重設密碼功能
+- **Google OAuth**：支援 Google 第三方登入與帳戶綁定
+
+### 任務管理
+- **異步轉錄**：任務在背景執行，不阻塞其他請求
+- **狀態追蹤**：即時查看任務進度（pending → processing → completed）
+- **SSE 推送**：Server-Sent Events 即時狀態更新
+- **任務取消**：支援取消進行中的轉錄任務
+- **標籤系統**：建立、編輯、刪除標籤，為任務分類
+
+### 管理後台
+- **用戶管理**：查看所有用戶、修改狀態 / 角色 / 配額、重設密碼
+- **任務管理**：查看、取消、刪除任務，批量操作
+- **審計日誌**：記錄所有重要操作，支援篩選與統計
+- **系統統計**：用戶數、任務數、使用量統計
+
+## 技術架構
+
+### 後端（Python / FastAPI）
+
+```
+src/
+├── main.py                 # FastAPI 應用入口
+├── routers/                # API 路由層
+│   ├── auth.py             # 認證 API
+│   ├── oauth.py            # OAuth API
+│   ├── tasks.py            # 任務管理 API
+│   ├── transcriptions.py   # 轉錄 API
+│   ├── tags.py             # 標籤管理 API
+│   ├── summaries.py        # 摘要生成 API
+│   └── admin.py            # 管理後台 API
+├── services/               # 業務邏輯層
+│   ├── task_service.py
+│   ├── transcription_service.py
+│   └── utils/
+│       ├── whisper_processor.py      # Whisper 轉錄處理
+│       ├── punctuation_processor.py  # 標點符號處理
+│       └── diarization_processor.py  # 說話者辨識
+├── database/               # 資料存取層
+│   ├── mongodb.py          # MongoDB 連接
+│   └── repositories/       # 數據操作
+└── auth/                   # 認證模組
+    ├── jwt_handler.py
+    ├── password.py
+    └── dependencies.py
+```
+
+### 前端（Vue 3 / Vite）
+
+```
+frontend/                   # 用戶前端
+├── src/
+│   ├── views/              # 頁面組件
+│   ├── components/         # 可複用組件
+│   ├── composables/        # Vue 3 組合函數
+│   ├── stores/             # Pinia 狀態管理
+│   └── router/             # 路由配置
+└── ...
+
+admin-frontend/             # 管理後台
+├── src/
+│   ├── views/              # 管理頁面
+│   └── ...
+└── ...
+```
+
+### 技術棧
+
+| 類別 | 技術 |
+|------|------|
+| 後端框架 | FastAPI + Uvicorn |
+| 語音辨識 | faster-whisper + PyTorch |
+| 說話者辨識 | pyannote.audio |
+| 標點服務 | Google Gemini / OpenAI API |
+| 資料庫 | MongoDB (Motor 異步驅動) |
+| 認證 | JWT + bcrypt |
+| 前端框架 | Vue 3 + Vite |
+| 狀態管理 | Pinia |
+| HTTP 客戶端 | Axios |
+| 音頻播放 | WaveSurfer.js |
+| 國際化 | Vue I18n |
+| 容器化 | Docker + Docker Compose |
 
 ## 目錄結構
 
 ```
 transcriber/
-├── src/                    # 原始碼
-│   ├── whisper_server.py   # FastAPI 伺服器
-│   └── refine_transcript.py # 文稿精煉工具
-├── frontend/               # Vue 前端界面
-├── docs/                   # 文檔
-│   └── DOCKER_README.md    # Docker 部署說明
-├── data/                   # 音訊檔案（被 git 忽略）
-├── output/                 # 轉錄結果（被 git 忽略）
-├── .env.example            # 環境變數範本
-├── requirements.txt        # Python 依賴套件
-├── Dockerfile              # Docker 映像檔配置
-└── docker-compose.yml      # Docker Compose 配置
+├── src/                      # 後端原始碼
+├── frontend/                 # 用戶前端 (Vue 3)
+├── admin-frontend/           # 管理後台 (Vue 3)
+├── output/                   # 轉錄結果輸出
+├── uploads/                  # 上傳文件存儲
+├── requirements.txt          # Python 依賴
+├── requirements_auth.txt     # 認證相關依賴
+├── .env.example              # 環境變數範本
+├── Dockerfile                # 後端 Docker 配置
+├── docker-compose.yml        # 多容器編排
+├── start_backend_daemon.sh   # 啟動後端腳本
+├── stop_backend.sh           # 停止後端腳本
+├── restart_backend.sh        # 重啟後端腳本
+└── status_backend.sh         # 查看後端狀態
 ```
 
 ## 快速開始
+
+### 系統需求
+
+- Python 3.10+
+- Node.js 16+
+- MongoDB 7.0+
+- FFmpeg（音頻編解碼）
+- 8-12GB RAM（使用 medium 模型）
 
 ### 1. 環境設定
 
@@ -42,405 +137,244 @@ transcriber/
 git clone <repository-url>
 cd transcriber
 
+# 設定環境變數
+cp .env.example .env
+# 編輯 .env 填入您的配置
+```
+
+### 2. 環境變數配置
+
+在 `.env` 檔案中設定以下變數：
+
+```bash
+# MongoDB
+MONGODB_URL=mongodb://127.0.0.1:27020
+MONGODB_DB_NAME=whisper_transcriber
+
+# JWT 認證
+JWT_SECRET_KEY=your_jwt_secret_key_here
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=15
+REFRESH_TOKEN_EXPIRE_DAYS=30
+
+# Google Gemini API（支援多個 Key 輪詢）
+GOOGLE_API_KEY_1=your_gemini_api_key_1
+GOOGLE_API_KEY_2=your_gemini_api_key_2
+
+# OpenAI API（選填）
+OPENAI_API_KEY=your_openai_api_key
+
+# Hugging Face Token（Speaker Diarization 必填）
+HF_TOKEN=your_huggingface_token
+
+# Google OAuth（選填）
+GOOGLE_CLIENT_ID=your_google_client_id
+
+# Email 服務（選填，用於驗證郵件）
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your_email@gmail.com
+SMTP_PASSWORD=your_app_password
+FRONTEND_URL=http://localhost:3000
+
+# CORS
+CORS_ORIGINS=http://localhost:3000,http://localhost:3001,http://localhost:5173
+```
+
+### 3. 啟動服務
+
+#### 方式一：使用 Docker Compose（推薦）
+
+```bash
+# 啟動所有服務
+docker-compose up -d
+
+# 服務端口：
+# - 前端：http://localhost:3000
+# - 管理後台：http://localhost:3003
+# - 後端 API：http://localhost:8000
+# - MongoDB：localhost:27020
+```
+
+#### 方式二：原生運行
+
+**啟動 MongoDB：**
+```bash
+# 使用 Docker 運行 MongoDB
+docker run -d --name mongo -p 27020:27017 mongo:7.0
+```
+
+**啟動後端：**
+```bash
 # 安裝依賴
 pip install -r requirements.txt
 
-# 設定環境變數
-cp .env.example .env
-# 編輯 .env 填入您的 API 金鑰
-```
-
-### 2. 使用方式
-
-#### 系統架構
-
-本系統採用混合部署方式：
-- **後端**：使用背景執行模式（daemon），原生運行以獲得最佳性能
-- **前端**：使用 Docker 容器化部署，方便管理與更新
-
-#### 步驟 1：啟動後端服務（背景執行）
-
-**使用管理腳本（推薦）：**
-
-```bash
-# 初次設定（安裝依賴、設定環境）
-./setup_native_backend.sh
-
-# 啟動後端（背景執行）
+# 背景執行（推薦）
 ./start_backend_daemon.sh
 
-# 查看後端狀態
-./status_backend.sh
-
-# 查看即時日誌
-tail -f backend.log
-
-# 停止後端
-./stop_backend.sh
-
-# 重新部署後端（應用程式碼更新）
-./restart_backend.sh
+# 或前景執行（開發用）
+python src/main.py --host 0.0.0.0 --port 8000 --model medium
 ```
 
-**手動啟動（開發測試）：**
-
+**啟動前端：**
 ```bash
-# 前景執行（按 Ctrl+C 停止）
-python src/whisper_server.py --host 0.0.0.0 --port 8000 --model medium
-```
-
-#### 步驟 2：啟動前端服務（Docker）
-
-```bash
-# 使用 Docker Compose 啟動前端容器
-docker-compose up -d
-
-# 查看前端日誌
-docker-compose logs -f frontend
-
-# 訪問前端界面
-# http://localhost:3000
-```
-
-**停止前端服務：**
-
-```bash
-docker-compose down
-```
-
-#### 開發模式（不使用 Docker）
-
-如果您想在開發時不使用 Docker，可以直接運行前端開發服務器：
-
-```bash
+# 用戶前端
 cd frontend
 npm install
-npm run dev
-# 訪問 http://localhost:5173
+npm run dev  # http://localhost:5173
+
+# 管理後台
+cd admin-frontend
+npm install
+npm run dev  # http://localhost:5174
 ```
 
-詳細說明請參考 [Docker 部署文檔](docs/DOCKER_README.md)
-
-### 3. 文稿精煉
+### 4. 後端管理腳本
 
 ```bash
-python src/refine_transcript.py -i output/transcript.txt --style podcast
+./start_backend_daemon.sh   # 啟動後端（背景執行）
+./status_backend.sh         # 查看後端狀態
+./stop_backend.sh           # 停止後端
+./restart_backend.sh        # 重啟後端
+tail -f backend.log         # 查看即時日誌
 ```
 
-**精煉風格：**
-- `book_guide`：書面化，移除口語贅詞（預設）
-- `podcast`：提取核心觀點與金句
-- `concise`：濃縮成條列式摘要
-- `formal`：正式化書面文字
+## API 端點
 
-## 技術架構
+### 認證相關
 
-### 核心技術棧
+| 方法 | 端點 | 描述 |
+|------|------|------|
+| POST | `/auth/register` | 用戶註冊 |
+| POST | `/auth/login` | 用戶登入 |
+| POST | `/auth/logout` | 用戶登出 |
+| POST | `/auth/refresh` | 刷新 Token |
+| GET | `/auth/me` | 獲取當前用戶資訊 |
+| GET | `/auth/verify-email` | Email 驗證 |
+| POST | `/auth/forgot-password` | 忘記密碼 |
+| POST | `/auth/reset-password` | 重設密碼 |
 
-- **AI/ML**: OpenAI Whisper, PyTorch
-- **音訊處理**: pydub (格式轉換、靜音偵測)
-- **網頁框架**: FastAPI + Uvicorn
-- **LLM API**: Google Gemini, OpenAI GPT
-- **容器化**: Docker + docker-compose
+### OAuth 相關
 
-### 系統需求
+| 方法 | 端點 | 描述 |
+|------|------|------|
+| POST | `/oauth/google` | Google OAuth 登入 |
+| POST | `/oauth/google/bind` | 綁定 Google 帳戶 |
+| DELETE | `/oauth/google/unbind` | 解綁 Google 帳戶 |
 
-- Python 3.10+
-- FFmpeg（音訊編解碼）
-- 8-12GB RAM（使用 medium 模型）
+### 轉錄相關
 
-### 環境變數
+| 方法 | 端點 | 描述 |
+|------|------|------|
+| POST | `/transcriptions` | 建立轉錄任務 |
+| GET | `/tasks/{task_id}` | 獲取任務狀態 |
+| GET | `/tasks/{task_id}/events` | SSE 即時狀態更新 |
+| POST | `/tasks/{task_id}/cancel` | 取消任務 |
+| DELETE | `/tasks/{task_id}` | 刪除任務 |
+| GET | `/transcriptions/{task_id}/download` | 下載轉錄結果 |
+| GET | `/transcriptions/{task_id}/segments` | 獲取時間軸片段 |
 
-在 `.env` 檔案中設定：
+### 標籤管理
 
-```bash
-GOOGLE_API_KEY=your_google_api_key_here  # 必填
-OPENAI_API_KEY=your_openai_api_key_here  # 選填
-```
+| 方法 | 端點 | 描述 |
+|------|------|------|
+| POST | `/api/tags` | 建立標籤 |
+| GET | `/api/tags` | 獲取所有標籤 |
+| PUT | `/api/tags/{tag_id}` | 更新標籤 |
+| DELETE | `/api/tags/{tag_id}` | 刪除標籤 |
+| GET | `/api/tags/statistics` | 獲取標籤統計 |
 
-## API 文檔
+### 管理後台
 
-伺服器啟動後，可透過以下端點存取：
+| 方法 | 端點 | 描述 |
+|------|------|------|
+| GET | `/admin/users` | 列出所有用戶 |
+| PUT | `/admin/users/{user_id}/status` | 修改用戶狀態 |
+| PUT | `/admin/users/{user_id}/role` | 修改用戶角色 |
+| GET | `/admin/tasks` | 列出所有任務 |
+| GET | `/admin/statistics` | 獲取系統統計 |
+| GET | `/admin/audit-logs` | 獲取審計日誌 |
 
+完整 API 文檔請訪問：
 - **Swagger UI**: `http://localhost:8000/docs`
 - **ReDoc**: `http://localhost:8000/redoc`
-- **健康檢查**: `http://localhost:8000/health`
 
-### 檔案儲存機制
+## 使用流程
 
-**FastAPI 伺服器採用混合模式處理檔案：**
+### 1. 用戶註冊與登入
 
-- ✅ **轉錄文字檔**：自動保存到 `output/` 目錄，永久保留
-  - 檔名格式：`{原檔名}_{時間戳}_transcript.txt`
-  - 例如：`audio_20241111_143025_transcript.txt`
+1. 訪問前端 `http://localhost:3000`
+2. 點擊「註冊」建立帳戶
+3. 檢查 Email 並點擊驗證連結
+4. 使用帳號密碼登入，或使用 Google 第三方登入
 
-- 🗑️ **上傳的音訊檔**：處理完成後自動清理，不占用磁碟空間
-  - 臨時儲存在系統臨時目錄
-  - 使用 BackgroundTasks 在回應後自動刪除
+### 2. 上傳音檔轉錄
 
-### ⚡️ 異步轉錄模式
+1. 在主頁面上傳音檔（支援 m4a, mp3, wav, mp4, flac 等）
+2. 選擇標點服務（Gemini / OpenAI / 無）
+3. 選擇是否啟用說話者辨識
+4. 提交後可即時查看轉錄進度
+5. 完成後可下載結果或在線編輯
 
-**v2.0 新功能：異步非阻塞轉錄**
+### 3. 管理轉錄結果
 
-轉錄任務在背景線程執行，不會阻塞其他 API 請求。適合前端應用輪詢查詢進度。
-
-**工作流程：**
-1. **提交任務**：上傳音檔，立即獲得 `task_id`
-2. **輪詢狀態**：定期查詢任務進度
-3. **下載結果**：完成後下載轉錄文字檔
-
-**並發控制：**
-- 最多同時處理 **1 個**轉錄任務（避免記憶體溢出）
-- 超過限制的請求會排隊等待
-
-### API 端點
-
-#### POST /transcribe
-
-上傳音訊檔案進行轉錄（異步模式）
-
-**參數：**
-- `file`: 音訊檔案（支援 m4a, mp3, wav, mp4 等）
-- `punct_provider`: 標點服務（openai/gemini/none，預設 gemini）
-- `chunk_audio`: 啟用音檔切割（true/false，預設 true）
-- `chunk_minutes`: 切割長度（分鐘，預設 10）
-
-**回傳範例：**
-```json
-{
-  "task_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "status": "pending",
-  "message": "轉錄任務已提交，請使用 task_id 查詢狀態",
-  "filename": "audio.m4a",
-  "created_at": "2024-11-11 14:30:00",
-  "status_url": "/transcribe/a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "download_url": "/transcribe/a1b2c3d4-e5f6-7890-abcd-ef1234567890/download"
-}
-```
-
-#### GET /transcribe/{task_id}
-
-查詢轉錄任務狀態
-
-**回傳範例：**
-```json
-{
-  "task_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "status": "processing",
-  "filename": "audio.m4a",
-  "file_size_mb": 140.5,
-  "progress": "正在轉錄音訊...",
-  "punct_provider": "gemini",
-  "created_at": "2024-11-11 14:30:00",
-  "updated_at": "2024-11-11 14:31:25"
-}
-```
-
-**狀態說明：**
-- `pending`: 等待處理
-- `processing`: 處理中
-- `completed`: 已完成
-- `failed`: 失敗
-
-#### GET /transcribe/{task_id}/download
-
-下載轉錄結果（僅 status=completed 時可用）
-
-**回傳：** 文字檔案下載
-
-#### GET /transcribe/active/list
-
-列出所有任務（含進行中的任務）
-
-**回傳範例：**
-```json
-{
-  "active_count": 1,
-  "total_count": 5,
-  "active_tasks": [
-    {
-      "task_id": "...",
-      "status": "processing",
-      "filename": "audio.m4a",
-      "progress": "正在轉錄音訊..."
-    }
-  ],
-  "all_tasks": [...]
-}
-```
-
-#### GET /transcripts
-
-列出所有已保存的轉錄文字檔
-
-**回傳範例：**
-```json
-{
-  "total": 5,
-  "output_dir": "output",
-  "transcripts": [
-    {
-      "filename": "audio_20241111_143025_transcript.txt",
-      "size_kb": 12.5,
-      "created": "2024-11-11 14:30:25",
-      "path": "output/audio_20241111_143025_transcript.txt"
-    }
-  ]
-}
-```
-
-## 使用範例
-
-### 範例 1：使用 curl 提交轉錄任務
-
-```bash
-# 1. 提交任務
-curl -X POST http://localhost:8000/transcribe \
-  -F "file=@data/audio.m4a" \
-  -F "punct_provider=gemini"
-
-# 回傳：
-# {
-#   "task_id": "abc-123",
-#   "status": "pending",
-#   ...
-# }
-
-# 2. 查詢狀態（每 5 秒查一次）
-watch -n 5 curl -s http://localhost:8000/transcribe/abc-123
-
-# 3. 下載結果
-curl http://localhost:8000/transcribe/abc-123/download -o transcript.txt
-
-# 4. 查看目前進行中的任務
-curl http://localhost:8000/transcribe/active/list
-```
-
-### 範例 2：Python 腳本自動輪詢
-
-```python
-import requests
-import time
-
-# 1. 上傳音檔
-with open('data/audio.m4a', 'rb') as f:
-    response = requests.post('http://localhost:8000/transcribe',
-                            files={'file': f})
-    task_id = response.json()['task_id']
-    print(f"任務 ID: {task_id}")
-
-# 2. 輪詢狀態
-while True:
-    status_response = requests.get(f'http://localhost:8000/transcribe/{task_id}')
-    task = status_response.json()
-
-    print(f"狀態: {task['status']} - {task['progress']}")
-
-    if task['status'] == 'completed':
-        print("轉錄完成！")
-        break
-    elif task['status'] == 'failed':
-        print(f"轉錄失敗：{task.get('error')}")
-        break
-
-    time.sleep(5)  # 每 5 秒查詢一次
-
-# 3. 下載結果
-if task['status'] == 'completed':
-    download_response = requests.get(f'http://localhost:8000/transcribe/{task_id}/download')
-    with open('transcript.txt', 'wb') as f:
-        f.write(download_response.content)
-    print("已下載到 transcript.txt")
-```
-
-### 範例 3：前端 JavaScript（適合 React/Vue）
-
-```javascript
-async function transcribeAudio(audioFile) {
-  // 1. 提交任務
-  const formData = new FormData();
-  formData.append('file', audioFile);
-  formData.append('punct_provider', 'gemini');
-
-  const response = await fetch('http://localhost:8000/transcribe', {
-    method: 'POST',
-    body: formData
-  });
-  const { task_id } = await response.json();
-
-  // 2. 輪詢狀態
-  return new Promise((resolve, reject) => {
-    const interval = setInterval(async () => {
-      const statusRes = await fetch(`http://localhost:8000/transcribe/${task_id}`);
-      const task = await statusRes.json();
-
-      // 更新 UI 進度
-      updateProgress(task.progress);
-
-      if (task.status === 'completed') {
-        clearInterval(interval);
-        resolve(task_id);
-      } else if (task.status === 'failed') {
-        clearInterval(interval);
-        reject(new Error(task.error));
-      }
-    }, 5000);  // 每 5 秒查詢
-  });
-}
-
-// 使用範例
-const task_id = await transcribeAudio(selectedFile);
-window.location = `http://localhost:8000/transcribe/${task_id}/download`;
-```
+- 在「我的任務」頁面查看所有任務
+- 使用標籤功能分類管理
+- 點擊任務查看詳細內容與時間軸
+- 支援下載 txt 格式
 
 ## 常見問題
 
 ### Q: 支援哪些音訊格式？
 A: 支援所有 FFmpeg 可處理的格式，包括 m4a, mp3, wav, mp4, flac 等。
 
+### Q: 支援哪些語言？
+A: 支援 Whisper 模型支援的所有語言（99+ 種），包括中文、英文、日文、韓文、法文、德文、西班牙文等。系統會自動偵測語言，也可手動指定。
+
 ### Q: 哪個 Whisper 模型最好？
-A: `medium` 模型提供良好的準確度與速度平衡。若需最高準確度選 `large-v2`，若需快速處理選 `small`。
+A: `medium` 模型提供良好的準確度與速度平衡。若需最高準確度選 `large-v2`，若需快速處理選 `small`。對於非英語語言，建議使用 `medium` 以上的模型。
 
 ### Q: 標點符號服務選哪個？
 A: Google Gemini 速度較快且成本較低，OpenAI GPT 品質稍好但較貴。兩者都能提供良好結果。
 
 ### Q: 如何處理長音檔？
-A: 啟用 `chunk_audio=true` 參數，系統會自動偵測靜音點並分段處理。
-
-### Q: 轉錄時其他 API 還能用嗎？
-A: **可以！** v2.0 採用異步架構，轉錄在背景線程執行，不會阻塞 `/health`、`/transcripts` 等其他端點。
+A: 系統會自動偵測靜音點並分段處理，預設超過 10 分鐘的音檔會自動切割。
 
 ### Q: 可以同時轉錄多個檔案嗎？
-A: 目前並發數限制為 1，超過的請求會自動排隊。可修改 `executor = ThreadPoolExecutor(max_workers=1)` 增加並發數（需注意記憶體）。
+A: 支援。目前並發數限制為 2，超過的請求會自動排隊。
 
-### Q: 任務記錄會永久保存嗎？
-A: 任務狀態儲存在記憶體中，重啟伺服器會清空。文字檔會永久保存在 `output/` 目錄。\
+### Q: Speaker Diarization 需要什麼？
+A: 需要 Hugging Face Token，並同意 pyannote 模型的使用條款。
 
-## 開發指南
+### Q: 忘記密碼怎麼辦？
+A: 在登入頁面點擊「忘記密碼」，輸入 Email 後系統會發送重設連結。
 
-### 安裝開發依賴
+## 更新日誌
 
-```bash
-pip install -r requirements.txt
-```
+### v3.0.0 (2025-02)
+- **用戶認證系統**：完整的註冊 / 登入 / Email 驗證流程
+- **Google OAuth**：支援 Google 第三方登入與帳戶綁定
+- **密碼管理**：新增忘記密碼、重設密碼功能
+- **管理後台**：獨立的管理介面，用戶 / 任務 / 審計日誌管理
+- **標籤系統**：為任務建立分類標籤
+- **審計日誌**：記錄所有重要操作
+- **三層架構**：Router → Service → Repository 清晰分層
+- **MongoDB 整合**：使用 Motor 異步驅動
 
-### 執行測試
+### v2.1.0 (2025-01)
+- **Speaker Diarization**：使用獨立進程執行，可被立即終止
+- **效能優化**：調整 Whisper 模型並行配置
+- **前端改進**：任務卡片顯示 Diarization 狀態
 
-```bash
-# 測試伺服器
-python src/whisper_server.py --model small
+### v2.0.0 (2024-12)
+- **異步轉錄**：任務在背景執行，不阻塞其他請求
+- **SSE 推送**：Server-Sent Events 即時狀態更新
+- **Vue 3 前端**：全新的用戶介面
 
-# 測試 API（使用 curl）
-curl -X POST http://localhost:8000/transcribe -F "file=@data/test.m4a"
-
-# 或使用前端界面上傳測試檔案
-```
-
-### 程式碼風格
-
-- 遵循 PEP 8 規範
-- 使用有意義的變數名稱
-- 添加適當的註解與文檔字串
+### v1.0.0 (2024-11)
+- 初始版本發布
+- 支援多語言語音轉錄
+- 整合 Gemini 和 OpenAI 標點服務
 
 ## 授權
 
@@ -449,40 +383,3 @@ curl -X POST http://localhost:8000/transcribe -F "file=@data/test.m4a"
 ## 貢獻
 
 歡迎提交 Issue 和 Pull Request！
-
-## 作者
-
-[請在此添加作者資訊]
-
-## 更新日誌
-
-### v2.1.0 (2025-01-19)
-- 🔧 **效能優化**：調整 Whisper 模型並行配置
-  - `cpu_threads=1, num_workers=4`：優化核心使用效率
-  - 避免與 Speaker Diarization 的資源競爭
-  - 在 8 核 M1 Mac 上達到最佳平衡
-- 🎤 **Speaker Diarization 增強**：
-  - 使用獨立進程執行，可被立即終止
-  - 支援取消正在執行的說話者辨識
-  - 新增 `diarization_status` 即時狀態追蹤
-  - 顯示識別到的講者人數和耗時
-- 📊 **前端改進**：
-  - 在任務卡片中顯示 Diarization 狀態
-  - 支援取消時立即停止所有進程
-  - 更詳細的進度資訊
-- ⚡ **資源管理**：
-  - 模型權重共享，不會隨並行數倍增
-  - 優化內存使用（~2.7 GB 總內存）
-  - 更好的背景執行管理腳本
-
-**重新部署後端以應用優化：**
-```bash
-./restart_backend.sh
-```
-
-### v1.0.0 (2024-11-11)
-- 初始版本發布
-- 支援中文語音轉錄
-- 整合 Gemini 和 OpenAI 標點服務
-- 提供 Docker 部署方案
-- 新增文稿精煉功能
