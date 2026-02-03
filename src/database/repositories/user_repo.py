@@ -38,6 +38,10 @@ class UserRepository:
         """根據密碼重設 token 獲取用戶"""
         return await self.collection.find_one({"password_reset_token": token})
 
+    async def get_by_google_id(self, google_id: str) -> Optional[Dict[str, Any]]:
+        """根據 Google ID 獲取用戶"""
+        return await self.collection.find_one({"google_id": google_id})
+
     async def delete(self, user_id: str) -> bool:
         """刪除用戶"""
         try:

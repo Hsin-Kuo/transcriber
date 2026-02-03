@@ -61,7 +61,20 @@
     "reqLength": "At least 8 characters",
     "reqUppercase": "Contains uppercase letter",
     "reqLowercase": "Contains lowercase letter",
-    "reqNumber": "Contains number"
+    "reqNumber": "Contains number",
+    "googleAccount": "Google Account",
+    "connected": "Connected",
+    "unbind": "Unlink",
+    "processing": "Processing...",
+    "googleBindSuccess": "Google account linked successfully",
+    "googleBindFailed": "Failed to link Google account",
+    "googleUnbindSuccess": "Google account unlinked successfully",
+    "unbindConfirm": "Are you sure you want to unlink your Google account?",
+    "unbindWarningNoPassword": "Warning: You haven't set a password! You won't be able to log in after unlinking Google. Are you sure you want to continue?",
+    "setPassword": "Set Password",
+    "setPasswordDescription": "Set a password to enable email + password login.",
+    "passwordSetSuccess": "Password set successfully",
+    "setting": "Setting..."
   },
   "navigation": {
     "expandSidebar": "Expand Sidebar",
@@ -370,6 +383,7 @@
     "failed": "Batch Creation Failed"
   },
   "auth": {
+    "loadingGoogle": "Loading Google Sign-In...",
     "forgotPassword": "Forgot Password",
     "forgotPasswordTitle": "Forgot Password",
     "forgotPasswordDescription": "Enter the email address you used to register and we'll send you a password reset link.",
@@ -399,7 +413,21 @@
     "reqLength": "At least 8 characters",
     "reqUppercase": "Contains uppercase letter",
     "reqLowercase": "Contains lowercase letter",
-    "reqNumber": "Contains number"
+    "reqNumber": "Contains number",
+    "or": "or",
+    "googleLogin": "Sign in with Google",
+    "googleSignup": "Sign up with Google",
+    "googleBind": "Link Google Account",
+    "googleUnbind": "Unlink Google",
+    "googleBindSuccess": "Google account linked successfully",
+    "googleUnbindSuccess": "Google account unlinked successfully",
+    "googleBindError": "Failed to link Google account",
+    "googleUnbindError": "Failed to unlink Google account",
+    "googleAlreadyBound": "This Google account is already linked to another account",
+    "setPassword": "Set Password",
+    "setPasswordDescription": "Set a password to enable email + password login",
+    "setPasswordSuccess": "Password set successfully",
+    "noPasswordWarning": "You haven't set a password. You won't be able to log in after unlinking Google"
   },
   "aiSummary": {
     "title": "AI Summary",

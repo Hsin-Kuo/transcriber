@@ -82,12 +82,62 @@
       <!-- 帳戶安全 -->
       <div class="card security-card">
         <h2>{{ $t('userSettings.security') }}</h2>
+
+        <!-- 密碼設定 -->
         <div class="setting-item">
           <span class="setting-label">{{ $t('userSettings.password') }}</span>
-          <button class="change-password-btn" @click="showPasswordModal = true">
-            {{ $t('userSettings.changePassword') }}
-          </button>
+          <div v-if="authStore.hasPassword">
+            <button class="change-password-btn" @click="showPasswordModal = true">
+              {{ $t('userSettings.changePassword') }}
+            </button>
+          </div>
+          <div v-else>
+            <button class="change-password-btn" @click="showSetPasswordModal = true">
+              {{ $t('userSettings.setPassword') }}
+            </button>
+          </div>
         </div>
+
+        <!-- Google 綁定 -->
+        <div v-if="googleClientId" class="setting-item google-setting">
+          <div class="setting-left">
+            <span class="setting-label">{{ $t('userSettings.googleAccount') }}</span>
+            <span v-if="authStore.hasGoogle" class="connected-status">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+              {{ $t('userSettings.connected') }}
+            </span>
+          </div>
+          <div class="setting-right">
+            <!-- 未綁定：顯示綁定按鈕 -->
+            <div v-if="!authStore.hasGoogle" class="google-bind-wrapper">
+              <GoogleSignInButton
+                :key="'google-bind-' + locale"
+                :client-id="googleClientId"
+                button-text="signin_with"
+                size="medium"
+                :width="200"
+                @success="handleGoogleBindSuccess"
+                @error="handleGoogleBindError"
+              />
+            </div>
+            <!-- 已綁定：顯示解除綁定按鈕 -->
+            <div v-else>
+              <button
+                class="unbind-btn"
+                @click="confirmUnbindGoogle"
+                :disabled="googleLoading"
+              >
+                {{ googleLoading ? $t('userSettings.processing') : $t('userSettings.unbind') }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Google 操作訊息 -->
+        <div v-if="googleError" class="google-message error">{{ googleError }}</div>
+        <div v-if="googleSuccess" class="google-message success">{{ googleSuccess }}</div>
       </div>
 
       <!-- 介面設定 -->
@@ -263,6 +313,81 @@
         </div>
       </div>
     </div>
+
+    <!-- 設定密碼 Modal (OAuth 用戶) -->
+    <div v-if="showSetPasswordModal" class="modal-overlay" @click.self="closeSetPasswordModal">
+      <div class="modal">
+        <h3>{{ $t('userSettings.setPassword') }}</h3>
+        <p class="modal-description">{{ $t('userSettings.setPasswordDescription') }}</p>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>{{ $t('userSettings.newPassword') }}</label>
+            <div class="password-input-wrapper">
+              <input
+                v-model="setPasswordForm.newPassword"
+                :type="showSetNewPassword ? 'text' : 'password'"
+                class="form-input"
+                :placeholder="$t('userSettings.newPasswordPlaceholder')"
+                @input="validateSetPassword"
+              />
+              <button type="button" class="password-toggle" @click="showSetNewPassword = !showSetNewPassword" tabindex="-1">
+                <svg v-if="showSetNewPassword" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+                <svg v-else xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                  <line x1="1" y1="1" x2="23" y2="23"></line>
+                </svg>
+              </button>
+            </div>
+            <div v-if="setPasswordForm.newPassword" class="password-requirements">
+              <div class="requirement" :class="{ met: setPasswordChecks.length }">
+                {{ setPasswordChecks.length ? '✓' : '○' }} {{ $t('userSettings.reqLength') }}
+              </div>
+              <div class="requirement" :class="{ met: setPasswordChecks.hasUpper }">
+                {{ setPasswordChecks.hasUpper ? '✓' : '○' }} {{ $t('userSettings.reqUppercase') }}
+              </div>
+              <div class="requirement" :class="{ met: setPasswordChecks.hasLower }">
+                {{ setPasswordChecks.hasLower ? '✓' : '○' }} {{ $t('userSettings.reqLowercase') }}
+              </div>
+              <div class="requirement" :class="{ met: setPasswordChecks.hasNumber }">
+                {{ setPasswordChecks.hasNumber ? '✓' : '○' }} {{ $t('userSettings.reqNumber') }}
+              </div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>{{ $t('userSettings.confirmPassword') }}</label>
+            <div class="password-input-wrapper">
+              <input
+                v-model="setPasswordForm.confirmPassword"
+                :type="showSetConfirmPassword ? 'text' : 'password'"
+                class="form-input"
+                :placeholder="$t('userSettings.confirmPasswordPlaceholder')"
+              />
+              <button type="button" class="password-toggle" @click="showSetConfirmPassword = !showSetConfirmPassword" tabindex="-1">
+                <svg v-if="showSetConfirmPassword" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+                <svg v-else xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                  <line x1="1" y1="1" x2="23" y2="23"></line>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <p v-if="setPasswordError" class="error-text">{{ setPasswordError }}</p>
+          <p v-if="setPasswordSuccess" class="success-text">{{ setPasswordSuccess }}</p>
+        </div>
+        <div class="modal-footer">
+          <button @click="closeSetPasswordModal" class="btn-cancel">{{ $t('userSettings.cancel') }}</button>
+          <button @click="setPassword" class="btn-confirm" :disabled="isSettingPassword">
+            {{ isSettingPassword ? $t('userSettings.setting') : $t('userSettings.confirm') }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -271,9 +396,13 @@ import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useI18n } from 'vue-i18n'
 import api from '../utils/api'
+import GoogleSignInButton from '../components/GoogleSignInButton.vue'
 
 const authStore = useAuthStore()
 const { t: $t, locale } = useI18n()
+
+// Google OAuth Client ID
+const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 
 // 更改密碼相關狀態
 const showPasswordModal = ref(false)
@@ -290,6 +419,29 @@ const passwordForm = ref({
 })
 
 const newPasswordChecks = ref({
+  length: false,
+  hasUpper: false,
+  hasLower: false,
+  hasNumber: false
+})
+
+// Google 綁定相關狀態
+const googleLoading = ref(false)
+const googleError = ref('')
+const googleSuccess = ref('')
+
+// 設定密碼 Modal（給 OAuth 用戶使用）
+const showSetPasswordModal = ref(false)
+const setPasswordForm = ref({
+  newPassword: '',
+  confirmPassword: ''
+})
+const setPasswordError = ref('')
+const setPasswordSuccess = ref('')
+const isSettingPassword = ref(false)
+const showSetNewPassword = ref(false)
+const showSetConfirmPassword = ref(false)
+const setPasswordChecks = ref({
   length: false,
   hasUpper: false,
   hasLower: false,
@@ -473,6 +625,126 @@ async function changePassword() {
   } finally {
     isChangingPassword.value = false
   }
+}
+
+// Google 綁定成功
+async function handleGoogleBindSuccess(credential) {
+  googleLoading.value = true
+  googleError.value = ''
+  googleSuccess.value = ''
+
+  const result = await authStore.bindGoogle(credential)
+
+  if (result.success) {
+    googleSuccess.value = $t('userSettings.googleBindSuccess')
+    setTimeout(() => {
+      googleSuccess.value = ''
+    }, 3000)
+  } else {
+    googleError.value = result.error
+  }
+
+  googleLoading.value = false
+}
+
+// Google 綁定失敗
+function handleGoogleBindError(err) {
+  googleError.value = $t('userSettings.googleBindFailed') + ': ' + err
+}
+
+// 確認解除 Google 綁定
+function confirmUnbindGoogle() {
+  // 如果用戶沒有密碼，警告他們
+  if (!authStore.hasPassword) {
+    if (!confirm($t('userSettings.unbindWarningNoPassword'))) {
+      return
+    }
+  } else {
+    if (!confirm($t('userSettings.unbindConfirm'))) {
+      return
+    }
+  }
+  unbindGoogle()
+}
+
+// 解除 Google 綁定
+async function unbindGoogle() {
+  googleLoading.value = true
+  googleError.value = ''
+  googleSuccess.value = ''
+
+  const result = await authStore.unbindGoogle()
+
+  if (result.success) {
+    googleSuccess.value = $t('userSettings.googleUnbindSuccess')
+    setTimeout(() => {
+      googleSuccess.value = ''
+    }, 3000)
+  } else {
+    googleError.value = result.error
+  }
+
+  googleLoading.value = false
+}
+
+// 驗證設定密碼表單
+function validateSetPassword() {
+  const pwd = setPasswordForm.value.newPassword
+  setPasswordChecks.value = {
+    length: pwd.length >= 8,
+    hasUpper: /[A-Z]/.test(pwd),
+    hasLower: /[a-z]/.test(pwd),
+    hasNumber: /[0-9]/.test(pwd)
+  }
+}
+
+const isSetPasswordValid = computed(() => {
+  return setPasswordChecks.value.length &&
+         setPasswordChecks.value.hasUpper &&
+         setPasswordChecks.value.hasLower &&
+         setPasswordChecks.value.hasNumber
+})
+
+// 關閉設定密碼對話框
+function closeSetPasswordModal() {
+  showSetPasswordModal.value = false
+  setPasswordForm.value = { newPassword: '', confirmPassword: '' }
+  setPasswordError.value = ''
+  setPasswordSuccess.value = ''
+  showSetNewPassword.value = false
+  showSetConfirmPassword.value = false
+  setPasswordChecks.value = { length: false, hasUpper: false, hasLower: false, hasNumber: false }
+}
+
+// 設定密碼
+async function setPassword() {
+  setPasswordError.value = ''
+  setPasswordSuccess.value = ''
+
+  if (!isSetPasswordValid.value) {
+    setPasswordError.value = $t('userSettings.errorPasswordRequirements')
+    return
+  }
+
+  if (setPasswordForm.value.newPassword !== setPasswordForm.value.confirmPassword) {
+    setPasswordError.value = $t('userSettings.errorPasswordMismatch')
+    return
+  }
+
+  isSettingPassword.value = true
+
+  const result = await authStore.setPassword(setPasswordForm.value.newPassword)
+
+  if (result.success) {
+    setPasswordSuccess.value = $t('userSettings.passwordSetSuccess')
+    setTimeout(() => {
+      closeSetPasswordModal()
+    }, 2000)
+  } else {
+    setPasswordError.value = result.error
+  }
+
+  isSettingPassword.value = false
 }
 </script>
 
@@ -1053,6 +1325,89 @@ async function changePassword() {
 .btn-confirm:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* Google 綁定樣式 */
+.google-setting {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.setting-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setting-right {
+  display: flex;
+  align-items: center;
+}
+
+.connected-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--color-success, #28a745);
+  font-weight: 500;
+}
+
+.connected-status svg {
+  flex-shrink: 0;
+}
+
+.google-bind-wrapper {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+}
+
+.unbind-btn {
+  padding: 8px 16px;
+  background: transparent;
+  color: var(--color-danger, #dc3545);
+  border: 1px solid var(--color-danger, #dc3545);
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.unbind-btn:hover:not(:disabled) {
+  background: var(--color-danger, #dc3545);
+  color: white;
+}
+
+.unbind-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.google-message {
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  margin-top: 12px;
+}
+
+.google-message.error {
+  background: rgba(220, 53, 69, 0.1);
+  color: var(--color-danger, #dc3545);
+  border: 1px solid rgba(220, 53, 69, 0.2);
+}
+
+.google-message.success {
+  background: rgba(40, 167, 69, 0.1);
+  color: var(--color-success, #28a745);
+  border: 1px solid rgba(40, 167, 69, 0.2);
+}
+
+.modal-description {
+  color: var(--main-text-light);
+  font-size: 0.9rem;
+  margin: -10px 0 20px 0;
 }
 
 /* 配額卡片樣式 */

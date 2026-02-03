@@ -80,6 +80,20 @@
             </button>
           </form>
 
+          <!-- Google 登入 -->
+          <div v-if="googleClientId" class="oauth-section">
+            <div class="divider">
+              <span>或</span>
+            </div>
+            <GoogleSignInButton
+              :client-id="googleClientId"
+              button-text="signin_with"
+              :width="350"
+              @success="handleGoogleSuccess"
+              @error="handleGoogleError"
+            />
+          </div>
+
           <div class="auth-footer">
             <p><router-link to="/forgot-password">忘記密碼？</router-link></p>
             <p>還沒有帳號？<router-link to="/register">立即註冊</router-link></p>
@@ -93,9 +107,13 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
+import GoogleSignInButton from '../../components/GoogleSignInButton.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
+
+// Google OAuth Client ID（從環境變數取得）
+const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 
 const email = ref('')
 const password = ref('')
@@ -161,6 +179,26 @@ async function resendVerification() {
   } finally {
     resendLoading.value = false
   }
+}
+
+async function handleGoogleSuccess(credential) {
+  loading.value = true
+  error.value = ''
+
+  const result = await authStore.googleLogin(credential)
+
+  if (result.success) {
+    const redirect = router.currentRoute.value.query.redirect || '/'
+    router.push(redirect)
+  } else {
+    error.value = result.error
+  }
+
+  loading.value = false
+}
+
+function handleGoogleError(err) {
+  error.value = 'Google 登入失敗：' + err
 }
 </script>
 
@@ -449,5 +487,29 @@ async function resendVerification() {
 .auth-footer a:hover {
   color: var(--main-primary-dark);
   text-decoration: underline;
+}
+
+.oauth-section {
+  margin-top: 24px;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  margin: 20px 0;
+  color: var(--main-text-light);
+  font-size: 0.85rem;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(var(--color-divider-rgb), 0.3);
+}
+
+.divider span {
+  padding: 0 16px;
 }
 </style>

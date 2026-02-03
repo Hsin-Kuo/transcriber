@@ -61,7 +61,20 @@
     "reqLength": "至少 8 個字元",
     "reqUppercase": "包含大寫字母",
     "reqLowercase": "包含小寫字母",
-    "reqNumber": "包含數字"
+    "reqNumber": "包含數字",
+    "googleAccount": "Google 帳號",
+    "connected": "已連結",
+    "unbind": "解除綁定",
+    "processing": "處理中...",
+    "googleBindSuccess": "已成功綁定 Google 帳號",
+    "googleBindFailed": "綁定 Google 失敗",
+    "googleUnbindSuccess": "已解除綁定 Google 帳號",
+    "unbindConfirm": "確定要解除綁定 Google 帳號嗎？",
+    "unbindWarningNoPassword": "警告：您尚未設定密碼！解除綁定 Google 後將無法登入。確定要繼續嗎？",
+    "setPassword": "設定密碼",
+    "setPasswordDescription": "設定密碼後，您可以使用 Email + 密碼登入。",
+    "passwordSetSuccess": "密碼設定成功",
+    "setting": "設定中..."
   },
   "navigation": {
     "expandSidebar": "展開側欄",
@@ -370,6 +383,7 @@
     "failed": "批次建立失敗"
   },
   "auth": {
+    "loadingGoogle": "載入 Google 登入...",
     "forgotPassword": "忘記密碼",
     "forgotPasswordTitle": "忘記密碼",
     "forgotPasswordDescription": "請輸入您註冊時使用的 Email，我們將發送密碼重設連結給您。",
@@ -399,7 +413,21 @@
     "reqLength": "至少 8 個字元",
     "reqUppercase": "包含大寫字母",
     "reqLowercase": "包含小寫字母",
-    "reqNumber": "包含數字"
+    "reqNumber": "包含數字",
+    "or": "或",
+    "googleLogin": "使用 Google 登入",
+    "googleSignup": "使用 Google 註冊",
+    "googleBind": "綁定 Google 帳號",
+    "googleUnbind": "解除綁定 Google",
+    "googleBindSuccess": "已成功綁定 Google 帳號",
+    "googleUnbindSuccess": "已解除綁定 Google 帳號",
+    "googleBindError": "綁定 Google 失敗",
+    "googleUnbindError": "解除綁定失敗",
+    "googleAlreadyBound": "此 Google 帳號已綁定到其他帳號",
+    "setPassword": "設定密碼",
+    "setPasswordDescription": "設定密碼後可使用 Email + 密碼登入",
+    "setPasswordSuccess": "密碼設定成功",
+    "noPasswordWarning": "您尚未設定密碼，解除綁定 Google 後將無法登入"
   },
   "aiSummary": {
     "title": "AI 摘要",

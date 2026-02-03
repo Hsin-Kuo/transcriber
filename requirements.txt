@@ -21,6 +21,9 @@ psutil
 # HTTP 客戶端
 requests
 
+# Google OAuth
+google-auth
+
 # LLM API
 openai
 google-generativeai

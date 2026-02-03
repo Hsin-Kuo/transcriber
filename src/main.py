@@ -27,6 +27,7 @@ from src.database.repositories.audit_log_repo import AuditLogRepository
 
 # Routers
 from src.routers import auth as auth_router
+from src.routers import oauth as oauth_router
 from src.routers import tasks as tasks_router
 from src.routers import transcriptions as transcriptions_router
 from src.routers import tags as tags_router
@@ -100,6 +101,7 @@ app.add_middleware(
 # ========== 註冊所有路由 ==========
 
 app.include_router(auth_router.router)
+app.include_router(oauth_router.router)
 app.include_router(tasks_router.router)
 app.include_router(transcriptions_router.router)
 app.include_router(tags_router.router)

@@ -133,6 +133,20 @@
             </button>
           </form>
 
+          <!-- Google 註冊 -->
+          <div v-if="!success && googleClientId" class="oauth-section">
+            <div class="divider">
+              <span>或</span>
+            </div>
+            <GoogleSignInButton
+              :client-id="googleClientId"
+              button-text="signup_with"
+              :width="350"
+              @success="handleGoogleSuccess"
+              @error="handleGoogleError"
+            />
+          </div>
+
           <div v-if="!success" class="auth-footer">
             <p>已有帳號？<router-link to="/login">立即登入</router-link></p>
           </div>
@@ -159,9 +173,13 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
+import GoogleSignInButton from '../../components/GoogleSignInButton.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
+
+// Google OAuth Client ID（從環境變數取得）
+const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 
 const email = ref('')
 const password = ref('')
@@ -251,6 +269,25 @@ async function handleRegister() {
   }
 
   loading.value = false
+}
+
+async function handleGoogleSuccess(credential) {
+  loading.value = true
+  error.value = ''
+
+  const result = await authStore.googleLogin(credential)
+
+  if (result.success) {
+    router.push('/')
+  } else {
+    error.value = result.error
+  }
+
+  loading.value = false
+}
+
+function handleGoogleError(err) {
+  error.value = 'Google 註冊失敗：' + err
 }
 </script>
 
@@ -636,5 +673,29 @@ async function handleRegister() {
   font-size: 1.1rem;
   color: var(--main-text);
   font-weight: 700;
+}
+
+.oauth-section {
+  margin-top: 24px;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  margin: 20px 0;
+  color: var(--main-text-light);
+  font-size: 0.85rem;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(160, 145, 124, 0.3);
+}
+
+.divider span {
+  padding: 0 16px;
 }
 </style>

@@ -16,6 +16,9 @@ export const useAuthStore = defineStore('auth', () => {
   const isAdmin = computed(() => user.value?.role === 'admin')
   const quota = computed(() => user.value?.quota || {})
   const usage = computed(() => user.value?.usage || {})
+  const authProviders = computed(() => user.value?.auth_providers || [])
+  const hasPassword = computed(() => authProviders.value.includes('password'))
+  const hasGoogle = computed(() => authProviders.value.includes('google'))
 
   // 計算配額使用百分比
   const quotaPercentage = computed(() => {
@@ -167,6 +170,97 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function googleLogin(credential) {
+    loading.value = true
+    error.value = null
+
+    try {
+      const response = await api.post('/auth/google', { credential })
+      const { access_token, refresh_token } = response.data
+
+      TokenManager.setTokens(access_token, refresh_token)
+      await fetchCurrentUser()
+
+      return { success: true }
+    } catch (err) {
+      error.value = err.response?.data?.detail || 'Google 登入失敗'
+      return {
+        success: false,
+        error: error.value
+      }
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function bindGoogle(credential) {
+    loading.value = true
+    error.value = null
+
+    try {
+      const response = await api.post('/auth/google/bind', { credential })
+      await fetchCurrentUser() // 重新獲取用戶資訊以更新 auth_providers
+      return {
+        success: true,
+        message: response.data.message
+      }
+    } catch (err) {
+      error.value = err.response?.data?.detail || '綁定 Google 失敗'
+      return {
+        success: false,
+        error: error.value
+      }
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function unbindGoogle() {
+    loading.value = true
+    error.value = null
+
+    try {
+      const response = await api.delete('/auth/google/unbind')
+      await fetchCurrentUser() // 重新獲取用戶資訊以更新 auth_providers
+      return {
+        success: true,
+        message: response.data.message
+      }
+    } catch (err) {
+      error.value = err.response?.data?.detail || '解除綁定失敗'
+      return {
+        success: false,
+        error: error.value
+      }
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function setPassword(newPassword) {
+    loading.value = true
+    error.value = null
+
+    try {
+      const response = await api.post('/auth/set-password', {
+        new_password: newPassword
+      })
+      await fetchCurrentUser() // 重新獲取用戶資訊以更新 auth_providers
+      return {
+        success: true,
+        message: response.data.message
+      }
+    } catch (err) {
+      error.value = err.response?.data?.detail || '設定密碼失敗'
+      return {
+        success: false,
+        error: error.value
+      }
+    } finally {
+      loading.value = false
+    }
+  }
+
   return {
     // State
     user,
@@ -179,6 +273,9 @@ export const useAuthStore = defineStore('auth', () => {
     usage,
     quotaPercentage,
     remainingQuota,
+    authProviders,
+    hasPassword,
+    hasGoogle,
     // Actions
     register,
     login,
@@ -186,6 +283,10 @@ export const useAuthStore = defineStore('auth', () => {
     fetchCurrentUser,
     initialize,
     forgotPassword,
-    resetPassword
+    resetPassword,
+    googleLogin,
+    bindGoogle,
+    unbindGoogle,
+    setPassword
   }
 })

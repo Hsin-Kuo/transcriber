@@ -69,6 +69,7 @@ async def register(
     user = await user_repo.create({
         "email": user_data.email,
         "password_hash": hash_password(user_data.password),
+        "auth_providers": ["password"],
         "role": "user",
         "is_active": False,  # 需要驗證 email 後才激活
         "email_verified": False,
@@ -501,6 +502,12 @@ async def get_current_user_info(
         if hasattr(last_reset, 'timestamp'):
             usage = {**usage, "last_reset": int(last_reset.timestamp())}
 
+    # 計算 auth_providers
+    auth_providers = full_user.get("auth_providers", [])
+    # 相容舊帳號：如果沒有 auth_providers 但有密碼，則為 password
+    if not auth_providers and full_user.get("password_hash"):
+        auth_providers = ["password"]
+
     return UserResponse(
         id=str(full_user["_id"]),
         email=full_user["email"],
@@ -508,7 +515,8 @@ async def get_current_user_info(
         is_active=full_user["is_active"],
         quota=full_user["quota"],
         usage=usage,
-        created_at=created_at
+        created_at=created_at,
+        auth_providers=auth_providers
     )
 
 
