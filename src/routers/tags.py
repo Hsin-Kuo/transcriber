@@ -6,6 +6,7 @@ from ..auth.dependencies import get_current_user
 from ..dependencies import get_tag_service
 from ..services.tag_service import TagService
 from ..models.tag import TagCreate, TagUpdate, TagOrderUpdate, TagResponse
+from ..utils.audit_logger import get_audit_logger
 
 
 router = APIRouter(prefix="/tags", tags=["Tags"])
@@ -13,6 +14,7 @@ router = APIRouter(prefix="/tags", tags=["Tags"])
 
 @router.post("", response_model=TagResponse, status_code=status.HTTP_201_CREATED)
 async def create_tag(
+    request: Request,
     tag_data: TagCreate,
     tag_service: TagService = Depends(get_tag_service),
     current_user: dict = Depends(get_current_user)
@@ -20,6 +22,7 @@ async def create_tag(
     """建立新標籤
 
     Args:
+        request: Request 對象
         tag_data: 標籤資料
         tag_service: TagService 實例
         current_user: 當前用戶
@@ -37,6 +40,18 @@ async def create_tag(
             color=tag_data.color,
             description=tag_data.description
         )
+
+        # 記錄 audit log
+        audit_logger = get_audit_logger()
+        await audit_logger.log_tag_operation(
+            request=request,
+            action="create",
+            user_id=str(current_user["_id"]),
+            tag_id=str(tag.get("_id") or tag.get("tag_id")),
+            status_code=201,
+            message=f"建立標籤：{tag_data.name}"
+        )
+
         return tag
     except ValueError as e:
         raise HTTPException(
@@ -194,6 +209,7 @@ async def update_tag_order(
 
 @router.put("/{tag_id}", response_model=TagResponse)
 async def update_tag(
+    request: Request,
     tag_id: str,
     tag_data: TagUpdate,
     tag_service: TagService = Depends(get_tag_service),
@@ -202,6 +218,7 @@ async def update_tag(
     """更新標籤
 
     Args:
+        request: Request 對象
         tag_id: 標籤 ID
         tag_data: 更新資料
         tag_service: TagService 實例
@@ -228,6 +245,17 @@ async def update_tag(
                 detail="標籤不存在或無權訪問"
             )
 
+        # 記錄 audit log
+        audit_logger = get_audit_logger()
+        await audit_logger.log_tag_operation(
+            request=request,
+            action="update",
+            user_id=str(current_user["_id"]),
+            tag_id=tag_id,
+            status_code=200,
+            message=f"更新標籤：{tag_data.name or '(未變更名稱)'}"
+        )
+
         return tag
 
     except ValueError as e:
@@ -239,6 +267,7 @@ async def update_tag(
 
 @router.delete("/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_tag(
+    request: Request,
     tag_id: str,
     tag_service: TagService = Depends(get_tag_service),
     current_user: dict = Depends(get_current_user)
@@ -246,6 +275,7 @@ async def delete_tag(
     """刪除標籤
 
     Args:
+        request: Request 對象
         tag_id: 標籤 ID
         tag_service: TagService 實例
         current_user: 當前用戶
@@ -254,7 +284,23 @@ async def delete_tag(
         HTTPException: 標籤不存在或無權訪問
     """
     try:
+        # 先獲取標籤資訊（用於 log）
+        tag = await tag_service.get_tag(str(current_user["_id"]), tag_id)
+        tag_name = tag.get("name", "未知") if tag else "未知"
+
+        # 刪除標籤
         await tag_service.delete_tag(str(current_user["_id"]), tag_id)
+
+        # 記錄 audit log（包含標籤名稱）
+        audit_logger = get_audit_logger()
+        await audit_logger.log_tag_operation(
+            request=request,
+            action="delete",
+            user_id=str(current_user["_id"]),
+            tag_id=tag_id,
+            status_code=204,
+            message=f"刪除標籤：{tag_name}"
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

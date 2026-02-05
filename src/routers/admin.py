@@ -205,14 +205,18 @@ async def update_user_status(
     success = await user_repo.update(user_id, {"is_active": request.is_active})
 
     if success:
-        # 記錄操作
+        # 記錄操作（包含變更前後對比）
         action = "enable_user" if request.is_active else "disable_user"
         await log_admin_action(
             admin_id=str(admin["_id"]),
             action=action,
             resource_type="user",
             resource_id=user_id,
-            details={"email": user.get("email"), "is_active": request.is_active}
+            details={
+                "email": user.get("email"),
+                "before": {"is_active": user.get("is_active", True)},
+                "after": {"is_active": request.is_active}
+            }
         )
 
     return {
@@ -254,12 +258,17 @@ async def update_user_role(
     success = await user_repo.update(user_id, {"role": request.role})
 
     if success:
+        # 記錄操作（包含變更前後對比）
         await log_admin_action(
             admin_id=str(admin["_id"]),
             action="change_role",
             resource_type="user",
             resource_id=user_id,
-            details={"email": user.get("email"), "new_role": request.role}
+            details={
+                "email": user.get("email"),
+                "before": {"role": user.get("role", "user")},
+                "after": {"role": request.role}
+            }
         )
 
     return {
@@ -316,12 +325,23 @@ async def update_user_quota(
     success = await user_repo.update_quota(user_id, new_quota)
 
     if success:
+        # 記錄操作（包含變更前後對比）
         await log_admin_action(
             admin_id=str(admin["_id"]),
             action="update_quota",
             resource_type="user",
             resource_id=user_id,
-            details={"email": user.get("email"), "new_quota": new_quota}
+            details={
+                "email": user.get("email"),
+                "before": {
+                    "tier": current_quota.get("tier"),
+                    "max_duration_minutes": current_quota.get("max_duration_minutes")
+                },
+                "after": {
+                    "tier": new_quota.get("tier"),
+                    "max_duration_minutes": new_quota.get("max_duration_minutes")
+                }
+            }
         )
 
     return {
@@ -347,6 +367,11 @@ async def reset_user_monthly_quota(
             detail="用戶不存在"
         )
 
+    # 記錄重置前的使用量
+    old_usage = user.get("usage", {})
+    old_transcriptions = old_usage.get("transcriptions", 0)
+    old_duration = old_usage.get("duration_minutes", 0)
+
     # 重置使用量
     usage = user.get("usage", {})
     usage["transcriptions"] = 0
@@ -356,12 +381,23 @@ async def reset_user_monthly_quota(
     success = await user_repo.update(user_id, {"usage": usage})
 
     if success:
+        # 記錄操作（包含重置前的使用量）
         await log_admin_action(
             admin_id=str(admin["_id"]),
             action="reset_quota",
             resource_type="user",
             resource_id=user_id,
-            details={"email": user.get("email")}
+            details={
+                "email": user.get("email"),
+                "before": {
+                    "transcriptions": old_transcriptions,
+                    "duration_minutes": old_duration
+                },
+                "after": {
+                    "transcriptions": 0,
+                    "duration_minutes": 0
+                }
+            }
         )
 
     return {

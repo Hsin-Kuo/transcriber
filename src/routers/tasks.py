@@ -661,6 +661,7 @@ async def cancel_task(
 
 @router.delete("/{task_id}")
 async def delete_task(
+    request: Request,
     task_id: str,
     task_service: TaskService = Depends(get_task_service),
     current_user: dict = Depends(get_current_user)
@@ -668,6 +669,7 @@ async def delete_task(
     """軟刪除任務（標記為已刪除但保留記錄供統計），物理刪除相關檔案
 
     Args:
+        request: Request 對象
         task_id: 任務 ID
         task_service: TaskService 實例
         current_user: 當前用戶
@@ -772,6 +774,36 @@ async def delete_task(
     })
 
     print(f"🗑️ 任務 {task_id} 已被標記為已刪除")
+
+    # 記錄 audit log（刪除任務）- 詳細記錄
+    try:
+        from ..utils.audit_logger import get_audit_logger
+        audit_logger = get_audit_logger()
+
+        # 取得任務詳細資訊
+        original_filename = task.get("custom_name") or get_task_field(task, "original_filename") or "未知"
+        audio_duration = get_task_field(task, "audio_duration") or 0
+        audio_size = get_task_field(task, "audio_size") or 0
+        task_status = task.get("status", "unknown")
+
+        await audit_logger.log_task_operation(
+            request=request,
+            action="delete",
+            user_id=str(current_user["_id"]),
+            task_id=task_id,
+            status_code=200,
+            message=f"刪除任務：{original_filename}",
+            request_body={
+                "original_filename": original_filename,
+                "audio_duration_seconds": audio_duration,
+                "audio_size_bytes": audio_size,
+                "task_status": task_status,
+                "deleted_files_count": len(deleted_files),
+                "deleted_files": deleted_files
+            }
+        )
+    except Exception as e:
+        print(f"⚠️ 記錄 audit log 失敗：{e}")
 
     return {
         "message": "任務已刪除",

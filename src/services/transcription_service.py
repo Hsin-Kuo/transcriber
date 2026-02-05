@@ -677,6 +677,12 @@ class TranscriptionService:
                     try:
                         from src.utils.audit_logger import get_audit_logger
                         audit_logger = get_audit_logger()
+
+                        # 取得更詳細的任務資訊
+                        original_filename = task.get("original_filename") or task.get("file", {}).get("original_filename", "未知")
+                        audio_size = task.get("stats", {}).get("audio_size_bytes", 0)
+                        processing_time = task.get("stats", {}).get("processing_time_seconds", 0)
+
                         run_async_in_thread(
                             audit_logger.log_background_task(
                                 log_type="transcription",
@@ -684,7 +690,14 @@ class TranscriptionService:
                                 user_id=user_id,
                                 task_id=task_id,
                                 status_code=200,
-                                message=f"轉錄完成（語言：{language}）"
+                                message=f"轉錄完成：{original_filename}",
+                                request_body={
+                                    "language": language,
+                                    "audio_duration_seconds": audio_duration_seconds,
+                                    "audio_size_bytes": audio_size,
+                                    "processing_time_seconds": processing_time,
+                                    "quota_deducted_minutes": round(audio_duration_seconds / 60, 2)
+                                }
                             )
                         )
                     except Exception as log_error:
@@ -712,17 +725,26 @@ class TranscriptionService:
         if not success:
             print(f"❌ [CRITICAL] 無法將任務 {task_id} 標記為失敗！請檢查 MongoDB 連接")
 
-        # 記錄 audit log（轉錄失敗）
+        # 記錄 audit log（轉錄失敗）- 詳細記錄
         try:
             # 獲取任務信息以取得 user_id（使用同步方法）
             task = self._get_task_sync(task_id)
             if task:
                 user_id = task.get("user", {}).get("user_id") if isinstance(task.get("user"), dict) else None
+                if not user_id:
+                    user_id = task.get("user_id")
+
                 if user_id:
                     # Audit log 可以保持異步（較不重要）
                     from src.services.utils.async_utils import run_async_in_thread
                     from src.utils.audit_logger import get_audit_logger
                     audit_logger = get_audit_logger()
+
+                    # 取得任務詳細資訊
+                    original_filename = task.get("original_filename") or task.get("file", {}).get("original_filename", "未知")
+                    task_status = task.get("status", "unknown")
+                    retry_count = task.get("retry_count", 0)
+
                     run_async_in_thread(
                         audit_logger.log_background_task(
                             log_type="transcription",
@@ -730,8 +752,14 @@ class TranscriptionService:
                             user_id=user_id,
                             task_id=task_id,
                             status_code=500,
-                            message="轉錄失敗",
-                            error=error
+                            message=f"轉錄失敗：{original_filename}",
+                            request_body={
+                                "error": error,
+                                "error_type": type(error).__name__ if not isinstance(error, str) else "Error",
+                                "task_status_before": task_status,
+                                "retry_count": retry_count,
+                                "original_filename": original_filename
+                            }
                         )
                     )
         except Exception as e:

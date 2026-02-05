@@ -374,6 +374,7 @@ async def refresh_token(
 
 @router.post("/logout")
 async def logout(
+    http_request: Request,
     request: RefreshTokenRequest,
     current_user: dict = Depends(get_current_user),
     db=Depends(get_database)
@@ -381,6 +382,7 @@ async def logout(
     """登出（撤銷 Refresh Token）
 
     Args:
+        http_request: HTTP Request 對象
         request: Refresh Token 請求
         current_user: 當前用戶
         db: 資料庫實例
@@ -390,11 +392,23 @@ async def logout(
     """
     user_repo = UserRepository(db)
     await user_repo.revoke_refresh_token(str(current_user["_id"]), request.refresh_token)
+
+    # 記錄登出
+    audit_logger = get_audit_logger()
+    await audit_logger.log_auth(
+        request=http_request,
+        action="logout",
+        user_id=str(current_user["_id"]),
+        status_code=200,
+        message="登出成功"
+    )
+
     return {"message": "登出成功"}
 
 
 @router.post("/change-password")
 async def change_password(
+    http_request: Request,
     request: ChangePasswordRequest,
     current_user: dict = Depends(get_current_user),
     db=Depends(get_database)
@@ -402,6 +416,7 @@ async def change_password(
     """更改密碼
 
     Args:
+        http_request: HTTP Request 對象
         request: 更改密碼請求（current_password, new_password）
         current_user: 當前用戶
         db: 資料庫實例
@@ -424,6 +439,15 @@ async def change_password(
 
     # 驗證目前密碼
     if not verify_password(request.current_password, user["password_hash"]):
+        # 記錄密碼變更失敗
+        audit_logger = get_audit_logger()
+        await audit_logger.log_auth(
+            request=http_request,
+            action="change_password_failed",
+            user_id=str(current_user["_id"]),
+            status_code=400,
+            message="密碼變更失敗：目前密碼錯誤"
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="目前密碼錯誤"
@@ -460,6 +484,16 @@ async def change_password(
     await user_repo.update(str(current_user["_id"]), {
         "password_hash": new_password_hash
     })
+
+    # 記錄密碼變更成功
+    audit_logger = get_audit_logger()
+    await audit_logger.log_auth(
+        request=http_request,
+        action="change_password",
+        user_id=str(current_user["_id"]),
+        status_code=200,
+        message="密碼變更成功"
+    )
 
     return {"message": "密碼已更新成功"}
 
@@ -614,17 +648,29 @@ async def forgot_password(
         reset_token=reset_token
     )
 
+    # 記錄忘記密碼請求
+    audit_logger = get_audit_logger()
+    await audit_logger.log_auth(
+        request=http_request,
+        action="forgot_password",
+        user_id=str(user["_id"]),
+        status_code=200,
+        message=f"發送密碼重設郵件：{request.email}"
+    )
+
     return success_message
 
 
 @router.post("/reset-password")
 async def reset_password(
+    http_request: Request,
     request: ResetPasswordRequest,
     db=Depends(get_database)
 ):
     """重設密碼
 
     Args:
+        http_request: HTTP Request 對象
         request: 重設密碼請求（包含 token 和新密碼）
         db: 資料庫實例
 
@@ -683,5 +729,15 @@ async def reset_password(
         "password_reset_expires": None,
         "password_reset_requested_at": None
     })
+
+    # 記錄密碼重設成功
+    audit_logger = get_audit_logger()
+    await audit_logger.log_auth(
+        request=http_request,
+        action="reset_password",
+        user_id=str(user["_id"]),
+        status_code=200,
+        message=f"密碼重設成功：{user.get('email')}"
+    )
 
     return {"message": "密碼已重設成功，請使用新密碼登入"}

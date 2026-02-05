@@ -567,6 +567,7 @@ async def create_transcription(
 
 @router.get("/{task_id}/download")
 async def download_transcription(
+    request: Request,
     task_id: str,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_database)
@@ -574,6 +575,7 @@ async def download_transcription(
     """下載轉錄結果
 
     Args:
+        request: Request 對象
         task_id: 任務 ID
         current_user: 當前用戶
         db: 資料庫實例
@@ -644,6 +646,21 @@ async def download_transcription(
 
     # 使用 RFC 5987 編碼來支援中文檔名
     encoded_filename = quote(download_filename, safe='')
+
+    # 記錄 audit log（下載轉錄結果）
+    try:
+        from ..utils.audit_logger import get_audit_logger
+        audit_logger = get_audit_logger()
+        await audit_logger.log_task_operation(
+            request=request,
+            action="download",
+            user_id=str(current_user["_id"]),
+            task_id=task_id,
+            status_code=200,
+            message=f"下載轉錄結果：{download_filename}"
+        )
+    except Exception as e:
+        print(f"⚠️ 記錄 audit log 失敗：{e}")
 
     return StreamingResponse(
         BytesIO(content.encode('utf-8')),
@@ -849,6 +866,7 @@ async def get_segments(
 
 @router.put("/{task_id}/content")
 async def update_content(
+    request: Request,
     task_id: str,
     content: dict,
     current_user: dict = Depends(get_current_user),
@@ -857,6 +875,7 @@ async def update_content(
     """更新轉錄文字內容和 segments
 
     Args:
+        request: Request 對象
         task_id: 任務 ID
         content: 新的文字內容 {"text": "...", "segments": [...]} (segments 為可選)
         current_user: 當前用戶
@@ -924,6 +943,21 @@ async def update_content(
         if new_segments is not None:
             response_message = "轉錄內容和字幕已更新"
 
+        # 記錄 audit log（更新轉錄內容）
+        try:
+            from ..utils.audit_logger import get_audit_logger
+            audit_logger = get_audit_logger()
+            await audit_logger.log_task_operation(
+                request=request,
+                action="update_content",
+                user_id=str(current_user["_id"]),
+                task_id=task_id,
+                status_code=200,
+                message=response_message
+            )
+        except Exception as e:
+            print(f"⚠️ 記錄 audit log 失敗：{e}")
+
         return {
             "message": response_message,
             "task_id": task_id,
@@ -938,6 +972,7 @@ async def update_content(
 
 @router.put("/{task_id}/metadata")
 async def update_metadata(
+    request: Request,
     task_id: str,
     metadata: dict,
     current_user: dict = Depends(get_current_user),
@@ -946,6 +981,7 @@ async def update_metadata(
     """更新任務元數據（自訂名稱）
 
     Args:
+        request: Request 對象
         task_id: 任務 ID
         metadata: 元數據 {"custom_name": "..."}
         current_user: 當前用戶
@@ -991,6 +1027,21 @@ async def update_metadata(
         )
 
     print(f"✅ 已更新任務 {task_id} 的元數據: {updates}")
+
+    # 記錄 audit log（更新元數據）
+    try:
+        from ..utils.audit_logger import get_audit_logger
+        audit_logger = get_audit_logger()
+        await audit_logger.log_task_operation(
+            request=request,
+            action="update_metadata",
+            user_id=str(current_user["_id"]),
+            task_id=task_id,
+            status_code=200,
+            message=f"更新任務名稱：{updates.get('custom_name')}"
+        )
+    except Exception as e:
+        print(f"⚠️ 記錄 audit log 失敗：{e}")
 
     return {
         "message": "任務名稱已更新",
