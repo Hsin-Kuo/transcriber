@@ -20,6 +20,8 @@ from ..services.transcription_service import TranscriptionService
 from ..services.utils.whisper_processor import WhisperProcessor
 from ..services.utils.punctuation_processor import PunctuationProcessor
 from ..services.utils.diarization_processor import DiarizationProcessor
+from ..utils.storage_service import is_aws
+import os
 
 
 router = APIRouter(prefix="/transcriptions", tags=["Transcriptions"])
@@ -241,10 +243,9 @@ async def create_transcription(
     if task_type == "subtitle":
         punct_provider = "none"
         print(f"ℹ️  字幕模式：已自動停用標點符號處理")
-    # 獲取服務
-    try:
-        transcription_service = get_transcription_service()
-    except RuntimeError as e:
+    # 獲取服務（AWS 模式下 TranscriptionService 可能為 None）
+    transcription_service = _transcription_service
+    if not is_aws() and transcription_service is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="轉錄服務尚未初始化"
@@ -456,46 +457,82 @@ async def create_transcription(
         task_repo = TaskRepository(db)
         await task_repo.create(task_data)
 
-        # 初始化記憶體狀態（確保 SSE 能立即讀取到正確狀態）
-        transcription_service.task_service.update_memory_state(task_id, {
-            "status": "pending",
-            "progress": "等待處理中..."
-        })
+        if is_aws():
+            # ===== AWS 模式：上傳 S3 + 發送 SQS =====
+            from ..utils.storage_service import save_audio
+            import boto3
 
-        # 記錄臨時目錄
-        transcription_service.task_service.set_temp_dir(task_id, temp_dir)
+            # 上傳音檔到 S3
+            save_audio(task_id, temp_audio)
+            print(f"☁️  音檔已上傳到 S3: uploads/{task_id}.mp3")
 
-        # 根據系統負載決定是否立即啟動或加入隊列
-        if not should_queue:
-            # 系統空閒，立即啟動轉錄（異步執行）
-            use_punctuation = punct_provider != "none"
-            language_code = None if language == "auto" else language
+            # 發送 SQS 訊息
+            sqs_queue_url = os.getenv("SQS_QUEUE_URL", "")
+            if sqs_queue_url:
+                sqs = boto3.client("sqs", region_name=os.getenv("S3_REGION", "ap-northeast-1"))
+                use_punctuation = punct_provider != "none"
+                language_code = None if language == "auto" else language
+                sqs.send_message(
+                    QueueUrl=sqs_queue_url,
+                    MessageBody=json.dumps({
+                        "task_id": task_id,
+                        "language": language_code,
+                        "use_chunking": chunk_audio,
+                        "use_punctuation": use_punctuation,
+                        "punctuation_provider": punct_provider,
+                        "use_diarization": diarize,
+                        "max_speakers": max_speakers,
+                    })
+                )
+                print(f"📨 已發送 SQS 訊息: {task_id}")
+            else:
+                print(f"⚠️  SQS_QUEUE_URL 未設定，任務 {task_id} 保持 pending 狀態")
 
-            # ✅ 關鍵修復：立即更新狀態為 processing，防止隊列處理器重複啟動
-            await task_repo.update(task_id, {
-                "status": "processing"
-                # updated_at 由 task_repo.update() 自動設置
-            })
-            transcription_service.task_service.update_memory_state(task_id, {
-                "status": "processing",
-                "progress": "準備開始轉錄..."
-            })
-
-            await transcription_service.start_transcription(
-                task_id=task_id,
-                audio_file_path=temp_audio,
-                language=language_code,
-                use_chunking=chunk_audio,
-                use_punctuation=use_punctuation,
-                punctuation_provider=punct_provider,
-                use_diarization=diarize,
-                max_speakers=max_speakers
-            )
-
-            print(f"✅ 任務 {task_id} 已建立，正在背景執行轉錄...")
+            # 清理本地臨時目錄（音檔已上傳到 S3）
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir)
         else:
-            # 系統忙碌，加入隊列（保持 pending 狀態）
-            print(f"📋 任務 {task_id} 已加入隊列，等待處理...（隊列中有 {pending_count + 1} 個任務）")
+            # ===== 本地模式：現有行為 =====
+            # 初始化記憶體狀態（確保 SSE 能立即讀取到正確狀態）
+            transcription_service.task_service.update_memory_state(task_id, {
+                "status": "pending",
+                "progress": "等待處理中..."
+            })
+
+            # 記錄臨時目錄
+            transcription_service.task_service.set_temp_dir(task_id, temp_dir)
+
+            # 根據系統負載決定是否立即啟動或加入隊列
+            if not should_queue:
+                # 系統空閒，立即啟動轉錄（異步執行）
+                use_punctuation = punct_provider != "none"
+                language_code = None if language == "auto" else language
+
+                # 立即更新狀態為 processing，防止隊列處理器重複啟動
+                await task_repo.update(task_id, {
+                    "status": "processing"
+                    # updated_at 由 task_repo.update() 自動設置
+                })
+                transcription_service.task_service.update_memory_state(task_id, {
+                    "status": "processing",
+                    "progress": "準備開始轉錄..."
+                })
+
+                await transcription_service.start_transcription(
+                    task_id=task_id,
+                    audio_file_path=temp_audio,
+                    language=language_code,
+                    use_chunking=chunk_audio,
+                    use_punctuation=use_punctuation,
+                    punctuation_provider=punct_provider,
+                    use_diarization=diarize,
+                    max_speakers=max_speakers
+                )
+
+                print(f"✅ 任務 {task_id} 已建立，正在背景執行轉錄...")
+            else:
+                # 系統忙碌，加入隊列（保持 pending 狀態）
+                print(f"📋 任務 {task_id} 已加入隊列，等待處理...（隊列中有 {pending_count + 1} 個任務）")
 
         # 記錄 audit log（創建轉錄任務）
         try:
@@ -653,11 +690,11 @@ async def download_transcription(
         audit_logger = get_audit_logger()
         await audit_logger.log_task_operation(
             request=request,
-            action="download",
+            action="view_transcript",
             user_id=str(current_user["_id"]),
             task_id=task_id,
             status_code=200,
-            message=f"下載轉錄結果：{download_filename}"
+            message=f"檢視轉錄結果：{download_filename}"
         )
     except Exception as e:
         print(f"⚠️ 記錄 audit log 失敗：{e}")
@@ -735,55 +772,80 @@ async def download_audio(
             detail="任務不存在或無權訪問"
         )
 
-    audio_file_path = get_task_field(task, "audio_file")
-    if not audio_file_path:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="音檔不存在（可能已被刪除）"
-        )
+    if is_aws():
+        # AWS 模式：回傳 S3 presigned URL redirect
+        from ..utils.storage_service import get_audio_presigned_url, audio_exists, S3_REGION
+        from fastapi.responses import RedirectResponse
+        from urllib.parse import urlparse
 
-    audio_file = Path(audio_file_path)
-    if not audio_file.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="音檔不存在"
-        )
+        if not audio_exists(task_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="音檔不存在（可能已被刪除）"
+            )
 
-    # 使用 task_id 作為下載檔名，確保唯一性且不會重複
-    download_filename = f"{task_id}{audio_file.suffix}"
+        presigned_url = get_audio_presigned_url(task_id, expires_in=3600)
 
-    # 使用 RFC 5987 編碼來支援中文檔名
-    encoded_filename = quote(download_filename, safe='')
+        # 驗證 presigned URL 指向合法的 S3 域名，防止 open redirect
+        parsed = urlparse(presigned_url)
+        if not parsed.hostname or not parsed.hostname.endswith(".amazonaws.com"):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="產生的下載連結異常"
+            )
 
-    # 根據檔案副檔名判斷 MIME type
-    file_suffix = audio_file.suffix.lower()
-    media_type_map = {
-        ".mp3": "audio/mpeg",
-        ".m4a": "audio/mp4",
-        ".wav": "audio/wav",
-        ".ogg": "audio/ogg",
-        ".flac": "audio/flac",
-        ".aac": "audio/aac",
-        ".wma": "audio/x-ms-wma",
-        ".opus": "audio/opus"
-    }
-    media_type = media_type_map.get(file_suffix)
+        return RedirectResponse(url=presigned_url)
+    else:
+        # 本地模式：回傳 FileResponse
+        audio_file_path = get_task_field(task, "audio_file")
+        if not audio_file_path:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="音檔不存在（可能已被刪除）"
+            )
 
-    # 如果映射表中沒有，嘗試使用 mimetypes 模組猜測
-    if not media_type:
-        media_type, _ = mimetypes.guess_type(str(audio_file))
+        audio_file = Path(audio_file_path)
+        if not audio_file.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="音檔不存在"
+            )
 
-    # 如果還是無法判斷，使用預設的音檔類型
-    if not media_type or not media_type.startswith('audio'):
-        media_type = "audio/mpeg"
+        # 使用 task_id 作為下載檔名，確保唯一性且不會重複
+        download_filename = f"{task_id}{audio_file.suffix}"
 
-    return FileResponse(
-        audio_file,
-        media_type=media_type,
-        headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
+        # 使用 RFC 5987 編碼來支援中文檔名
+        encoded_filename = quote(download_filename, safe='')
+
+        # 根據檔案副檔名判斷 MIME type
+        file_suffix = audio_file.suffix.lower()
+        media_type_map = {
+            ".mp3": "audio/mpeg",
+            ".m4a": "audio/mp4",
+            ".wav": "audio/wav",
+            ".ogg": "audio/ogg",
+            ".flac": "audio/flac",
+            ".aac": "audio/aac",
+            ".wma": "audio/x-ms-wma",
+            ".opus": "audio/opus"
         }
-    )
+        media_type = media_type_map.get(file_suffix)
+
+        # 如果映射表中沒有，嘗試使用 mimetypes 模組猜測
+        if not media_type:
+            media_type, _ = mimetypes.guess_type(str(audio_file))
+
+        # 如果還是無法判斷，使用預設的音檔類型
+        if not media_type or not media_type.startswith('audio'):
+            media_type = "audio/mpeg"
+
+        return FileResponse(
+            audio_file,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
+            }
+        )
 
 
 @router.get("/{task_id}/segments")
@@ -1220,10 +1282,9 @@ async def create_batch_transcriptions(
             detail="overrides 格式錯誤，必須是有效的 JSON"
         )
 
-    # 獲取服務
-    try:
-        transcription_service = get_transcription_service()
-    except RuntimeError:
+    # 獲取服務（AWS 模式下 TranscriptionService 可能為 None）
+    transcription_service = _transcription_service
+    if not is_aws() and transcription_service is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="轉錄服務尚未初始化"
@@ -1380,47 +1441,84 @@ async def create_batch_transcriptions(
             # 保存到資料庫
             await task_repo.create(task_data)
 
-            # 初始化記憶體狀態
-            transcription_service.task_service.update_memory_state(task_id, {
-                "status": "pending",
-                "progress": "等待處理中..."
-            })
+            if is_aws():
+                # ===== AWS 模式：上傳 S3 + 發送 SQS =====
+                from ..utils.storage_service import save_audio
+                import boto3
 
-            # 記錄臨時目錄
-            transcription_service.task_service.set_temp_dir(task_id, temp_dir)
+                save_audio(task_id, temp_audio)
 
-            # 計算隊列位置
-            should_queue = (processing_count + created_count) >= MAX_CONCURRENT_TASKS
-            queue_position = pending_count + created_count + 1 if should_queue else 0
+                sqs_queue_url = os.getenv("SQS_QUEUE_URL", "")
+                if sqs_queue_url:
+                    sqs = boto3.client("sqs", region_name=os.getenv("S3_REGION", "ap-northeast-1"))
+                    use_punctuation = punct_provider != "none"
+                    language_code = None if language == "auto" else language
+                    sqs.send_message(
+                        QueueUrl=sqs_queue_url,
+                        MessageBody=json.dumps({
+                            "task_id": task_id,
+                            "language": language_code,
+                            "use_chunking": True,
+                            "use_punctuation": use_punctuation,
+                            "punctuation_provider": punct_provider,
+                            "use_diarization": diarize,
+                            "max_speakers": max_speakers,
+                        })
+                    )
 
-            # 如果系統空閒，立即啟動
-            if not should_queue:
-                use_punctuation = punct_provider != "none"
-                language_code = None if language == "auto" else language
+                # 清理本地臨時目錄
+                if temp_dir.exists():
+                    shutil.rmtree(temp_dir)
+                    temp_dir = None  # 避免 except 中重複清理
 
-                await task_repo.update(task_id, {"status": "processing"})
+                file_result["task_id"] = task_id
+                file_result["status"] = "pending"
+                file_result["queue_position"] = created_count + 1
+                created_count += 1
+                print(f"☁️  批次任務 [{idx + 1}/{len(files)}] {upload_file.filename} -> {task_id} (SQS)")
+            else:
+                # ===== 本地模式：現有行為 =====
+                # 初始化記憶體狀態
                 transcription_service.task_service.update_memory_state(task_id, {
-                    "status": "processing",
-                    "progress": "準備開始轉錄..."
+                    "status": "pending",
+                    "progress": "等待處理中..."
                 })
 
-                await transcription_service.start_transcription(
-                    task_id=task_id,
-                    audio_file_path=temp_audio,
-                    language=language_code,
-                    use_chunking=True,
-                    use_punctuation=use_punctuation,
-                    punctuation_provider=punct_provider,
-                    use_diarization=diarize,
-                    max_speakers=max_speakers
-                )
+                # 記錄臨時目錄
+                transcription_service.task_service.set_temp_dir(task_id, temp_dir)
 
-            file_result["task_id"] = task_id
-            file_result["status"] = "pending" if should_queue else "processing"
-            file_result["queue_position"] = queue_position
-            created_count += 1
+                # 計算隊列位置
+                should_queue = (processing_count + created_count) >= MAX_CONCURRENT_TASKS
+                queue_position = pending_count + created_count + 1 if should_queue else 0
 
-            print(f"✅ 批次任務 [{idx + 1}/{len(files)}] {upload_file.filename} -> {task_id}")
+                # 如果系統空閒，立即啟動
+                if not should_queue:
+                    use_punctuation = punct_provider != "none"
+                    language_code = None if language == "auto" else language
+
+                    await task_repo.update(task_id, {"status": "processing"})
+                    transcription_service.task_service.update_memory_state(task_id, {
+                        "status": "processing",
+                        "progress": "準備開始轉錄..."
+                    })
+
+                    await transcription_service.start_transcription(
+                        task_id=task_id,
+                        audio_file_path=temp_audio,
+                        language=language_code,
+                        use_chunking=True,
+                        use_punctuation=use_punctuation,
+                        punctuation_provider=punct_provider,
+                        use_diarization=diarize,
+                        max_speakers=max_speakers
+                    )
+
+                file_result["task_id"] = task_id
+                file_result["status"] = "pending" if should_queue else "processing"
+                file_result["queue_position"] = queue_position
+                created_count += 1
+
+                print(f"✅ 批次任務 [{idx + 1}/{len(files)}] {upload_file.filename} -> {task_id}")
 
         except Exception as e:
             file_result["status"] = "failed"

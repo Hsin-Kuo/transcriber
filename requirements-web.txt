@@ -1,0 +1,42 @@
+# ===== AWS Web Server 依賴（不含 ML 模型）=====
+
+# 音檔處理（ffmpeg 前處理、合併等）
+pydub
+
+# API 相關
+fastapi
+uvicorn[standard]
+python-multipart
+
+# 系統監控
+psutil
+
+# HTTP 客戶端
+requests
+
+# Google OAuth
+google-auth
+
+# LLM API（標點處理由 Worker 執行，但 Web Server 也用到 PunctuationProcessor 的部分邏輯）
+openai
+google-generativeai
+
+# MongoDB
+pymongo
+motor
+
+# 環境變數
+python-dotenv
+
+# JWT
+python-jose[cryptography]
+passlib[bcrypt]
+
+# Email 模板
+jinja2
+
+# AWS SDK
+boto3
+
+# BSON (ObjectId)
+# pymongo 已包含 bson

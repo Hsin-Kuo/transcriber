@@ -11,6 +11,7 @@ class EmailService:
 
     def __init__(self):
         """初始化 Email 服務配置"""
+        self.email_provider = os.getenv("EMAIL_PROVIDER", "console")
         self.smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
         self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
         self.smtp_user = os.getenv("SMTP_USER", "")
@@ -200,8 +201,13 @@ class EmailService:
             是否發送成功
         """
         try:
-            # 如果沒有配置 SMTP，則只記錄日誌（開發環境）
-            if not self.smtp_user or not self.smtp_password:
+            # 根據 EMAIL_PROVIDER 選擇發送方式
+            if self.email_provider == "ses":
+                return self._send_via_ses(to_email, subject, html_content, text_content)
+            elif self.email_provider == "smtp" or (self.smtp_user and self.smtp_password):
+                return self._send_via_smtp(to_email, subject, html_content, text_content)
+            else:
+                # console 模式：印到終端（開發環境）
                 print(f"\n{'='*60}")
                 print(f"📧 Email 發送（開發模式）")
                 print(f"{'='*60}")
@@ -211,29 +217,65 @@ class EmailService:
                 print(f"{'='*60}\n")
                 return True
 
-            # 創建郵件
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = subject
-            msg['From'] = f"{self.from_name} <{self.from_email}>"
-            msg['To'] = to_email
-
-            # 添加內容
-            if text_content:
-                msg.attach(MIMEText(text_content, 'plain', 'utf-8'))
-            msg.attach(MIMEText(html_content, 'html', 'utf-8'))
-
-            # 發送郵件
-            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
-                server.starttls()
-                server.login(self.smtp_user, self.smtp_password)
-                server.send_message(msg)
-
-            print(f"✅ Email 已發送到 {to_email}")
-            return True
-
         except Exception as e:
             print(f"❌ Email 發送失敗: {str(e)}")
             return False
+
+    def _send_via_smtp(
+        self,
+        to_email: str,
+        subject: str,
+        html_content: str,
+        text_content: Optional[str] = None
+    ) -> bool:
+        """透過 SMTP 發送"""
+        # 創建郵件
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = f"{self.from_name} <{self.from_email}>"
+        msg['To'] = to_email
+
+        # 添加內容
+        if text_content:
+            msg.attach(MIMEText(text_content, 'plain', 'utf-8'))
+        msg.attach(MIMEText(html_content, 'html', 'utf-8'))
+
+        # 發送郵件
+        with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+            server.starttls()
+            server.login(self.smtp_user, self.smtp_password)
+            server.send_message(msg)
+
+        print(f"✅ Email 已發送到 {to_email} (SMTP)")
+        return True
+
+    def _send_via_ses(
+        self,
+        to_email: str,
+        subject: str,
+        html_content: str,
+        text_content: Optional[str] = None
+    ) -> bool:
+        """透過 AWS SES 發送"""
+        import boto3
+
+        ses = boto3.client("ses", region_name=os.getenv("S3_REGION", "ap-northeast-1"))
+
+        body = {"Html": {"Data": html_content, "Charset": "UTF-8"}}
+        if text_content:
+            body["Text"] = {"Data": text_content, "Charset": "UTF-8"}
+
+        ses.send_email(
+            Source=f"{self.from_name} <{self.from_email}>",
+            Destination={"ToAddresses": [to_email]},
+            Message={
+                "Subject": {"Data": subject, "Charset": "UTF-8"},
+                "Body": body,
+            },
+        )
+
+        print(f"✅ Email 已發送到 {to_email} (SES)")
+        return True
 
 
 # 單例

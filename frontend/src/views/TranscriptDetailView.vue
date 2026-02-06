@@ -328,6 +328,7 @@ import { useSegmentMarkers } from '../composables/transcript/useSegmentMarkers'
 import { useKeyboardShortcuts } from '../composables/transcript/useKeyboardShortcuts'
 import { useTranscriptDownload } from '../composables/transcript/useTranscriptDownload'
 import { useTaskTags } from '../composables/task/useTaskTags'
+import { isMac, isModifierPressed } from '../utils/platform'
 
 const route = useRoute()
 const router = useRouter()
@@ -1968,12 +1969,12 @@ function handleTextClick(startTime, event) {
   }
 }
 
-// 鍵盤事件處理
+// 鍵盤事件處理（Mac 使用 ⌘，Windows/Linux 使用 Ctrl）
 function handleKeyDown(e) {
-  if (e.ctrlKey) {
+  if (isModifierPressed(e)) {
     isAltPressed.value = true
 
-    // 防止 Ctrl 組合鍵的預設瀏覽器行為
+    // 防止修飾鍵組合的預設瀏覽器行為
     // 只針對我們有定義快捷鍵的按鍵
     const shortcutKeys = [' ', 'm', 'M', ',', '.', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']
     if (shortcutKeys.includes(e.key)) {
@@ -1984,7 +1985,8 @@ function handleKeyDown(e) {
 }
 
 function handleKeyUp(e) {
-  if (!e.ctrlKey) {
+  const modifierStillHeld = isMac ? e.metaKey : e.ctrlKey
+  if (!modifierStillHeld) {
     isAltPressed.value = false
   }
 }
@@ -2003,11 +2005,11 @@ function handlePaste(e) {
   }
 }
 
-// 處理 contenteditable 區域的按鍵事件
+// 處理 contenteditable 區域的按鍵事件（Mac 使用 ⌘，Windows/Linux 使用 Ctrl）
 function handleContentEditableKeyDown(e) {
-  if (!e.ctrlKey) return
+  if (!isModifierPressed(e)) return
 
-  // Ctrl + Space: 播放/暫停
+  // 修飾鍵 + Space: 播放/暫停
   if (e.key === ' ') {
     e.preventDefault()
     e.stopPropagation()
@@ -2017,7 +2019,7 @@ function handleContentEditableKeyDown(e) {
     return
   }
 
-  // Alt + ArrowUp: 加速播放
+  // 修飾鍵 + ArrowUp: 加速播放
   if (e.key === 'ArrowUp') {
     e.preventDefault()
     e.stopPropagation()
@@ -2026,7 +2028,7 @@ function handleContentEditableKeyDown(e) {
     return
   }
 
-  // Alt + ArrowDown: 減速播放
+  // 修飾鍵 + ArrowDown: 減速播放
   if (e.key === 'ArrowDown') {
     e.preventDefault()
     e.stopPropagation()

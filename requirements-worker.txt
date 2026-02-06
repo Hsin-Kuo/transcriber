@@ -1,0 +1,26 @@
+# ===== AWS AI Worker 依賴（含 ML 模型）=====
+
+# Whisper 相關
+faster-whisper
+torch<2.6
+torchaudio<2.6
+
+# Speaker Diarization
+pyannote.audio
+huggingface-hub>=0.21,<0.22
+
+# 音檔處理
+pydub
+
+# MongoDB（Worker 直接寫入結果）
+pymongo
+
+# LLM API（標點處理）
+openai
+google-generativeai
+
+# AWS SDK（S3 下載、SQS 接收）
+boto3
+
+# 環境變數
+python-dotenv

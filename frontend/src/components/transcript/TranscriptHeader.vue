@@ -683,7 +683,7 @@ onUnmounted(() => {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  min-width: auto;
+  min-width: 120px;
   max-height: 400px;
   overflow-y: auto;
   overflow-x: hidden;

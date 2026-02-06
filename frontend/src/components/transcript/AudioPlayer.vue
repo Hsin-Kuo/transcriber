@@ -157,35 +157,35 @@
             <div class="shortcuts-section">
               <!-- <div class="shortcuts-section-title">{{ $t('audioPlayer.generalEditMode') }}</div> -->
               <div class="shortcut-item">
-                <kbd>Alt</kbd> + <kbd>Space</kbd>
+                <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>Space</kbd>
                 <span>{{ $t('audioPlayer.playPause') }}</span>
               </div>
               <div class="shortcut-item">
-                <kbd>Alt</kbd> + <kbd>←</kbd>
+                <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>←</kbd>
                 <span>{{ $t('audioPlayer.rewind10sShortcut') }}</span>
               </div>
               <div class="shortcut-item">
-                <kbd>Alt</kbd> + <kbd>→</kbd>
+                <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>→</kbd>
                 <span>{{ $t('audioPlayer.fastForward10sShortcut') }}</span>
               </div>
               <div class="shortcut-item">
-                <kbd>Alt</kbd> + <kbd>↑</kbd>
+                <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>↑</kbd>
                 <span>{{ $t('audioPlayer.speedUp') }}</span>
               </div>
               <div class="shortcut-item">
-                <kbd>Alt</kbd> + <kbd>↓</kbd>
+                <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>↓</kbd>
                 <span>{{ $t('audioPlayer.speedDown') }}</span>
               </div>
               <div class="shortcut-item">
-                <kbd>Alt</kbd> + <kbd>,</kbd>
+                <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>,</kbd>
                 <span>{{ $t('audioPlayer.rewind5s') }}</span>
               </div>
               <div class="shortcut-item">
-                <kbd>Alt</kbd> + <kbd>.</kbd>
+                <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>.</kbd>
                 <span>{{ $t('audioPlayer.fastForward5s') }}</span>
               </div>
               <div class="shortcut-item">
-                <kbd>Alt</kbd> + <kbd>M</kbd>
+                <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>M</kbd>
                 <span>{{ $t('audioPlayer.toggleMute') }}</span>
               </div>
             </div>
@@ -242,6 +242,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { modifierKeyLabel } from '../../utils/platform'
 
 const { t: $t } = useI18n()
 

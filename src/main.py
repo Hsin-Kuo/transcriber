@@ -13,7 +13,6 @@ from datetime import datetime, timezone, timedelta
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from faster_whisper import WhisperModel
 from dotenv import load_dotenv
 
 # 載入環境變數
@@ -50,6 +49,10 @@ from src.utils.shared_state import (
     tasks_lock
 )
 
+# 部署環境設定
+DEPLOY_ENV = os.getenv("DEPLOY_ENV", "local")
+APP_ROLE = os.getenv("APP_ROLE", "server")
+
 # 設定
 DEFAULT_MODEL = "medium"
 # OUTPUT_DIR 已移除 - 文字檔和 segments 現在存儲在 MongoDB 中
@@ -67,13 +70,19 @@ audit_log_repo = None
 main_loop = None
 executor = ThreadPoolExecutor(max_workers=2)  # 降低並發數避免記憶體爆炸
 
+# 是否需要載入 ML 模型（本地開發一律載入；AWS 僅 worker 載入）
+SHOULD_LOAD_MODELS = (DEPLOY_ENV == "local") or (APP_ROLE == "worker")
+
 # 檢查 Diarization 是否可用
-try:
-    from pyannote.audio import Pipeline
-    DIARIZATION_AVAILABLE = True
-except ImportError:
-    DIARIZATION_AVAILABLE = False
-    print("⚠️  pyannote.audio 未安裝，speaker diarization 功能不可用")
+DIARIZATION_AVAILABLE = False
+if SHOULD_LOAD_MODELS:
+    try:
+        from pyannote.audio import Pipeline
+        DIARIZATION_AVAILABLE = True
+    except ImportError:
+        print("⚠️  pyannote.audio 未安裝，speaker diarization 功能不可用")
+else:
+    print(f"ℹ️  DEPLOY_ENV={DEPLOY_ENV}, APP_ROLE={APP_ROLE}：跳過 ML 模型載入")
 
 
 # ========== 創建 FastAPI 應用 ==========
@@ -154,6 +163,12 @@ async def startup_event():
 
     print("🚀 啟動 Whisper 轉錄服務 v3.0.0", flush=True)
     print("=" * 50, flush=True)
+
+    # AWS 模式：驗證必要的環境變數
+    if DEPLOY_ENV == "aws":
+        from src.utils.storage_service import validate_aws_config
+        validate_aws_config()
+        print("✅ AWS 設定驗證通過", flush=True)
 
     # 清理殘留的 ProcessPoolExecutor worker 進程
     print("🧹 清理殘留的 worker 進程...", flush=True)
@@ -249,42 +264,54 @@ async def startup_event():
     # 注意：這裡暫時先創建任務，稍後在 TranscriptionService 初始化後會實際啟動
     queue_processor_task = None
 
-    # 6. 載入 Whisper 模型
-    print(f"🎙 正在載入 Whisper 模型：{DEFAULT_MODEL}...")
-    print(f"🔧 配置：device=auto, compute_type=int8")
-    current_model_name = DEFAULT_MODEL
-    whisper_model = WhisperModel(
-        current_model_name,
-        device="auto",
-        compute_type="int8",
-        cpu_threads=2,  # 優化：配合 ProcessPoolExecutor，降低單進程並行度
-        num_workers=1   # 優化：避免進程內過度並行（外部已有 ProcessPoolExecutor）
-    )
-    print(f"✅ Whisper 模型載入完成！")
+    # 6. 載入 Whisper 模型（條件式）
+    if SHOULD_LOAD_MODELS:
+        from faster_whisper import WhisperModel
+        print(f"🎙 正在載入 Whisper 模型：{DEFAULT_MODEL}...")
+        print(f"🔧 配置：device=auto, compute_type=int8")
+        current_model_name = DEFAULT_MODEL
+        whisper_model = WhisperModel(
+            current_model_name,
+            device="auto",
+            compute_type="int8",
+            cpu_threads=2,  # 優化：配合 ProcessPoolExecutor，降低單進程並行度
+            num_workers=1   # 優化：避免進程內過度並行（外部已有 ProcessPoolExecutor）
+        )
+        print(f"✅ Whisper 模型載入完成！")
+    else:
+        print(f"ℹ️  AWS Web Server 模式：跳過 Whisper 模型載入")
+        whisper_model = None
+        current_model_name = None
 
     # 8. 載入 Diarization 模型（可選）
-    if DIARIZATION_AVAILABLE:
+    if SHOULD_LOAD_MODELS and DIARIZATION_AVAILABLE:
         hf_token = os.getenv("HF_TOKEN")
         if hf_token:
             diarization_pipeline = DiarizationProcessor.load_pipeline(hf_token)
         else:
             print("ℹ️  未設定 HF_TOKEN，speaker diarization 功能不可用")
+    elif not SHOULD_LOAD_MODELS:
+        print(f"ℹ️  AWS Web Server 模式：跳過 Diarization 模型載入")
 
-    # 9. 初始化 TranscriptionService
-    print(f"🔧 正在初始化 TranscriptionService...")
-    transcription_service = transcriptions_router.init_transcription_service(
-        whisper_model=whisper_model,
-        task_service=task_service,
-        model_name=current_model_name,  # 傳遞模型名稱供 ProcessPoolExecutor 使用
-        diarization_pipeline=diarization_pipeline,
-        executor=executor
-    )
-    print(f"✅ TranscriptionService 初始化完成")
+    # 9. 初始化 TranscriptionService（僅在有 Whisper 模型時）
+    transcription_service = None
+    if SHOULD_LOAD_MODELS and whisper_model is not None:
+        print(f"🔧 正在初始化 TranscriptionService...")
+        transcription_service = transcriptions_router.init_transcription_service(
+            whisper_model=whisper_model,
+            task_service=task_service,
+            model_name=current_model_name,  # 傳遞模型名稱供 ProcessPoolExecutor 使用
+            diarization_pipeline=diarization_pipeline,
+            executor=executor
+        )
+        print(f"✅ TranscriptionService 初始化完成")
 
-    # 10. 啟動任務隊列處理器
-    print(f"🚀 正在啟動任務隊列處理器...")
-    asyncio.create_task(task_service.process_pending_queue(transcription_service, max_concurrent=2))
-    print(f"✅ 任務隊列處理器已啟動")
+        # 10. 啟動任務隊列處理器
+        print(f"🚀 正在啟動任務隊列處理器...")
+        asyncio.create_task(task_service.process_pending_queue(transcription_service, max_concurrent=2))
+        print(f"✅ 任務隊列處理器已啟動")
+    else:
+        print(f"ℹ️  AWS Web Server 模式：跳過 TranscriptionService 初始化和任務隊列")
 
     print("=" * 50)
     print(f"✨ 服務已就緒！")
@@ -336,6 +363,8 @@ async def health_check():
     """健康檢查端點"""
     return {
         "status": "healthy",
+        "deploy_env": DEPLOY_ENV,
+        "app_role": APP_ROLE,
         "whisper_model": current_model_name,
         "diarization_available": diarization_pipeline is not None,
         "database": "connected" if MongoDB.get_db() is not None else "disconnected"

@@ -895,10 +895,12 @@ class TranscriptionService:
             traceback.print_exc()
 
     def _save_audio_file_sync(self, task_id: str, temp_dir: Path, audio_files: list) -> None:
-        """同步處理音檔保存（直接移動已轉換的 MP3）
+        """同步處理音檔保存（使用 storage_service 統一管理）
 
-        由於在轉錄前已經轉換為 16kHz MP3，這裡只需直接移動
+        由於在轉錄前已經轉換為 16kHz MP3，這裡只需移動/上傳
         """
+        from src.utils.storage_service import save_audio
+
         print(f"🔧 [_save_audio_file_sync] 開始處理，audio_files 數量: {len(audio_files)}")
 
         if not audio_files:
@@ -920,21 +922,15 @@ class TranscriptionService:
             print(f"🔧 [_save_audio_file_sync] 找到 MP3: {mp3_file}")
             print(f"🔧 [_save_audio_file_sync] 音檔是否存在: {mp3_file.exists()}")
 
-            uploads_dir = Path("uploads")
-            uploads_dir.mkdir(exist_ok=True)
-
-            # 直接移動 MP3（無需再次轉換）
-            permanent_audio = uploads_dir / f"{task_id}.mp3"
-            print(f"🔧 [_save_audio_file_sync] 目標路徑: {permanent_audio}")
-
-            shutil.move(str(mp3_file), str(permanent_audio))
-            print(f"💾 已移動音檔到：{permanent_audio}")
+            # 使用 storage_service 儲存（local: 移動到 uploads/，aws: 上傳 S3）
+            stored_path = save_audio(task_id, mp3_file)
+            print(f"💾 已儲存音檔: {stored_path}")
 
             # 使用同步方法更新任務的 audio_file 路徑
             # 保存原始檔名（但副檔名改為 .mp3）
             original_filename = Path(audio_files[0].name).stem + ".mp3"
             self._update_task_sync(task_id, {
-                "result.audio_file": str(permanent_audio),
+                "result.audio_file": stored_path,
                 "result.audio_filename": original_filename
             })
             print(f"✅ [_save_audio_file_sync] 已更新資料庫")

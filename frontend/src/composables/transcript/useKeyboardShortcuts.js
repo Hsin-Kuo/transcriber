@@ -1,4 +1,5 @@
 import { onMounted, onUnmounted } from 'vue'
+import { isMac, isModifierPressed } from '../../utils/platform'
 
 /**
  * 鍵盤快捷鍵管理 Composable
@@ -6,6 +7,7 @@ import { onMounted, onUnmounted } from 'vue'
  * 職責：
  * - 處理音訊播放器相關的鍵盤快捷鍵
  * - 區分編輯和非編輯模式下的快捷鍵
+ * - Mac 使用 ⌘ (Command)，Windows/Linux 使用 Ctrl
  */
 export function useKeyboardShortcuts(
   hasAudio,
@@ -31,17 +33,22 @@ export function useKeyboardShortcuts(
                           event.target.tagName === 'TEXTAREA' ||
                           event.target.isContentEditable
 
-    // Ctrl + Alt（單純）：播放/暫停
-    if (event.ctrlKey && event.altKey && !event.metaKey) {
-      if (event.key === 'Alt' || event.key === 'Control') {
+    // 修飾鍵 + Alt（單純）：播放/暫停
+    // Mac: ⌘ + Option, Windows: Ctrl + Alt
+    const modifierKey = isModifierPressed(event)
+    const otherModifier = isMac ? event.ctrlKey : event.metaKey
+    if (modifierKey && event.altKey && !otherModifier) {
+      const expectedKey = isMac ? 'Meta' : 'Control'
+      if (event.key === 'Alt' || event.key === expectedKey) {
         event.preventDefault()
         togglePlayPause()
         return
       }
     }
 
-    // Ctrl + 鍵組合（編輯和非編輯模式都可用，即使焦點在輸入框內也可用）
-    if (event.ctrlKey && !event.metaKey) {
+    // 修飾鍵 + 鍵組合（編輯和非編輯模式都可用，即使焦點在輸入框內也可用）
+    // Mac: ⌘ + Key, Windows: Ctrl + Key
+    if (modifierKey && !otherModifier) {
       switch(event.key) {
         case 'ArrowLeft':
           event.preventDefault()
@@ -51,14 +58,14 @@ export function useKeyboardShortcuts(
           event.preventDefault()
           skipForward()
           break
-        case 'ArrowUp':  // Ctrl + 上鍵：加速播放（+0.25x）
+        case 'ArrowUp':  // 修飾鍵 + 上鍵：加速播放（+0.25x）
           event.preventDefault()
           if (setPlaybackRate && playbackRate) {
             const newRate = Math.min(2, playbackRate.value + 0.25)
             setPlaybackRate(newRate)
           }
           break
-        case 'ArrowDown':  // Ctrl + 下鍵：減速播放（-0.25x）
+        case 'ArrowDown':  // 修飾鍵 + 下鍵：減速播放（-0.25x）
           event.preventDefault()
           if (setPlaybackRate && playbackRate) {
             const newRate = Math.max(0.25, playbackRate.value - 0.25)
@@ -82,7 +89,7 @@ export function useKeyboardShortcuts(
       return
     }
 
-    // 非編輯模式下的單鍵快捷鍵（不需要 Alt）
+    // 非編輯模式下的單鍵快捷鍵（不需要修飾鍵）
     // 如果焦點在輸入框內，不處理這些快捷鍵，避免干擾打字
     const isEditingText = isEditing.value || isEditingTitle.value
     if (!isEditingText && !targetIsInput && !event.altKey && !event.ctrlKey && !event.metaKey) {

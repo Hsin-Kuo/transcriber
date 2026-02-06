@@ -55,6 +55,17 @@
 
       <!-- 已有摘要 -->
       <div v-else-if="summary" class="summary-display">
+        <!-- 複製按鈕 -->
+        <button class="copy-btn" :class="{ copied: isCopied }" @click="copySummaryText" :title="isCopied ? $t('aiSummary.copied') : $t('aiSummary.copySummary')">
+          <svg v-if="!isCopied" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="8" y="8" width="12" height="12" rx="2" ry="2"></rect>
+            <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path>
+          </svg>
+          <svg v-else xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+        </button>
+
         <!-- Meta 資訊區塊 -->
         <div v-if="summary.content.meta" class="meta-section">
           <div class="meta-badges">
@@ -196,6 +207,7 @@ const isLoading = ref(false)
 const error = ref(null)
 const summary = ref(null)
 const summaryStatus = ref(props.initialSummaryStatus)
+const isCopied = ref(false)
 
 // Computed
 const keyPoints = computed(() => {
@@ -242,6 +254,87 @@ function getSentimentLabel(sentiment) {
     'Negative': $t('aiSummary.sentimentNegative')
   }
   return labels[sentiment] || $t('aiSummary.sentimentNeutral')
+}
+
+// 複製摘要為純文字
+async function copySummaryText() {
+  if (!summary.value?.content) return
+
+  const content = summary.value.content
+  const lines = []
+
+  // 主題
+  if (content.meta?.detected_topic) {
+    lines.push(content.meta.detected_topic)
+    lines.push('')
+  }
+
+  // 執行摘要
+  if (content.summary) {
+    lines.push(`【${$t('aiSummary.executiveSummary')}】`)
+    lines.push(content.summary)
+    lines.push('')
+  }
+
+  // 重點
+  const points = content.key_points || content.highlights || []
+  if (points.length > 0) {
+    lines.push(`【${$t('aiSummary.keyPoints')}】`)
+    points.forEach(point => {
+      lines.push(`• ${point}`)
+    })
+    lines.push('')
+  }
+
+  // 內容段落
+  if (content.segments && content.segments.length > 0) {
+    lines.push(`【${$t('aiSummary.contentSegments')}】`)
+    content.segments.forEach(segment => {
+      lines.push(`▎${segment.topic}`)
+      lines.push(segment.content)
+      if (segment.keywords && segment.keywords.length > 0) {
+        lines.push(`${$t('aiSummary.keywords')}: ${segment.keywords.join(', ')}`)
+      }
+      lines.push('')
+    })
+  }
+
+  // 待辦事項
+  if (content.action_items && content.action_items.length > 0) {
+    lines.push(`【${$t('aiSummary.actionItems')}】`)
+    content.action_items.forEach(item => {
+      let line = `☐ ${item.task}`
+      const meta = []
+      if (item.owner) meta.push(item.owner)
+      if (item.deadline) meta.push(item.deadline)
+      if (meta.length > 0) line += ` (${meta.join(' / ')})`
+      lines.push(line)
+    })
+    lines.push('')
+  }
+
+  const text = lines.join('\n').trim()
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+    }
+    isCopied.value = true
+    setTimeout(() => {
+      isCopied.value = false
+    }, 2000)
+  } catch (err) {
+    console.error('複製失敗:', err)
+  }
 }
 
 // 切換展開/收起
@@ -463,9 +556,41 @@ onMounted(() => {
 
 /* 摘要顯示 */
 .summary-display {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+/* 複製按鈕 (右上角) */
+.copy-btn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  color: var(--main-text-light);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.copy-btn:hover {
+  background: rgba(0, 0, 0, 0.03);
+  color: var(--main-text);
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+.copy-btn.copied {
+  color: #22c55e;
+  border-color: rgba(34, 197, 94, 0.3);
+  background: rgba(34, 197, 94, 0.05);
 }
 
 /* Meta 區塊 */
@@ -752,6 +877,15 @@ onMounted(() => {
 
 [data-theme="dark"] .metadata {
   border-top-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .copy-btn {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .copy-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 [data-theme="dark"] .regenerate-btn {

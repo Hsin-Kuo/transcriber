@@ -14,6 +14,7 @@ from ..database.repositories.tag_repo import TagRepository
 from ..services.task_service import TaskService
 from ..services.tag_service import TagService
 from ..services.utils.async_utils import get_current_time
+from ..utils.storage_service import is_aws, delete_audio as storage_delete_audio
 
 try:
     import psutil
@@ -498,6 +499,10 @@ async def task_status_events(
     """
     async def event_generator():
         """生成 SSE 事件流"""
+        # AWS 模式下 Worker 更新 MongoDB，Web Server 輪詢 DB；
+        # 本地模式使用 in-memory state
+        poll_interval = 2 if is_aws() else 1
+
         try:
             # 首先驗證權限
             task = await task_service.get_task(task_id, str(current_user["_id"]))
@@ -511,8 +516,17 @@ async def task_status_events(
             previous_progress = None
 
             while True:
-                # 獲取任務狀態
-                task_data = await task_service.get_task(task_id, str(current_user["_id"]))
+                if is_aws():
+                    # AWS 模式：直接從 MongoDB 讀取（Worker 寫入 DB）
+                    task_data = await task_service.task_repo.get_by_id(task_id)
+                    if task_data:
+                        # 驗證用戶權限
+                        task_user_id = task_data.get("user", {}).get("user_id")
+                        if task_user_id != str(current_user["_id"]):
+                            task_data = None
+                else:
+                    # 本地模式：使用 in-memory state（現有行為）
+                    task_data = await task_service.get_task(task_id, str(current_user["_id"]))
 
                 if not task_data:
                     yield f"event: error\ndata: {json.dumps({'error': '任務不存在'})}\n\n"
@@ -540,8 +554,8 @@ async def task_status_events(
                     yield f"event: end\ndata: {json.dumps({'status': current_status})}\n\n"
                     break
 
-                # 等待 1 秒再檢查
-                await asyncio.sleep(1)
+                # 等待再檢查（AWS 間隔較長因為是 DB polling）
+                await asyncio.sleep(poll_interval)
 
         except asyncio.CancelledError:
             # 客戶端斷開連接
@@ -732,16 +746,12 @@ async def delete_task(
     # 物理刪除音檔（如果存在）
     # ⚠️ 手動刪除任務時，應刪除所有相關檔案（包括音檔）
     # keep_audio 只控制「自動清理機制」，不影響「用戶手動刪除」
-    audio_file_path = get_task_field(task, "audio_file")
-    if audio_file_path:
-        audio_file = Path(audio_file_path)
-        try:
-            if audio_file.exists():
-                audio_file.unlink()
-                deleted_files.append(audio_file.name)
-                print(f"🗑️ 已刪除音檔：{audio_file.name}")
-        except Exception as e:
-            print(f"⚠️ 刪除音檔失敗：{e}")
+    try:
+        storage_delete_audio(task_id)
+        deleted_files.append(f"{task_id}.mp3")
+        print(f"🗑️ 已刪除音檔：{task_id}.mp3")
+    except Exception as e:
+        print(f"⚠️ 刪除音檔失敗：{e}")
 
     # 清理記憶體狀態
     task_service.cleanup_task_memory(task_id)
@@ -1031,16 +1041,12 @@ async def batch_delete_tasks(
                 except Exception as e:
                     print(f"⚠️ [批次] 刪除 segments 檔案失敗：{e}")
 
-            # 物理刪除音檔（如果存在）
-            audio_file_path = get_task_field(task, "audio_file")
-            if audio_file_path:
-                audio_file = Path(audio_file_path)
-                try:
-                    if audio_file.exists():
-                        audio_file.unlink()
-                        print(f"🗑️ [批次] 已刪除音檔：{audio_file.name}")
-                except Exception as e:
-                    print(f"⚠️ [批次] 刪除音檔失敗：{e}")
+            # 物理刪除音檔（使用 storage_service）
+            try:
+                storage_delete_audio(task_id)
+                print(f"🗑️ [批次] 已刪除音檔：{task_id}.mp3")
+            except Exception as e:
+                print(f"⚠️ [批次] 刪除音檔失敗：{e}")
 
             # 清理記憶體
             task_service.cleanup_task_memory(task_id)

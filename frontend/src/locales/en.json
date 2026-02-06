@@ -454,6 +454,8 @@
     "typeGeneral": "General",
     "sentimentPositive": "Positive",
     "sentimentNeutral": "Neutral",
-    "sentimentNegative": "Negative"
+    "sentimentNegative": "Negative",
+    "copySummary": "Copy Summary",
+    "copied": "Copied"
   }
 }
