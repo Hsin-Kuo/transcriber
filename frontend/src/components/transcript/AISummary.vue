@@ -213,7 +213,8 @@ const isCopied = ref(false)
 const keyPoints = computed(() => {
   if (!summary.value?.content) return []
   // 優先使用 key_points，向後兼容 highlights
-  return summary.value.content.key_points || summary.value.content.highlights || []
+  const points = summary.value.content.key_points || summary.value.content.highlights || []
+  return points.map(p => typeof p === 'string' ? p : (p.text || p.point || p.content || JSON.stringify(p)))
 })
 
 // 類型標籤樣式
@@ -281,7 +282,8 @@ async function copySummaryText() {
   if (points.length > 0) {
     lines.push(`【${$t('aiSummary.keyPoints')}】`)
     points.forEach(point => {
-      lines.push(`• ${point}`)
+      const text = typeof point === 'string' ? point : (point.text || point.point || point.content || JSON.stringify(point))
+      lines.push(`• ${text}`)
     })
     lines.push('')
   }

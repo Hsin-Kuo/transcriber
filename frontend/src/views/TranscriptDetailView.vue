@@ -289,11 +289,15 @@
     <!-- 下載對話框組件 -->
     <DownloadDialog
       :show="showDownloadDialog"
+      :display-mode="displayMode"
       :time-format="timeFormat"
       :density-threshold="densityThreshold"
       :has-speaker-info="hasSpeakerInfo"
+      :has-summary="hasSummaryData"
       v-model:selected-format="selectedDownloadFormat"
       v-model:include-speaker="includeSpeaker"
+      v-model:include-summary="includeSummary"
+      v-model:include-transcript="includeTranscript"
       @close="showDownloadDialog = false"
       @download="performDownload"
     />
@@ -317,7 +321,7 @@ import DisplaySettingsCard from '../components/transcript/DisplaySettingsCard.vu
 import AISummary from '../components/transcript/AISummary.vue'
 
 // API 服務
-import { taskService } from '../api/services.js'
+import { taskService, summaryService } from '../api/services.js'
 
 // Composables
 import { useTranscriptData } from '../composables/transcript/useTranscriptData'
@@ -579,10 +583,32 @@ const {
   showDownloadDialog,
   selectedDownloadFormat,
   includeSpeaker,
-  downloadParagraphMode,
+  includeSummary,
+  includeTranscript,
   performSubtitleDownload,
-  openDownloadDialog
+  openDownloadDialog,
+  downloadAsPdf
 } = useTranscriptDownload()
+
+// AI 摘要數據（用於下載）
+const summaryData = ref(null)
+
+// 是否有 AI 摘要
+const hasSummaryData = computed(() => {
+  return currentTranscript.value.summary_status === 'completed'
+})
+
+// 載入 AI 摘要數據
+async function loadSummaryForDownload() {
+  if (!hasSummaryData.value || summaryData.value) return
+
+  try {
+    summaryData.value = await summaryService.get(currentTranscript.value.task_id)
+  } catch (error) {
+    console.error('載入摘要失敗:', error)
+    summaryData.value = null
+  }
+}
 
 // ========== 鍵盤快捷鍵 ==========
 const hasAudio = computed(() => currentTranscript.value.hasAudio)
@@ -833,35 +859,154 @@ async function saveTaskName() {
 
 // 下載逐字稿
 function downloadTranscript() {
-  if (displayMode.value === 'subtitle') {
-    openDownloadDialog()
-  } else {
-    const filename = currentTranscript.value.custom_name || currentTranscript.value.filename || 'transcript'
-    downloadParagraphMode(currentTranscript.value.content, filename)
-  }
+  // 兩種模式都開啟下載對話框
+  openDownloadDialog()
 }
 
 // 執行下載（從對話框）
-function performDownload() {
+async function performDownload() {
   // 根據用戶選擇決定是否包含講者資訊
   // null 表示不顯示講者，{} 或 speakerNames 表示顯示講者（使用自定義名稱或原始代號）
   const speakerNamesToUse = includeSpeaker.value ? speakerNames.value : null
   const filename = currentTranscript.value.custom_name || currentTranscript.value.filename || 'transcript'
-
-  let content = ''
   const format = selectedDownloadFormat.value
+  const isParagraphMode = displayMode.value === 'paragraph'
 
-  // 根據選擇的格式生成對應的內容
+  // 取得逐字稿文字的輔助函數
+  const getTranscriptText = () => {
+    if (isParagraphMode) {
+      // 段落模式：直接使用原始內容
+      return currentTranscript.value.content || ''
+    } else {
+      // 字幕模式：根據設定生成格式化文字
+      return generateSubtitleText(groupedSegments.value, timeFormat.value, speakerNamesToUse)
+    }
+  }
+
+  // PDF 格式處理
+  if (format === 'pdf') {
+    // 如果需要包含摘要且尚未載入，先載入
+    if (includeSummary.value && hasSummaryData.value && !summaryData.value) {
+      await loadSummaryForDownload()
+    }
+
+    // 生成逐字稿文字（如果需要）
+    let transcriptText = ''
+    if (includeTranscript.value) {
+      transcriptText = getTranscriptText()
+    }
+
+    await downloadAsPdf({
+      filename,
+      title: currentTranscript.value.custom_name || currentTranscript.value.filename,
+      summary: includeSummary.value ? summaryData.value : null,
+      transcriptText,
+      includeSummary: includeSummary.value,
+      includeTranscript: includeTranscript.value,
+      t: $t
+    })
+    return
+  }
+
+  // TXT 格式處理（支援內容選擇）
+  if (format === 'txt') {
+    let content = ''
+
+    // 如果有摘要且選擇包含
+    if (includeSummary.value && hasSummaryData.value) {
+      if (!summaryData.value) {
+        await loadSummaryForDownload()
+      }
+      if (summaryData.value) {
+        content += formatSummaryAsText(summaryData.value)
+        if (includeTranscript.value) {
+          content += '\n\n' + '='.repeat(50) + '\n\n'
+        }
+      }
+    }
+
+    // 逐字稿
+    if (includeTranscript.value) {
+      content += getTranscriptText()
+    }
+
+    performSubtitleDownload(content, filename, format)
+    return
+  }
+
+  // SRT/VTT 格式（僅逐字稿，僅字幕模式可用）
+  let content = ''
   if (format === 'srt') {
     content = generateSRTText(groupedSegments.value, speakerNamesToUse)
   } else if (format === 'vtt') {
     content = generateVTTText(groupedSegments.value, speakerNamesToUse)
-  } else {
-    // TXT 格式：使用用戶當前選擇的時間格式
-    content = generateSubtitleText(groupedSegments.value, timeFormat.value, speakerNamesToUse)
   }
 
   performSubtitleDownload(content, filename, format)
+}
+
+// 將摘要格式化為純文字
+function formatSummaryAsText(summary) {
+  if (!summary?.content) return ''
+
+  const content = summary.content
+  const lines = []
+
+  lines.push('【AI 摘要】')
+  lines.push('')
+
+  // 主題
+  if (content.meta?.detected_topic) {
+    lines.push(content.meta.detected_topic)
+    lines.push('')
+  }
+
+  // 執行摘要
+  if (content.summary) {
+    lines.push(`【${$t('aiSummary.executiveSummary')}】`)
+    lines.push(content.summary)
+    lines.push('')
+  }
+
+  // 重點
+  const points = content.key_points || content.highlights || []
+  if (points.length > 0) {
+    lines.push(`【${$t('aiSummary.keyPoints')}】`)
+    points.forEach(point => {
+      const text = typeof point === 'string' ? point : (point.text || point.point || point.content || JSON.stringify(point))
+      lines.push(`• ${text}`)
+    })
+    lines.push('')
+  }
+
+  // 內容段落
+  if (content.segments && content.segments.length > 0) {
+    lines.push(`【${$t('aiSummary.contentSegments')}】`)
+    content.segments.forEach(segment => {
+      lines.push(`▎${segment.topic}`)
+      lines.push(segment.content)
+      if (segment.keywords && segment.keywords.length > 0) {
+        lines.push(`關鍵詞: ${segment.keywords.join(', ')}`)
+      }
+      lines.push('')
+    })
+  }
+
+  // 待辦事項
+  if (content.action_items && content.action_items.length > 0) {
+    lines.push(`【${$t('aiSummary.actionItems')}】`)
+    content.action_items.forEach(item => {
+      let line = `☐ ${item.task}`
+      const meta = []
+      if (item.owner) meta.push(item.owner)
+      if (item.deadline) meta.push(item.deadline)
+      if (meta.length > 0) line += ` (${meta.join(' / ')})`
+      lines.push(line)
+    })
+    lines.push('')
+  }
+
+  return lines.join('\n').trim()
 }
 
 // 更新 segment 的講者

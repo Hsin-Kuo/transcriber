@@ -64,6 +64,7 @@ export function useTranscriptData() {
         duration_text: task.duration_text,
         hasAudio: !!(task.result?.audio_file || task.audio_file),
         task_type: task.task_type || 'paragraph',
+        summary_status: task.summary_status || null,
         tags: task.tags || [],
         content: ''
       }

@@ -13,15 +13,41 @@
 
       <div class="dialog-body">
         <p class="dialog-description">
-          {{ $t('downloadDialog.description') }}
+          {{ displayMode === 'paragraph' ? $t('downloadDialog.paragraphDescription') : $t('downloadDialog.description') }}
         </p>
-        <ul class="current-settings">
+        <!-- 字幕模式設定（僅字幕模式顯示） -->
+        <ul v-if="displayMode === 'subtitle'" class="current-settings">
           <li><strong>{{ $t('downloadDialog.timeFormat') }}</strong>{{ timeFormat === 'start' ? $t('subtitleTable.startTime') : $t('subtitleTable.timeRange') }}</li>
           <li><strong>{{ $t('downloadDialog.density') }}</strong>{{ densityThreshold.toFixed(1) }}s</li>
         </ul>
 
-        <!-- 講者資訊選項 -->
-        <div v-if="hasSpeakerInfo" class="speaker-option">
+        <!-- 下載內容選項（僅 TXT/PDF 顯示） -->
+        <div v-if="showContentOptions" class="content-options">
+          <label class="section-label">{{ $t('downloadDialog.contentToDownload') }}</label>
+          <div class="checkbox-group">
+            <label v-if="hasSummary" class="checkbox-label">
+              <input
+                type="checkbox"
+                :checked="includeSummary"
+                @change="$emit('update:includeSummary', $event.target.checked)"
+                class="checkbox-input"
+              />
+              <span class="checkbox-text">{{ $t('downloadDialog.includeSummary') }}</span>
+            </label>
+            <label class="checkbox-label">
+              <input
+                type="checkbox"
+                :checked="includeTranscript"
+                @change="$emit('update:includeTranscript', $event.target.checked)"
+                class="checkbox-input"
+              />
+              <span class="checkbox-text">{{ $t('downloadDialog.includeTranscript') }}</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- 講者資訊選項（僅字幕模式顯示） -->
+        <div v-if="hasSpeakerInfo && displayMode === 'subtitle'" class="speaker-option">
           <label class="checkbox-label">
             <input
               type="checkbox"
@@ -49,7 +75,8 @@
             </div>
           </label>
 
-          <label class="format-option">
+          <!-- SRT/VTT 僅字幕模式顯示 -->
+          <label v-if="displayMode === 'subtitle'" class="format-option">
             <input
               type="radio"
               :value="'srt'"
@@ -63,7 +90,7 @@
             </div>
           </label>
 
-          <label class="format-option">
+          <label v-if="displayMode === 'subtitle'" class="format-option">
             <input
               type="radio"
               :value="'vtt'"
@@ -76,6 +103,20 @@
               <span class="format-desc">{{ $t('downloadDialog.vttDesc') }}</span>
             </div>
           </label>
+
+          <label class="format-option">
+            <input
+              type="radio"
+              :value="'pdf'"
+              :checked="selectedFormat === 'pdf'"
+              @change="$emit('update:selectedFormat', 'pdf')"
+              name="downloadFormat"
+            />
+            <div class="format-info">
+              <span class="format-name">{{ $t('downloadDialog.pdfFormat') }}</span>
+              <span class="format-desc">{{ $t('downloadDialog.pdfDesc') }}</span>
+            </div>
+          </label>
         </div>
       </div>
 
@@ -83,7 +124,7 @@
         <button @click="$emit('close')" class="btn btn-secondary">
           {{ $t('downloadDialog.cancel') }}
         </button>
-        <button @click="$emit('download')" class="btn btn-primary">
+        <button @click="$emit('download')" class="btn btn-primary" :disabled="!canDownload">
           {{ $t('downloadDialog.download') }}
         </button>
       </div>
@@ -92,24 +133,33 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const { t: $t } = useI18n()
 
-defineProps({
+const props = defineProps({
   show: {
     type: Boolean,
     default: false
   },
+  displayMode: {
+    type: String,
+    default: 'subtitle' // 'paragraph' | 'subtitle'
+  },
   timeFormat: {
     type: String,
-    required: true
+    default: 'start'
   },
   densityThreshold: {
     type: Number,
-    required: true
+    default: 0
   },
   hasSpeakerInfo: {
+    type: Boolean,
+    default: false
+  },
+  hasSummary: {
     type: Boolean,
     default: false
   },
@@ -120,10 +170,33 @@ defineProps({
   includeSpeaker: {
     type: Boolean,
     default: true
+  },
+  includeSummary: {
+    type: Boolean,
+    default: true
+  },
+  includeTranscript: {
+    type: Boolean,
+    default: true
   }
 })
 
-defineEmits(['close', 'download', 'update:selectedFormat', 'update:includeSpeaker'])
+defineEmits(['close', 'download', 'update:selectedFormat', 'update:includeSpeaker', 'update:includeSummary', 'update:includeTranscript'])
+
+// 是否顯示內容選項（僅 TXT/PDF 顯示）
+const showContentOptions = computed(() => {
+  return (props.selectedFormat === 'txt' || props.selectedFormat === 'pdf') && props.hasSummary
+})
+
+// 是否可以下載（至少要選擇一個內容）
+const canDownload = computed(() => {
+  // SRT/VTT 格式不需要選擇內容
+  if (props.selectedFormat === 'srt' || props.selectedFormat === 'vtt') {
+    return true
+  }
+  // TXT/PDF 格式需要至少選擇一個內容
+  return props.includeSummary || props.includeTranscript
+})
 </script>
 
 <style scoped>
@@ -234,6 +307,28 @@ defineEmits(['close', 'download', 'update:selectedFormat', 'update:includeSpeake
 .current-settings strong {
   color: var(--main-text);
   font-weight: 600;
+}
+
+/* 內容選項 */
+.content-options {
+  background: rgba(160, 145, 124, 0.08);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 0 0 16px 0;
+}
+
+.section-label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--main-text);
+  margin-bottom: 12px;
+}
+
+.checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 /* 講者選項 */
