@@ -2,7 +2,6 @@
   <div class="settings-container">
     <div class="settings-header">
       <h1>{{ $t('userSettings.title') }}</h1>
-      <p>{{ $t('userSettings.description') }}</p>
     </div>
 
     <!-- 使用者資訊顯示面板 -->
@@ -14,7 +13,6 @@
         <span class="label-item">{{ $t('userSettings.language') }}</span>
         <span class="label-item">{{ $t('userSettings.timezone') }}</span>
         <span class="label-item">{{ $t('userSettings.theme') }}</span>
-        <span class="label-item">AI Summary</span>
         <span class="label-item">{{ $t('userSettings.tasks') }}</span>
         <span class="label-bar"></span>
         <span class="label-item">{{ $t('userSettings.duration') }}</span>
@@ -59,11 +57,6 @@
               <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
             </svg>
           </span>
-        </div>
-
-        <!-- AI Summary 展開模式 -->
-        <div class="display-row">
-          <span class="display-value">{{ currentSummaryExpandLabel }}</span>
         </div>
 
         <!-- 轉錄次數 -->

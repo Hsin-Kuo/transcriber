@@ -50,7 +50,7 @@
 
     <!-- 雙欄佈局 -->
     <div class="transcript-layout"
-         :style="{ '--left-panel-width': isEffectivelyCollapsed ? '52px' : '280px' }">
+         :style="{ '--left-panel-width': isEffectivelyCollapsed ? '62px' : '280px' }">
       <!-- 移動端底部抽屜切換按鈕 -->
       <button
         class="mobile-drawer-toggle"
@@ -155,7 +155,7 @@
             </label>
           </div>
 
-          <!-- 垂直滑桿：字體大小 + 字體粗細 -->
+          <!-- 垂直滑桿：字體大小 + 字體粗細 (+ 字幕模式疏密度) -->
           <div class="collapsed-sliders-container">
             <div class="collapsed-slider-wrapper">
               <input
@@ -181,6 +181,18 @@
                 title="字體粗細"
               />
             </div>
+            <div v-if="displayMode === 'subtitle'" class="collapsed-slider-wrapper">
+              <input
+                type="range"
+                class="collapsed-vertical-slider"
+                min="0"
+                max="120"
+                step="1"
+                :value="densityThreshold"
+                @input="densityThreshold = Number($event.target.value)"
+                title="疏密度"
+              />
+            </div>
           </div>
 
           <!-- 數位顯示面板 -->
@@ -196,34 +208,7 @@
             <!-- 音訊控制群組（緊湊間距） -->
             <div class="collapsed-audio-controls">
               <!-- 鍵盤快捷鍵按鈕 + tooltip -->
-              <div class="collapsed-shortcuts-info">
-                <button class="collapsed-icon-btn" title="鍵盤快捷鍵">
-                  <svg width="22" height="16" viewBox="0 0 48 36" fill="currentColor">
-                    <circle cx="9" cy="8" r="2.5" fill="currentColor"/>
-                    <circle cx="19" cy="8" r="2.5" fill="currentColor"/>
-                    <circle cx="29" cy="8" r="2.5" fill="currentColor"/>
-                    <circle cx="39" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
-                    <circle cx="9" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
-                    <circle cx="19" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
-                    <circle cx="29" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
-                    <circle cx="39" cy="18" r="2.5" fill="currentColor"/>
-                    <circle cx="9" cy="28" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
-                    <circle cx="19" cy="28" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
-                    <circle cx="29" cy="28" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
-                    <circle cx="39" cy="28" r="2.5" fill="currentColor"/>
-                  </svg>
-                </button>
-                <div class="collapsed-shortcuts-tooltip">
-                  <div class="shortcuts-title">{{ $t('audioPlayer.audioControlShortcuts') }}</div>
-                  <div class="shortcuts-section">
-                    <div class="shortcut-item"><kbd>{{ isMac ? '⌘' : 'Ctrl' }}</kbd> + <kbd>Space</kbd> <span>{{ $t('audioPlayer.playPause') }}</span></div>
-                    <div class="shortcut-item"><kbd>{{ isMac ? '⌘' : 'Ctrl' }}</kbd> + <kbd>←</kbd> <span>{{ $t('audioPlayer.rewind10sShortcut') }}</span></div>
-                    <div class="shortcut-item"><kbd>{{ isMac ? '⌘' : 'Ctrl' }}</kbd> + <kbd>→</kbd> <span>{{ $t('audioPlayer.fastForward10sShortcut') }}</span></div>
-                    <div class="shortcut-item"><kbd>{{ isMac ? '⌘' : 'Ctrl' }}</kbd> + <kbd>↑</kbd> <span>{{ $t('audioPlayer.speedUp') }}</span></div>
-                    <div class="shortcut-item"><kbd>{{ isMac ? '⌘' : 'Ctrl' }}</kbd> + <kbd>↓</kbd> <span>{{ $t('audioPlayer.speedDown') }}</span></div>
-                  </div>
-                </div>
-              </div>
+              <KeyboardShortcutsInfo class="collapsed-shortcuts-wrapper" pop-direction="pop-right" />
 
               <!-- 播放/暫停按鈕 -->
               <button class="collapsed-icon-btn" @click="togglePlayPause" :title="isPlaying ? $t('audioPlayer.pause') : $t('audioPlayer.play')">
@@ -252,22 +237,12 @@
               </button>
 
               <!-- 播放速度選擇器 -->
-              <div class="collapsed-speed-control">
-              <button class="collapsed-icon-btn collapsed-speed-btn" @click="showCollapsedSpeedDropdown = !showCollapsedSpeedDropdown" :title="$t('audioPlayer.playbackSpeed', { rate: playbackRate })">
-                <span class="collapsed-speed-label">{{ playbackRate }}x</span>
-              </button>
-              <div v-if="showCollapsedSpeedDropdown" class="collapsed-speed-dropdown">
-                <button
-                  v-for="rate in [0.5, 0.75, 1, 1.25, 1.5, 2]"
-                  :key="rate"
-                  class="collapsed-speed-option"
-                  :class="{ active: playbackRate === rate }"
-                  @click="setPlaybackRate(rate); showCollapsedSpeedDropdown = false"
-                >
-                  {{ rate }}x
-                </button>
-              </div>
-            </div>
+              <PlaybackSpeedControl
+                class="collapsed-speed-wrapper"
+                :playback-rate="playbackRate"
+                pop-direction="pop-right"
+                @set-playback-rate="setPlaybackRate"
+              />
             </div>
           </template>
         </div>
@@ -499,6 +474,8 @@ import DownloadDialog from '../components/transcript/DownloadDialog.vue'
 import TaskInfoCard from '../components/transcript/TaskInfoCard.vue'
 import DisplaySettingsCard from '../components/transcript/DisplaySettingsCard.vue'
 import AISummary from '../components/transcript/AISummary.vue'
+import KeyboardShortcutsInfo from '../components/transcript/KeyboardShortcutsInfo.vue'
+import PlaybackSpeedControl from '../components/transcript/PlaybackSpeedControl.vue'
 
 // API 服務
 import { taskService, summaryService } from '../api/services.js'
@@ -513,9 +490,11 @@ import { useKeyboardShortcuts } from '../composables/transcript/useKeyboardShort
 import { useTranscriptDownload } from '../composables/transcript/useTranscriptDownload'
 import { useTaskTags } from '../composables/task/useTaskTags'
 import { isMac, isModifierPressed } from '../utils/platform'
+import { useAuthStore } from '../stores/auth'
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 
 // 組件引用
 const audioPlayerRef = ref(null)
@@ -682,18 +661,19 @@ const contentFontWeight = ref(400)
 const contentFontFamily = ref('sans-serif')
 
 // 左側面板收合狀態
-const isLeftPanelCollapsed = ref(false)
+const isLeftPanelCollapsed = ref(localStorage.getItem('leftPanelCollapsed') === 'true')
+watch(isLeftPanelCollapsed, (v) => localStorage.setItem('leftPanelCollapsed', String(v)))
 
-// 播放速率下拉選單狀態（收合模式用）
-const showCollapsedSpeedDropdown = ref(false)
-
-// 監聽暗色模式變化，切換全局主題
+// 監聽暗色模式變化，切換全局主題並儲存偏好
 watch(isDarkMode, (dark) => {
+  const theme = dark ? 'dark' : 'light'
   if (dark) {
     document.documentElement.setAttribute('data-theme', 'dark')
   } else {
     document.documentElement.removeAttribute('data-theme')
   }
+  localStorage.setItem('theme', theme)
+  authStore.updatePreferences({ theme })
 })
 
 // 保存編輯前的 timecode markers 狀態
@@ -2946,11 +2926,11 @@ watch(displayMode, () => {
 
 /* === 收合面板 === */
 .left-panel.collapsed {
-  width: 52px;
+  width: 62px;
   padding: 8px 4px;
   align-items: center;
-  overflow-x: visible;
-  overflow-y: auto;
+  overflow: visible;
+  z-index: 10;
 }
 
 .collapsed-sidebar {
@@ -3049,7 +3029,7 @@ watch(displayMode, () => {
 /* 收合垂直滑桿 */
 .collapsed-sliders-container {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   justify-content: center;
   padding: 4px 0;
 }
@@ -3090,9 +3070,9 @@ watch(displayMode, () => {
 .collapsed-vertical-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 14px;
+  width: 10px;
   height: 7px;
-  margin-left: -6px;
+  margin-left: -4px;
   background: var(--nav-bg);
   border-right: 1.5px solid var(--nav-active-bg);
   border-left: 1.5px solid var(--nav-active-bg);
@@ -3167,111 +3147,27 @@ watch(displayMode, () => {
   background: rgba(var(--color-text-dark-rgb, 0, 0, 0), 0.08);
 }
 
-/* 收合鍵盤快捷鍵 */
-.collapsed-shortcuts-info {
-  position: relative;
-}
-
-.collapsed-shortcuts-tooltip {
-  display: none;
-  position: absolute;
-  left: 100%;
-  top: 50%;
-  transform: translateY(-50%);
-  margin-left: 8px;
-  background: rgba(0, 0, 0, 0.9);
-  color: white;
-  border-radius: 8px;
-  padding: 12px;
-  font-size: 12px;
-  white-space: nowrap;
-  z-index: 1000;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
-.collapsed-shortcuts-info:hover .collapsed-shortcuts-tooltip {
-  display: block;
-}
-
-.collapsed-shortcuts-tooltip .shortcuts-title {
-  font-weight: 600;
-  margin-bottom: 8px;
-  font-size: 13px;
-}
-
-.collapsed-shortcuts-tooltip .shortcut-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 0;
-}
-
-.collapsed-shortcuts-tooltip kbd {
-  display: inline-block;
-  padding: 1px 5px;
-  font-size: 11px;
-  font-family: monospace;
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-.collapsed-shortcuts-tooltip .shortcut-item span {
-  margin-left: 8px;
-  opacity: 0.8;
-}
-
-/* 收合播放速度 */
-.collapsed-speed-control {
-  position: relative;
-}
-
-.collapsed-speed-btn {
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.collapsed-speed-label {
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.collapsed-speed-dropdown {
-  position: absolute;
-  left: 100%;
-  top: 50%;
-  transform: translateY(-50%);
-  margin-left: 8px;
-  background: var(--nav-bg, #fff);
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  border-radius: 8px;
-  padding: 4px;
-  z-index: 1000;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.collapsed-speed-option {
-  padding: 6px 16px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  cursor: pointer;
-  font-size: 13px;
-  white-space: nowrap;
+/* 收合側邊欄的共用元件樣式微調 */
+.collapsed-shortcuts-wrapper :deep(.shortcuts-trigger-btn) {
+  width: 36px;
+  height: 30px;
+  border-radius: 50%;
   color: var(--nav-text);
-  transition: background 0.15s;
 }
 
-.collapsed-speed-option:hover {
-  background: rgba(var(--color-text-dark-rgb, 0, 0, 0), 0.06);
+.collapsed-shortcuts-wrapper :deep(.shortcuts-trigger-btn) svg {
+  width: 22px;
+  height: 16px;
 }
 
-.collapsed-speed-option.active {
-  background: var(--nav-active-bg);
-  color: white;
+.collapsed-speed-wrapper :deep(.speed-trigger-btn) {
+  width: 36px;
+  height: 30px;
+  border-radius: 50%;
+}
+
+.collapsed-speed-wrapper :deep(.speed-label) {
+  font-size: 12px;
 }
 
 /* === 音訊播放器顯示控制 === */

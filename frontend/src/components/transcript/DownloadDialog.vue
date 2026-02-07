@@ -12,13 +12,10 @@
       </div>
 
       <div class="dialog-body">
-        <p class="dialog-description">
-          {{ displayMode === 'paragraph' ? $t('downloadDialog.paragraphDescription') : $t('downloadDialog.description') }}
-        </p>
         <!-- 字幕模式設定（僅字幕模式顯示） -->
-        <ul v-if="displayMode === 'subtitle'" class="current-settings">
+        <ul v-if="displayMode === 'subtitle' && (selectedFormat === 'txt' || selectedFormat === 'pdf')" class="current-settings">
           <li><strong>{{ $t('downloadDialog.timeFormat') }}</strong>{{ timeFormat === 'start' ? $t('subtitleTable.startTime') : $t('subtitleTable.timeRange') }}</li>
-          <li><strong>{{ $t('downloadDialog.density') }}</strong>{{ densityThreshold.toFixed(1) }}s</li>
+          <li><strong>{{ $t('downloadDialog.density') }}</strong>{{ densityThreshold.toFixed(0) }}s</li>
         </ul>
 
         <!-- 下載內容選項（僅 TXT/PDF 顯示） -->
@@ -57,7 +54,6 @@
             />
             <span class="checkbox-text">{{ $t('downloadDialog.speakerInfo') }}</span>
           </label>
-          <p class="option-hint">{{ $t('downloadDialog.speakerHint') }}</p>
         </div>
 
         <div class="format-options">
@@ -71,7 +67,6 @@
             />
             <div class="format-info">
               <span class="format-name">{{ $t('downloadDialog.txtFormat') }}</span>
-              <span class="format-desc">{{ $t('downloadDialog.txtDesc') }}</span>
             </div>
           </label>
 
@@ -86,7 +81,6 @@
             />
             <div class="format-info">
               <span class="format-name">{{ $t('downloadDialog.srtFormat') }}</span>
-              <span class="format-desc">{{ $t('downloadDialog.srtDesc') }}</span>
             </div>
           </label>
 
@@ -100,7 +94,6 @@
             />
             <div class="format-info">
               <span class="format-name">{{ $t('downloadDialog.vttFormat') }}</span>
-              <span class="format-desc">{{ $t('downloadDialog.vttDesc') }}</span>
             </div>
           </label>
 
@@ -114,7 +107,6 @@
             />
             <div class="format-info">
               <span class="format-name">{{ $t('downloadDialog.pdfFormat') }}</span>
-              <span class="format-desc">{{ $t('downloadDialog.pdfDesc') }}</span>
             </div>
           </label>
         </div>
@@ -284,12 +276,6 @@ const canDownload = computed(() => {
   flex: 1;
 }
 
-.dialog-description {
-  margin: 0 0 16px 0;
-  color: var(--main-text);
-  font-size: 14px;
-}
-
 .current-settings {
   background: rgba(160, 145, 124, 0.15);
   border-radius: 8px;
@@ -360,13 +346,6 @@ const canDownload = computed(() => {
   color: var(--main-text);
 }
 
-.option-hint {
-  margin: 8px 0 0 28px;
-  font-size: 13px;
-  color: var(--main-text-light);
-  line-height: 1.4;
-}
-
 .format-options {
   display: flex;
   flex-direction: column;
@@ -415,11 +394,6 @@ const canDownload = computed(() => {
   font-weight: 600;
   font-size: 15px;
   color: var(--main-text);
-}
-
-.format-desc {
-  font-size: 13px;
-  color: var(--main-text-light);
 }
 
 .dialog-footer {

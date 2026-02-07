@@ -118,79 +118,7 @@
       <!-- Volume and controls -->
       <div class="volume-and-controls">
         <!-- Left: Keyboard shortcuts info -->
-        <div class="keyboard-shortcuts-info">
-          <button class="audio-control-btn info-btn" :title="$t('audioPlayer.keyboardShortcuts')">
-            <svg width="32" height="24" viewBox="0 0 48 36" fill="currentColor">
-              <!-- Row 1: 1234 -->
-              <!-- 1: Filled -->
-              <circle cx="9" cy="8" r="2.5" fill="currentColor"/>
-              <!-- 2: Filled -->
-              <circle cx="19" cy="8" r="2.5" fill="currentColor"/>
-              <!-- 3: Filled -->
-              <circle cx="29" cy="8" r="2.5" fill="currentColor"/>
-              <!-- 4: Hollow -->
-              <circle cx="39" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
-
-              <!-- Row 2: 5678 -->
-              <!-- 5: Hollow -->
-              <circle cx="9" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
-              <!-- 6: Hollow -->
-              <circle cx="19" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
-              <!-- 7: Hollow -->
-              <circle cx="29" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
-              <!-- 8: Filled -->
-              <circle cx="39" cy="18" r="2.5" fill="currentColor"/>
-
-              <!-- Row 3: 9abc -->
-              <!-- 9: Hollow -->
-              <circle cx="9" cy="28" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
-              <!-- a: Hollow -->
-              <circle cx="19" cy="28" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
-              <!-- b: Hollow -->
-              <circle cx="29" cy="28" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
-              <!-- c: Filled -->
-              <circle cx="39" cy="28" r="2.5" fill="currentColor"/>
-            </svg>
-          </button>
-          <div class="shortcuts-tooltip">
-            <div class="shortcuts-title">{{ $t('audioPlayer.audioControlShortcuts') }}</div>
-            <div class="shortcuts-section">
-              <!-- <div class="shortcuts-section-title">{{ $t('audioPlayer.generalEditMode') }}</div> -->
-              <div class="shortcut-item">
-                <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>Space</kbd>
-                <span>{{ $t('audioPlayer.playPause') }}</span>
-              </div>
-              <div class="shortcut-item">
-                <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>←</kbd>
-                <span>{{ $t('audioPlayer.rewind10sShortcut') }}</span>
-              </div>
-              <div class="shortcut-item">
-                <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>→</kbd>
-                <span>{{ $t('audioPlayer.fastForward10sShortcut') }}</span>
-              </div>
-              <div class="shortcut-item">
-                <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>↑</kbd>
-                <span>{{ $t('audioPlayer.speedUp') }}</span>
-              </div>
-              <div class="shortcut-item">
-                <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>↓</kbd>
-                <span>{{ $t('audioPlayer.speedDown') }}</span>
-              </div>
-              <div class="shortcut-item">
-                <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>,</kbd>
-                <span>{{ $t('audioPlayer.rewind5s') }}</span>
-              </div>
-              <div class="shortcut-item">
-                <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>.</kbd>
-                <span>{{ $t('audioPlayer.fastForward5s') }}</span>
-              </div>
-              <div class="shortcut-item">
-                <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>M</kbd>
-                <span>{{ $t('audioPlayer.toggleMute') }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
+        <KeyboardShortcutsInfo class="info-btn-wrapper" pop-direction="pop-up" />
 
         <!-- Middle: Volume control -->
         <div class="volume-control-center">
@@ -218,22 +146,12 @@
         </div>
 
         <!-- Right: Playback speed -->
-        <div class="speed-control">
-          <button class="audio-control-btn speed-btn" :title="$t('audioPlayer.playbackSpeed', { rate: playbackRate })">
-            <span class="speed-label">{{ playbackRate }}x</span>
-          </button>
-          <div class="speed-dropdown">
-            <button
-              v-for="rate in [0.5, 0.75, 1, 1.25, 1.5, 2]"
-              :key="rate"
-              class="speed-option"
-              :class="{ active: playbackRate === rate }"
-              @click="$emit('set-playback-rate', rate)"
-            >
-              {{ rate }}x
-            </button>
-          </div>
-        </div>
+        <PlaybackSpeedControl
+          class="speed-btn-wrapper"
+          :playback-rate="playbackRate"
+          pop-direction="pop-up"
+          @set-playback-rate="$emit('set-playback-rate', $event)"
+        />
       </div>
     </div>
   </div>
@@ -243,6 +161,8 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { modifierKeyLabel } from '../../utils/platform'
+import KeyboardShortcutsInfo from './KeyboardShortcutsInfo.vue'
+import PlaybackSpeedControl from './PlaybackSpeedControl.vue'
 
 const { t: $t } = useI18n()
 
@@ -682,103 +602,17 @@ defineExpose({
   opacity: 0.6;
 }
 
-/* Keyboard shortcuts info */
-.keyboard-shortcuts-info {
+/* Keyboard shortcuts info wrapper */
+.info-btn-wrapper {
   position: absolute;
   top: 10px;
   right: 10px;
   z-index: 100;
 }
 
-.info-btn {
+.info-btn-wrapper :deep(.shortcuts-trigger-btn) {
   width: 40px;
   height: 20px;
-  margin-right: 30px;
-  margin-top: -3px;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-.info-btn:hover {
-  background: var(--main-bg) !important;
-}
-
-.shortcuts-tooltip {
-  position: absolute;
-  bottom: 100%;
-  right: 0;
-  margin-bottom: 8px;
-  background: var(--main-bg);
-  border-radius: 12px;
-  padding: 12px;
-  display: none;
-  flex-direction: column;
-  gap: 8px;
-  z-index: 99999 !important;
-  min-width: 220px;
-  white-space: nowrap;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.shortcuts-tooltip::after {
-  content: '';
-  position: absolute;
-  top: 100%;
-  right: 20px;
-  border: 6px solid transparent;
-  border-top-color: var(--main-bg);
-}
-
-.keyboard-shortcuts-info:hover .shortcuts-tooltip,
-.shortcuts-tooltip:hover {
-  display: flex;
-}
-
-.shortcuts-title {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--main-text);
-  margin-bottom: 4px;
-}
-
-.shortcuts-section {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.shortcuts-section-title {
-  font-size: 0.7rem;
-  font-weight: 600;
-  color: var(--main-text-light);
-  margin-top: 4px;
-  margin-bottom: 2px;
-}
-
-.shortcut-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 0.75rem;
-  color: var(--main-text);
-}
-
-.shortcut-item kbd {
-  background: var(--main-bg);
-  padding: 3px 6px;
-  border-radius: 6px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  font-family: monospace;
-  color: var(--main-primary);
-  min-width: 28px;
-  text-align: center;
-}
-
-.shortcut-item span {
-  flex: 1;
-  color: var(--main-text);
-  font-size: 0.75rem;
 }
 
 /* Control buttons */
@@ -837,83 +671,10 @@ defineExpose({
   right: 9px;
 }
 
-/* Speed control */
-.speed-control {
-  position: relative;
-}
-
-.speed-btn {
+/* Playback speed wrapper */
+.speed-btn-wrapper :deep(.speed-trigger-btn) {
   width: 54px;
   height: 25px;
-  border-radius: 12px;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-.speed-btn:hover {
-  background: var(--main-bg) !important;
-}
-
-.speed-label {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--main-text);
-}
-
-.speed-dropdown {
-  position: absolute;
-  bottom: 100%;
-  right: 0;
-  margin-bottom: 8px;
-  background: rgba(236, 240, 243, 0.75) !important;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1),
-              0 0 0 1px rgba(255, 255, 255, 0.2) inset !important;
-  border-radius: 12px;
-  padding: 4px;
-  display: none;
-  flex-direction: column;
-  gap: 4px;
-  z-index: 1000;
-  min-width: 70px;
-}
-
-.speed-dropdown::after {
-  content: '';
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  height: 12px;
-}
-
-.speed-control:hover .speed-dropdown,
-.speed-dropdown:hover {
-  display: flex;
-}
-
-.speed-option {
-  background: transparent;
-  box-shadow: none;
-  border: none;
-  padding: 6px 0px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--main-text);
-  transition: all 0.2s ease;
-  text-align: center;
-}
-
-.speed-option:hover {
-  background: rgba(163, 177, 198, 0.15);
-  color: var(--main-primary);
-}
-
-.speed-option.active {
-  background: rgba(163, 177, 198, 0.2);
-  color: var(--main-primary);
-  font-weight: 700;
 }
 
 /* === 手機版：簡化橫向播放器 === */
@@ -968,7 +729,7 @@ defineExpose({
 
   .circular-progress-container,
   .decorative-element,
-  .keyboard-shortcuts-info {
+  .info-btn-wrapper {
     display: none !important;
   }
 
@@ -1048,21 +809,21 @@ defineExpose({
     width: 60px;
   }
 
-  .speed-control {
+  .speed-btn-wrapper {
     order: 4;
   }
 
-  .speed-btn {
+  .speed-btn-wrapper :deep(.speed-trigger-btn) {
     width: 40px;
     height: 24px;
     border-radius: 8px;
   }
 
-  .speed-label {
+  .speed-btn-wrapper :deep(.speed-label) {
     font-size: 0.75rem;
   }
 
-  .speed-dropdown {
+  .speed-btn-wrapper :deep(.speed-dropdown) {
     bottom: auto;
     top: auto;
     right: 0;
