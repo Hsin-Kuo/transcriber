@@ -26,13 +26,10 @@ class ActionItem(BaseModel):
 class SummaryContent(BaseModel):
     """摘要內容"""
     meta: SummaryMeta = Field(default_factory=SummaryMeta, description="元資訊")
-    summary: str = Field("", description="執行摘要 (200 字以內)")
+    summary: str = Field("", description="摘要 (200 字以內)")
     key_points: List[str] = Field(default_factory=list, description="條列式重點 (3-5 點)")
     segments: List[SummarySegment] = Field(default_factory=list, description="邏輯分段")
     action_items: List[ActionItem] = Field(default_factory=list, description="待辦事項")
-    # 保留舊欄位以保持向後兼容
-    highlights: List[str] = Field(default_factory=list, description="重點列表 (已棄用，使用 key_points)")
-    keywords: List[str] = Field(default_factory=list, description="關鍵詞 (已棄用，從 segments 取得)")
 
 
 class SummaryMetadata(BaseModel):

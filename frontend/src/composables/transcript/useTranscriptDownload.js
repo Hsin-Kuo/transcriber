@@ -223,7 +223,7 @@ export function useTranscriptDownload() {
       }
     }
 
-    // 執行摘要
+    // 摘要
     if (summaryContent.summary) {
       content.push({
         text: t('aiSummary.executiveSummary'),

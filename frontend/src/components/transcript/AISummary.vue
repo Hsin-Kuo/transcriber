@@ -78,7 +78,7 @@
           </h3>
         </div>
 
-        <!-- 執行摘要 -->
+        <!-- 摘要 -->
         <div v-if="summary.content.summary" class="section summary-section">
           <h4 class="section-title">{{ $t('aiSummary.executiveSummary') }}</h4>
           <p class="summary-text">{{ summary.content.summary }}</p>
@@ -261,7 +261,7 @@ async function copySummaryText() {
     lines.push('')
   }
 
-  // 執行摘要
+  // 摘要
   if (content.summary) {
     lines.push(`【${$t('aiSummary.executiveSummary')}】`)
     lines.push(content.summary)
@@ -639,7 +639,7 @@ onMounted(() => {
   margin: 0;
 }
 
-/* 執行摘要 */
+/* 摘要 */
 .summary-text {
   font-size: 13px;
   line-height: 1.7;

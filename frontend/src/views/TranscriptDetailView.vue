@@ -49,7 +49,8 @@
     />
 
     <!-- 雙欄佈局 -->
-    <div class="transcript-layout">
+    <div class="transcript-layout"
+         :style="{ '--left-panel-width': isEffectivelyCollapsed ? '52px' : '280px' }">
       <!-- 移動端底部抽屜切換按鈕 -->
       <button
         class="mobile-drawer-toggle"
@@ -70,32 +71,211 @@
       ></div>
 
       <!-- 左側控制面板 / 移動端底部抽屜 -->
-      <div class="left-panel card" :class="{ 'drawer-open': isMobileDrawerOpen }">
-        <!-- 任務資訊卡片 -->
-        <TaskInfoCard
-          :task-id="currentTranscript.task_id"
-          :updated-at="currentTranscript.updated_at"
-          :content="currentTranscript.content"
-          :tags="currentTranscript.tags"
-          :all-tags="allTags"
-          @tags-updated="handleTagsUpdated"
-        />
+      <div class="left-panel card" :class="{ 'drawer-open': isMobileDrawerOpen, 'collapsed': isEffectivelyCollapsed }">
 
-        <!-- 顯示設定卡片 -->
-        <DisplaySettingsCard
-          :display-mode="displayMode"
-          v-model:show-timecode-markers="showTimecodeMarkers"
-          v-model:time-format="timeFormat"
-          v-model:is-dark-mode="isDarkMode"
-          v-model:font-size="contentFontSize"
-          v-model:font-weight="contentFontWeight"
-          v-model:font-family="contentFontFamily"
-          v-model:density-threshold="densityThreshold"
-        />
+        <!-- A) 展開狀態：完整面板 -->
+        <template v-if="!isEffectivelyCollapsed">
+          <!-- 收合按鈕 -->
+          <button class="panel-collapse-btn" @click="isLeftPanelCollapsed = true" title="收合面板">
+            <span>−</span>
+          </button>
 
-        <!-- 音訊播放器組件（桌面版在抽屜內） -->
+          <!-- 任務資訊卡片 -->
+          <TaskInfoCard
+            :task-id="currentTranscript.task_id"
+            :updated-at="currentTranscript.updated_at"
+            :content="currentTranscript.content"
+            :tags="currentTranscript.tags"
+            :all-tags="allTags"
+            @tags-updated="handleTagsUpdated"
+          />
+
+          <!-- 顯示設定卡片 -->
+          <DisplaySettingsCard
+            :display-mode="displayMode"
+            v-model:show-timecode-markers="showTimecodeMarkers"
+            v-model:time-format="timeFormat"
+            v-model:is-dark-mode="isDarkMode"
+            v-model:font-size="contentFontSize"
+            v-model:font-weight="contentFontWeight"
+            v-model:font-family="contentFontFamily"
+            v-model:density-threshold="densityThreshold"
+          />
+        </template>
+
+        <!-- B) 收合狀態：精簡側邊欄 -->
+        <div v-else class="collapsed-sidebar">
+          <!-- 展開按鈕 -->
+          <button class="panel-expand-btn" @click="isLeftPanelCollapsed = false" title="展開面板">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <!-- 左上直角 -->
+              <polyline points="5,1 1,1 1,5" />
+              <!-- 右下直角 -->
+              <polyline points="9,13 13,13 13,9" />
+            </svg>
+          </button>
+
+          <!-- 字體切換 (sans-serif / serif) -->
+          <div class="collapsed-font-toggle">
+            <button
+              class="collapsed-font-btn"
+              :class="{ active: contentFontFamily === 'sans-serif' }"
+              @click="contentFontFamily = 'sans-serif'"
+              title="Sans-serif"
+            >
+              <span style="font-family: -apple-system, sans-serif; font-size: 11px;">Aa</span>
+            </button>
+            <button
+              class="collapsed-font-btn"
+              :class="{ active: contentFontFamily === 'serif' }"
+              @click="contentFontFamily = 'serif'"
+              title="Serif"
+            >
+              <span style="font-family: Georgia, serif; font-size: 11px;">Aa</span>
+            </button>
+          </div>
+
+          <!-- 時間碼/時間格式旋鈕 -->
+          <div class="collapsed-knob-wrapper">
+            <label v-if="displayMode === 'paragraph'" class="knob" :class="{ active: showTimecodeMarkers }" title="時間標記">
+              <input type="checkbox" :checked="showTimecodeMarkers" @change="showTimecodeMarkers = $event.target.checked" />
+              <span class="knob-indicator"></span>
+            </label>
+            <label v-else class="knob" :class="{ active: timeFormat === 'range' }" title="時間格式">
+              <input type="checkbox" :checked="timeFormat === 'range'" @change="timeFormat = $event.target.checked ? 'range' : 'start'" />
+              <span class="knob-indicator"></span>
+            </label>
+          </div>
+
+          <!-- 深色/淺色模式旋鈕 -->
+          <div class="collapsed-knob-wrapper">
+            <label class="knob" :class="{ active: isDarkMode }" title="深色模式">
+              <input type="checkbox" :checked="isDarkMode" @change="isDarkMode = $event.target.checked" />
+              <span class="knob-indicator"></span>
+            </label>
+          </div>
+
+          <!-- 垂直滑桿：字體大小 + 字體粗細 -->
+          <div class="collapsed-sliders-container">
+            <div class="collapsed-slider-wrapper">
+              <input
+                type="range"
+                class="collapsed-vertical-slider"
+                min="12"
+                max="24"
+                step="1"
+                :value="contentFontSize"
+                @input="contentFontSize = Number($event.target.value)"
+                title="字體大小"
+              />
+            </div>
+            <div class="collapsed-slider-wrapper">
+              <input
+                type="range"
+                class="collapsed-vertical-slider"
+                min="300"
+                max="700"
+                step="100"
+                :value="contentFontWeight"
+                @input="contentFontWeight = Number($event.target.value)"
+                title="字體粗細"
+              />
+            </div>
+          </div>
+
+          <!-- 數位顯示面板 -->
+          <div class="collapsed-display-panel">
+            <span class="display-row">{{ contentFontSize }}px</span>
+            <span class="display-row">{{ contentFontWeight }}</span>
+          </div>
+
+          <!-- 音訊控制區域 -->
+          <template v-if="hasAudio">
+            <div class="collapsed-divider"></div>
+
+            <!-- 音訊控制群組（緊湊間距） -->
+            <div class="collapsed-audio-controls">
+              <!-- 鍵盤快捷鍵按鈕 + tooltip -->
+              <div class="collapsed-shortcuts-info">
+                <button class="collapsed-icon-btn" title="鍵盤快捷鍵">
+                  <svg width="22" height="16" viewBox="0 0 48 36" fill="currentColor">
+                    <circle cx="9" cy="8" r="2.5" fill="currentColor"/>
+                    <circle cx="19" cy="8" r="2.5" fill="currentColor"/>
+                    <circle cx="29" cy="8" r="2.5" fill="currentColor"/>
+                    <circle cx="39" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
+                    <circle cx="9" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
+                    <circle cx="19" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
+                    <circle cx="29" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
+                    <circle cx="39" cy="18" r="2.5" fill="currentColor"/>
+                    <circle cx="9" cy="28" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
+                    <circle cx="19" cy="28" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
+                    <circle cx="29" cy="28" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
+                    <circle cx="39" cy="28" r="2.5" fill="currentColor"/>
+                  </svg>
+                </button>
+                <div class="collapsed-shortcuts-tooltip">
+                  <div class="shortcuts-title">{{ $t('audioPlayer.audioControlShortcuts') }}</div>
+                  <div class="shortcuts-section">
+                    <div class="shortcut-item"><kbd>{{ isMac ? '⌘' : 'Ctrl' }}</kbd> + <kbd>Space</kbd> <span>{{ $t('audioPlayer.playPause') }}</span></div>
+                    <div class="shortcut-item"><kbd>{{ isMac ? '⌘' : 'Ctrl' }}</kbd> + <kbd>←</kbd> <span>{{ $t('audioPlayer.rewind10sShortcut') }}</span></div>
+                    <div class="shortcut-item"><kbd>{{ isMac ? '⌘' : 'Ctrl' }}</kbd> + <kbd>→</kbd> <span>{{ $t('audioPlayer.fastForward10sShortcut') }}</span></div>
+                    <div class="shortcut-item"><kbd>{{ isMac ? '⌘' : 'Ctrl' }}</kbd> + <kbd>↑</kbd> <span>{{ $t('audioPlayer.speedUp') }}</span></div>
+                    <div class="shortcut-item"><kbd>{{ isMac ? '⌘' : 'Ctrl' }}</kbd> + <kbd>↓</kbd> <span>{{ $t('audioPlayer.speedDown') }}</span></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 播放/暫停按鈕 -->
+              <button class="collapsed-icon-btn" @click="togglePlayPause" :title="isPlaying ? $t('audioPlayer.pause') : $t('audioPlayer.play')">
+                <svg v-if="!isPlaying" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M8 5v14l11-7z"/>
+                </svg>
+                <svg v-else width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+                </svg>
+              </button>
+
+              <!-- 倒退 10s -->
+              <button class="collapsed-icon-btn" @click="skipBackward" :title="$t('audioPlayer.rewind10s')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                  <path d="M3 3v5h5"/>
+                </svg>
+              </button>
+
+              <!-- 快進 10s -->
+              <button class="collapsed-icon-btn" @click="skipForward" :title="$t('audioPlayer.fastForward10s')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
+                  <path d="M21 3v5h-5"/>
+                </svg>
+              </button>
+
+              <!-- 播放速度選擇器 -->
+              <div class="collapsed-speed-control">
+              <button class="collapsed-icon-btn collapsed-speed-btn" @click="showCollapsedSpeedDropdown = !showCollapsedSpeedDropdown" :title="$t('audioPlayer.playbackSpeed', { rate: playbackRate })">
+                <span class="collapsed-speed-label">{{ playbackRate }}x</span>
+              </button>
+              <div v-if="showCollapsedSpeedDropdown" class="collapsed-speed-dropdown">
+                <button
+                  v-for="rate in [0.5, 0.75, 1, 1.25, 1.5, 2]"
+                  :key="rate"
+                  class="collapsed-speed-option"
+                  :class="{ active: playbackRate === rate }"
+                  @click="setPlaybackRate(rate); showCollapsedSpeedDropdown = false"
+                >
+                  {{ rate }}x
+                </button>
+              </div>
+            </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- C) AudioPlayer 始終掛載，收合時隱藏（保持 audio element 活躍） -->
         <AudioPlayer
           v-if="currentTranscript.hasAudio"
+          v-show="!isEffectivelyCollapsed"
           ref="audioPlayerRef"
           class="desktop-audio-player"
           :audio-url="audioUrl"
@@ -344,6 +524,13 @@ const headerRef = ref(null)
 // 移動端底部抽屜狀態
 const isMobileDrawerOpen = ref(false)
 
+// 是否為移動端（用於保護收合功能不影響移動端）
+const isMobileView = ref(window.innerWidth <= 768)
+const handleResize = () => { isMobileView.value = window.innerWidth <= 768 }
+
+// 面板是否實際處於收合狀態（移動端永遠展開）
+const isEffectivelyCollapsed = computed(() => isLeftPanelCollapsed.value && !isMobileView.value)
+
 // ========== 數據管理 ==========
 const {
   currentTranscript,
@@ -493,6 +680,12 @@ const isDarkMode = ref(document.documentElement.getAttribute('data-theme') === '
 const contentFontSize = ref(16)
 const contentFontWeight = ref(400)
 const contentFontFamily = ref('sans-serif')
+
+// 左側面板收合狀態
+const isLeftPanelCollapsed = ref(false)
+
+// 播放速率下拉選單狀態（收合模式用）
+const showCollapsedSpeedDropdown = ref(false)
 
 // 監聽暗色模式變化，切換全局主題
 watch(isDarkMode, (dark) => {
@@ -961,7 +1154,7 @@ function formatSummaryAsText(summary) {
     lines.push('')
   }
 
-  // 執行摘要
+  // 摘要
   if (content.summary) {
     lines.push(`【${$t('aiSummary.executiveSummary')}】`)
     lines.push(content.summary)
@@ -2293,6 +2486,7 @@ onMounted(() => {
   window.addEventListener('keydown', handleKeyDown)
   window.addEventListener('keyup', handleKeyUp)
   window.addEventListener('blur', handleBlur)
+  window.addEventListener('resize', handleResize)
 
   loadTranscript(route.params.taskId)
   loadAllTags()
@@ -2334,6 +2528,7 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown)
   window.removeEventListener('keyup', handleKeyUp)
   window.removeEventListener('blur', handleBlur)
+  window.removeEventListener('resize', handleResize)
 
   document.body.classList.remove('editing-transcript')
   document.body.classList.remove('transcript-detail-page')
@@ -2400,13 +2595,14 @@ watch(displayMode, () => {
 /* 雙欄佈局 */
 .transcript-layout {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: var(--left-panel-width, 280px) 1fr;
   gap: 20px;
   height: calc(100vh - var(--header-height) - 20px);
   align-items: start;
   max-width: 1400px;
   margin: 0 auto;
   padding: 0 20px 20px;
+  transition: grid-template-columns 0.3s ease;
 }
 
 /* 左側控制面板 */
@@ -2696,6 +2892,388 @@ watch(displayMode, () => {
   border-top-color: rgba(0, 0, 0, 0.85);
 }
 
+/* === 面板收合按鈕 === */
+.panel-collapse-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: rgba(var(--color-text-dark-rgb, 0, 0, 0), 0.08);
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 300;
+  line-height: 1;
+  color: var(--nav-text);
+  opacity: 0.5;
+  transition: opacity 0.2s, background 0.2s;
+  z-index: 2;
+}
+
+.panel-collapse-btn:hover {
+  opacity: 1;
+  background: rgba(var(--color-text-dark-rgb, 0, 0, 0), 0.15);
+}
+
+.panel-expand-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: rgba(var(--color-text-dark-rgb, 0, 0, 0), 0.08);
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 300;
+  line-height: 1;
+  color: var(--nav-text);
+  transition: background 0.2s;
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+
+.panel-expand-btn:hover {
+  background: rgba(var(--color-text-dark-rgb, 0, 0, 0), 0.15);
+  opacity: 1;
+}
+
+/* === 收合面板 === */
+.left-panel.collapsed {
+  width: 52px;
+  padding: 8px 4px;
+  align-items: center;
+  overflow-x: visible;
+  overflow-y: auto;
+}
+
+.collapsed-sidebar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+/* 收合字體切換 */
+.collapsed-font-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+}
+
+.collapsed-font-btn {
+  width: 100%;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(var(--color-text-dark-rgb, 0, 0, 0), 0.4);
+  transition: all 0.2s;
+}
+
+.collapsed-font-btn.active {
+  background: rgba(var(--color-text-dark-rgb, 0, 0, 0), 0.08);
+  color: var(--color-text-dark);
+}
+
+.collapsed-font-btn:hover {
+  color: rgba(var(--color-text-dark-rgb, 0, 0, 0), 0.7);
+}
+
+/* 收合旋鈕 */
+.collapsed-knob-wrapper {
+  display: flex;
+  justify-content: center;
+}
+
+@import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+
+/* Knob Switch (copied from DisplaySettingsCard scoped styles) */
+.knob {
+  position: relative;
+  display: inline-block;
+  width: 32px;
+  height: 32px;
+  background: #dedede;
+  border: 0.5px solid;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.knob input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.knob-indicator {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 14px;
+  background-color: var(--nav-active-bg);
+  border-radius: 1px;
+  transform-origin: center bottom;
+  transform: translate(-50%, -100%) rotate(230deg);
+  transition: transform 0.3s ease, background-color 0.3s ease;
+}
+
+.knob.active {
+  background: var(--nav-active-bg);
+}
+
+.knob.active .knob-indicator {
+  background-color: white;
+  transform: translate(-50%, -100%) rotate(130deg);
+}
+
+.knob:hover {
+  box-shadow: 0 0 0 3px rgba(var(--main-primary-rgb, 59, 130, 246), 0.2);
+}
+
+/* 收合垂直滑桿 */
+.collapsed-sliders-container {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  padding: 4px 0;
+}
+
+.collapsed-slider-wrapper {
+  height: 90px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.collapsed-vertical-slider {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 14px;
+  height: 88px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  outline: none;
+}
+
+.collapsed-vertical-slider::-webkit-slider-runnable-track {
+  width: 3px;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 2px;
+  border: 0.5px solid #999;
+}
+
+.collapsed-vertical-slider::-moz-range-track {
+  width: 3px;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 2px;
+}
+
+.collapsed-vertical-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 7px;
+  margin-left: -6px;
+  background: var(--nav-bg);
+  border-right: 1.5px solid var(--nav-active-bg);
+  border-left: 1.5px solid var(--nav-active-bg);
+  border-radius: 10%;
+  cursor: pointer;
+}
+
+.collapsed-vertical-slider::-moz-range-thumb {
+  width: 14px;
+  height: 7px;
+  background: var(--main-primary);
+  border-radius: 10%;
+  cursor: pointer;
+  border: none;
+}
+
+/* 收合數位顯示面板 */
+.collapsed-display-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: 'VT323', monospace;
+  font-size: 12px;
+  color: #ffffff;
+  background: #101010;
+  padding: 2px 6px;
+  border-radius: 3px;
+  min-width: 40px;
+  text-align: right;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.6);
+  border: 1px solid #222;
+  letter-spacing: 1px;
+}
+
+.collapsed-display-panel .display-row {
+  line-height: 1.3;
+}
+
+/* 收合分隔線 */
+.collapsed-divider {
+  width: 28px;
+  height: 1px;
+  background: rgba(var(--color-text-dark-rgb, 0, 0, 0), 0.12);
+  margin: 4px 0;
+}
+
+/* 收合音訊控制群組 */
+.collapsed-audio-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+/* 收合圖標按鈕 */
+.collapsed-icon-btn {
+  width: 36px;
+  height: 30px;
+  border: none;
+  border-radius: 15%;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--nav-text);
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.collapsed-icon-btn:hover {
+  background: rgba(var(--color-text-dark-rgb, 0, 0, 0), 0.08);
+}
+
+/* 收合鍵盤快捷鍵 */
+.collapsed-shortcuts-info {
+  position: relative;
+}
+
+.collapsed-shortcuts-tooltip {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-left: 8px;
+  background: rgba(0, 0, 0, 0.9);
+  color: white;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 12px;
+  white-space: nowrap;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.collapsed-shortcuts-info:hover .collapsed-shortcuts-tooltip {
+  display: block;
+}
+
+.collapsed-shortcuts-tooltip .shortcuts-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.collapsed-shortcuts-tooltip .shortcut-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+}
+
+.collapsed-shortcuts-tooltip kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  font-size: 11px;
+  font-family: monospace;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.collapsed-shortcuts-tooltip .shortcut-item span {
+  margin-left: 8px;
+  opacity: 0.8;
+}
+
+/* 收合播放速度 */
+.collapsed-speed-control {
+  position: relative;
+}
+
+.collapsed-speed-btn {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.collapsed-speed-label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.collapsed-speed-dropdown {
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-left: 8px;
+  background: var(--nav-bg, #fff);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  padding: 4px;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.collapsed-speed-option {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+  color: var(--nav-text);
+  transition: background 0.15s;
+}
+
+.collapsed-speed-option:hover {
+  background: rgba(var(--color-text-dark-rgb, 0, 0, 0), 0.06);
+}
+
+.collapsed-speed-option.active {
+  background: var(--nav-active-bg);
+  color: white;
+}
+
 /* === 音訊播放器顯示控制 === */
 
 /* 手機版播放器：桌面隱藏 */
@@ -2828,6 +3406,19 @@ watch(displayMode, () => {
   /* 顯示手機版播放器 */
   .mobile-audio-player {
     display: block;
+  }
+
+  /* 移動端：隱藏收合按鈕和收合側邊欄 */
+  .panel-collapse-btn,
+  .collapsed-sidebar {
+    display: none !important;
+  }
+
+  /* 移動端：重設收合面板樣式 */
+  .left-panel.collapsed {
+    width: auto;
+    padding: 20px 16px;
+    align-items: stretch;
   }
 }
 

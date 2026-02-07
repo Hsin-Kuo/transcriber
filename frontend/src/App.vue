@@ -139,7 +139,8 @@ body.transcript-detail-page .content-wrapper {
 }
 
 @media (max-width: 768px) {
-  .app-container {
+  .app-container,
+  body.nav-collapsed .app-container {
     flex-direction: column;
     padding: 0 12px;
     padding-left: 12px;
@@ -154,7 +155,8 @@ body.transcript-detail-page .content-wrapper {
 }
 
 @media (max-width: 480px) {
-  .app-container {
+  .app-container,
+  body.nav-collapsed .app-container {
     padding: 0 8px;
     padding-left: 8px;
     padding-bottom: calc(52px + env(safe-area-inset-bottom, 0px));
