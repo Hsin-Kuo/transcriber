@@ -14,6 +14,7 @@
         <span class="label-item">{{ $t('userSettings.language') }}</span>
         <span class="label-item">{{ $t('userSettings.timezone') }}</span>
         <span class="label-item">{{ $t('userSettings.theme') }}</span>
+        <span class="label-item">AI Summary</span>
         <span class="label-item">{{ $t('userSettings.tasks') }}</span>
         <span class="label-bar"></span>
         <span class="label-item">{{ $t('userSettings.duration') }}</span>
@@ -58,6 +59,11 @@
               <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
             </svg>
           </span>
+        </div>
+
+        <!-- AI Summary 展開模式 -->
+        <div class="display-row">
+          <span class="display-value">{{ currentSummaryExpandLabel }}</span>
         </div>
 
         <!-- 轉錄次數 -->
@@ -214,6 +220,42 @@
             <svg class="theme-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
             </svg>
+          </div>
+        </div>
+
+        <!-- AI 摘要展開 -->
+        <div class="setting-item">
+          <span class="setting-label">{{ $t('userSettings.summaryExpand') }}</span>
+          <div class="custom-select" :class="{ open: summaryExpandDropdownOpen }">
+            <div class="select-trigger" @click="toggleSummaryExpandDropdown">
+              <span>{{ currentSummaryExpandLabel }}</span>
+              <svg class="select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+            <div class="select-dropdown">
+              <div
+                class="select-option"
+                :class="{ active: summaryExpandMode === 'always-open' }"
+                @click="selectSummaryExpandMode('always-open')"
+              >
+                {{ $t('userSettings.summaryAlwaysOpen') }}
+              </div>
+              <div
+                class="select-option"
+                :class="{ active: summaryExpandMode === 'always-collapsed' }"
+                @click="selectSummaryExpandMode('always-collapsed')"
+              >
+                {{ $t('userSettings.summaryAlwaysCollapsed') }}
+              </div>
+              <div
+                class="select-option"
+                :class="{ active: summaryExpandMode === 'follow-last' }"
+                @click="selectSummaryExpandMode('follow-last')"
+              >
+                {{ $t('userSettings.summaryFollowLast') }}
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -396,6 +438,7 @@ import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useI18n } from 'vue-i18n'
 import api from '../utils/api'
+import { detectTimezone, detectTheme } from '../utils/defaults'
 import GoogleSignInButton from '../components/GoogleSignInButton.vue'
 
 const authStore = useAuthStore()
@@ -471,8 +514,8 @@ const availableLanguages = [
   { code: 'en', name: 'English' }
 ]
 
-// 當前語言
-const currentLanguage = ref(locale.value)
+// 當前語言（優先 authStore → fallback localStorage/i18n → 預設值）
+const currentLanguage = ref(authStore.preferences.language || locale.value)
 
 // 可用時區列表
 const availableTimezones = [
@@ -485,11 +528,17 @@ const availableTimezones = [
   { code: 'Europe/London', name: 'UTC+0 倫敦' }
 ]
 
-// 當前時區
-const currentTimezone = ref(localStorage.getItem('timezone') || 'Asia/Taipei')
+// 當前時區（優先 authStore → fallback localStorage → 偵測系統時區）
+const currentTimezone = ref(authStore.preferences.timezone || localStorage.getItem('timezone') || detectTimezone())
 
-// 當前色調
-const currentTheme = ref(localStorage.getItem('theme') || 'light')
+// 當前色調（優先 authStore → fallback localStorage → 偵測 OS 深色模式）
+const currentTheme = ref(authStore.preferences.theme || localStorage.getItem('theme') || detectTheme())
+
+// AI 摘要展開模式（優先 authStore → fallback localStorage → 預設值）
+const summaryExpandMode = ref(
+  authStore.preferences.summaryExpandMode || localStorage.getItem('summaryExpandMode') || 'follow-last'
+)
+const summaryExpandDropdownOpen = ref(false)
 
 // 下拉選單狀態
 const languageDropdownOpen = ref(false)
@@ -506,15 +555,39 @@ const currentTimezoneLabel = computed(() => {
   return tz ? tz.name : ''
 })
 
+const currentSummaryExpandLabel = computed(() => {
+  const labels = {
+    'always-open': $t('userSettings.summaryAlwaysOpen'),
+    'always-collapsed': $t('userSettings.summaryAlwaysCollapsed'),
+    'follow-last': $t('userSettings.summaryFollowLast')
+  }
+  return labels[summaryExpandMode.value] || labels['follow-last']
+})
+
 // 切換下拉選單
 function toggleLanguageDropdown() {
   languageDropdownOpen.value = !languageDropdownOpen.value
   timezoneDropdownOpen.value = false
+  summaryExpandDropdownOpen.value = false
 }
 
 function toggleTimezoneDropdown() {
   timezoneDropdownOpen.value = !timezoneDropdownOpen.value
   languageDropdownOpen.value = false
+  summaryExpandDropdownOpen.value = false
+}
+
+function toggleSummaryExpandDropdown() {
+  summaryExpandDropdownOpen.value = !summaryExpandDropdownOpen.value
+  languageDropdownOpen.value = false
+  timezoneDropdownOpen.value = false
+}
+
+async function selectSummaryExpandMode(mode) {
+  summaryExpandMode.value = mode
+  localStorage.setItem('summaryExpandMode', mode)
+  summaryExpandDropdownOpen.value = false
+  await authStore.updatePreferences({ summaryExpandMode: mode })
 }
 
 // 選擇選項
@@ -535,11 +608,54 @@ function handleClickOutside(event) {
   if (!event.target.closest('.custom-select')) {
     languageDropdownOpen.value = false
     timezoneDropdownOpen.value = false
+    summaryExpandDropdownOpen.value = false
   }
 }
 
+// 當 authStore preferences 更新時，同步本地 ref 和 localStorage
+watch(
+  () => authStore.preferences,
+  (prefs) => {
+    if (prefs.summaryExpandMode && prefs.summaryExpandMode !== summaryExpandMode.value) {
+      summaryExpandMode.value = prefs.summaryExpandMode
+      localStorage.setItem('summaryExpandMode', prefs.summaryExpandMode)
+    }
+    if (prefs.language && prefs.language !== currentLanguage.value) {
+      currentLanguage.value = prefs.language
+      locale.value = prefs.language
+      localStorage.setItem('locale', prefs.language)
+    }
+    if (prefs.timezone && prefs.timezone !== currentTimezone.value) {
+      currentTimezone.value = prefs.timezone
+      localStorage.setItem('timezone', prefs.timezone)
+    }
+    if (prefs.theme && prefs.theme !== currentTheme.value) {
+      currentTheme.value = prefs.theme
+      localStorage.setItem('theme', prefs.theme)
+      document.documentElement.setAttribute('data-theme', prefs.theme)
+    }
+  },
+  { deep: true }
+)
+
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
+
+  // 如果 localStorage 已有值但後端沒有，首次同步寫入後端
+  const prefs = authStore.preferences
+  const localSync = {}
+  const localMode = localStorage.getItem('summaryExpandMode')
+  if (localMode && !prefs.summaryExpandMode) localSync.summaryExpandMode = localMode
+  const localLang = localStorage.getItem('locale')
+  if (localLang && !prefs.language) localSync.language = localLang
+  const localTz = localStorage.getItem('timezone')
+  if (localTz && !prefs.timezone) localSync.timezone = localTz
+  const localTheme = localStorage.getItem('theme')
+  if (localTheme && !prefs.theme) localSync.theme = localTheme
+
+  if (Object.keys(localSync).length > 0) {
+    authStore.updatePreferences(localSync)
+  }
 })
 
 onUnmounted(() => {
@@ -553,17 +669,20 @@ const currentTier = computed(() => authStore.quota?.tier || 'free')
 function changeLanguage() {
   locale.value = currentLanguage.value
   localStorage.setItem('locale', currentLanguage.value)
+  authStore.updatePreferences({ language: currentLanguage.value })
 }
 
 // 切換時區
 function changeTimezone() {
   localStorage.setItem('timezone', currentTimezone.value)
+  authStore.updatePreferences({ timezone: currentTimezone.value })
 }
 
 // 切換色調
 function changeTheme() {
   localStorage.setItem('theme', currentTheme.value)
   document.documentElement.setAttribute('data-theme', currentTheme.value)
+  authStore.updatePreferences({ theme: currentTheme.value })
 }
 
 // 取得時區簡短顯示

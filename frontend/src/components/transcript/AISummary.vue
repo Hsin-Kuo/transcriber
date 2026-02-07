@@ -72,9 +72,6 @@
             <span class="type-badge" :class="getTypeClass(summary.content.meta.type)">
               {{ getTypeLabel(summary.content.meta.type) }}
             </span>
-            <span class="sentiment-badge" :class="getSentimentClass(summary.content.meta.sentiment)">
-              {{ getSentimentLabel(summary.content.meta.sentiment) }}
-            </span>
           </div>
           <h3 v-if="summary.content.meta.detected_topic" class="detected-topic">
             {{ summary.content.meta.detected_topic }}
@@ -183,8 +180,10 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { summaryService } from '../../api/services.js'
+import { useAuthStore } from '../../stores/auth'
 
 const { t: $t } = useI18n()
+const authStore = useAuthStore()
 
 // Props
 const props = defineProps({
@@ -201,8 +200,19 @@ const props = defineProps({
 // Emits
 const emit = defineEmits(['summary-updated'])
 
+// 根據偏好設定決定初始展開狀態（優先 authStore → fallback localStorage）
+function getInitialExpandedState() {
+  const mode = authStore.preferences.summaryExpandMode
+    || localStorage.getItem('summaryExpandMode')
+    || 'follow-last'
+  if (mode === 'always-open') return true
+  if (mode === 'always-collapsed') return false
+  // follow-last
+  return localStorage.getItem('summaryLastExpanded') === 'true'
+}
+
 // State
-const isExpanded = ref(false)
+const isExpanded = ref(getInitialExpandedState())
 const isLoading = ref(false)
 const error = ref(null)
 const summary = ref(null)
@@ -236,25 +246,6 @@ function getTypeLabel(type) {
     'General': $t('aiSummary.typeGeneral')
   }
   return labels[type] || $t('aiSummary.typeGeneral')
-}
-
-// 語氣標籤樣式
-function getSentimentClass(sentiment) {
-  const classes = {
-    'Positive': 'sentiment-positive',
-    'Neutral': 'sentiment-neutral',
-    'Negative': 'sentiment-negative'
-  }
-  return classes[sentiment] || 'sentiment-neutral'
-}
-
-function getSentimentLabel(sentiment) {
-  const labels = {
-    'Positive': $t('aiSummary.sentimentPositive'),
-    'Neutral': $t('aiSummary.sentimentNeutral'),
-    'Negative': $t('aiSummary.sentimentNegative')
-  }
-  return labels[sentiment] || $t('aiSummary.sentimentNeutral')
 }
 
 // 複製摘要為純文字
@@ -342,6 +333,7 @@ async function copySummaryText() {
 // 切換展開/收起
 function toggleExpanded() {
   isExpanded.value = !isExpanded.value
+  localStorage.setItem('summaryLastExpanded', String(isExpanded.value))
 
   // 展開時嘗試載入摘要（如果還沒載入過）
   if (isExpanded.value && !summary.value && !isLoading.value) {
@@ -408,6 +400,9 @@ watch(() => props.taskId, (newTaskId) => {
     summary.value = null
     error.value = null
     summaryStatus.value = props.initialSummaryStatus
+
+    // 根據設定重新決定展開狀態
+    isExpanded.value = getInitialExpandedState()
 
     // 如果已展開，載入摘要
     if (isExpanded.value) {
@@ -609,7 +604,7 @@ onMounted(() => {
   gap: 8px;
 }
 
-.type-badge, .sentiment-badge {
+.type-badge {
   font-size: 11px;
   padding: 3px 10px;
   border-radius: 12px;
@@ -620,10 +615,6 @@ onMounted(() => {
 .type-lecture { background: rgba(168, 85, 247, 0.15); color: #a855f7; }
 .type-interview { background: rgba(236, 72, 153, 0.15); color: #ec4899; }
 .type-general { background: rgba(107, 114, 128, 0.15); color: #6b7280; }
-
-.sentiment-positive { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
-.sentiment-neutral { background: rgba(107, 114, 128, 0.15); color: #6b7280; }
-.sentiment-negative { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
 
 .detected-topic {
   font-size: 16px;

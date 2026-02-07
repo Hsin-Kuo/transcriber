@@ -1,5 +1,5 @@
 """認證相關資料模型"""
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, validator
 from typing import Optional, List
 
 
@@ -38,6 +38,55 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=8, description="新密碼至少 8 個字元")
 
 
+class UserPreferences(BaseModel):
+    """用戶偏好設定"""
+    summaryExpandMode: str = "follow-last"
+    language: str = "zh-TW"
+    timezone: str = "Asia/Taipei"
+    theme: str = "light"
+
+
+VALID_SUMMARY_EXPAND_MODES = ('always-open', 'always-collapsed', 'follow-last')
+VALID_LANGUAGES = ('zh-TW', 'en')
+VALID_THEMES = ('light', 'dark')
+VALID_TIMEZONES = (
+    'Asia/Taipei', 'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Hong_Kong',
+    'America/New_York', 'America/Los_Angeles', 'Europe/London'
+)
+
+
+class UpdatePreferencesRequest(BaseModel):
+    """更新偏好設定請求"""
+    summaryExpandMode: Optional[str] = None
+    language: Optional[str] = None
+    timezone: Optional[str] = None
+    theme: Optional[str] = None
+
+    @validator('summaryExpandMode')
+    def validate_summary_expand_mode(cls, v):
+        if v is not None and v not in VALID_SUMMARY_EXPAND_MODES:
+            raise ValueError(f'summaryExpandMode 必須是 {", ".join(VALID_SUMMARY_EXPAND_MODES)} 之一')
+        return v
+
+    @validator('language')
+    def validate_language(cls, v):
+        if v is not None and v not in VALID_LANGUAGES:
+            raise ValueError(f'language 必須是 {", ".join(VALID_LANGUAGES)} 之一')
+        return v
+
+    @validator('timezone')
+    def validate_timezone(cls, v):
+        if v is not None and v not in VALID_TIMEZONES:
+            raise ValueError(f'timezone 必須是 {", ".join(VALID_TIMEZONES)} 之一')
+        return v
+
+    @validator('theme')
+    def validate_theme(cls, v):
+        if v is not None and v not in VALID_THEMES:
+            raise ValueError(f'theme 必須是 {", ".join(VALID_THEMES)} 之一')
+        return v
+
+
 class UserResponse(BaseModel):
     """用戶資訊響應"""
     id: str
@@ -48,6 +97,7 @@ class UserResponse(BaseModel):
     usage: dict
     created_at: int  # UTC Unix timestamp
     auth_providers: List[str] = []  # ["password", "google", "apple"]
+    preferences: dict = {}
 
     class Config:
         from_attributes = True

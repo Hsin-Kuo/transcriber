@@ -2544,12 +2544,12 @@ watch(displayMode, () => {
 
 /* Alt 鍵按下時的可點擊文字樣式 */
 .text-part.clickable {
-  background-color: rgba(196, 140, 226, 0.175);
+  background-color: rgba(229, 179, 133, 0.25);
   cursor: pointer;
 }
 
 .text-part.clickable:hover {
-  background-color: rgba(163, 177, 198, 0.25);
+  background-color: rgba(148, 171, 204, 0.3);
 }
 
 /* 搜尋高亮 */

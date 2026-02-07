@@ -35,7 +35,7 @@
         <circle cx="4" cy="14" r="1.5" fill="#f4ecd5"/>
         <circle cx="7" cy="7" r="1.5" fill="#f4ecd5"/>
       </svg>
-      <h2 v-if="!isCollapsed">SoundTh</h2>
+      <h2 v-if="!isCollapsed">Sound Lite</h2>
     </div>
 
     <div class="nav-links">

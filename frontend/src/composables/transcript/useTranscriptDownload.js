@@ -199,14 +199,11 @@ export function useTranscriptDownload() {
       margin: [0, 0, 0, 12]
     })
 
-    // Meta 資訊（類型、語氣）
+    // Meta 資訊（類型）
     if (summaryContent.meta) {
       const metaText = []
       if (summaryContent.meta.type) {
         metaText.push(`${t('aiSummary.type')}: ${summaryContent.meta.type}`)
-      }
-      if (summaryContent.meta.sentiment) {
-        metaText.push(`${t('aiSummary.sentiment')}: ${summaryContent.meta.sentiment}`)
       }
       if (metaText.length > 0) {
         content.push({

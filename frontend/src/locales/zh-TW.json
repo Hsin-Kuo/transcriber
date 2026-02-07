@@ -74,7 +74,11 @@
     "setPassword": "設定密碼",
     "setPasswordDescription": "設定密碼後，您可以使用 Email + 密碼登入。",
     "passwordSetSuccess": "密碼設定成功",
-    "setting": "設定中..."
+    "setting": "設定中...",
+    "summaryExpand": "AI 摘要展開",
+    "summaryAlwaysOpen": "總是展開",
+    "summaryAlwaysCollapsed": "總是收合",
+    "summaryFollowLast": "記住上次狀態"
   },
   "navigation": {
     "expandSidebar": "展開側欄",
@@ -453,7 +457,6 @@
     "keywords": "關鍵詞",
     "model": "模型",
     "type": "類型",
-    "sentiment": "語氣",
     "emptyHint": "點擊下方按鈕，讓 AI 為您生成逐字稿的重點摘要",
     "loadError": "載入摘要失敗，請稍後再試",
     "generateError": "生成摘要失敗，請稍後再試",
@@ -461,9 +464,6 @@
     "typeLecture": "講座",
     "typeInterview": "訪談",
     "typeGeneral": "一般",
-    "sentimentPositive": "正面",
-    "sentimentNeutral": "中性",
-    "sentimentNegative": "負面",
     "copySummary": "複製摘要",
     "copied": "已複製"
   }

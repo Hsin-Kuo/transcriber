@@ -59,12 +59,34 @@ class UserRepository:
         )
         return result.modified_count > 0
 
+    async def update_preferences(self, user_id: str, preferences: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """更新用戶偏好設定（merge 而非覆蓋）"""
+        set_fields = {
+            f"preferences.{key}": value
+            for key, value in preferences.items()
+            if value is not None
+        }
+        if not set_fields:
+            # 沒有要更新的欄位，直接回傳現有 preferences
+            user = await self.get_by_id(user_id)
+            return user.get("preferences", {}) if user else {}
+
+        set_fields["updated_at"] = get_utc_timestamp()
+        result = await self.collection.find_one_and_update(
+            {"_id": ObjectId(user_id)},
+            {"$set": set_fields},
+            return_document=True
+        )
+        return result.get("preferences", {}) if result else None
+
     async def update_quota(self, user_id: str, quota: Dict[str, Any]) -> bool:
         """更新用戶配額"""
         return await self.update(user_id, {"quota": quota})
 
+    MAX_REFRESH_TOKENS = 5  # 最多保留 5 個同時登入的 session
+
     async def save_refresh_token(self, user_id: str, token: str) -> bool:
-        """保存 Refresh Token"""
+        """保存 Refresh Token（清理無效 token，並限制同時存活數量）"""
         now = get_utc_timestamp()
         token_data = {
             "token": token,
@@ -73,9 +95,28 @@ class UserRepository:
             "revoked": False
         }
 
+        oid = ObjectId(user_id)
+
+        # 先清理已撤銷或已過期的 token（MongoDB 不允許同一欄位同時 $pull + $push）
+        await self.collection.update_one(
+            {"_id": oid},
+            {"$pull": {"refresh_tokens": {
+                "$or": [
+                    {"revoked": True},
+                    {"expires_at": {"$lt": now}}
+                ]
+            }}}
+        )
+
+        # push 新 token，按 created_at 排序後只保留最新的 N 筆
+        # $slice: -N 表示保留陣列尾端（最新）的 N 個元素
         result = await self.collection.update_one(
-            {"_id": ObjectId(user_id)},
-            {"$push": {"refresh_tokens": token_data}}
+            {"_id": oid},
+            {"$push": {"refresh_tokens": {
+                "$each": [token_data],
+                "$sort": {"created_at": 1},
+                "$slice": -self.MAX_REFRESH_TOKENS
+            }}}
         )
         return result.modified_count > 0
 

@@ -10,6 +10,19 @@
     <!-- Google Sign-In SDK 會在組件中動態載入 -->
   </head>
   <body>
+    <script>
+      // 在 Vue 載入前立即套用 theme，避免畫面閃爍
+      (function() {
+        var theme = localStorage.getItem('theme');
+        // 沒有 localStorage 值時，偵測 OS 深色模式偏好
+        if (!theme) {
+          try { theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; } catch(e) {}
+        }
+        if (theme === 'dark') {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
     <div id="app"></div>
     <script type="module" src="/src/main.js"></script>
   </body>

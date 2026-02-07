@@ -19,7 +19,8 @@ from ..models.auth import (
     ChangePasswordRequest,
     UserResponse,
     ForgotPasswordRequest,
-    ResetPasswordRequest
+    ResetPasswordRequest,
+    UpdatePreferencesRequest
 )
 from ..auth.password import hash_password, verify_password
 from ..auth.jwt_handler import create_access_token, create_refresh_token, verify_token
@@ -550,8 +551,48 @@ async def get_current_user_info(
         quota=full_user["quota"],
         usage=usage,
         created_at=created_at,
-        auth_providers=auth_providers
+        auth_providers=auth_providers,
+        preferences=full_user.get("preferences", {})
     )
+
+
+@router.patch("/preferences")
+async def update_preferences(
+    request: UpdatePreferencesRequest,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database)
+):
+    """更新用戶偏好設定
+
+    Args:
+        request: 偏好設定更新請求
+        current_user: 當前用戶
+        db: 資料庫實例
+
+    Returns:
+        更新後的 preferences
+    """
+    user_repo = UserRepository(db)
+
+    prefs_to_update = request.dict(exclude_none=True)
+    if not prefs_to_update:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="未提供任何要更新的偏好設定"
+        )
+
+    updated_preferences = await user_repo.update_preferences(
+        str(current_user["_id"]),
+        prefs_to_update
+    )
+
+    if updated_preferences is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="用戶不存在"
+        )
+
+    return {"preferences": updated_preferences}
 
 
 @router.post("/forgot-password")

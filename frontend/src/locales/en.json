@@ -74,7 +74,11 @@
     "setPassword": "Set Password",
     "setPasswordDescription": "Set a password to enable email + password login.",
     "passwordSetSuccess": "Password set successfully",
-    "setting": "Setting..."
+    "setting": "Setting...",
+    "summaryExpand": "AI Summary Expand",
+    "summaryAlwaysOpen": "Always Open",
+    "summaryAlwaysCollapsed": "Always Collapsed",
+    "summaryFollowLast": "Remember Last State"
   },
   "navigation": {
     "expandSidebar": "Expand Sidebar",
@@ -453,7 +457,6 @@
     "keywords": "Keywords",
     "model": "Model",
     "type": "Type",
-    "sentiment": "Sentiment",
     "emptyHint": "Click the button below to generate an AI summary of the transcript",
     "loadError": "Failed to load summary, please try again later",
     "generateError": "Failed to generate summary, please try again later",
@@ -461,9 +464,6 @@
     "typeLecture": "Lecture",
     "typeInterview": "Interview",
     "typeGeneral": "General",
-    "sentimentPositive": "Positive",
-    "sentimentNeutral": "Neutral",
-    "sentimentNegative": "Negative",
     "copySummary": "Copy Summary",
     "copied": "Copied"
   }

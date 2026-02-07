@@ -7,7 +7,6 @@ class SummaryMeta(BaseModel):
     """摘要元資訊"""
     type: str = Field("General", description="內容類型: Meeting | Lecture | Interview | General")
     detected_topic: str = Field("", description="自動生成的標題或主題")
-    sentiment: str = Field("Neutral", description="整體語氣: Positive | Neutral | Negative")
 
 
 class SummarySegment(BaseModel):

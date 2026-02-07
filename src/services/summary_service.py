@@ -407,8 +407,7 @@ class SummaryService:
 {{
   "meta": {{
     "type": "Meeting | Lecture | Interview | General",
-    "detected_topic": "自動生成的標題或主題",
-    "sentiment": "Positive | Neutral | Negative"
+    "detected_topic": "自動生成的標題或主題"
   }},
   "summary": "200字以內的執行摘要 (Executive Summary)",
   "key_points": [
@@ -462,8 +461,7 @@ class SummaryService:
 {{
   "meta": {{
     "type": "Meeting | Lecture | Interview | General",
-    "detected_topic": "自動生成されたタイトルまたはトピック",
-    "sentiment": "Positive | Neutral | Negative"
+    "detected_topic": "自動生成されたタイトルまたはトピック"
   }},
   "summary": "200文字以内のエグゼクティブサマリー",
   "key_points": ["ポイント1", "ポイント2", "ポイント3"],
@@ -507,8 +505,7 @@ class SummaryService:
 {{
   "meta": {{
     "type": "Meeting | Lecture | Interview | General",
-    "detected_topic": "자동 생성된 제목 또는 주제",
-    "sentiment": "Positive | Neutral | Negative"
+    "detected_topic": "자동 생성된 제목 또는 주제"
   }},
   "summary": "200자 이내의 요약",
   "key_points": ["포인트1", "포인트2", "포인트3"],
@@ -553,8 +550,7 @@ Output only a valid JSON object. Do not include Markdown markers (such as ```jso
 {{
   "meta": {{
     "type": "Meeting | Lecture | Interview | General",
-    "detected_topic": "Auto-generated title or topic",
-    "sentiment": "Positive | Neutral | Negative"
+    "detected_topic": "Auto-generated title or topic"
   }},
   "summary": "Executive summary within 200 words",
   "key_points": [
@@ -616,19 +612,13 @@ Output only a valid JSON object. Do not include Markdown markers (such as ```jso
 
             parsed_meta = {
                 "type": meta.get("type", "General"),
-                "detected_topic": meta.get("detected_topic", ""),
-                "sentiment": meta.get("sentiment", "Neutral")
+                "detected_topic": meta.get("detected_topic", "")
             }
 
             # 驗證 type 值
             valid_types = ["Meeting", "Lecture", "Interview", "General"]
             if parsed_meta["type"] not in valid_types:
                 parsed_meta["type"] = "General"
-
-            # 驗證 sentiment 值
-            valid_sentiments = ["Positive", "Neutral", "Negative"]
-            if parsed_meta["sentiment"] not in valid_sentiments:
-                parsed_meta["sentiment"] = "Neutral"
 
             # 處理 summary
             summary = data.get("summary", "")

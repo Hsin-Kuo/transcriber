@@ -4,6 +4,7 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import api, { TokenManager } from '../utils/api'
+import i18n from '../i18n'
 
 export const useAuthStore = defineStore('auth', () => {
   // State
@@ -19,6 +20,7 @@ export const useAuthStore = defineStore('auth', () => {
   const authProviders = computed(() => user.value?.auth_providers || [])
   const hasPassword = computed(() => authProviders.value.includes('password'))
   const hasGoogle = computed(() => authProviders.value.includes('google'))
+  const preferences = computed(() => user.value?.preferences || {})
 
   // 計算配額使用百分比
   const quotaPercentage = computed(() => {
@@ -111,10 +113,34 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const response = await api.get('/auth/me')
       user.value = response.data
+      // 從後端偏好同步到 localStorage 和 DOM（跨裝置同步）
+      applyPreferences(response.data.preferences)
     } catch (err) {
       console.error('獲取用戶資訊失敗:', err)
       TokenManager.clearTokens()
       user.value = null
+    }
+  }
+
+  function applyPreferences(prefs) {
+    if (!prefs) return
+    if (prefs.theme) {
+      localStorage.setItem('theme', prefs.theme)
+      if (prefs.theme === 'dark') {
+        document.documentElement.setAttribute('data-theme', 'dark')
+      } else {
+        document.documentElement.removeAttribute('data-theme')
+      }
+    }
+    if (prefs.language) {
+      localStorage.setItem('locale', prefs.language)
+      i18n.global.locale.value = prefs.language
+    }
+    if (prefs.timezone) {
+      localStorage.setItem('timezone', prefs.timezone)
+    }
+    if (prefs.summaryExpandMode) {
+      localStorage.setItem('summaryExpandMode', prefs.summaryExpandMode)
     }
   }
 
@@ -237,6 +263,24 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function updatePreferences(prefs) {
+    try {
+      const response = await api.patch('/auth/preferences', prefs)
+      if (user.value) {
+        user.value = {
+          ...user.value,
+          preferences: response.data.preferences
+        }
+      }
+      return { success: true }
+    } catch (err) {
+      return {
+        success: false,
+        error: err.response?.data?.detail || '更新偏好設定失敗'
+      }
+    }
+  }
+
   async function setPassword(newPassword) {
     loading.value = true
     error.value = null
@@ -276,6 +320,7 @@ export const useAuthStore = defineStore('auth', () => {
     authProviders,
     hasPassword,
     hasGoogle,
+    preferences,
     // Actions
     register,
     login,
@@ -287,6 +332,7 @@ export const useAuthStore = defineStore('auth', () => {
     googleLogin,
     bindGoogle,
     unbindGoogle,
-    setPassword
+    setPassword,
+    updatePreferences
   }
 })
