@@ -20,32 +20,20 @@
       <div class="shortcuts-title">{{ $t('audioPlayer.audioControlShortcuts') }}</div>
       <div class="shortcuts-section">
         <div class="shortcut-item">
-          <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>Space</kbd>
+          <kbd>Ctrl</kbd> + <kbd>{{ modifierKeyLabel }}</kbd>
           <span>{{ $t('audioPlayer.playPause') }}</span>
         </div>
         <div class="shortcut-item">
-          <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>←</kbd>
-          <span>{{ $t('audioPlayer.rewind10sShortcut') }}</span>
+          <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>← →</kbd>
+          <span>{{ $t('audioPlayer.skipShortcut') }}</span>
         </div>
         <div class="shortcut-item">
-          <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>→</kbd>
-          <span>{{ $t('audioPlayer.fastForward10sShortcut') }}</span>
+          <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>, .</kbd>
+          <span>{{ $t('audioPlayer.fineSkipShortcut') }}</span>
         </div>
         <div class="shortcut-item">
-          <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>↑</kbd>
-          <span>{{ $t('audioPlayer.speedUp') }}</span>
-        </div>
-        <div class="shortcut-item">
-          <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>↓</kbd>
-          <span>{{ $t('audioPlayer.speedDown') }}</span>
-        </div>
-        <div class="shortcut-item">
-          <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>,</kbd>
-          <span>{{ $t('audioPlayer.rewind5s') }}</span>
-        </div>
-        <div class="shortcut-item">
-          <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>.</kbd>
-          <span>{{ $t('audioPlayer.fastForward5s') }}</span>
+          <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>↑ ↓</kbd>
+          <span>{{ $t('audioPlayer.speedShortcut') }}</span>
         </div>
         <div class="shortcut-item">
           <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>M</kbd>

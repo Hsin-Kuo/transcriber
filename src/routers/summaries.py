@@ -1,5 +1,5 @@
 """AI 摘要管理路由"""
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from ..auth.dependencies import get_current_user
 from ..database.mongodb import get_database
@@ -18,6 +18,7 @@ def get_summary_service(db=Depends(get_database)) -> SummaryService:
 @router.post("/{task_id}", response_model=GenerateSummaryResponse)
 async def generate_summary(
     task_id: str,
+    mode: str = Query("paragraph", description="顯示模式: paragraph 或 subtitle"),
     summary_service: SummaryService = Depends(get_summary_service),
     current_user: dict = Depends(get_current_user)
 ):
@@ -25,6 +26,7 @@ async def generate_summary(
 
     Args:
         task_id: 任務 ID
+        mode: 顯示模式，subtitle 模式會優先使用 segments 內容
         summary_service: SummaryService 實例
         current_user: 當前用戶
 
@@ -33,7 +35,7 @@ async def generate_summary(
     """
     user_id = str(current_user["_id"])
 
-    result = await summary_service.generate_summary(task_id, user_id)
+    result = await summary_service.generate_summary(task_id, user_id, mode=mode)
 
     if result["status"] == "failed":
         # 返回失敗結果但不拋出異常（讓前端處理）

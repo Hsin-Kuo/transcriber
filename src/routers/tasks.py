@@ -26,6 +26,35 @@ except ImportError:
 router = APIRouter(prefix="/tasks", tags=["Tasks"])
 
 
+# 允許刪除的目錄白名單（相對於工作目錄的絕對路徑）
+_ALLOWED_OUTPUT_DIR = Path("output").resolve()
+_ALLOWED_UPLOADS_DIR = Path("uploads").resolve()
+
+
+def _validate_file_path(file_path: str, allowed_dir: Path) -> Path:
+    """驗證檔案路徑在允許的目錄內，防止路徑穿越攻擊
+
+    Args:
+        file_path: 要驗證的檔案路徑
+        allowed_dir: 允許的目錄（絕對路徑）
+
+    Returns:
+        驗證通過的 Path 物件
+
+    Raises:
+        ValueError: 路徑不在允許的目錄內
+    """
+    resolved = Path(file_path).resolve()
+
+    # 檢查是否在允許的目錄下
+    try:
+        resolved.relative_to(allowed_dir)
+    except ValueError:
+        raise ValueError(f"路徑不在允許的目錄內: {file_path}")
+
+    return resolved
+
+
 def get_task_service(db=Depends(get_database)) -> TaskService:
     """依賴注入：獲取 TaskService 實例
 
@@ -722,24 +751,28 @@ async def delete_task(
     # 物理刪除結果檔案（如果存在）
     result_file_path = get_task_field(task, "result_file")
     if result_file_path:
-        result_file = Path(result_file_path)
         try:
+            result_file = _validate_file_path(result_file_path, _ALLOWED_OUTPUT_DIR)
             if result_file.exists():
                 result_file.unlink()
                 deleted_files.append(result_file.name)
                 print(f"🗑️ 已刪除轉錄檔案：{result_file.name}")
+        except ValueError as e:
+            print(f"⚠️ 路徑驗證失敗，跳過刪除：{e}")
         except Exception as e:
             print(f"⚠️ 刪除轉錄檔案失敗：{e}")
 
     # 物理刪除 segments 檔案（如果存在）
     segments_file_path = get_task_field(task, "segments_file")
     if segments_file_path:
-        segments_file = Path(segments_file_path)
         try:
+            segments_file = _validate_file_path(segments_file_path, _ALLOWED_OUTPUT_DIR)
             if segments_file.exists():
                 segments_file.unlink()
                 deleted_files.append(segments_file.name)
                 print(f"🗑️ 已刪除 segments 檔案：{segments_file.name}")
+        except ValueError as e:
+            print(f"⚠️ 路徑驗證失敗，跳過刪除：{e}")
         except Exception as e:
             print(f"⚠️ 刪除 segments 檔案失敗：{e}")
 
@@ -1022,22 +1055,26 @@ async def batch_delete_tasks(
             # 物理刪除結果檔案（如果存在）
             result_file_path = get_task_field(task, "result_file")
             if result_file_path:
-                result_file = Path(result_file_path)
                 try:
+                    result_file = _validate_file_path(result_file_path, _ALLOWED_OUTPUT_DIR)
                     if result_file.exists():
                         result_file.unlink()
                         print(f"🗑️ [批次] 已刪除轉錄檔案：{result_file.name}")
+                except ValueError as e:
+                    print(f"⚠️ [批次] 路徑驗證失敗，跳過刪除：{e}")
                 except Exception as e:
                     print(f"⚠️ [批次] 刪除轉錄檔案失敗：{e}")
 
             # 物理刪除 segments 檔案（如果存在）
             segments_file_path = get_task_field(task, "segments_file")
             if segments_file_path:
-                segments_file = Path(segments_file_path)
                 try:
+                    segments_file = _validate_file_path(segments_file_path, _ALLOWED_OUTPUT_DIR)
                     if segments_file.exists():
                         segments_file.unlink()
                         print(f"🗑️ [批次] 已刪除 segments 檔案：{segments_file.name}")
+                except ValueError as e:
+                    print(f"⚠️ [批次] 路徑驗證失敗，跳過刪除：{e}")
                 except Exception as e:
                     print(f"⚠️ [批次] 刪除 segments 檔案失敗：{e}")
 

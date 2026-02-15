@@ -6,10 +6,26 @@ from jose import JWTError, jwt
 from pydantic import BaseModel
 
 # JWT 配置（從環境變數讀取）
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-here")  # 生產環境必須設定
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "30"))
+
+# 驗證 JWT_SECRET_KEY 是否設定
+if not SECRET_KEY:
+    raise RuntimeError(
+        "JWT_SECRET_KEY 環境變數未設定。\n"
+        "請在 .env 檔案中設定：\n"
+        "  JWT_SECRET_KEY=$(openssl rand -hex 32)\n"
+        "或執行：openssl rand -hex 32 生成密鑰"
+    )
+
+# 密鑰強度檢查（至少 32 字元）
+if len(SECRET_KEY) < 32:
+    raise RuntimeError(
+        f"JWT_SECRET_KEY 過短（{len(SECRET_KEY)} 字元），至少需要 32 字元。\n"
+        "建議執行：openssl rand -hex 32 生成安全密鑰"
+    )
 
 
 class TokenData(BaseModel):

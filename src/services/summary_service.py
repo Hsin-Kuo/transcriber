@@ -43,13 +43,15 @@ class SummaryService:
     async def generate_summary(
         self,
         task_id: str,
-        user_id: str
+        user_id: str,
+        mode: str = "paragraph"
     ) -> Dict[str, Any]:
         """生成 AI 摘要
 
         Args:
             task_id: 任務 ID
             user_id: 使用者 ID（用於權限驗證）
+            mode: 顯示模式，subtitle 時優先從 segments 組合內容
 
         Returns:
             生成結果 {task_id, status, summary?, error?}
@@ -72,7 +74,7 @@ class SummaryService:
                 }
 
             # 2. 獲取逐字稿內容
-            content = await self._get_transcript_content(task_id)
+            content = await self._get_transcript_content(task_id, mode=mode)
             if not content:
                 return {
                     "task_id": task_id,
@@ -209,25 +211,50 @@ class SummaryService:
 
         return success
 
-    async def _get_transcript_content(self, task_id: str) -> Optional[str]:
+    async def _get_transcript_content(self, task_id: str, mode: str = "paragraph") -> Optional[str]:
         """獲取逐字稿內容
 
         Args:
             task_id: 任務 ID
+            mode: 顯示模式，subtitle 時優先從 segments 組合（包含使用者編輯與講者資訊）
 
         Returns:
             逐字稿文字內容
         """
-        # 從 transcripts collection 獲取
-        transcript = await self.db.transcripts.find_one({"_id": task_id})
+        if mode == "subtitle":
+            # 字幕模式：優先從 segments 組合（反映使用者編輯）
+            segments_doc = await self.db.segments.find_one({"_id": task_id})
+            if segments_doc and segments_doc.get("segments"):
+                # 取得講者名稱對應
+                task = await self.task_repo.get_by_id(task_id)
+                speaker_names = task.get("speaker_names", {}) if task else {}
+
+                texts = []
+                current_speaker = None
+                for seg in segments_doc["segments"]:
+                    text = seg.get("text", "")
+                    speaker = seg.get("speaker")
+
+                    if speaker and speaker != current_speaker:
+                        display_name = speaker_names.get(speaker, speaker)
+                        texts.append(f"\n[{display_name}]\n{text}")
+                        current_speaker = speaker
+                    else:
+                        texts.append(text)
+
+                return " ".join(texts).strip()
+
+        # 段落模式或 segments 不存在：從 transcripts collection 獲取
+        transcript = await self.db.transcriptions.find_one({"_id": task_id})
         if transcript and transcript.get("content"):
             return transcript["content"]
 
-        # 如果沒有，嘗試從 segments 組合
-        segments_doc = await self.db.segments.find_one({"_id": task_id})
-        if segments_doc and segments_doc.get("segments"):
-            texts = [seg.get("text", "") for seg in segments_doc["segments"]]
-            return " ".join(texts)
+        # 最終 fallback：嘗試從 segments 組合
+        if mode != "subtitle":
+            segments_doc = await self.db.segments.find_one({"_id": task_id})
+            if segments_doc and segments_doc.get("segments"):
+                texts = [seg.get("text", "") for seg in segments_doc["segments"]]
+                return " ".join(texts)
 
         return None
 
@@ -436,6 +463,7 @@ class SummaryService:
 - segments 請依內容邏輯分為 2-4 個段落
 - action_items 若非會議或無待辦事項，請回傳空陣列 []
 - 所有文字請使用繁體中文
+- 日期與時間請忠實保留原文所述，不要自行推測或補充未提及的資訊（例如原文只說「6月4號」，就寫「6月4號」，不要擅自加上年份）
 
 【輸入文字】
 {text}"""
@@ -481,6 +509,12 @@ class SummaryService:
   ]
 }}
 
+【注意事項】
+- key_points は 3〜5 個提供してください
+- segments は内容のロジックに従って 2〜4 個に分割してください
+- action_items は会議でない場合やアクションアイテムがない場合は空配列 [] を返してください
+- 日付や時間は原文の通りに忠実に保持し、言及されていない情報を推測・補完しないでください（例：原文が「6月4日」とだけ言っている場合、年を勝手に追加しないでください）
+
 【入力テキスト】
 {text}"""
 
@@ -524,6 +558,12 @@ class SummaryService:
     }}
   ]
 }}
+
+【주의사항】
+- key_points는 3~5개 제공하세요
+- segments는 내용 논리에 따라 2~4개로 나누세요
+- action_items는 회의가 아니거나 액션 아이템이 없으면 빈 배열 []을 반환하세요
+- 날짜와 시간은 원문에 언급된 그대로 유지하고, 언급되지 않은 정보를 추측하거나 보충하지 마세요 (예: 원문이 "6월 4일"만 언급한 경우 연도를 임의로 추가하지 마세요)
 
 【입력 텍스트】
 {text}"""
@@ -578,6 +618,7 @@ Output only a valid JSON object. Do not include Markdown markers (such as ```jso
 - Provide 3-5 key_points
 - Divide content into 2-4 logical segments
 - Return empty array [] for action_items if not a meeting or no action items found
+- Preserve dates and times exactly as stated in the original text. Do not guess or fill in unmentioned information (e.g., if the text only says "June 4th", write "June 4th" without adding a year)
 
 【Input Text】
 {text}"""

@@ -55,11 +55,14 @@ async def register(
     email_service = get_email_service()
 
     # 檢查 Email 是否已存在
-    if await user_repo.get_by_email(user_data.email):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email 已被註冊"
-        )
+    existing_user = await user_repo.get_by_email(user_data.email)
+    if existing_user:
+        # 為防止 email 枚舉攻擊，回傳與新註冊相同的訊息
+        # 可選：發送「有人嘗試用您的 email 註冊」的通知信
+        return {
+            "message": "註冊成功！請檢查您的信箱以完成驗證",
+            "email": user_data.email
+        }
 
     # 生成驗證 token (使用 secrets 生成安全的隨機字符串)
     verification_token = secrets.token_urlsafe(32)

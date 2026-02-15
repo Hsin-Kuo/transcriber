@@ -24,6 +24,33 @@ from ..utils.storage_service import is_aws
 import os
 
 
+def _sign_sqs_message(payload: dict) -> dict:
+    """為 SQS 訊息添加 HMAC 簽名
+
+    Args:
+        payload: 訊息內容
+
+    Returns:
+        添加了 _signature 欄位的訊息
+    """
+    worker_secret = os.getenv("WORKER_SECRET", "")
+    if not worker_secret:
+        return payload  # 未設定密鑰時不簽名
+
+    import hmac
+    import hashlib
+
+    # 計算簽名（不含 _signature 欄位）
+    payload_str = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    signature = hmac.new(
+        worker_secret.encode(),
+        payload_str.encode(),
+        hashlib.sha256
+    ).hexdigest()
+
+    return {**payload, "_signature": signature}
+
+
 router = APIRouter(prefix="/transcriptions", tags=["Transcriptions"])
 
 
@@ -238,6 +265,46 @@ async def create_transcription(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="任務類型必須是 'paragraph' 或 'subtitle'"
         )
+
+    # 驗證 chunk_minutes（1-120 分鐘）
+    if chunk_minutes < 1 or chunk_minutes > 120:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="分段長度必須在 1-120 分鐘之間"
+        )
+
+    # 驗證 max_speakers（2-10，若有提供）
+    if max_speakers is not None and (max_speakers < 2 or max_speakers > 10):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="最大講者人數必須在 2-10 之間"
+        )
+
+    # 驗證 language（白名單）
+    ALLOWED_LANGUAGES = {"zh", "en", "ja", "ko", "auto"}
+    if language not in ALLOWED_LANGUAGES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"不支援的語言：{language}，可選：{', '.join(ALLOWED_LANGUAGES)}"
+        )
+
+    # 驗證 punct_provider（白名單）
+    ALLOWED_PUNCT_PROVIDERS = {"openai", "gemini", "none"}
+    if punct_provider not in ALLOWED_PUNCT_PROVIDERS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"不支援的標點提供者：{punct_provider}"
+        )
+
+    # 驗證 custom_name（長度和字元安全性）
+    if custom_name:
+        if len(custom_name) > 255:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="自訂名稱過長（最多 255 字元）"
+            )
+        # 移除可能導致路徑穿越的字元
+        custom_name = custom_name.replace("/", "").replace("\\", "").replace("..", "")
 
     # 字幕類型強制不使用標點符號
     if task_type == "subtitle":
@@ -466,23 +533,24 @@ async def create_transcription(
             save_audio(task_id, temp_audio)
             print(f"☁️  音檔已上傳到 S3: uploads/{task_id}.mp3")
 
-            # 發送 SQS 訊息
+            # 發送 SQS 訊息（帶簽名）
             sqs_queue_url = os.getenv("SQS_QUEUE_URL", "")
             if sqs_queue_url:
                 sqs = boto3.client("sqs", region_name=os.getenv("S3_REGION", "ap-northeast-1"))
                 use_punctuation = punct_provider != "none"
                 language_code = None if language == "auto" else language
+                sqs_payload = _sign_sqs_message({
+                    "task_id": task_id,
+                    "language": language_code,
+                    "use_chunking": chunk_audio,
+                    "use_punctuation": use_punctuation,
+                    "punctuation_provider": punct_provider,
+                    "use_diarization": diarize,
+                    "max_speakers": max_speakers,
+                })
                 sqs.send_message(
                     QueueUrl=sqs_queue_url,
-                    MessageBody=json.dumps({
-                        "task_id": task_id,
-                        "language": language_code,
-                        "use_chunking": chunk_audio,
-                        "use_punctuation": use_punctuation,
-                        "punctuation_provider": punct_provider,
-                        "use_diarization": diarize,
-                        "max_speakers": max_speakers,
-                    })
+                    MessageBody=json.dumps(sqs_payload)
                 )
                 print(f"📨 已發送 SQS 訊息: {task_id}")
             else:
@@ -843,7 +911,10 @@ async def download_audio(
             audio_file,
             media_type=media_type,
             headers={
-                "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
+                # 使用 inline 而非 attachment，讓瀏覽器可以串流播放
+                "Content-Disposition": f"inline; filename*=UTF-8''{encoded_filename}",
+                # 允許範圍請求，支援音訊跳轉
+                "Accept-Ranges": "bytes"
             }
         )
 
@@ -1304,6 +1375,21 @@ async def create_batch_transcriptions(
             detail="任務類型必須是 'paragraph' 或 'subtitle'"
         )
 
+    # 驗證 max_speakers（2-10，若有提供）
+    if max_speakers is not None and (max_speakers < 2 or max_speakers > 10):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="最大講者人數必須在 2-10 之間"
+        )
+
+    # 驗證 language（白名單）
+    ALLOWED_LANGUAGES = {"zh", "en", "ja", "ko", "auto"}
+    if language not in ALLOWED_LANGUAGES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"不支援的語言：{language}"
+        )
+
     # 字幕類型強制不使用標點符號
     punct_provider = "gemini"
     if task_type == "subtitle":
@@ -1453,17 +1539,18 @@ async def create_batch_transcriptions(
                     sqs = boto3.client("sqs", region_name=os.getenv("S3_REGION", "ap-northeast-1"))
                     use_punctuation = punct_provider != "none"
                     language_code = None if language == "auto" else language
+                    sqs_payload = _sign_sqs_message({
+                        "task_id": task_id,
+                        "language": language_code,
+                        "use_chunking": True,
+                        "use_punctuation": use_punctuation,
+                        "punctuation_provider": punct_provider,
+                        "use_diarization": diarize,
+                        "max_speakers": max_speakers,
+                    })
                     sqs.send_message(
                         QueueUrl=sqs_queue_url,
-                        MessageBody=json.dumps({
-                            "task_id": task_id,
-                            "language": language_code,
-                            "use_chunking": True,
-                            "use_punctuation": use_punctuation,
-                            "punctuation_provider": punct_provider,
-                            "use_diarization": diarize,
-                            "max_speakers": max_speakers,
-                        })
+                        MessageBody=json.dumps(sqs_payload)
                     )
 
                 # 清理本地臨時目錄

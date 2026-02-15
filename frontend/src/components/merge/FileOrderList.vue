@@ -147,7 +147,7 @@ function formatSize(bytes) {
   align-items: center;
   gap: 12px;
   padding: 12px;
-  background: rgba(255, 255, 255, 0.8);
+  background: var(--color-bg-light);
   border: 1px solid rgba(var(--color-primary-rgb), 0.2);
   border-radius: 10px;
   transition: all 0.2s;
@@ -155,7 +155,7 @@ function formatSize(bytes) {
 }
 
 .file-item:hover {
-  background: var(--color-white);
+  background: var(--color-bg-lighter);
   border-color: rgba(var(--color-primary-rgb), 0.4);
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(var(--color-text-dark-rgb), 0.1);

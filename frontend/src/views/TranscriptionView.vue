@@ -192,8 +192,17 @@
 
         <!-- 動作按鈕 -->
         <div class="modal-actions">
-          <button class="btn btn-primary btn-start" @click="confirmAndUpload">{{ $t('transcription.startTranscription') }}</button>
-          <button class="btn btn-secondary btn-cancel" @click="cancelUpload">{{ $t('transcription.cancel') }}</button>
+          <button
+            class="btn btn-primary btn-start"
+            :class="{ 'is-loading': uploading }"
+            :disabled="uploading"
+            @click="confirmAndUpload"
+          >
+            <span v-if="uploading" class="btn-spinner"></span>
+            <span v-else>{{ $t('transcription.startTranscription') }}</span>
+            <span v-if="uploading">{{ $t('transcription.uploading') }}</span>
+          </button>
+          <button class="btn btn-secondary btn-cancel" :disabled="uploading" @click="cancelUpload">{{ $t('transcription.cancel') }}</button>
         </div>
       </div>
     </div>
@@ -811,7 +820,7 @@ onUnmounted(() => {
   font-size: 14px;
   border: 2px solid rgba(var(--color-primary-rgb), 0.3);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--color-bg-light);
   color: var(--color-text-dark);
   transition: all 0.3s;
 }
@@ -844,7 +853,7 @@ onUnmounted(() => {
   font-size: 14px;
   border: 2px solid rgba(var(--color-primary-rgb), 0.3);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--color-bg-light);
   color: var(--color-text-dark);
   transition: all 0.3s;
 }
@@ -989,10 +998,40 @@ onUnmounted(() => {
 .modal-actions .btn-start {
   background: var(--main-bg);
   color: var(--main-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
-.modal-actions .btn-start:hover {
+.modal-actions .btn-start:hover:not(:disabled) {
   color: var(--main-primary-dark);
+}
+
+.modal-actions .btn-start:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.modal-actions .btn-start.is-loading {
+  pointer-events: none;
+}
+
+/* Loading spinner */
+.btn-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(var(--color-primary-rgb), 0.3);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 
@@ -1075,7 +1114,7 @@ onUnmounted(() => {
   font-size: 14px;
   border: 2px solid rgba(var(--color-primary-rgb), 0.3);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--color-bg-light);
   color: var(--color-text-dark);
   transition: all 0.3s;
   margin-top: 6px;

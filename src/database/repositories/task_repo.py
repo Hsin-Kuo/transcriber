@@ -6,6 +6,29 @@ from bson import ObjectId
 from ...utils.time_utils import get_utc_timestamp
 
 
+# 允許的查詢參數值（白名單）
+ALLOWED_STATUSES = {"pending", "processing", "completed", "failed", "cancelled"}
+ALLOWED_TASK_TYPES = {"paragraph", "subtitle"}
+
+
+def _validate_status(status: Optional[str]) -> Optional[str]:
+    """驗證 status 參數在白名單內"""
+    if status is None:
+        return None
+    if status not in ALLOWED_STATUSES:
+        return None  # 無效值視為不篩選
+    return status
+
+
+def _validate_task_type(task_type: Optional[str]) -> Optional[str]:
+    """驗證 task_type 參數在白名單內"""
+    if task_type is None:
+        return None
+    if task_type not in ALLOWED_TASK_TYPES:
+        return None  # 無效值視為不篩選
+    return task_type
+
+
 class TaskRepository:
     """任務資料庫操作"""
 
@@ -112,11 +135,16 @@ class TaskRepository:
                 {"user_id": user_id}  # 扁平格式（向後兼容）
             ]
         }
-        if status:
-            filters["status"] = status
 
-        if task_type:
-            filters["task_type"] = task_type
+        # 驗證並應用 status 篩選（白名單）
+        validated_status = _validate_status(status)
+        if validated_status:
+            filters["status"] = validated_status
+
+        # 驗證並應用 task_type 篩選（白名單）
+        validated_task_type = _validate_task_type(task_type)
+        if validated_task_type:
+            filters["task_type"] = validated_task_type
 
         # 標籤篩選（AND 邏輯：任務必須包含所有指定的標籤）
         if tags and len(tags) > 0:
@@ -154,11 +182,16 @@ class TaskRepository:
                 {"user_id": user_id}  # 扁平格式（向後兼容）
             ]
         }
-        if status:
-            filters["status"] = status
 
-        if task_type:
-            filters["task_type"] = task_type
+        # 驗證並應用 status 篩選（白名單）
+        validated_status = _validate_status(status)
+        if validated_status:
+            filters["status"] = validated_status
+
+        # 驗證並應用 task_type 篩選（白名單）
+        validated_task_type = _validate_task_type(task_type)
+        if validated_task_type:
+            filters["task_type"] = validated_task_type
 
         # 標籤篩選（AND 邏輯：任務必須包含所有指定的標籤）
         if tags and len(tags) > 0:

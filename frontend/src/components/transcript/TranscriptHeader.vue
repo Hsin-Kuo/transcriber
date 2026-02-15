@@ -437,7 +437,8 @@ defineExpose({
   openMoreOptions,
   closeMoreOptions,
   openSpeakerSettings,
-  closeSpeakerSettings
+  closeSpeakerSettings,
+  toggleSearch
 })
 
 onMounted(() => {

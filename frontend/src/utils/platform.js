@@ -6,7 +6,7 @@
 export const isMac = /Mac|iPhone|iPod|iPad/.test(navigator.platform)
 
 /** 顯示用的修飾鍵標籤 */
-export const modifierKeyLabel = isMac ? '⌘' : 'Ctrl'
+export const modifierKeyLabel = 'Alt'
 
 /** 檢查事件中是否按下了平台對應的修飾鍵 */
 export function isModifierPressed(event) {

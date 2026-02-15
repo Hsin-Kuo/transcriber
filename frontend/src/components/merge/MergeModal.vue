@@ -356,7 +356,7 @@ function handleConfirm() {
   padding: 30px 20px;
   border: 3px dashed rgba(var(--color-primary-rgb), 0.3);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--color-bg-light);
   cursor: pointer;
   transition: all 0.3s ease;
   text-align: center;
@@ -364,7 +364,7 @@ function handleConfirm() {
 
 .upload-zone:hover {
   border-color: rgba(var(--color-primary-rgb), 0.5);
-  background: rgba(255, 255, 255, 0.8);
+  background: var(--color-bg-lighter);
 }
 
 .upload-zone.drag-over {
@@ -443,14 +443,14 @@ function handleConfirm() {
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.8);
+  background: var(--color-bg-light);
   border: 1px solid rgba(var(--color-divider-rgb), 0.3);
   border-radius: 10px;
   transition: all 0.2s;
 }
 
 .file-item:hover {
-  background: var(--color-white);
+  background: var(--color-bg-lighter);
   border-color: rgba(var(--color-primary-rgb), 0.3);
   box-shadow: 0 2px 8px rgba(var(--color-text-dark-rgb), 0.08);
 }

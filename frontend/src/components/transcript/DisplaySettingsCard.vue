@@ -297,7 +297,7 @@ defineEmits([
   height: 32px;
   top: -5px;
   background: #dedede;
-  border: 0.5px solidf;
+  border: 0.5px solid;
   border-radius: 50%;
   cursor: pointer;
   transition: all 0.3s ease;

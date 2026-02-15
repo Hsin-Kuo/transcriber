@@ -193,6 +193,10 @@ const props = defineProps({
   initialSummaryStatus: {
     type: String,
     default: null
+  },
+  displayMode: {
+    type: String,
+    default: 'paragraph'
   }
 })
 
@@ -371,7 +375,7 @@ async function generateSummary() {
     error.value = null
     summaryStatus.value = 'processing'
 
-    const result = await summaryService.generate(props.taskId)
+    const result = await summaryService.generate(props.taskId, props.displayMode)
 
     if (result.status === 'completed') {
       summary.value = result.summary
@@ -616,7 +620,7 @@ onMounted(() => {
 .type-general { background: rgba(107, 114, 128, 0.15); color: #6b7280; }
 
 .detected-topic {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 600;
   color: var(--main-text);
   margin: 0;
@@ -630,7 +634,7 @@ onMounted(() => {
 }
 
 .section-title {
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--main-text-light);
   text-transform: uppercase;
@@ -640,7 +644,7 @@ onMounted(() => {
 
 /* 摘要 */
 .summary-text {
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.7;
   color: var(--main-text);
   margin: 0;
@@ -654,7 +658,7 @@ onMounted(() => {
 }
 
 .key-points-list li {
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.6;
   color: var(--main-text);
   margin-bottom: 4px;
@@ -675,14 +679,14 @@ onMounted(() => {
 }
 
 .segment-topic {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--main-text);
   margin: 0 0 6px 0;
 }
 
 .segment-content {
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.6;
   color: var(--main-text);
   margin: 0 0 8px 0;
@@ -701,7 +705,7 @@ onMounted(() => {
   background: rgba(var(--main-primary-rgb), 0.1);
   color: var(--main-primary);
   border-radius: 10px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* 待辦事項 */
@@ -731,7 +735,7 @@ onMounted(() => {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--main-text);
 }
 

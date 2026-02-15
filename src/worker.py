@@ -39,6 +39,7 @@ S3_REGION = os.getenv("S3_REGION", "ap-northeast-1")
 MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
 DEFAULT_MODEL = os.getenv("WHISPER_MODEL", "medium")
+WORKER_SECRET = os.getenv("WORKER_SECRET", "")
 
 # Graceful shutdown
 _shutdown = False
@@ -52,6 +53,42 @@ def _signal_handler(signum, frame):
 
 signal.signal(signal.SIGINT, _signal_handler)
 signal.signal(signal.SIGTERM, _signal_handler)
+
+
+def _verify_message_signature(body: dict) -> bool:
+    """驗證 SQS 訊息簽名
+
+    Args:
+        body: 解析後的訊息內容
+
+    Returns:
+        True 如果簽名有效或未啟用簽名驗證，False 如果簽名無效
+    """
+    if not WORKER_SECRET:
+        # 未設定密鑰時跳過驗證（向後相容，但會印警告）
+        return True
+
+    import hmac
+    import hashlib
+
+    signature = body.pop("_signature", None)
+    if not signature:
+        print("⚠️ SQS 訊息缺少簽名，可能來源不明")
+        return False
+
+    # 計算預期簽名
+    payload = json.dumps(body, sort_keys=True, separators=(",", ":"))
+    expected = hmac.new(
+        WORKER_SECRET.encode(),
+        payload.encode(),
+        hashlib.sha256
+    ).hexdigest()
+
+    if not hmac.compare_digest(signature, expected):
+        print("⚠️ SQS 訊息簽名無效，拒絕處理")
+        return False
+
+    return True
 
 
 # ===== MongoDB 同步 helpers =====
@@ -286,6 +323,16 @@ def main():
             for msg in messages:
                 body = json.loads(msg["Body"])
                 receipt_handle = msg["ReceiptHandle"]
+
+                # 驗證訊息簽名（如果有設定 WORKER_SECRET）
+                if not _verify_message_signature(body):
+                    # 簽名無效，刪除訊息但不處理
+                    sqs.delete_message(
+                        QueueUrl=SQS_QUEUE_URL,
+                        ReceiptHandle=receipt_handle,
+                    )
+                    print(f"🚫 已丟棄無效簽名的訊息: {body.get('task_id', 'unknown')}")
+                    continue
 
                 process_task(body)
 

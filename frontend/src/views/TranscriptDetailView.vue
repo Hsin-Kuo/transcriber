@@ -295,6 +295,7 @@
           v-if="currentTranscript.task_id"
           :task-id="currentTranscript.task_id"
           :initial-summary-status="currentTranscript.summary_status"
+          :display-mode="displayMode"
           @summary-updated="handleSummaryUpdated"
         />
 
@@ -489,7 +490,7 @@ import { useSegmentMarkers } from '../composables/transcript/useSegmentMarkers'
 import { useKeyboardShortcuts } from '../composables/transcript/useKeyboardShortcuts'
 import { useTranscriptDownload } from '../composables/transcript/useTranscriptDownload'
 import { useTaskTags } from '../composables/task/useTaskTags'
-import { isMac, isModifierPressed } from '../utils/platform'
+import { isModifierPressed } from '../utils/platform'
 import { useAuthStore } from '../stores/auth'
 
 const route = useRoute()
@@ -2289,22 +2290,32 @@ function handleTextClick(startTime, event) {
 
 // 鍵盤事件處理（Mac 使用 ⌘，Windows/Linux 使用 Ctrl）
 function handleKeyDown(e) {
-  if (isModifierPressed(e)) {
+  // Ctrl/Cmd+F: 攔截瀏覽器搜尋，改為打開自訂搜尋浮窗
+  if (isModifierPressed(e) && e.key === 'f') {
+    e.preventDefault()
+    e.stopPropagation()
+    if (headerRef.value) {
+      headerRef.value.toggleSearch()
+    }
+    return
+  }
+
+  if (e.altKey) {
+    // 停用 Alt 鍵的瀏覽器預設行為（Windows Chrome 會 focus 到瀏覽器選單）
+    e.preventDefault()
     isAltPressed.value = true
 
-    // 防止修飾鍵組合的預設瀏覽器行為
+    // 防止 Alt 組合鍵的預設瀏覽器行為
     // 只針對我們有定義快捷鍵的按鍵
-    const shortcutKeys = [' ', 'm', 'M', ',', '.', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']
+    const shortcutKeys = ['m', 'M', ',', '.', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']
     if (shortcutKeys.includes(e.key)) {
-      e.preventDefault()
       e.stopPropagation() // 阻止事件繼續傳播，避免 contenteditable 插入字元
     }
   }
 }
 
 function handleKeyUp(e) {
-  const modifierStillHeld = isMac ? e.metaKey : e.ctrlKey
-  if (!modifierStillHeld) {
+  if (!e.altKey) {
     isAltPressed.value = false
   }
 }
@@ -2323,21 +2334,11 @@ function handlePaste(e) {
   }
 }
 
-// 處理 contenteditable 區域的按鍵事件（Mac 使用 ⌘，Windows/Linux 使用 Ctrl）
+// 處理 contenteditable 區域的按鍵事件（使用 Alt 作為修飾鍵）
 function handleContentEditableKeyDown(e) {
-  if (!isModifierPressed(e)) return
+  if (!e.altKey) return
 
-  // 修飾鍵 + Space: 播放/暫停
-  if (e.key === ' ') {
-    e.preventDefault()
-    e.stopPropagation()
-    if (hasAudio.value && audioElement.value) {
-      togglePlayPause()
-    }
-    return
-  }
-
-  // 修飾鍵 + ArrowUp: 加速播放
+  // Alt + ArrowUp: 加速播放
   if (e.key === 'ArrowUp') {
     e.preventDefault()
     e.stopPropagation()

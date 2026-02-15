@@ -363,10 +363,13 @@ export const summaryService = {
   /**
    * 生成 AI 摘要
    * @param {string} taskId - 任務 ID
+   * @param {string} mode - 顯示模式 (paragraph/subtitle)
    * @returns {Promise} 生成結果
    */
-  async generate(taskId) {
-    const response = await api.post(NEW_ENDPOINTS.summaries.generate(taskId))
+  async generate(taskId, mode = 'paragraph') {
+    const response = await api.post(NEW_ENDPOINTS.summaries.generate(taskId), null, {
+      params: { mode }
+    })
     return response.data
   },
 

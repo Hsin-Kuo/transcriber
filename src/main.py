@@ -94,16 +94,39 @@ app = FastAPI(
 )
 
 # CORS 中間件
-cors_origins_str = os.getenv("CORS_ORIGINS", "*")
-cors_origins = [origin.strip() for origin in cors_origins_str.split(",")] if cors_origins_str != "*" else ["*"]
+cors_origins_str = os.getenv("CORS_ORIGINS", "")
+
+# 安全的 CORS 配置
+if cors_origins_str and cors_origins_str != "*":
+    # 生產環境：明確指定允許的來源
+    cors_origins = [origin.strip() for origin in cors_origins_str.split(",") if origin.strip()]
+    allow_credentials = True
+else:
+    # 開發環境：允許常見的本地開發來源，但不允許 credentials
+    # 注意：CORS_ORIGINS="*" + allow_credentials=True 違反 CORS 規範
+    if DEPLOY_ENV == "local":
+        cors_origins = [
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:5173",
+        ]
+        allow_credentials = True
+        print("⚠️  CORS: 開發模式，允許本地來源", flush=True)
+    else:
+        # AWS 生產環境必須設定 CORS_ORIGINS
+        raise RuntimeError(
+            "生產環境必須設定 CORS_ORIGINS 環境變數。\n"
+            "例如：CORS_ORIGINS=https://app.example.com,https://admin.example.com"
+        )
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
+    allow_credentials=allow_credentials,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+    expose_headers=["Content-Type", "Content-Disposition"],
     max_age=3600,
 )
 

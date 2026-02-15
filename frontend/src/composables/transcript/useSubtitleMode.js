@@ -151,19 +151,35 @@ export function useSubtitleMode(segments) {
 
     let hasChanges = false
 
-    // 遍歷每個 span，更新對應的 segment
-    spanElements.forEach((span, index) => {
-      if (index < group.segments.length) {
-        const newText = span.textContent.trim()
-        const originalText = group.segments[index].text.trim()
-
+    if (spanElements.length === 0 && group.segments.length > 0) {
+      // 使用者刪除了整個 cell 的內容，span 元素被瀏覽器移除
+      // 檢查 cell 內是否還有殘留文字
+      const remainingText = tdElement.textContent.trim()
+      group.segments.forEach((seg, index) => {
+        const originalText = seg.text.trim()
+        // 第一個 segment 保留殘留文字，其餘清空
+        const newText = index === 0 ? remainingText : ''
         if (newText !== originalText) {
-          group.segments[index].text = newText
+          seg.text = newText
           hasChanges = true
           console.log(`✏️ Segment ${index} 已修改: "${originalText}" → "${newText}"`)
         }
-      }
-    })
+      })
+    } else {
+      // 正常情況：遍歷每個 span，更新對應的 segment
+      spanElements.forEach((span, index) => {
+        if (index < group.segments.length) {
+          const newText = span.textContent.trim()
+          const originalText = group.segments[index].text.trim()
+
+          if (newText !== originalText) {
+            group.segments[index].text = newText
+            hasChanges = true
+            console.log(`✏️ Segment ${index} 已修改: "${originalText}" → "${newText}"`)
+          }
+        }
+      })
+    }
 
     if (hasChanges) {
       group.edited = true
@@ -180,14 +196,16 @@ export function useSubtitleMode(segments) {
    */
   function convertTableToPlainText(groups, speakerNames = {}) {
     return groups.map(group => {
+      const text = group.combinedText.trim()
+      if (!text) return null // 跳過空的 groups
       if (group.speaker) {
         const displayName = speakerNames[group.speaker] || group.speaker
         const speakerPrefix = `[${displayName}] `
-        return `${speakerPrefix}${group.combinedText.trim()}`
+        return `${speakerPrefix}${text}`
       } else {
-        return group.combinedText.trim()
+        return text
       }
-    }).join('\n\n')
+    }).filter(Boolean).join('\n\n')
   }
 
   /**
@@ -199,7 +217,12 @@ export function useSubtitleMode(segments) {
     const reconstructedSegments = []
 
     for (const group of groups) {
-      reconstructedSegments.push(...group.segments)
+      for (const segment of group.segments) {
+        // 過濾掉文字為空的 segments（使用者已刪除的）
+        if (segment.text.trim() !== '') {
+          reconstructedSegments.push(segment)
+        }
+      }
     }
 
     console.log(`🔄 重建 segments: ${groups.length} groups → ${reconstructedSegments.length} segments`)
