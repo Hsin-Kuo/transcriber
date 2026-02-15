@@ -63,7 +63,7 @@ onMounted(async () => {
 
   try {
     const response = await fetch(
-      `${import.meta.env.VITE_API_URL || 'http://100.66.247.23:8000'}/auth/verify-email?token=${token}`
+      `${import.meta.env.VITE_API_URL ?? ''}/auth/verify-email?token=${token}`
     )
 
     const data = await response.json()

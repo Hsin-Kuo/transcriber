@@ -4,7 +4,8 @@
 import axios from 'axios'
 import router from '../router'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://100.66.247.23:8000'
+// 空字串表示使用相對路徑（適用於 Nginx 代理）
+const API_BASE = import.meta.env.VITE_API_URL ?? ''
 
 // 創建 axios 實例
 const api = axios.create({

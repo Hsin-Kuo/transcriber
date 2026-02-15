@@ -221,7 +221,7 @@ async function resendEmail() {
   error.value = ''
 
   try {
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://100.66.247.23:8000'}/auth/resend-verification`, {
+    const response = await fetch(`${import.meta.env.VITE_API_URL ?? ''}/auth/resend-verification`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
