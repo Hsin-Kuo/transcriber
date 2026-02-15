@@ -5,8 +5,10 @@ from typing import Optional
 from jose import JWTError, jwt
 from pydantic import BaseModel
 
-# JWT 配置（從環境變數讀取）
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
+from ..utils.config_loader import get_parameter
+
+# JWT 配置（AWS 從 SSM 讀取，本地從環境變數）
+SECRET_KEY = get_parameter("/transcriber/jwt-secret", fallback_env="JWT_SECRET_KEY", default="")
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "30"))

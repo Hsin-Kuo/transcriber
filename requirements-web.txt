@@ -32,6 +32,9 @@ python-dotenv
 python-jose[cryptography]
 passlib[bcrypt]
 
+# Email 驗證
+email-validator
+
 # Email 模板
 jinja2
 

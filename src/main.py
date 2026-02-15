@@ -210,23 +210,20 @@ async def startup_event():
     print("✅ 事件循環已就緒", flush=True)
 
     # 1. 連接 MongoDB
-    mongodb_url = os.getenv('MONGODB_URL', 'mongodb://localhost:27017')
     mongodb_db = os.getenv('MONGODB_DB_NAME', 'whisper_transcriber')
     print(f"🔌 正在連接 MongoDB...", flush=True)
-    print(f"   URL: {mongodb_url}", flush=True)
+    print(f"   Mode: {DEPLOY_ENV}", flush=True)
     print(f"   Database: {mongodb_db}", flush=True)
     try:
         await asyncio.wait_for(MongoDB.connect(), timeout=10.0)
         print(f"✅ 已連接到 MongoDB: {mongodb_db}", flush=True)
     except asyncio.TimeoutError:
         print(f"❌ MongoDB 連接超時（10秒）", flush=True)
-        print(f"   請確保 MongoDB 正在運行：docker ps | grep mongo", flush=True)
-        print(f"   URL: {mongodb_url}", flush=True)
+        print(f"   請確保 MongoDB 正在運行", flush=True)
         raise
     except Exception as e:
         print(f"❌ MongoDB 連接失敗: {e}", flush=True)
-        print(f"   請確保 MongoDB 正在運行並檢查 .env 配置", flush=True)
-        print(f"   URL: {mongodb_url}", flush=True)
+        print(f"   請確保 MongoDB 正在運行並檢查配置", flush=True)
         raise
 
     # 2. 初始化 Repositories

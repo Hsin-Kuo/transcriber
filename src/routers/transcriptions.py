@@ -21,6 +21,7 @@ from ..services.utils.whisper_processor import WhisperProcessor
 from ..services.utils.punctuation_processor import PunctuationProcessor
 from ..services.utils.diarization_processor import DiarizationProcessor
 from ..utils.storage_service import is_aws
+from ..utils.config_loader import get_parameter
 import os
 
 
@@ -33,7 +34,7 @@ def _sign_sqs_message(payload: dict) -> dict:
     Returns:
         添加了 _signature 欄位的訊息
     """
-    worker_secret = os.getenv("WORKER_SECRET", "")
+    worker_secret = get_parameter("/transcriber/worker-secret", fallback_env="WORKER_SECRET", default="")
     if not worker_secret:
         return payload  # 未設定密鑰時不簽名
 

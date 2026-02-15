@@ -4,13 +4,23 @@ WhisperProcessor - Whisper 轉錄處理器
 """
 
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Optional, Tuple, List, Dict, Any, TYPE_CHECKING
 import subprocess
 import json
 import re
+import os
 from pydub import AudioSegment
-from faster_whisper import WhisperModel
 from concurrent.futures import ProcessPoolExecutor, as_completed
+
+# 只在本地環境或 GPU Worker 才 import faster_whisper
+# AWS Web Server 不需要這個模組，因為轉錄在 GPU Worker 執行
+_DEPLOY_ENV = os.getenv("DEPLOY_ENV", "local")
+_APP_ROLE = os.getenv("APP_ROLE", "server")
+
+if _DEPLOY_ENV == "local" or _APP_ROLE == "worker":
+    from faster_whisper import WhisperModel
+else:
+    WhisperModel = None  # AWS Web Server 不需要
 
 
 def transcribe_chunk_worker(

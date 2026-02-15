@@ -40,6 +40,7 @@ MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
 DEFAULT_MODEL = os.getenv("WHISPER_MODEL", "medium")
 WORKER_SECRET = os.getenv("WORKER_SECRET", "")
+AUTO_SHUTDOWN_IDLE_MINUTES = int(os.getenv("AUTO_SHUTDOWN_IDLE_MINUTES", "5"))
 
 # Graceful shutdown
 _shutdown = False
@@ -294,6 +295,32 @@ def process_task(message_body: dict):
             shutil.rmtree(temp_dir)
 
 
+def _shutdown_instance():
+    """關閉當前 EC2 實例"""
+    try:
+        # 獲取當前實例 ID
+        import urllib.request
+        token_req = urllib.request.Request(
+            "http://169.254.169.254/latest/api/token",
+            headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"},
+            method="PUT"
+        )
+        token = urllib.request.urlopen(token_req, timeout=2).read().decode()
+
+        instance_req = urllib.request.Request(
+            "http://169.254.169.254/latest/meta-data/instance-id",
+            headers={"X-aws-ec2-metadata-token": token}
+        )
+        instance_id = urllib.request.urlopen(instance_req, timeout=2).read().decode()
+
+        print(f"🔌 正在關閉實例 {instance_id}...")
+        ec2 = boto3.client("ec2", region_name=S3_REGION)
+        ec2.stop_instances(InstanceIds=[instance_id])
+        print(f"✅ 已發送關機指令")
+    except Exception as e:
+        print(f"⚠️ 無法自動關機: {e}")
+
+
 def main():
     """SQS Consumer 主迴圈"""
     if not SQS_QUEUE_URL:
@@ -305,6 +332,10 @@ def main():
     print(f"   SQS Queue: {SQS_QUEUE_URL}")
     print(f"   Whisper Model: {DEFAULT_MODEL}")
     print(f"   MongoDB: {MONGODB_DB_NAME}")
+    print(f"   Auto Shutdown: {AUTO_SHUTDOWN_IDLE_MINUTES} 分鐘空閒後")
+
+    idle_start = None  # 空閒開始時間
+    idle_threshold = AUTO_SHUTDOWN_IDLE_MINUTES * 60  # 轉為秒
 
     while not _shutdown:
         try:
@@ -318,7 +349,20 @@ def main():
 
             messages = resp.get("Messages", [])
             if not messages:
+                # 沒有訊息，開始計算空閒時間
+                if idle_start is None:
+                    idle_start = time.time()
+                    print(f"⏳ 佇列空閒，{AUTO_SHUTDOWN_IDLE_MINUTES} 分鐘後自動關機...")
+
+                idle_duration = time.time() - idle_start
+                if idle_duration >= idle_threshold:
+                    print(f"💤 空閒超過 {AUTO_SHUTDOWN_IDLE_MINUTES} 分鐘，準備關機...")
+                    _shutdown_instance()
+                    break
                 continue
+
+            # 有訊息，重置空閒計時
+            idle_start = None
 
             for msg in messages:
                 body = json.loads(msg["Body"])

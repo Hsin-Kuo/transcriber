@@ -3,8 +3,10 @@ import os
 from motor.motor_asyncio import AsyncIOMotorClient
 from typing import Optional
 
-# 環境變數配置
-MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
+from ..utils.config_loader import get_parameter
+
+# 環境變數配置（AWS 從 SSM 讀取，本地從環境變數）
+MONGODB_URL = get_parameter("/transcriber/mongodb-url", fallback_env="MONGODB_URL", default="mongodb://localhost:27017")
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
 
 
@@ -17,12 +19,14 @@ class MongoDB:
         """啟動時連接 MongoDB"""
         try:
             # 添加連接參數以提高可靠性
+            # 注意：MongoDB Atlas 使用副本集，不能用 directConnection=True
+            is_atlas = "mongodb.net" in MONGODB_URL or "mongodb+srv" in MONGODB_URL
             cls.client = AsyncIOMotorClient(
                 MONGODB_URL,
                 serverSelectionTimeoutMS=5000,
                 connectTimeoutMS=5000,
                 socketTimeoutMS=5000,
-                directConnection=True  # 直接連接，不使用副本集發現
+                **({"directConnection": True} if not is_atlas else {})
             )
             # 測試連接
             await cls.client.admin.command('ping')
