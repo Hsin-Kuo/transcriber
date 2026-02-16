@@ -2,7 +2,6 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import TranscriptionView from '../views/TranscriptionView.vue'
 import TasksView from '../views/TasksView.vue'
-// import AudioEditorView from '../views/AudioEditorView.vue'
 import UserSettingsView from '../views/UserSettingsView.vue'
 import TranscriptDetailView from '../views/TranscriptDetailView.vue'
 import LoginView from '../views/auth/LoginView.vue'
@@ -30,15 +29,6 @@ const routes = [
       requiresAuth: true
     }
   },
-  // {
-  //   path: '/editor',
-  //   name: 'audioEditor',
-  //   component: AudioEditorView,
-  //   meta: {
-  //     title: '音訊編輯',
-  //     requiresAuth: true
-  //   }
-  // },
   {
     path: '/settings',
     name: 'settings',
