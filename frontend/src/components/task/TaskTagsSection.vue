@@ -1,18 +1,7 @@
 <template>
-  <div class="task-tags-section" @click.stop>
+  <div class="task-tags-section" ref="tagSectionEl" @click.stop>
     <!-- 編輯模式 -->
     <div v-if="isEditing" class="tag-edit-mode">
-      <div class="tag-edit-header">
-        <span class="tag-edit-label">{{ $t('taskList.editTags') }}</span>
-        <div class="tag-edit-actions">
-          <button class="btn-tag-action btn-save" @click="handleSave" :title="$t('taskList.save')">
-            ✓
-          </button>
-          <button class="btn-tag-action btn-cancel" @click="handleCancel" :title="$t('taskList.cancel')">
-            ✕
-          </button>
-        </div>
-      </div>
 
       <!-- 標籤輸入框 -->
       <div class="tag-input-wrapper-inline">
@@ -36,7 +25,6 @@
 
       <!-- 可快速選擇的現有標籤 -->
       <div v-if="availableTagsList.length > 0" class="available-tags-section">
-        <div class="available-tags-label">{{ $t('taskList.quickSelect') }}</div>
         <div class="available-tags">
           <button
             v-for="tag in availableTagsList"
@@ -51,7 +39,7 @@
             @click="quickAddTag(tag)"
             :title="$t('taskList.clickToAddTag', { tag })"
           >
-            + {{ tag }}
+            {{ tag }}
           </button>
         </div>
       </div>
@@ -112,6 +100,7 @@
           </span>
         </template>
       </div>
+
     </div>
 
     <!-- 顯示模式 -->
@@ -149,7 +138,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTaskTags } from '../../composables/task/useTaskTags'
 
@@ -173,7 +162,7 @@ const props = defineProps({
 })
 
 // Emits
-const emit = defineEmits(['tags-updated'])
+const emit = defineEmits(['tags-updated', 'editing-change'])
 
 // State
 const isEditing = ref(false)
@@ -182,17 +171,49 @@ const editingTagInput = ref('')
 const editingTagIndex = ref(null)
 const editingTagText = ref('')
 const tagTextInput = ref(null)
+const tagSectionEl = ref(null)
 
 // Computed
 const availableTagsList = computed(() => {
   return props.allTags.filter(tag => !editingTags.value.includes(tag))
 })
 
+// 發送更新
+function emitUpdate() {
+  emit('tags-updated', {
+    taskId: props.taskId,
+    tags: [...editingTags.value]
+  })
+}
+
+// 點擊外部關閉編輯
+function handleClickOutside(event) {
+  if (tagSectionEl.value && !tagSectionEl.value.contains(event.target)) {
+    event.stopPropagation()
+    event.preventDefault()
+    closeEditing()
+  }
+}
+
 // Methods
 function startEditing() {
   isEditing.value = true
+  emit('editing-change', true)
   editingTags.value = props.tags ? [...props.tags] : []
   editingTagInput.value = ''
+  nextTick(() => {
+    document.addEventListener('click', handleClickOutside, true)
+  })
+}
+
+function closeEditing() {
+  document.removeEventListener('click', handleClickOutside, true)
+  isEditing.value = false
+  emit('editing-change', false)
+  editingTags.value = []
+  editingTagInput.value = ''
+  editingTagIndex.value = null
+  editingTagText.value = ''
 }
 
 function addTag() {
@@ -200,6 +221,7 @@ function addTag() {
   if (tag && !editingTags.value.includes(tag)) {
     editingTags.value.push(tag)
     editingTagInput.value = ''
+    emitUpdate()
   } else if (editingTags.value.includes(tag)) {
     editingTagInput.value = ''
   }
@@ -208,11 +230,13 @@ function addTag() {
 function quickAddTag(tag) {
   if (!editingTags.value.includes(tag)) {
     editingTags.value.push(tag)
+    emitUpdate()
   }
 }
 
 function removeTag(index) {
   editingTags.value.splice(index, 1)
+  emitUpdate()
 }
 
 async function startEditingTagText(index, tag) {
@@ -233,9 +257,9 @@ async function startEditingTagText(index, tag) {
 function saveTagText(index) {
   const newText = editingTagText.value.trim()
   if (newText && newText !== editingTags.value[index]) {
-    // 檢查新標籤是否已存在
     if (!editingTags.value.includes(newText)) {
       editingTags.value[index] = newText
+      emitUpdate()
     }
   }
   editingTagIndex.value = null
@@ -247,25 +271,9 @@ function cancelTagText() {
   editingTagText.value = ''
 }
 
-function handleSave() {
-  emit('tags-updated', {
-    taskId: props.taskId,
-    tags: [...editingTags.value]
-  })
-  isEditing.value = false
-  editingTags.value = []
-  editingTagInput.value = ''
-  editingTagIndex.value = null
-  editingTagText.value = ''
-}
-
-function handleCancel() {
-  isEditing.value = false
-  editingTags.value = []
-  editingTagInput.value = ''
-  editingTagIndex.value = null
-  editingTagText.value = ''
-}
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside, true)
+})
 </script>
 
 <style scoped>
@@ -437,59 +445,10 @@ function handleCancel() {
 
 /* 編輯模式 */
 .tag-edit-mode {
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--color-bg-light, rgba(255, 255, 255, 0.5));
   border: 1px solid rgba(var(--color-primary-rgb), 0.2);
   border-radius: 8px;
   padding: 12px;
-}
-
-.tag-edit-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-}
-
-.tag-edit-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: rgba(var(--color-text-dark-rgb), 0.7);
-}
-
-.tag-edit-actions {
-  display: flex;
-  gap: 6px;
-}
-
-.btn-tag-action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: none;
-  border-radius: 4px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn-tag-action.btn-save {
-  background: rgba(var(--color-success-rgb), 0.15);
-  color: var(--color-success-light);
-}
-
-.btn-tag-action.btn-save:hover {
-  background: rgba(var(--color-success-rgb), 0.25);
-}
-
-.btn-tag-action.btn-cancel {
-  background: rgba(var(--color-danger-rgb), 0.15);
-  color: var(--color-danger);
-}
-
-.btn-tag-action.btn-cancel:hover {
-  background: rgba(var(--color-danger-rgb), 0.25);
 }
 
 /* 標籤輸入 */
@@ -505,7 +464,8 @@ function handleCancel() {
   font-size: 13px;
   border: 1px solid rgba(var(--color-primary-rgb), 0.3);
   border-radius: 6px;
-  background: white;
+  background: var(--color-bg, white);
+  color: var(--main-text);
   transition: all 0.2s;
 }
 
@@ -549,15 +509,6 @@ function handleCancel() {
   border-radius: 6px;
 }
 
-.available-tags-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: rgba(var(--color-text-dark-rgb), 0.6);
-  margin-bottom: 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
 .available-tags {
   display: flex;
   flex-wrap: wrap;
@@ -570,11 +521,11 @@ function handleCancel() {
   padding: 4px 10px;
   font-size: 12px;
   font-weight: 500;
-  border: 1.5px solid;
+  border: 1.5px dashed;
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s;
-  background: white;
+  background: var(--color-bg, white);
 }
 
 .available-tag-btn:hover {

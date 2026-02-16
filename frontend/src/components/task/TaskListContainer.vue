@@ -14,19 +14,6 @@
     />
 
 
-    <!-- 批次編輯工具列 -->
-    <BatchEditToolbar
-      v-if="isBatchEditMode"
-      v-model:selectedTaskIds="selectedTaskIds"
-      :tasks="sortedTasks"
-      :all-tags="allTags"
-      @select-all="handleSelectAll"
-      @deselect-all="handleDeselectAll"
-      @batch-delete="handleBatchDelete"
-      @batch-tags-add="handleBatchTagsAdd"
-      @batch-tags-remove="handleBatchTagsRemove"
-    />
-
     <!-- 任務類型篩選區 - 資料夾頁籤樣式 -->
     <div class="task-type-tabs">
       <button
@@ -97,7 +84,21 @@
       @toggle-selection="handleToggleSelection"
       @toggle-keep-audio="handleToggleKeepAudio"
       @tags-updated="handleTaskTagsUpdated"
-    />
+    >
+      <template #before-cards>
+        <BatchEditToolbar
+          v-if="isBatchEditMode"
+          v-model:selectedTaskIds="selectedTaskIds"
+          :tasks="sortedTasks"
+          :all-tags="allTags"
+          @select-all="handleSelectAll"
+          @deselect-all="handleDeselectAll"
+          @batch-delete="handleBatchDelete"
+          @batch-tags-add="handleBatchTagsAdd"
+          @batch-tags-remove="handleBatchTagsRemove"
+        />
+      </template>
+    </TaskGrid>
   </div>
 </template>
 

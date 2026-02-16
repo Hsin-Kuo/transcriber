@@ -7,6 +7,7 @@
 
     <!-- 任務列表 -->
     <div v-else class="tasks" :class="{ 'batch-mode': isBatchMode }">
+      <slot name="before-cards"></slot>
       <TaskCard
         v-for="task in tasks"
         :key="task.task_id"

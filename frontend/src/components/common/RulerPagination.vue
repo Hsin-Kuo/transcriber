@@ -101,6 +101,7 @@ function nextPage() {
   font-family: 'Doto', sans-serif;
   font-size: 18px;
   font-weight: 700;
+  letter-spacing: -3px;
   color: var(--main-text);
   background: transparent;
   border: 1px solid rgba(var(--main-text-rgb, 0, 0, 0), 0);
