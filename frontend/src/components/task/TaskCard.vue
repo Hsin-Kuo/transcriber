@@ -598,7 +598,7 @@ function getKeepAudioTooltip() {
   height: 24px;
   top: 50%;
   left: 50%;
-  color: #555;
+  color: var(--color-text-light);
   cursor: pointer;
   transition: all 0.3s ease;
   transform-origin: center 30%;
@@ -614,7 +614,7 @@ function getKeepAudioTooltip() {
 /* 選中狀態 - 垂直插入 */
 .toggle-input:checked ~ .pin-icon {
   transform: translate(-50%, -50%) rotate(0deg);
-  color: #e67216;
+  color: var(--color-primary);
   opacity: 1;
 }
 
@@ -627,12 +627,12 @@ function getKeepAudioTooltip() {
 /* hover 效果 */
 .toggle-label:hover .toggle-input:not(:disabled):not(:checked) ~ .pin-icon {
   transform: translate(-50%, -50%) rotate(35deg) scale(1.08);
-  color: #444;
+  color: var(--color-text-muted);
 }
 
 .toggle-label:hover .toggle-input:not(:disabled):checked ~ .pin-icon {
   transform: translate(-50%, -50%) rotate(0deg) scale(1.08);
-  color: #ff8c2a;
+  color: var(--color-primary-light);
 }
 
 .newest-badge {

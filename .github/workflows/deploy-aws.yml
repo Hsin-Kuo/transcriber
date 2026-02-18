@@ -106,8 +106,8 @@ jobs:
       - name: Verify deployment
         run: |
           sleep 5
-          curl -f http://${{ env.EC2_HOST }}/health || exit 1
-          echo "✅ Deployment successful!"
+          curl -f https://soundlite.app/health || exit 1
+          echo "✅ Deployment successful! https://soundlite.app"
 
       - name: Cleanup SSH key
         if: always()

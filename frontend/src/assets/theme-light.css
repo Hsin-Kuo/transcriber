@@ -159,24 +159,6 @@
   --gradient-cool: linear-gradient(145deg, #e9eef5, #d1d9e6);
 
   /* ========================================
-     編輯器專用色 - Editor Colors
-     ======================================== */
-  --editor-bg: rgba(28, 28, 28, 0.95);
-  --editor-bg-dark: rgba(20, 20, 20, 0.95);
-  --editor-bg-gradient: linear-gradient(135deg, rgba(28, 28, 28, 0.95) 0%, rgba(20, 20, 20, 0.95) 100%);
-  --editor-waveform: var(--palette-orange-primary);
-  --editor-progress: var(--palette-orange-bright);
-  --editor-cursor: var(--palette-white);
-  --editor-region-1: rgba(var(--palette-orange-primary-rgb), 0.3);
-  --editor-region-2: rgba(var(--palette-orange-bright-rgb), 0.3);
-  --editor-region-3: rgba(var(--palette-green-sea-rgb), 0.3);
-  --editor-region-4: rgba(var(--palette-purple-material-rgb), 0.3);
-  --editor-region-5: rgba(var(--palette-blue-primary-rgb), 0.3);
-  --editor-region-deleted: rgba(100, 100, 100, 0.3);
-  --editor-marker-color: rgba(var(--palette-orange-bright-rgb), 0.8);
-  --editor-marker-fill: rgba(255, 255, 255, 0.05);
-
-  /* ========================================
      Legacy 變數映射 (向後兼容)
      保留舊的變數名稱以避免破壞現有代碼
      ======================================== */

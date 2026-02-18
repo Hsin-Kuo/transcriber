@@ -1219,7 +1219,7 @@ async function setPassword() {
   left: 0;
   right: 0;
   bottom: 0;
-  background: #dedede;
+  background: var(--color-divider);
   border-radius: 22px;
   transition: all 0.3s ease;
 }

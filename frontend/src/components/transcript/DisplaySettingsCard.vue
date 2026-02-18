@@ -296,7 +296,7 @@ defineEmits([
   width: 32px;
   height: 32px;
   top: -5px;
-  background: #dedede;
+  background: var(--color-divider);
   border: 0.5px solid;
   border-radius: 50%;
   cursor: pointer;

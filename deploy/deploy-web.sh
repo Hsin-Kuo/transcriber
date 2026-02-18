@@ -37,15 +37,18 @@ SQS_QUEUE_URL=https://sqs.ap-northeast-1.amazonaws.com/696637902131/transcriber-
 
 # Email 設定（使用 SES）
 EMAIL_PROVIDER=ses
-FROM_EMAIL=hsinforwork@gmail.com
+FROM_EMAIL=noreply@soundlite.app
 
 # 以下密鑰從 SSM Parameter Store 自動載入
 # JWT_SECRET_KEY - 從 /transcriber/jwt-secret 載入
 # WORKER_SECRET - 從 /transcriber/worker-secret 載入
 # MONGODB_URL - 從 /transcriber/mongodb-url 載入
 
-# CORS 設定（替換為你的實際域名）
-CORS_ORIGINS=http://localhost:3000,http://your-domain.com
+# CORS 設定
+CORS_ORIGINS=https://soundlite.app
+
+# Frontend URL (用於 email 中的連結)
+FRONTEND_URL=https://soundlite.app
 EOF
 
 echo "=== 建立 systemd 服務 ==="
@@ -73,4 +76,4 @@ sudo systemctl enable transcriber
 sudo systemctl start transcriber
 
 echo "=== 部署完成 ==="
-echo "Web Server 運行在: http://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4):8000"
+echo "Web Server 運行在: https://soundlite.app"
