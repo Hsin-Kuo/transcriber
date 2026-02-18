@@ -434,7 +434,19 @@
     "setPassword": "Set Password",
     "setPasswordDescription": "Set a password to enable email + password login",
     "setPasswordSuccess": "Password set successfully",
-    "noPasswordWarning": "You haven't set a password. You won't be able to log in after unlinking Google"
+    "noPasswordWarning": "You haven't set a password. You won't be able to log in after unlinking Google",
+    "email": "Email",
+    "password": "Password",
+    "login": "Login",
+    "loggingIn": "Logging in...",
+    "noVerificationEmail": "Didn't receive the verification email?",
+    "resendVerification": "Resend Verification Email",
+    "verificationEmailSent": "Verification email sent, please check your inbox",
+    "noAccount": "Don't have an account?",
+    "register": "Register",
+    "sendVerificationFailed": "Failed to send verification email",
+    "networkError": "Network error, please try again later",
+    "googleLoginFailed": "Google login failed: "
   },
   "aiSummary": {
     "title": "AI Summary",

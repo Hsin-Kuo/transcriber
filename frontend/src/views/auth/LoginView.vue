@@ -2,31 +2,33 @@
   <div class="auth-container">
     <div class="auth-card">
       <div class="auth-content">
-          <h1 class="auth-title">登入</h1>
-          <p class="auth-subtitle">Whisper 轉錄服務</p>
+          <div class="auth-brand">
+            <img src="/favicon.svg" alt="Sound Lite" width="36" height="36" />
+            <h1 class="auth-title">Sound Lite</h1>
+          </div>
 
           <form @submit.prevent="handleLogin" class="auth-form">
             <div class="form-group">
-              <label for="email">帳號</label>
+              <label for="email">{{ $t('auth.email') }}</label>
               <input
                 type="email"
                 id="email"
                 v-model="email"
                 required
-                placeholder="your@email.com"
+                :placeholder="$t('auth.email')"
                 :disabled="loading"
               />
             </div>
 
             <div class="form-group">
-              <label for="password">密碼</label>
+              <label for="password">{{ $t('auth.password') }}</label>
               <div class="password-input-wrapper">
                 <input
                   :type="showPassword ? 'text' : 'password'"
                   id="password"
                   v-model="password"
                   required
-                  placeholder="至少 8 個字元"
+                  :placeholder="$t('auth.password')"
                   minlength="8"
                   :disabled="loading"
                 />
@@ -55,7 +57,7 @@
               {{ error }}
               <div v-if="needsVerification" class="verification-prompt">
                 <p class="verification-text">
-                  沒收到驗證郵件嗎？
+                  {{ $t('auth.noVerificationEmail') }}
                 </p>
                 <button
                   type="button"
@@ -63,10 +65,10 @@
                   @click="resendVerification"
                   :disabled="resendLoading"
                 >
-                  {{ resendLoading ? '發送中...' : '重新發送驗證郵件' }}
+                  {{ resendLoading ? $t('auth.sending') : $t('auth.resendVerification') }}
                 </button>
                 <p v-if="resendSuccess" class="resend-success">
-                  ✓ 驗證郵件已發送，請查看您的郵箱
+                  ✓ {{ $t('auth.verificationEmailSent') }}
                 </p>
               </div>
             </div>
@@ -76,27 +78,27 @@
               class="btn-primary"
               :disabled="loading"
             >
-              {{ loading ? '登入中...' : '登入' }}
+              {{ loading ? $t('auth.loggingIn') : $t('auth.login') }}
             </button>
           </form>
 
           <!-- Google 登入 -->
           <div v-if="googleClientId" class="oauth-section">
             <div class="divider">
-              <span>或</span>
+              <span>{{ $t('auth.or') }}</span>
             </div>
             <GoogleSignInButton
               :client-id="googleClientId"
               button-text="signin_with"
-              :width="350"
+              :width="320"
               @success="handleGoogleSuccess"
               @error="handleGoogleError"
             />
           </div>
 
           <div class="auth-footer">
-            <p><router-link to="/forgot-password">忘記密碼？</router-link></p>
-            <p>還沒有帳號？<router-link to="/register">立即註冊</router-link></p>
+            <p><router-link to="/forgot-password">{{ $t('auth.forgotPassword') }}</router-link></p>
+            <p>{{ $t('auth.noAccount') }}<router-link to="/register">{{ $t('auth.register') }}</router-link></p>
           </div>
         </div>
     </div>
@@ -106,9 +108,11 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth'
 import GoogleSignInButton from '../../components/GoogleSignInButton.vue'
 
+const { t: $t } = useI18n()
 const router = useRouter()
 const authStore = useAuthStore()
 
@@ -172,10 +176,10 @@ async function resendVerification() {
         resendSuccess.value = false
       }, 5000)
     } else {
-      error.value = data.detail || '發送驗證郵件失敗'
+      error.value = data.detail || $t('auth.sendVerificationFailed')
     }
   } catch (err) {
-    error.value = '網路錯誤，請稍後再試'
+    error.value = $t('auth.networkError')
   } finally {
     resendLoading.value = false
   }
@@ -198,7 +202,7 @@ async function handleGoogleSuccess(credential) {
 }
 
 function handleGoogleError(err) {
-  error.value = 'Google 登入失敗：' + err
+  error.value = $t('auth.googleLoginFailed') + err
 }
 </script>
 
@@ -276,7 +280,7 @@ function handleGoogleError(err) {
 
 .auth-card {
   width: 100%;
-  max-width: 450px;
+  max-width: 380px;
   margin: 0 auto;
   background: var(--upload-bg);
   border-radius: 12px;
@@ -290,19 +294,24 @@ function handleGoogleError(err) {
   padding: 40px 30px;
 }
 
-.auth-title {
-  font-size: 2rem;
-  margin: 0 0 10px 0;
-  text-align: center;
-  color: var(--main-primary);
-  font-weight: 700;
+.auth-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 30px;
 }
 
-.auth-subtitle {
-  text-align: center;
-  color: var(--main-text-light);
-  margin: 0 0 30px 0;
-  font-size: 0.9rem;
+.auth-brand img {
+  flex-shrink: 0;
+}
+
+.auth-title {
+  font-size: 1.75rem;
+  margin: 0;
+  color: var(--main-primary);
+  font-weight: 500;
+  letter-spacing: -0.5px;
 }
 
 .auth-form {

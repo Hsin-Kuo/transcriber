@@ -434,7 +434,19 @@
     "setPassword": "設定密碼",
     "setPasswordDescription": "設定密碼後可使用 Email + 密碼登入",
     "setPasswordSuccess": "密碼設定成功",
-    "noPasswordWarning": "您尚未設定密碼，解除綁定 Google 後將無法登入"
+    "noPasswordWarning": "您尚未設定密碼，解除綁定 Google 後將無法登入",
+    "email": "帳號",
+    "password": "密碼",
+    "login": "登入",
+    "loggingIn": "登入中...",
+    "noVerificationEmail": "沒收到驗證郵件嗎？",
+    "resendVerification": "重新發送驗證郵件",
+    "verificationEmailSent": "驗證郵件已發送，請查看您的郵箱",
+    "noAccount": "還沒有帳號？",
+    "register": "立即註冊",
+    "sendVerificationFailed": "發送驗證郵件失敗",
+    "networkError": "網路錯誤，請稍後再試",
+    "googleLoginFailed": "Google 登入失敗："
   },
   "aiSummary": {
     "title": "AI 摘要",
