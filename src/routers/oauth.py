@@ -5,6 +5,7 @@ from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
 from ..utils.time_utils import get_utc_timestamp
+from ..utils.config_loader import get_parameter
 from ..models.auth import (
     GoogleAuthRequest,
     GoogleBindRequest,
@@ -19,8 +20,8 @@ from ..database.repositories.user_repo import UserRepository
 
 router = APIRouter(prefix="/auth", tags=["OAuth"])
 
-# Google OAuth 設定
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+# Google OAuth 設定（AWS 從 SSM 讀取，本地從環境變數）
+GOOGLE_CLIENT_ID = get_parameter("/transcriber/google-client-id", fallback_env="GOOGLE_CLIENT_ID", default="")
 
 # 啟動時印出設定狀態（除錯用）
 if GOOGLE_CLIENT_ID:
