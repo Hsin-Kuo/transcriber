@@ -204,6 +204,8 @@ class EmailService:
             # 根據 EMAIL_PROVIDER 選擇發送方式
             if self.email_provider == "ses":
                 return self._send_via_ses(to_email, subject, html_content, text_content)
+            elif self.email_provider == "resend":
+                return self._send_via_resend(to_email, subject, html_content, text_content)
             elif self.email_provider == "smtp" or (self.smtp_user and self.smtp_password):
                 return self._send_via_smtp(to_email, subject, html_content, text_content)
             else:
@@ -275,6 +277,40 @@ class EmailService:
         )
 
         print(f"✅ Email 已發送到 {to_email} (SES)")
+        return True
+
+    def _send_via_resend(
+        self,
+        to_email: str,
+        subject: str,
+        html_content: str,
+        text_content: Optional[str] = None
+    ) -> bool:
+        """透過 Resend 發送"""
+        import resend
+        from .config_loader import get_parameter
+
+        resend.api_key = get_parameter(
+            "/transcriber/resend-api-key",
+            fallback_env="RESEND_API_KEY"
+        )
+
+        if not resend.api_key:
+            raise ValueError("RESEND_API_KEY environment variable is not set")
+
+        params = {
+            "from": f"{self.from_name} <{self.from_email}>",
+            "to": [to_email],
+            "subject": subject,
+            "html": html_content,
+        }
+
+        if text_content:
+            params["text"] = text_content
+
+        resend.Emails.send(params)
+
+        print(f"✅ Email 已發送到 {to_email} (Resend)")
         return True
 
 

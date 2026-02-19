@@ -31,6 +31,8 @@
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="3 6 5 6 21 6"></polyline>
             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            <line x1="10" y1="11" x2="10" y2="17"></line>
+            <line x1="14" y1="11" x2="14" y2="17"></line>
           </svg>
           {{ $t('taskList.batchDelete', { count: selectedTaskIds.size }) }}
         </button>
@@ -264,11 +266,7 @@ function handleManualAddTags() {
 <style scoped>
 /* 從 TaskList.vue 複製批次工具列的 CSS */
 .batch-toolbar {
-  background: rgba(var(--color-primary-rgb), 0.05);
-  border: 1px solid rgba(var(--color-primary-rgb), 0.15);
-  border-radius: 12px;
-  padding: 16px;
-  margin-bottom: 20px;
+  padding: 0;
 }
 
 .batch-toolbar-header {
@@ -290,14 +288,14 @@ function handleManualAddTags() {
   align-items: center;
   gap: 8px;
   padding: 6px 12px;
-  background: white;
+  background: var(--color-bg, white);
   border: 1px solid rgba(var(--color-primary-rgb), 0.3);
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
   font-size: 13px;
   font-weight: 500;
-  color: rgba(var(--color-text-dark-rgb), 0.8);
+  color: var(--main-text);
 }
 
 .btn-batch-select-all:hover {
@@ -352,7 +350,7 @@ function handleManualAddTags() {
 
 /* 標籤管理區域 */
 .batch-tags-section-compact {
-  background: white;
+  background: var(--color-bg, white);
   border: 1px solid rgba(var(--color-primary-rgb), 0.2);
   border-radius: 8px;
   overflow: hidden;
@@ -367,7 +365,7 @@ function handleManualAddTags() {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 16px;
+  padding: 6px 16px;
   background: rgba(var(--color-teal-rgb), 0.05);
   border-bottom: 1px solid rgba(var(--color-primary-rgb), 0.1);
   cursor: pointer;
@@ -437,7 +435,7 @@ function handleManualAddTags() {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
-  background: white;
+  background: var(--color-bg, white);
 }
 
 .tag-pill:hover {
@@ -451,7 +449,7 @@ function handleManualAddTags() {
 }
 
 .tag-pill.tag-available {
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--color-bg, rgba(255, 255, 255, 0.9));
 }
 
 .pill-icon {
@@ -478,6 +476,8 @@ function handleManualAddTags() {
   font-size: 13px;
   border: 1px solid rgba(var(--color-primary-rgb), 0.3);
   border-radius: 6px;
+  background: var(--color-bg, white);
+  color: var(--main-text);
   transition: all 0.2s;
 }
 

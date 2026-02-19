@@ -90,6 +90,11 @@ git push origin aws
    sudo journalctl -u transcriber -n 50
    ```
 
+## 網站網址
+
+- **Production**: https://soundlite.app
+- **EC2 Direct**: http://3.112.209.96 (backup)
+
 ### SSH 連線失敗
 - 確認 EC2 Security Group 允許 GitHub Actions IP
 - 或使用 `0.0.0.0/0` 允許所有 IP（測試用）

@@ -35,20 +35,22 @@ S3_BUCKET=transcriber-files-696637902131
 S3_REGION=ap-northeast-1
 SQS_QUEUE_URL=https://sqs.ap-northeast-1.amazonaws.com/696637902131/transcriber-tasks
 
-# Email 設定（使用 SES）
-EMAIL_PROVIDER=ses
-FROM_EMAIL=hsinforwork@gmail.com
-
-# Frontend URL（用於 email 中的連結）
-FRONTEND_URL=http://3.112.209.96
+# Email 設定（使用 Resend）
+EMAIL_PROVIDER=resend
+FROM_EMAIL=noreply@soundlite.app
+FROM_NAME=Soundlite
 
 # 以下密鑰從 SSM Parameter Store 自動載入
 # JWT_SECRET_KEY - 從 /transcriber/jwt-secret 載入
 # WORKER_SECRET - 從 /transcriber/worker-secret 載入
 # MONGODB_URL - 從 /transcriber/mongodb-url 載入
+# RESEND_API_KEY - 從 /transcriber/resend-api-key 載入
 
 # CORS 設定
-CORS_ORIGINS=http://3.112.209.96,http://localhost:5173
+CORS_ORIGINS=https://soundlite.app
+
+# Frontend URL (用於 email 中的連結)
+FRONTEND_URL=https://soundlite.app
 EOF
 
 echo "=== 建立 systemd 服務 ==="
@@ -76,4 +78,4 @@ sudo systemctl enable transcriber
 sudo systemctl start transcriber
 
 echo "=== 部署完成 ==="
-echo "Web Server 運行在: http://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4):8000"
+echo "Web Server 運行在: https://soundlite.app"

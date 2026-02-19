@@ -32,7 +32,7 @@
 
     <!-- 標籤區塊 -->
     <div class="tags-section">
-      <span class="tags-icon" :title="$t('taskInfo.tags')">
+      <span v-if="!isEditingTags" class="tags-icon" :title="$t('taskInfo.tags')">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
           <line x1="7" y1="7" x2="7.01" y2="7"></line>
@@ -43,13 +43,14 @@
         :tags="tags"
         :all-tags="allTags"
         @tags-updated="handleTagsUpdated"
+        @editing-change="isEditingTags = $event"
       />
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import TaskTagsSection from '../task/TaskTagsSection.vue'
 
@@ -81,6 +82,9 @@ const props = defineProps({
 
 // Emits
 const emit = defineEmits(['tags-updated'])
+
+// State
+const isEditingTags = ref(false)
 
 // Computed
 const formattedDate = computed(() => {
@@ -197,7 +201,7 @@ function handleTagsUpdated(data) {
   align-items: center;
   gap: 8px;
   padding-top: 12px;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  border-top: 1px solid var(--color-divider, rgba(0, 0, 0, 0.06));
 }
 
 .tags-icon {

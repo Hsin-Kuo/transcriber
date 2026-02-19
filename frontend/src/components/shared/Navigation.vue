@@ -13,28 +13,7 @@
     </button>
 
     <div class="nav-brand">
-      <svg class="brand-icon" width="28" height="28" viewBox="0 0 28 28">
-        <!-- 橘色方框 -->
-        <rect x="0" y="0" width="28" height="28" rx="4" fill="currentColor"/>
-        <!-- 中心點 (白色) -->
-        <circle cx="14" cy="14" r="2" fill="#f4ecd5"/>
-        <!-- 內圈 (6 dots, 白色) -->
-        <circle cx="14" cy="9" r="1.5" fill="#f4ecd5"/>
-        <circle cx="18.3" cy="11.5" r="1.5" fill="#f4ecd5"/>
-        <circle cx="18.3" cy="16.5" r="1.5" fill="#f4ecd5"/>
-        <circle cx="14" cy="19" r="1.5" fill="#f4ecd5"/>
-        <circle cx="9.7" cy="16.5" r="1.5" fill="#f4ecd5"/>
-        <circle cx="9.7" cy="11.5" r="1.5" fill="#f4ecd5"/>
-        <!-- 外圈 (8 dots, 白色) -->
-        <circle cx="14" cy="4" r="1.5" fill="#f4ecd5"/>
-        <circle cx="21" cy="7" r="1.5" fill="#f4ecd5"/>
-        <circle cx="24" cy="14" r="1.5" fill="#f4ecd5"/>
-        <circle cx="21" cy="21" r="1.5" fill="#f4ecd5"/>
-        <circle cx="14" cy="24" r="1.5" fill="#f4ecd5"/>
-        <circle cx="7" cy="21" r="1.5" fill="#f4ecd5"/>
-        <circle cx="4" cy="14" r="1.5" fill="#f4ecd5"/>
-        <circle cx="7" cy="7" r="1.5" fill="#f4ecd5"/>
-      </svg>
+      <img class="brand-icon" src="/favicon.svg" alt="SoundLite" width="28" height="28" />
       <h2 v-if="!isCollapsed">Sound Lite</h2>
     </div>
 

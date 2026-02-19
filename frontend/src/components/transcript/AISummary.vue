@@ -478,12 +478,12 @@ onMounted(() => {
 
 .status-badge.processing {
   background-color: rgba(255, 193, 7, 0.15);
-  color: #f59e0b;
+  color: var(--color-warning);
 }
 
 .status-badge.completed {
   background-color: rgba(76, 175, 80, 0.15);
-  color: #4caf50;
+  color: var(--color-success-alt);
 }
 
 .expand-icon {
@@ -535,7 +535,7 @@ onMounted(() => {
 }
 
 .error-message {
-  color: #ef4444;
+  color: var(--color-danger);
   font-size: 13px;
 }
 
@@ -588,7 +588,7 @@ onMounted(() => {
 }
 
 .copy-btn.copied {
-  color: #22c55e;
+  color: var(--color-success);
   border-color: rgba(34, 197, 94, 0.3);
   background: rgba(34, 197, 94, 0.05);
 }
@@ -614,10 +614,10 @@ onMounted(() => {
   font-weight: 500;
 }
 
-.type-meeting { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
-.type-lecture { background: rgba(168, 85, 247, 0.15); color: #a855f7; }
+.type-meeting { background: rgba(59, 130, 246, 0.15); color: var(--color-info); }
+.type-lecture { background: rgba(168, 85, 247, 0.15); color: var(--color-purple-deep); }
 .type-interview { background: rgba(236, 72, 153, 0.15); color: #ec4899; }
-.type-general { background: rgba(107, 114, 128, 0.15); color: #6b7280; }
+.type-general { background: rgba(107, 114, 128, 0.15); color: var(--color-neutral-light); }
 
 .detected-topic {
   font-size: 18px;
@@ -740,7 +740,7 @@ onMounted(() => {
 }
 
 .action-task svg {
-  color: #3b82f6;
+  color: var(--color-info);
   flex-shrink: 0;
   margin-top: 2px;
 }

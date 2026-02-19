@@ -1152,7 +1152,7 @@ async function setPassword() {
   top: calc(100% + 4px);
   right: 0;
   min-width: 100%;
-  background: var(--card-bg, #fff);
+  background: var(--color-bg-light, #fff);
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   opacity: 0;
@@ -1219,7 +1219,7 @@ async function setPassword() {
   left: 0;
   right: 0;
   bottom: 0;
-  background: #dedede;
+  background: var(--color-divider);
   border-radius: 22px;
   transition: all 0.3s ease;
 }

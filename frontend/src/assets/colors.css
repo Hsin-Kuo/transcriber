@@ -81,7 +81,6 @@
   --palette-purple-rose: #fd79a8;
   --palette-purple-orchid: #9b59b6;
   --palette-purple-plum: #8e44ad;
-  --palette-purple-material: #9c27b0;
 
   /* 青綠色系 - Teal Colors */
   --palette-teal: #77969A;
@@ -121,32 +120,5 @@
   --palette-green-emerald-rgb: 16, 185, 129;
   --palette-red-bright-rgb: 239, 68, 68;
   --palette-purple-primary-rgb: 102, 126, 234;
-  --palette-blue-primary-rgb: 33, 150, 243;
-  --palette-purple-material-rgb: 156, 39, 176;
-  --palette-green-sea-rgb: 0, 184, 148;
 
-  /* ========================================
-     標籤預設色 - Tag Preset Colors
-     這些是固定的標籤顏色，不隨主題變化
-     ======================================== */
-  --tag-color-1: #667eea;   /* 紫藍 */
-  --tag-color-2: #f093fb;   /* 粉紫 */
-  --tag-color-3: #4facfe;   /* 天藍 */
-  --tag-color-4: #43e97b;   /* 青綠 */
-  --tag-color-5: #fa709a;   /* 粉紅 */
-  --tag-color-6: #feca57;   /* 橘黃 */
-  --tag-color-7: #48dbfb;   /* 青藍 */
-  --tag-color-8: #ff6b6b;   /* 珊瑚紅 */
-  --tag-color-9: #ee5a6f;   /* 玫瑰紅 */
-  --tag-color-10: #c44569;  /* 暗紅 */
-  --tag-color-11: #a29bfe;  /* 淡紫 */
-  --tag-color-12: #fd79a8;  /* 粉紅 */
-  --tag-color-13: #fdcb6e;  /* 淡黃 */
-  --tag-color-14: #00b894;  /* 翠綠 */
-  --tag-color-15: #0984e3;  /* 亮藍 */
-  --tag-color-16: #6c5ce7;  /* 深紫 */
-  --tag-color-17: #e17055;  /* 橘紅 */
-  --tag-color-18: #74b9ff;  /* 淡藍 */
-  --tag-color-19: #55efc4;  /* 青綠 */
-  --tag-color-20: #ffeaa7;  /* 淺黃 */
 }

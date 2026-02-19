@@ -71,68 +71,6 @@ body {
   position: relative;
 }
 
-/* 為 body 添加紋理（粗細與間距變化） */
-bodyd::before {
-  content: '';
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-image:
-    /* 垂直 - 密集細線 */
-    repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 2px,
-      rgba(255, 255, 255, 0.015) 2px,
-      rgba(255, 255, 255, 0.015) 3px
-    ),
-    /* 垂直 - 中等間距 */
-    repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 8px,
-      rgba(255, 255, 255, 0.03) 8px,
-      rgba(255, 255, 255, 0.03) 10px
-    ),
-    /* 垂直 - 稀疏粗線 */
-    repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 21px,
-      rgba(255, 255, 255, 0.04) 21px,
-      rgba(255, 255, 255, 0.04) 23px
-    ),
-    /* 水平 - 密集細線 */
-    repeating-linear-gradient(
-      90deg,
-      transparent,
-      transparent 4px,
-      rgba(0, 0, 0, 0.015) 4px,
-      rgba(0, 0, 0, 0.015) 5px
-    ),
-    /* 水平 - 中等間距 */
-    repeating-linear-gradient(
-      90deg,
-      transparent,
-      transparent 11px,
-      rgba(0, 0, 0, 0.03) 11px,
-      rgba(0, 0, 0, 0.03) 13px
-    ),
-    /* 水平 - 稀疏粗線 */
-    repeating-linear-gradient(
-      90deg,
-      transparent,
-      transparent 27px,
-      rgba(0, 0, 0, 0.04) 27px,
-      rgba(0, 0, 0, 0.04) 29px
-    );
-  pointer-events: none;
-  opacity: 0.2;
-  z-index: -1;
-}
-
 /* 可訪問性：減少動畫 */
 @media (prefers-reduced-motion: reduce) {
   * {
@@ -181,12 +119,6 @@ bodyd::before {
   border: none;
 }
 
-/* .btn-primary:hover:not(:disabled) {
-  color: white;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-} */
-
 .btn-primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -196,15 +128,7 @@ bodyd::before {
 .btn-secondary {
   background: var(--main-bg);
   color: var(--main-primary-light);
-  /* border: 2px solid var(--main-primary); */
 }
-
-/* .btn-secondary:hover:not(:disabled) {
-  background: var(--nav-bg);
-  color: var(--nav-recent-bg);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-} */
 
 .btn-danger {
   background: var(--main-bg);
