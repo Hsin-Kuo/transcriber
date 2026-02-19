@@ -528,6 +528,14 @@ const {
   updateTags
 } = useTranscriptData()
 
+// 動態更新頁面標題：任務名稱 - Sound Lite
+watch(
+  () => currentTranscript.value?.custom_name || currentTranscript.value?.filename,
+  (name) => {
+    document.title = name ? `${name} - Sound Lite` : 'Sound Lite'
+  }
+)
+
 // 標籤管理
 const { fetchTagColors, customTagOrder } = useTaskTags($t)
 

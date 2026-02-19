@@ -127,7 +127,10 @@ router.beforeEach(async (to, from, next) => {
 })
 
 router.afterEach((to) => {
-  document.title = to.meta.title || 'Whisper 逐字稿工具'
+  // 任務詳情頁的標題由組件內動態設定
+  if (to.name !== 'transcript') {
+    document.title = 'Sound Lite'
+  }
 })
 
 export default router

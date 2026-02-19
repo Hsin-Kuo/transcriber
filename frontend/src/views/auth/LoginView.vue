@@ -208,7 +208,7 @@ function handleGoogleError(err) {
 
 <style scoped>
 .auth-container {
-  min-height: 100vh;
+  min-height: calc(100dvh + 1px);
   display: flex;
   align-items: center;
   justify-content: center;

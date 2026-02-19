@@ -35,14 +35,16 @@ S3_BUCKET=transcriber-files-696637902131
 S3_REGION=ap-northeast-1
 SQS_QUEUE_URL=https://sqs.ap-northeast-1.amazonaws.com/696637902131/transcriber-tasks
 
-# Email 設定（使用 SES）
-EMAIL_PROVIDER=ses
+# Email 設定（使用 Resend）
+EMAIL_PROVIDER=resend
 FROM_EMAIL=noreply@soundlite.app
+FROM_NAME=Soundlite
 
 # 以下密鑰從 SSM Parameter Store 自動載入
 # JWT_SECRET_KEY - 從 /transcriber/jwt-secret 載入
 # WORKER_SECRET - 從 /transcriber/worker-secret 載入
 # MONGODB_URL - 從 /transcriber/mongodb-url 載入
+# RESEND_API_KEY - 從 /transcriber/resend-api-key 載入
 
 # CORS 設定
 CORS_ORIGINS=https://soundlite.app

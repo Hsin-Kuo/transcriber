@@ -38,6 +38,9 @@ email-validator
 # Email 模板
 jinja2
 
+# Resend (Email 服務)
+resend
+
 # AWS SDK
 boto3
 
