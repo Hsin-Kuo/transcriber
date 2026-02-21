@@ -4,7 +4,7 @@ AI Worker — AWS SQS Consumer
 職責：
 - 從 SQS 接收轉錄任務
 - 從 S3 下載音檔
-- 執行 Whisper 轉錄 + 標點處理 + 說話者辨識
+- 執行 Whisper 轉錄 + 標點處理 + 說話者辨識（轉錄與語者辨識平行處理）
 - 結果寫回 MongoDB
 - 更新任務進度（Web Server 透過 SSE 輪詢 MongoDB 推送給前端）
 
@@ -18,7 +18,9 @@ import json
 import time
 import signal
 import tempfile
+import subprocess
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # 確保能 import src 模組
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -31,16 +33,26 @@ from pymongo import MongoClient
 
 from src.utils.storage_service import download_audio, save_audio
 from src.utils.time_utils import get_utc_timestamp
+from src.utils.config_loader import get_parameter
 
 
 # ===== 設定 =====
 SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL", "")
 S3_REGION = os.getenv("S3_REGION", "ap-northeast-1")
-MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
+# AWS 從 SSM 讀取，本地從環境變數
+MONGODB_URL = get_parameter("/transcriber/mongodb-url", fallback_env="MONGODB_URL", default="mongodb://localhost:27017")
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
 DEFAULT_MODEL = os.getenv("WHISPER_MODEL", "medium")
-WORKER_SECRET = os.getenv("WORKER_SECRET", "")
+WORKER_SECRET = get_parameter("/transcriber/worker-secret", fallback_env="WORKER_SECRET", default="")
 AUTO_SHUTDOWN_IDLE_MINUTES = int(os.getenv("AUTO_SHUTDOWN_IDLE_MINUTES", "5"))
+
+# 從 SSM 載入 API keys 並設定到環境變數（讓 PunctuationProcessor 可以讀取）
+_google_api_key_1 = get_parameter("/transcriber/google-api-key-1", fallback_env="GOOGLE_API_KEY_1", default="")
+_google_api_key_2 = get_parameter("/transcriber/google-api-key-2", fallback_env="GOOGLE_API_KEY_2", default="")
+if _google_api_key_1:
+    os.environ["GOOGLE_API_KEY_1"] = _google_api_key_1
+if _google_api_key_2:
+    os.environ["GOOGLE_API_KEY_2"] = _google_api_key_2
 
 # Graceful shutdown
 _shutdown = False
@@ -111,6 +123,92 @@ def _update_progress(db, task_id: str, progress: str, extra: dict = None):
     _update_task(db, task_id, updates)
 
 
+# ===== 模型快取 =====
+_cached_whisper_processor = None
+_cached_diarization_pipeline = None
+
+
+def _get_whisper_processor():
+    """取得快取的 WhisperProcessor（首次呼叫時載入模型）"""
+    global _cached_whisper_processor
+    if _cached_whisper_processor is None:
+        from faster_whisper import WhisperModel
+        from src.services.utils.whisper_processor import WhisperProcessor
+
+        print(f"🔄 [Worker] 載入 Whisper 模型: {DEFAULT_MODEL} (float16)...")
+        whisper_model = WhisperModel(
+            DEFAULT_MODEL,
+            device="auto",
+            compute_type="float16",
+        )
+        _cached_whisper_processor = WhisperProcessor(whisper_model, DEFAULT_MODEL)
+        print(f"✅ [Worker] 模型載入完成")
+    return _cached_whisper_processor
+
+
+def _get_diarization_pipeline():
+    """取得快取的 Diarization Pipeline（首次呼叫時載入模型）"""
+    global _cached_diarization_pipeline
+    if _cached_diarization_pipeline is None:
+        from src.services.utils.diarization_processor import DiarizationProcessor
+        hf_token = get_parameter("/transcriber/hf-token", fallback_env="HF_TOKEN", default="")
+        if hf_token:
+            print(f"🔄 [Worker] 載入 Diarization 模型...")
+            _cached_diarization_pipeline = DiarizationProcessor.load_pipeline(hf_token)
+            if _cached_diarization_pipeline:
+                print(f"✅ [Worker] Diarization 模型載入完成")
+            else:
+                print(f"⚠️ [Worker] Diarization 模型載入失敗")
+        else:
+            print(f"⚠️ [Worker] 未設定 HF_TOKEN，Diarization 不可用")
+    return _cached_diarization_pipeline
+
+
+def _convert_to_wav(audio_path: Path, wav_path: Path) -> Path:
+    """將音檔轉換為 WAV 格式（pyannote 需要）"""
+    try:
+        subprocess.run([
+            'ffmpeg', '-y', '-i', str(audio_path),
+            '-ar', '16000', '-ac', '1', str(wav_path)
+        ], check=True, capture_output=True)
+        print(f"🔄 已轉換為 WAV: {wav_path}")
+        return wav_path
+    except Exception as e:
+        print(f"⚠️ WAV 轉換失敗: {e}，使用原始音檔")
+        return audio_path
+
+
+def _run_transcription(whisper_processor, audio_path: str, language: str, use_chunking: bool):
+    """執行 Whisper 轉錄（用於平行處理）"""
+    print(f"🎤 [平行] 開始轉錄...")
+    if use_chunking:
+        full_text, segments, detected_language = whisper_processor.transcribe_in_chunks(
+            audio_path, language=language
+        )
+    else:
+        full_text, segments, detected_language = whisper_processor.transcribe(
+            audio_path, language=language
+        )
+    print(f"✅ [平行] 轉錄完成: {len(full_text) if full_text else 0} 字元")
+    return full_text, segments, detected_language
+
+
+def _run_diarization(diarization_pipeline, wav_path: Path, max_speakers: int):
+    """執行說話者辨識（用於平行處理）"""
+    from src.services.utils.diarization_processor import DiarizationProcessor
+    print(f"🔊 [平行] 開始說話者辨識...")
+    diarization_processor = DiarizationProcessor(diarization_pipeline)
+    diarization_segments = diarization_processor.perform_diarization(
+        wav_path, max_speakers=max_speakers
+    )
+    if diarization_segments:
+        num_speakers = len(set(s['speaker'] for s in diarization_segments))
+        print(f"✅ [平行] 說話者辨識完成: {num_speakers} 位說話者")
+    else:
+        print(f"⚠️ [平行] 說話者辨識無結果")
+    return diarization_segments
+
+
 # ===== 主流程 =====
 
 def process_task(message_body: dict):
@@ -137,65 +235,85 @@ def process_task(message_body: dict):
         download_audio(task_id, audio_path)
         print(f"📥 已下載音檔: {audio_path} ({audio_path.stat().st_size / 1024 / 1024:.2f} MB)")
 
-        # 2. 載入 Whisper（lazy，首次任務時載入）
-        _update_progress(db, task_id, "正在載入模型...")
-        from faster_whisper import WhisperModel
-        from src.services.utils.whisper_processor import WhisperProcessor
+        # 2. 取得模型（快取，只在首次任務載入）
+        _update_progress(db, task_id, "正在準備模型...")
         from src.services.utils.punctuation_processor import PunctuationProcessor
-        from src.services.utils.diarization_processor import DiarizationProcessor
 
-        whisper_model = WhisperModel(
-            DEFAULT_MODEL,
-            device="auto",
-            compute_type="int8",
-        )
-        whisper_processor = WhisperProcessor(whisper_model, DEFAULT_MODEL)
+        whisper_processor = _get_whisper_processor()
+        diarization_pipeline = _get_diarization_pipeline() if use_diarization else None
 
-        # 3. 轉錄
-        _update_progress(db, task_id, "正在轉錄音檔...")
-        if use_chunking:
-            full_text, segments, detected_language = whisper_processor.transcribe_chunked(
-                str(audio_path), language=language
-            )
+        # 3. 平行執行轉錄和說話者辨識
+        full_text = None
+        segments = None
+        detected_language = None
+        diarization_segments = None
+
+        if use_diarization and diarization_pipeline:
+            # ===== 平行處理模式 =====
+            _update_progress(db, task_id, "正在轉錄音檔與說話者辨識（平行處理）...")
+            print(f"🚀 [平行模式] 同時執行轉錄與說話者辨識")
+
+            # 先轉換 WAV（這步很快，不需要平行）
+            wav_path = _convert_to_wav(audio_path, temp_dir / f"{task_id}.wav")
+
+            # 使用 ThreadPoolExecutor 平行執行
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                # 提交兩個任務
+                transcription_future = executor.submit(
+                    _run_transcription,
+                    whisper_processor, str(audio_path), language, use_chunking
+                )
+                diarization_future = executor.submit(
+                    _run_diarization,
+                    diarization_pipeline, wav_path, max_speakers
+                )
+
+                # 等待所有任務完成
+                for future in as_completed([transcription_future, diarization_future]):
+                    try:
+                        future.result()  # 觸發異常（如果有）
+                    except Exception as e:
+                        print(f"⚠️ [平行] 任務異常: {e}")
+
+                # 取得結果
+                full_text, segments, detected_language = transcription_future.result()
+                diarization_segments = diarization_future.result()
+
+            print(f"✅ [平行模式] 兩個任務都已完成")
+
+            # 合併說話者資訊
+            if diarization_segments and segments:
+                task = db.tasks.find_one({"_id": task_id})
+                task_type = task.get("task_type", "paragraph") if task else "paragraph"
+                num_speakers = len(set(s['speaker'] for s in diarization_segments))
+
+                if task_type == "subtitle":
+                    segments = whisper_processor._merge_speaker_to_segments(
+                        segments, diarization_segments
+                    )
+                else:
+                    full_text = whisper_processor._merge_transcription_with_diarization(
+                        segments, diarization_segments
+                    )
+
+                _update_progress(db, task_id, "語者辨識完成", {
+                    "stats.diarization.num_speakers": num_speakers
+                })
         else:
-            full_text, segments, detected_language = whisper_processor.transcribe(
-                str(audio_path), language=language
-            )
+            # ===== 僅轉錄模式 =====
+            _update_progress(db, task_id, "正在轉錄音檔...")
+            if use_chunking:
+                full_text, segments, detected_language = whisper_processor.transcribe_in_chunks(
+                    str(audio_path), language=language
+                )
+            else:
+                full_text, segments, detected_language = whisper_processor.transcribe(
+                    str(audio_path), language=language
+                )
+            print(f"✅ 轉錄完成: {len(full_text) if full_text else 0} 字元, 語言: {detected_language}")
 
         if full_text is None:
             raise ValueError("轉錄結果為空")
-
-        print(f"✅ 轉錄完成: {len(full_text)} 字元, 語言: {detected_language}")
-
-        # 4. 說話者辨識（可選）
-        if use_diarization:
-            hf_token = os.getenv("HF_TOKEN")
-            if hf_token:
-                _update_progress(db, task_id, "正在進行說話者辨識...")
-                diarization_pipeline = DiarizationProcessor.load_pipeline(hf_token)
-                if diarization_pipeline:
-                    diarization_processor = DiarizationProcessor(diarization_pipeline)
-                    diarization_segments = diarization_processor.process(
-                        str(audio_path), max_speakers=max_speakers
-                    )
-                    if diarization_segments and segments:
-                        # 取得任務類型
-                        task = db.tasks.find_one({"_id": task_id})
-                        task_type = task.get("task_type", "paragraph") if task else "paragraph"
-                        num_speakers = len(set(s['speaker'] for s in diarization_segments))
-
-                        if task_type == "subtitle":
-                            segments = whisper_processor._merge_speaker_to_segments(
-                                segments, diarization_segments
-                            )
-                        else:
-                            full_text = whisper_processor._merge_transcription_with_diarization(
-                                segments, diarization_segments
-                            )
-
-                        _update_progress(db, task_id, "語者辨識完成", {
-                            "stats.diarization.num_speakers": num_speakers
-                        })
 
         # 5. 標點處理（可選）
         punctuation_model = None
@@ -333,6 +451,11 @@ def main():
     print(f"   Whisper Model: {DEFAULT_MODEL}")
     print(f"   MongoDB: {MONGODB_DB_NAME}")
     print(f"   Auto Shutdown: {AUTO_SHUTDOWN_IDLE_MINUTES} 分鐘空閒後")
+    print(f"   平行處理: 轉錄 + 語者辨識同時執行")
+
+    # 預先載入模型，不用等第一個任務才載入
+    _get_whisper_processor()
+    _get_diarization_pipeline()  # 預先載入 diarization（如果有 HF_TOKEN）
 
     idle_start = None  # 空閒開始時間
     idle_threshold = AUTO_SHUTDOWN_IDLE_MINUTES * 60  # 轉為秒

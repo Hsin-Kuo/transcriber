@@ -431,23 +431,25 @@ async def create_transcription(
             # 拋出配額不足異常
             raise quota_error
 
-        # 檢查 diarization 可用性
-        if diarize and not _diarization_processor:
+        # 檢查 diarization 可用性（僅在本地模式下檢查，AWS 模式由 GPU Worker 處理）
+        if diarize and not is_aws() and not _diarization_processor:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Speaker diarization 功能未啟用。請設定 HF_TOKEN 環境變數並重啟服務。"
             )
 
-        # 檢查當前處理中的任務數量（限流機制）
-        MAX_CONCURRENT_TASKS = 2  # 最多同時處理 2 個任務
-        processing_count = await transcription_service.task_service.count_processing_tasks()
-        pending_count = await transcription_service.task_service.count_pending_tasks()
+        # 檢查當前處理中的任務數量（限流機制，僅本地模式）
+        should_queue = False
+        if not is_aws() and transcription_service:
+            MAX_CONCURRENT_TASKS = 2  # 最多同時處理 2 個任務
+            processing_count = await transcription_service.task_service.count_processing_tasks()
+            pending_count = await transcription_service.task_service.count_pending_tasks()
 
-        # 判斷是否需要排隊
-        should_queue = processing_count >= MAX_CONCURRENT_TASKS
+            # 判斷是否需要排隊
+            should_queue = processing_count >= MAX_CONCURRENT_TASKS
 
-        if should_queue:
-            print(f"⚠️  系統忙碌中（{processing_count} 個任務處理中，{pending_count} 個任務排隊中），新任務加入隊列")
+            if should_queue:
+                print(f"⚠️  系統忙碌中（{processing_count} 個任務處理中，{pending_count} 個任務排隊中），新任務加入隊列")
 
         # 解析標籤
         task_tags = []
@@ -656,13 +658,11 @@ async def create_transcription(
     except HTTPException:
         # 清理臨時檔案
         if temp_dir.exists():
-            import shutil
             shutil.rmtree(temp_dir)
         raise
     except Exception as e:
         # 清理臨時檔案
         if temp_dir.exists():
-            import shutil
             shutil.rmtree(temp_dir)
         print(f"❌ 建立轉錄任務失敗：{e}")
         raise HTTPException(
@@ -1396,8 +1396,8 @@ async def create_batch_transcriptions(
     if task_type == "subtitle":
         punct_provider = "none"
 
-    # 檢查 diarization 可用性
-    if diarize and not _diarization_processor:
+    # 檢查 diarization 可用性（僅在本地模式下檢查，AWS 模式由 GPU Worker 處理）
+    if diarize and not is_aws() and not _diarization_processor:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Speaker diarization 功能未啟用"
@@ -1428,10 +1428,13 @@ async def create_batch_transcriptions(
     created_count = 0
     failed_count = 0
 
-    # 檢查當前處理中的任務數量
-    MAX_CONCURRENT_TASKS = 2
-    processing_count = await transcription_service.task_service.count_processing_tasks()
-    pending_count = await transcription_service.task_service.count_pending_tasks()
+    # 檢查當前處理中的任務數量（僅本地模式）
+    processing_count = 0
+    pending_count = 0
+    if not is_aws() and transcription_service:
+        MAX_CONCURRENT_TASKS = 2
+        processing_count = await transcription_service.task_service.count_processing_tasks()
+        pending_count = await transcription_service.task_service.count_pending_tasks()
 
     # 逐一處理每個檔案
     for idx, upload_file in enumerate(files):
