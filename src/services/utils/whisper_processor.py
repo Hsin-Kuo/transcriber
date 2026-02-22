@@ -444,7 +444,9 @@ class WhisperProcessor:
         segments, info = self.model.transcribe(
             str(audio_path),
             language=language,
-            beam_size=5
+            beam_size=5,
+            vad_filter=True,
+            vad_parameters=dict(min_silence_duration_ms=500),
         )
         print(f"✅ [_transcribe_with_timestamps] model.transcribe() 完成！")
 
@@ -510,6 +512,10 @@ class WhisperProcessor:
         Returns:
             chunk 檔案路徑列表（MP3 格式）
         """
+        # 確保 audio_path 是 Path 物件
+        if isinstance(audio_path, str):
+            audio_path = Path(audio_path)
+
         chunk_files = []
         start_ms = 0
         chunk_idx = 1
