@@ -146,7 +146,7 @@ class WhisperProcessor:
     def transcribe_in_chunks(
         self,
         audio_path: Path,
-        chunk_duration_ms: int = 420000,  # 7 分鐘
+        chunk_duration_ms: int = 1500000,  # 25 分鐘
         language: Optional[str] = None,
         progress_callback: Optional[callable] = None
     ) -> Tuple[str, List[Dict], str]:
@@ -171,22 +171,19 @@ class WhisperProcessor:
             print(f"📝 音檔長度在 {chunk_duration_ms/1000/60:.0f} 分鐘內，直接轉錄...")
             return self.transcribe(audio_path, language)
 
-        # 長音檔：分段處理
-        num_chunks = (total_duration_ms + chunk_duration_ms - 1) // chunk_duration_ms
-        print(f"🔄 音檔較長，將分為 {num_chunks} 段處理（每段約 {chunk_duration_ms/1000/60:.0f} 分鐘）...")
-
-        # 切分音檔
-        chunk_files = self._split_audio_into_chunks(
+        # 長音檔：智慧分段處理
+        # 切分音檔（回傳 [(chunk_path, start_seconds), ...]）
+        chunk_entries = self._split_audio_into_chunks(
             audio_path, total_duration_ms, chunk_duration_ms
         )
+        num_chunks = len(chunk_entries)
 
         # 轉錄每個 chunk
         all_text_parts = []
         all_segments = []
         detected_language = None
-        chunk_duration_seconds = chunk_duration_ms / 1000.0
 
-        for chunk_idx, chunk_path in enumerate(chunk_files, start=1):
+        for chunk_idx, (chunk_path, time_offset) in enumerate(chunk_entries, start=1):
             print(f"🎙 轉錄第 {chunk_idx}/{num_chunks} 段...")
 
             # 進度回調
@@ -201,7 +198,6 @@ class WhisperProcessor:
             all_text_parts.append(chunk_text)
 
             # 調整時間戳並加入 segments
-            time_offset = (chunk_idx - 1) * chunk_duration_seconds
             for seg in chunk_segments:
                 adjusted_segment = {
                     "start": seg["start"] + time_offset,
@@ -229,7 +225,7 @@ class WhisperProcessor:
     def transcribe_in_chunks_parallel(
         self,
         audio_path: Path,
-        chunk_duration_ms: int = 420000,  # 7 分鐘
+        chunk_duration_ms: int = 1500000,  # 25 分鐘
         language: Optional[str] = None,
         max_workers: int = 3,  # 優化：默認 3 個並行進程
         progress_callback: Optional[callable] = None,
@@ -259,10 +255,14 @@ class WhisperProcessor:
             print(f"📝 音檔長度在 {chunk_duration_ms/1000/60:.0f} 分鐘內，直接轉錄...", flush=True)
             return self.transcribe(audio_path, language)
 
-        num_chunks = (total_duration_ms + chunk_duration_ms - 1) // chunk_duration_ms
-        print(f"🔄 音檔較長，將分為 {num_chunks} 段並行處理...", flush=True)
+        # 智慧分段（回傳 [(chunk_path, start_seconds), ...]）
+        chunk_entries = self._split_audio_into_chunks(audio_path, total_duration_ms, chunk_duration_ms)
+        num_chunks = len(chunk_entries)
 
-        chunk_files = self._split_audio_into_chunks(audio_path, total_duration_ms, chunk_duration_ms)
+        # 建立 chunk_idx → start_seconds 的映射
+        chunk_offsets = {}
+        for chunk_idx, (chunk_path, start_seconds) in enumerate(chunk_entries, start=1):
+            chunk_offsets[chunk_idx] = start_seconds
 
         # 2. 使用 ProcessPoolExecutor 並行轉錄
         results = {}
@@ -279,7 +279,7 @@ class WhisperProcessor:
 
             # 準備參數（從當前模型實例獲取配置）
             future_to_idx = {}
-            for chunk_path in chunk_files:
+            for chunk_path, _ in chunk_entries:
                 future = executor.submit(
                     transcribe_chunk_worker,
                     str(chunk_path),  # 轉為字符串以支持序列化
@@ -343,7 +343,7 @@ class WhisperProcessor:
 
         except Exception as e:
             # 清理所有剩餘的 chunk 檔案
-            for chunk_path in chunk_files:
+            for chunk_path, _ in chunk_entries:
                 try:
                     chunk_path.unlink()
                 except:
@@ -372,11 +372,9 @@ class WhisperProcessor:
         all_text_parts = [text for text, _, _ in sorted_results]
         all_segments = []
 
-        # 合併 segments 並調整時間戳
-        chunk_duration_seconds = chunk_duration_ms / 1000.0
+        # 合併 segments 並調整時間戳（使用實際切點偏移）
         for chunk_idx, (text, segments, lang) in enumerate(sorted_results, start=1):
-            # 計算此 chunk 在原音檔中的時間偏移
-            time_offset = (chunk_idx - 1) * chunk_duration_seconds
+            time_offset = chunk_offsets[chunk_idx]
 
             # 調整每個 segment 的時間戳
             for seg in segments:
@@ -494,74 +492,146 @@ class WhisperProcessor:
         del audio  # 立即釋放記憶體
         return duration_ms
 
+    def _find_silence_near(
+        self,
+        audio_path: Path,
+        target_ms: int,
+        search_range_ms: int = 30000,
+        noise_db: int = -30,
+        min_silence_duration: float = 0.5
+    ) -> int:
+        """在目標切點附近尋找最近的靜音段
+
+        Args:
+            audio_path: 音檔路徑
+            target_ms: 目標切點（毫秒）
+            search_range_ms: 搜尋範圍 ±（毫秒），預設 ±30 秒
+            noise_db: 靜音偵測門檻（dB）
+            min_silence_duration: 最短靜音長度（秒）
+
+        Returns:
+            調整後的切點（毫秒），找不到靜音則回傳原始 target_ms
+        """
+        search_start_s = max(0, (target_ms - search_range_ms)) / 1000.0
+        search_duration_s = (search_range_ms * 2) / 1000.0
+
+        try:
+            result = subprocess.run([
+                'ffmpeg', '-i', str(audio_path),
+                '-ss', str(search_start_s),
+                '-t', str(search_duration_s),
+                '-af', f'silencedetect=noise={noise_db}dB:d={min_silence_duration}',
+                '-f', 'null', '-'
+            ], capture_output=True, text=True, timeout=30)
+
+            stderr = result.stderr
+
+            # 解析 silence_start / silence_end
+            silences = []
+            silence_starts = re.findall(r'silence_start:\s*([\d.]+)', stderr)
+            silence_ends = re.findall(r'silence_end:\s*([\d.]+)', stderr)
+
+            for i in range(min(len(silence_starts), len(silence_ends))):
+                # ffmpeg 輸出的時間是相對於 search_start_s 的
+                abs_start_ms = int((float(silence_starts[i]) + search_start_s) * 1000)
+                abs_end_ms = int((float(silence_ends[i]) + search_start_s) * 1000)
+                mid_ms = (abs_start_ms + abs_end_ms) // 2
+                silences.append(mid_ms)
+
+            if not silences:
+                return target_ms
+
+            # 選離目標切點最近的靜音中點
+            best = min(silences, key=lambda s: abs(s - target_ms))
+            print(f"   🔇 切點調整: {target_ms/1000/60:.1f}min → {best/1000/60:.1f}min（靜音段）")
+            return best
+
+        except Exception as e:
+            print(f"   ⚠️ 靜音偵測失敗，使用原始切點: {e}")
+            return target_ms
+
     def _split_audio_into_chunks(
         self,
         audio_path: Path,
         total_duration_ms: int,
         chunk_duration_ms: int
-    ) -> List[Path]:
-        """將音檔切分為多個 MP3 小段
+    ) -> List[Tuple[Path, float]]:
+        """將音檔切分為多個 MP3 小段（智慧切割）
 
-        使用 ffmpeg 流式處理，避免記憶體問題
+        使用 ffmpeg 流式處理，避免記憶體問題。
+        切點會自動調整到附近的靜音段，避免切在對話中間。
+        最後一段太短（< 20% 目標長度）時會併入前一段。
 
         Args:
             audio_path: 原始音檔路徑（MP3）
             total_duration_ms: 音檔總長度（毫秒）
-            chunk_duration_ms: 每段長度（毫秒）
+            chunk_duration_ms: 每段目標長度（毫秒）
 
         Returns:
-            chunk 檔案路徑列表（MP3 格式）
+            (chunk 檔案路徑, 該段在原音檔中的起始秒數) 的列表
         """
-        # 確保 audio_path 是 Path 物件
         if isinstance(audio_path, str):
             audio_path = Path(audio_path)
 
+        # 1. 計算切點並用靜音偵測調整
+        cut_points = []  # 不含 0 和 total_duration_ms
+        pos = chunk_duration_ms
+        while pos < total_duration_ms:
+            adjusted = self._find_silence_near(audio_path, pos)
+            cut_points.append(adjusted)
+            pos = adjusted + chunk_duration_ms
+
+        # 2. 短尾合併：最後一段 < 20% 目標長度時，移除最後一個切點
+        if cut_points:
+            last_segment_ms = total_duration_ms - cut_points[-1]
+            if last_segment_ms < chunk_duration_ms * 0.2:
+                removed = cut_points.pop()
+                print(f"   📎 最後一段僅 {last_segment_ms/1000/60:.1f}min，併入前一段（移除切點 {removed/1000/60:.1f}min）")
+
+        # 3. 建立分段區間
+        boundaries = [0] + cut_points + [total_duration_ms]
+        num_chunks = len(boundaries) - 1
+        print(f"🔄 智慧分段：共 {num_chunks} 段")
+
+        # 4. 依據切點切割
         chunk_files = []
-        start_ms = 0
-        chunk_idx = 1
+        for chunk_idx in range(num_chunks):
+            start_ms = boundaries[chunk_idx]
+            end_ms = boundaries[chunk_idx + 1]
 
-        while start_ms < total_duration_ms:
-            end_ms = min(start_ms + chunk_duration_ms, total_duration_ms)
+            print(f"   準備第 {chunk_idx + 1} 段 ({start_ms/1000/60:.1f}-{end_ms/1000/60:.1f} 分鐘)...")
 
-            print(f"   準備第 {chunk_idx} 段 ({start_ms/1000/60:.1f}-{end_ms/1000/60:.1f} 分鐘)...")
-
-            # 使用 ffmpeg 直接切分為 MP3，不載入到記憶體
-            temp_path = audio_path.parent / f"_temp_{audio_path.stem}_chunk_{chunk_idx}.mp3"
+            temp_path = audio_path.parent / f"_temp_{audio_path.stem}_chunk_{chunk_idx + 1}.mp3"
             start_seconds = start_ms / 1000.0
             duration_seconds = (end_ms - start_ms) / 1000.0
 
             try:
-                # 使用 ffmpeg 切分音檔為 MP3（流式處理，不佔用記憶體）
                 subprocess.run([
                     'ffmpeg', '-y', '-i', str(audio_path),
                     '-ss', str(start_seconds),
                     '-t', str(duration_seconds),
-                    '-acodec', 'libmp3lame',  # MP3 編碼
-                    '-b:a', '128k',  # 128kbps
-                    '-ar', '16000',  # 16kHz 採樣率（Whisper 推薦）
-                    '-ac', '1',  # 單聲道
+                    '-acodec', 'libmp3lame',
+                    '-b:a', '128k',
+                    '-ar', '16000',
+                    '-ac', '1',
                     str(temp_path)
-                ], check=True, capture_output=True, timeout=60)
+                ], check=True, capture_output=True, timeout=120)
 
             except subprocess.TimeoutExpired:
-                print(f"   ⚠️ 切分第 {chunk_idx} 段超時，嘗試使用 pydub")
-                # 回退到 pydub（較慢但更穩定）
+                print(f"   ⚠️ 切分第 {chunk_idx + 1} 段超時，嘗試使用 pydub")
                 audio = AudioSegment.from_file(audio_path)
                 chunk_audio = audio[start_ms:end_ms]
                 chunk_audio.export(temp_path, format="mp3", bitrate="128k")
-                del audio, chunk_audio  # 立即釋放
+                del audio, chunk_audio
 
             except Exception as e:
                 print(f"   ⚠️ ffmpeg 切分失敗，回退到 pydub: {e}")
-                # 回退到 pydub
                 audio = AudioSegment.from_file(audio_path)
                 chunk_audio = audio[start_ms:end_ms]
                 chunk_audio.export(temp_path, format="mp3", bitrate="128k")
-                del audio, chunk_audio  # 立即釋放
+                del audio, chunk_audio
 
-            chunk_files.append(temp_path)
-            start_ms = end_ms
-            chunk_idx += 1
+            chunk_files.append((temp_path, start_seconds))
 
         return chunk_files
 
