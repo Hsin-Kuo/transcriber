@@ -15,8 +15,10 @@ import mimetypes
 from ..auth.dependencies import get_current_user, check_quota
 from ..database.mongodb import get_database
 from ..database.repositories.task_repo import TaskRepository
+from ..database.repositories.tag_repo import TagRepository
 from ..services.task_service import TaskService
 from ..services.transcription_service import TranscriptionService
+from ..services.tag_service import TagService
 from ..services.utils.whisper_processor import WhisperProcessor
 from ..services.utils.punctuation_processor import PunctuationProcessor
 from ..services.utils.diarization_processor import DiarizationProcessor
@@ -468,6 +470,23 @@ async def create_transcription(
                 task_tags = json.loads(tags)
             except:
                 task_tags = []
+
+        # 自動為新標籤建立 tags 集合記錄
+        if task_tags:
+            try:
+                tag_repo = TagRepository(db)
+                tag_service = TagService(tag_repo, TaskRepository(db))
+                user_id = str(current_user["_id"])
+                existing_tags = await tag_service.get_all_tags(user_id)
+                existing_names = {t["name"] for t in existing_tags}
+                for tag_name in task_tags:
+                    if tag_name and tag_name not in existing_names:
+                        try:
+                            await tag_service.create_tag(user_id=user_id, name=tag_name)
+                        except (ValueError, Exception):
+                            pass
+            except Exception as e:
+                print(f"⚠️ 上傳時自動建立標籤記錄失敗（不影響任務建立）：{e}")
 
         # 創建任務記錄
         from ..utils.time_utils import get_utc_timestamp
@@ -1406,6 +1425,27 @@ async def create_batch_transcriptions(
     max_speakers = config.get("maxSpeakers")
     language = config.get("language", "auto")
     default_tags = config.get("tags", [])
+
+    # 收集所有標籤（default + 各檔案覆蓋的）並自動建立 tags 集合記錄
+    all_upload_tags = set(default_tags)
+    for override in file_overrides.values():
+        if isinstance(override, dict):
+            all_upload_tags.update(override.get("tags", []))
+    if all_upload_tags:
+        try:
+            tag_repo = TagRepository(db)
+            tag_service = TagService(tag_repo, TaskRepository(db))
+            user_id = str(current_user["_id"])
+            existing_tags = await tag_service.get_all_tags(user_id)
+            existing_names = {t["name"] for t in existing_tags}
+            for tag_name in all_upload_tags:
+                if tag_name and tag_name not in existing_names:
+                    try:
+                        await tag_service.create_tag(user_id=user_id, name=tag_name)
+                    except (ValueError, Exception):
+                        pass
+        except Exception as e:
+            print(f"⚠️ 批次上傳時自動建立標籤記錄失敗（不影響任務建立）：{e}")
 
     # 驗證任務類型
     if task_type not in ["paragraph", "subtitle"]:
