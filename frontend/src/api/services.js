@@ -18,7 +18,7 @@ export const transcriptionService = {
   async create(formData) {
     const response = await api.post(NEW_ENDPOINTS.transcriptions.create, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 600000 // 10 分鐘，大檔案上傳安全網
+      timeout: 3600000 // 60 分鐘，大檔案上傳受限於用戶網速
     })
     return response.data
   },
@@ -91,7 +91,7 @@ export const transcriptionService = {
   async createBatch(formData) {
     const response = await api.post(NEW_ENDPOINTS.transcriptions.createBatch, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 600000 // 10 分鐘，大檔案上傳安全網
+      timeout: 3600000 // 60 分鐘，大檔案上傳受限於用戶網速
     })
     return response.data
   },

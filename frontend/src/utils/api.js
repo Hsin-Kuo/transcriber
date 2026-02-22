@@ -10,7 +10,7 @@ const API_BASE = import.meta.env.VITE_API_URL ?? ''
 // 創建 axios 實例
 const api = axios.create({
   baseURL: API_BASE,
-  timeout: 300000,  // 5 分鐘 (考慮轉錄時間長)
+  timeout: 300000,  // 5 分鐘（一般 API 請求）
 })
 
 // Token 管理
