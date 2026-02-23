@@ -15,8 +15,10 @@ import mimetypes
 from ..auth.dependencies import get_current_user, check_quota
 from ..database.mongodb import get_database
 from ..database.repositories.task_repo import TaskRepository
+from ..database.repositories.tag_repo import TagRepository
 from ..services.task_service import TaskService
 from ..services.transcription_service import TranscriptionService
+from ..services.tag_service import TagService
 from ..services.utils.whisper_processor import WhisperProcessor
 from ..services.utils.punctuation_processor import PunctuationProcessor
 from ..services.utils.diarization_processor import DiarizationProcessor
@@ -213,6 +215,7 @@ async def create_transcription(
     max_speakers: Optional[int] = Form(None, description="最大講者人數（可選，2-10）"),
     language: str = Form("zh", description="轉錄語言 (zh/en/ja/ko/auto)"),
     tags: Optional[str] = Form(None, description="標籤（JSON 陣列字串）"),
+    upload_id: Optional[str] = Form(None, description="分片上傳完成後的 upload_id（替代直接上傳檔案）"),
     current_user: dict = Depends(get_current_user),
     db = Depends(get_database)
 ):
@@ -243,8 +246,28 @@ async def create_transcription(
     Raises:
         HTTPException: 服務未就緒或參數錯誤
     """
+    # ── 分片上傳模式：從已組裝的檔案讀取 ──
+    use_chunked_upload = False
+    chunked_temp_dir = None
+    chunked_audio_path = None
+
+    if upload_id:
+        from .uploads import get_upload_meta, remove_upload
+        meta = get_upload_meta(upload_id)
+        if not meta:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "upload_id 無效或尚未完成組裝")
+        if meta["user_id"] != str(current_user["_id"]):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "無權使用此上傳")
+        use_chunked_upload = True
+        chunked_temp_dir = meta["temp_dir"]
+        chunked_audio_path = meta["assembled_path"]
+        # 從 active_uploads 移除（後續由本函數管理 temp_dir 生命週期）
+        remove_upload(upload_id)
+
     # 處理檔案參數
-    if merge_files and files and len(files) > 0:
+    if use_chunked_upload:
+        uploaded_files = []  # 不需要 UploadFile，後面會直接使用 chunked_audio_path
+    elif merge_files and files and len(files) > 0:
         # 合併模式：多檔案
         if len(files) < 2:
             raise HTTPException(
@@ -258,17 +281,18 @@ async def create_transcription(
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="請提供音檔"
+            detail="請提供音檔或 upload_id"
         )
 
     # 檢查檔案總大小（注意：UploadFile.size 可能為 None）
-    total_size = sum(f.size or 0 for f in uploaded_files)
-    MAX_TOTAL_SIZE = 500 * 1024 * 1024  # 500MB
-    if total_size > 0 and total_size > MAX_TOTAL_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="檔案總大小超過限制（最大500MB）"
-        )
+    if not use_chunked_upload:
+        total_size = sum(f.size or 0 for f in uploaded_files)
+        MAX_TOTAL_SIZE = 500 * 1024 * 1024  # 500MB
+        if total_size > 0 and total_size > MAX_TOTAL_SIZE:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="檔案總大小超過限制（最大500MB）"
+            )
 
     # 驗證任務類型
     if task_type not in ["paragraph", "subtitle"]:
@@ -332,15 +356,23 @@ async def create_transcription(
     # 生成任務 ID
     task_id = str(uuid.uuid4())
 
-    # 建立臨時目錄
-    temp_dir = Path(tempfile.mkdtemp())
+    # 建立臨時目錄（分片上傳模式直接複用已有的 temp_dir）
+    if use_chunked_upload:
+        temp_dir = chunked_temp_dir
+    else:
+        temp_dir = Path(tempfile.mkdtemp())
 
     try:
         # 如果是多檔案，先合併
         # 導入 AudioService（用於合併音檔和獲取時長）
         from src.services.audio_service import AudioService
 
-        if len(uploaded_files) > 1:
+        if use_chunked_upload:
+            # ── 分片上傳：檔案已組裝好，直接使用 ──
+            temp_audio = chunked_audio_path
+            original_filename = custom_name.strip() if custom_name and custom_name.strip() else chunked_audio_path.name
+            print(f"📁 分片上傳模式：使用已組裝檔案 {chunked_audio_path.name} ({chunked_audio_path.stat().st_size / 1024 / 1024:.2f} MB)")
+        elif len(uploaded_files) > 1:
             print(f"🔄 合併模式：{len(uploaded_files)} 個檔案")
 
             # 保存上傳的檔案到臨時目錄
@@ -468,6 +500,23 @@ async def create_transcription(
                 task_tags = json.loads(tags)
             except:
                 task_tags = []
+
+        # 自動為新標籤建立 tags 集合記錄
+        if task_tags:
+            try:
+                tag_repo = TagRepository(db)
+                tag_service = TagService(tag_repo, TaskRepository(db))
+                user_id = str(current_user["_id"])
+                existing_tags = await tag_service.get_all_tags(user_id)
+                existing_names = {t["name"] for t in existing_tags}
+                for tag_name in task_tags:
+                    if tag_name and tag_name not in existing_names:
+                        try:
+                            await tag_service.create_tag(user_id=user_id, name=tag_name)
+                        except (ValueError, Exception):
+                            pass
+            except Exception as e:
+                print(f"⚠️ 上傳時自動建立標籤記錄失敗（不影響任務建立）：{e}")
 
         # 創建任務記錄
         from ..utils.time_utils import get_utc_timestamp
@@ -1337,9 +1386,10 @@ async def update_subtitle_settings(
 @router.post("/batch")
 async def create_batch_transcriptions(
     request: Request,
-    files: List[UploadFile] = File(..., description="多個音檔（最多10個）"),
+    files: Optional[List[UploadFile]] = File(None, description="多個音檔（最多10個）"),
     default_config: str = Form(..., description="預設配置 JSON 字串"),
     overrides: str = Form("{}", description="單檔覆蓋設定 JSON 字串，格式：{索引: {tags, customName}}"),
+    upload_ids: Optional[str] = Form(None, description="分片上傳的 upload_id JSON 陣列，格式：{索引: upload_id}"),
     current_user: dict = Depends(get_current_user),
     db = Depends(get_database)
 ):
@@ -1361,15 +1411,30 @@ async def create_batch_transcriptions(
     Raises:
         HTTPException: 參數錯誤或服務未就緒
     """
+    # 解析分片上傳的 upload_ids（格式：{"索引": "upload_id"}）
+    chunked_uploads_map = {}
+    if upload_ids:
+        try:
+            chunked_uploads_map = json.loads(upload_ids)
+        except json.JSONDecodeError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "upload_ids 格式錯誤")
+
+    # 確保 files 是 list（可能為 None）
+    if files is None:
+        files = []
+
+    # 計算總檔案數（直接上傳 + 分片上傳）
+    total_files = len(files) + len(chunked_uploads_map)
+
     # 檢查檔案數量
     MAX_BATCH_FILES = 10
-    if len(files) > MAX_BATCH_FILES:
+    if total_files > MAX_BATCH_FILES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"批次上傳最多支援 {MAX_BATCH_FILES} 個檔案，您上傳了 {len(files)} 個"
+            detail=f"批次上傳最多支援 {MAX_BATCH_FILES} 個檔案，您提供了 {total_files} 個"
         )
 
-    if len(files) == 0:
+    if total_files == 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="請至少上傳一個檔案"
@@ -1406,6 +1471,27 @@ async def create_batch_transcriptions(
     max_speakers = config.get("maxSpeakers")
     language = config.get("language", "auto")
     default_tags = config.get("tags", [])
+
+    # 收集所有標籤（default + 各檔案覆蓋的）並自動建立 tags 集合記錄
+    all_upload_tags = set(default_tags)
+    for override in file_overrides.values():
+        if isinstance(override, dict):
+            all_upload_tags.update(override.get("tags", []))
+    if all_upload_tags:
+        try:
+            tag_repo = TagRepository(db)
+            tag_service = TagService(tag_repo, TaskRepository(db))
+            user_id = str(current_user["_id"])
+            existing_tags = await tag_service.get_all_tags(user_id)
+            existing_names = {t["name"] for t in existing_tags}
+            for tag_name in all_upload_tags:
+                if tag_name and tag_name not in existing_names:
+                    try:
+                        await tag_service.create_tag(user_id=user_id, name=tag_name)
+                    except (ValueError, Exception):
+                        pass
+        except Exception as e:
+            print(f"⚠️ 批次上傳時自動建立標籤記錄失敗（不影響任務建立）：{e}")
 
     # 驗證任務類型
     if task_type not in ["paragraph", "subtitle"]:
@@ -1474,11 +1560,31 @@ async def create_batch_transcriptions(
         processing_count = await transcription_service.task_service.count_processing_tasks()
         pending_count = await transcription_service.task_service.count_pending_tasks()
 
+    # 建立統一的處理列表：(global_idx, upload_file_or_None, chunked_meta_or_None)
+    _batch_items = []
+    # 直接上傳的檔案
+    for i, uf in enumerate(files):
+        _batch_items.append((i, uf, None))
+    # 分片上傳的檔案
+    if chunked_uploads_map:
+        from .uploads import get_upload_meta, remove_upload
+        for str_idx, uid in chunked_uploads_map.items():
+            global_idx = int(str_idx)
+            meta = get_upload_meta(uid)
+            if meta and meta["user_id"] == str(current_user["_id"]):
+                remove_upload(uid)
+                _batch_items.append((global_idx, None, meta))
+            else:
+                _batch_items.append((global_idx, None, None))  # 無效，後續會報錯
+    # 按 global_idx 排序
+    _batch_items.sort(key=lambda x: x[0])
+
     # 逐一處理每個檔案
-    for idx, upload_file in enumerate(files):
+    for idx, upload_file, chunked_meta in _batch_items:
+        display_name = upload_file.filename if upload_file else (chunked_meta["filename"] if chunked_meta else "unknown")
         file_result = {
             "index": idx,
-            "filename": upload_file.filename,
+            "filename": display_name,
             "task_id": None,
             "status": "pending",
             "error": None,
@@ -1487,15 +1593,24 @@ async def create_batch_transcriptions(
 
         temp_dir = None
         try:
-            # 建立臨時目錄
-            temp_dir = Path(tempfile.mkdtemp())
-            file_suffix = Path(upload_file.filename).suffix
-            temp_audio = temp_dir / f"input{file_suffix}"
+            if chunked_meta is None and upload_file is None:
+                raise ValueError("upload_id 無效或尚未完成組裝")
 
-            # 保存檔案
-            content = await upload_file.read()
-            with temp_audio.open("wb") as f:
-                f.write(content)
+            if chunked_meta:
+                # 分片上傳模式
+                temp_dir = chunked_meta["temp_dir"]
+                temp_audio = chunked_meta["assembled_path"]
+                original_filename = chunked_meta["filename"]
+            else:
+                # 直接上傳模式
+                temp_dir = Path(tempfile.mkdtemp())
+                file_suffix = Path(upload_file.filename).suffix
+                temp_audio = temp_dir / f"input{file_suffix}"
+
+                content = await upload_file.read()
+                with temp_audio.open("wb") as f:
+                    f.write(content)
+                original_filename = upload_file.filename
 
             # 獲取音檔資訊
             try:
@@ -1518,7 +1633,6 @@ async def create_batch_transcriptions(
             override = file_overrides.get(str(idx), {})
             file_tags = override.get("tags", default_tags.copy())
             custom_name = override.get("customName", None)
-            original_filename = upload_file.filename
 
             # 生成任務 ID
             task_id = str(uuid.uuid4())
@@ -1637,7 +1751,7 @@ async def create_batch_transcriptions(
                 file_result["status"] = "pending"
                 file_result["queue_position"] = created_count + 1
                 created_count += 1
-                print(f"☁️  批次任務 [{idx + 1}/{len(files)}] {upload_file.filename} -> {task_id} (SQS)")
+                print(f"☁️  批次任務 [{idx + 1}/{total_files}] {original_filename} -> {task_id} (SQS)")
             else:
                 # ===== 本地模式：現有行為 =====
                 # 初始化記憶體狀態
@@ -1680,7 +1794,7 @@ async def create_batch_transcriptions(
                 file_result["queue_position"] = queue_position
                 created_count += 1
 
-                print(f"✅ 批次任務 [{idx + 1}/{len(files)}] {upload_file.filename} -> {task_id}")
+                print(f"✅ 批次任務 [{idx + 1}/{total_files}] {original_filename} -> {task_id}")
 
         except Exception as e:
             file_result["status"] = "failed"
@@ -1691,7 +1805,7 @@ async def create_batch_transcriptions(
             if temp_dir and temp_dir.exists():
                 shutil.rmtree(temp_dir)
 
-            print(f"❌ 批次任務 [{idx + 1}/{len(files)}] {upload_file.filename} 失敗: {e}")
+            print(f"❌ 批次任務 [{idx + 1}/{total_files}] {display_name} 失敗: {e}")
 
         results.append(file_result)
 
@@ -1708,7 +1822,7 @@ async def create_batch_transcriptions(
             message=f"批次建立 {created_count} 個轉錄任務（失敗 {failed_count} 個）",
             request_body={
                 "batch_id": batch_id,
-                "total": len(files),
+                "total": total_files,
                 "created": created_count,
                 "failed": failed_count,
                 "task_type": task_type,
@@ -1720,7 +1834,7 @@ async def create_batch_transcriptions(
 
     return {
         "batch_id": batch_id,
-        "total": len(files),
+        "total": total_files,
         "created": created_count,
         "failed": failed_count,
         "tasks": results

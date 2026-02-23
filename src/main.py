@@ -33,6 +33,7 @@ from src.routers import tags as tags_router
 from src.routers import audio as audio_router
 from src.routers import summaries as summaries_router
 from src.routers import admin as admin_router
+from src.routers import uploads as uploads_router
 
 # Services
 from src.services.utils.diarization_processor import DiarizationProcessor
@@ -140,6 +141,7 @@ app.include_router(tags_router.router)
 app.include_router(audio_router.router)
 app.include_router(summaries_router.router)
 app.include_router(admin_router.router)
+app.include_router(uploads_router.router)
 
 
 # ========== 進程清理工具函數 ==========

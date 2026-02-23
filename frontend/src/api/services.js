@@ -5,6 +5,7 @@
 
 import api from '../utils/api.js'
 import { NEW_ENDPOINTS } from './endpoints.js'
+import { needsChunking, uploadChunked } from '../utils/chunkedUpload.js'
 
 /**
  * 轉錄服務
@@ -15,10 +16,19 @@ export const transcriptionService = {
    * @param {FormData} formData - 包含音檔和參數的表單資料
    * @returns {Promise} API 響應
    */
-  async create(formData) {
+  async create(formData, { onProgress } = {}) {
+    // 檢查是否有大檔案需要分片上傳
+    const file = formData.get('file')
+    if (file && needsChunking(file)) {
+      // 大檔案：先分片上傳拿 upload_id，再用 upload_id 建立轉錄
+      const uploadId = await uploadChunked(file, { onProgress })
+      formData.delete('file')
+      formData.append('upload_id', uploadId)
+    }
+
     const response = await api.post(NEW_ENDPOINTS.transcriptions.create, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 3600000 // 60 分鐘，大檔案上傳受限於用戶網速
+      timeout: 3600000,
     })
     return response.data
   },
@@ -88,10 +98,45 @@ export const transcriptionService = {
    *   - overrides: JSON 字串，格式 {"0": {tags, customName}, ...}
    * @returns {Promise} 批次建立結果
    */
-  async createBatch(formData) {
+  async createBatch(formData, { onProgress } = {}) {
+    // 檢查是否有大檔案需要分片上傳
+    const files = formData.getAll('files')
+    const chunkedMap = {} // { 原始索引: upload_id }
+    const smallFiles = [] // 小檔案保留直接上傳
+
+    let chunkedDone = 0
+    const chunkedTotal = files.filter((f) => needsChunking(f)).length
+
+    for (let i = 0; i < files.length; i++) {
+      if (needsChunking(files[i])) {
+        const uploadId = await uploadChunked(files[i], {
+          onProgress: onProgress
+            ? (pct) => {
+                // 粗略整體進度 = (已完成分片檔數 + 當前進度%) / 總分片檔數
+                const overall = Math.round(((chunkedDone + pct / 100) / chunkedTotal) * 100)
+                onProgress(overall)
+              }
+            : undefined,
+        })
+        chunkedMap[String(i)] = uploadId
+        chunkedDone++
+      } else {
+        smallFiles.push({ index: i, file: files[i] })
+      }
+    }
+
+    // 重建 formData：只保留小檔案 + 加入 upload_ids
+    formData.delete('files')
+    for (const { file } of smallFiles) {
+      formData.append('files', file)
+    }
+    if (Object.keys(chunkedMap).length > 0) {
+      formData.append('upload_ids', JSON.stringify(chunkedMap))
+    }
+
     const response = await api.post(NEW_ENDPOINTS.transcriptions.createBatch, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 3600000 // 60 分鐘，大檔案上傳受限於用戶網速
+      timeout: 3600000,
     })
     return response.data
   },
