@@ -2995,7 +2995,7 @@ watch(displayMode, () => {
   display: inline-block;
   width: 32px;
   height: 32px;
-  background: var(--color-divider);
+  background: #dedede;
   border: 0.5px solid;
   border-radius: 50%;
   cursor: pointer;
