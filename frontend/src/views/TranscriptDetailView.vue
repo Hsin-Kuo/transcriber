@@ -2298,12 +2298,12 @@ function handleTextClick(startTime, event) {
 
 // 鍵盤事件處理（Mac 使用 ⌘，Windows/Linux 使用 Ctrl）
 function handleKeyDown(e) {
-  // Ctrl/Cmd+F: 攔截瀏覽器搜尋，改為打開自訂搜尋浮窗
+  // Ctrl/Cmd+F: 攔截瀏覽器搜尋，改為打開自訂搜尋浮窗（已開啟則聚焦並選取）
   if (isModifierPressed(e) && e.key === 'f') {
     e.preventDefault()
     e.stopPropagation()
     if (headerRef.value) {
-      headerRef.value.toggleSearch()
+      headerRef.value.focusSearch()
     }
     return
   }

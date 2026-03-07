@@ -52,6 +52,7 @@
 
         <!-- 搜尋/取代浮窗 -->
         <SearchReplacePopup
+          ref="searchPopupRef"
           v-if="showSearchPopup"
           :search-text="searchText"
           :replace-text="replaceText"
@@ -293,6 +294,7 @@ const moreOptionsRef = ref(null)
 const speakerSettingsRef = ref(null)
 const showMoreOptions = ref(false)
 const showSearchPopup = ref(false)
+const searchPopupRef = ref(null)
 const showSpeakerSettings = ref(false)
 
 // 切換搜尋浮窗
@@ -302,6 +304,20 @@ function toggleSearch() {
     closeSearch()
   } else {
     // 打開時關閉更多選項
+    showSearchPopup.value = true
+    showMoreOptions.value = false
+  }
+}
+
+// 聚焦搜尋輸入框並選取文字；若焦點已在浮窗內則關閉
+function focusSearch() {
+  if (showSearchPopup.value) {
+    if (searchPopupRef.value?.hasFocus()) {
+      closeSearch()
+    } else {
+      searchPopupRef.value?.focusAndSelect()
+    }
+  } else {
     showSearchPopup.value = true
     showMoreOptions.value = false
   }
@@ -438,7 +454,8 @@ defineExpose({
   closeMoreOptions,
   openSpeakerSettings,
   closeSpeakerSettings,
-  toggleSearch
+  toggleSearch,
+  focusSearch
 })
 
 onMounted(() => {
