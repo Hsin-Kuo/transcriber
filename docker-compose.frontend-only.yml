@@ -12,5 +12,7 @@ services:
       - "3000:3000"
     restart: unless-stopped
     environment:
-      # 前端連接到主機上的後端（macOS Docker 使用 host.docker.internal）
-      - VITE_API_URL=http://host.docker.internal:8000
+      # API_UPSTREAM 控制 Nginx 反代目標
+      # macOS: host.docker.internal:8000 (預設)
+      # Linux/EC2: 172.17.0.1:8000
+      - API_UPSTREAM=host.docker.internal:8000

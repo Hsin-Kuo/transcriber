@@ -9,12 +9,13 @@ class QuotaManager:
     """配額管理器"""
 
     @staticmethod
-    async def check_transcription_quota(user: dict, audio_duration: float):
+    async def check_transcription_quota(user: dict, audio_duration: float, db=None):
         """檢查轉錄配額
 
         Args:
             user: 用戶資料
             audio_duration: 音訊時長 (秒)
+            db: 資料庫實例（用於跨月自動歸零寫回）
 
         Raises:
             HTTPException: 配額不足
@@ -23,21 +24,7 @@ class QuotaManager:
         usage = user.get("usage", {})
 
         # 重置每月配額 (如果需要)
-        usage = await QuotaManager._reset_monthly_quota_if_needed(user, usage)
-
-        # 檢查轉錄次數
-        if usage.get("transcriptions", 0) >= quota.get("max_transcriptions", 10):
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail={
-                    "message": "已達本月轉錄次數上限",
-                    "quota": {
-                        "used": usage["transcriptions"],
-                        "limit": quota["max_transcriptions"],
-                        "type": "transcriptions"
-                    }
-                }
-            )
+        usage = await QuotaManager._reset_monthly_quota_if_needed(user, usage, db=db)
 
         # 檢查轉錄時數
         duration_minutes = audio_duration / 60
@@ -115,12 +102,13 @@ class QuotaManager:
         )
 
     @staticmethod
-    async def _reset_monthly_quota_if_needed(user: dict, usage: dict) -> dict:
+    async def _reset_monthly_quota_if_needed(user: dict, usage: dict, db=None) -> dict:
         """重置每月配額 (如果需要)
 
         Args:
             user: 用戶資料
             usage: 使用量資料
+            db: 資料庫實例（有提供時會寫回 DB）
 
         Returns:
             更新後的使用量資料
@@ -137,14 +125,35 @@ class QuotaManager:
         # 檢查是否跨月
         now = datetime.utcnow()
         if now.month != last_reset.month or now.year != last_reset.year:
-            # 重置每月統計（此處僅返回新值，實際更新在使用者登入或首次請求時）
-            return {
+            new_usage = {
                 "transcriptions": 0,
                 "duration_minutes": 0,
                 "last_reset": now,
                 "total_transcriptions": usage.get("total_transcriptions", 0),
                 "total_duration_minutes": usage.get("total_duration_minutes", 0)
             }
+
+            # 寫回 DB
+            if db:
+                try:
+                    from bson import ObjectId
+                    user_id = str(user["_id"])
+                    await db.users.update_one(
+                        {"_id": ObjectId(user_id)},
+                        {
+                            "$set": {
+                                "usage.transcriptions": 0,
+                                "usage.duration_minutes": 0,
+                                "usage.last_reset": now,
+                                "updated_at": now
+                            }
+                        }
+                    )
+                    print(f"🔄 已自動重置用戶 {user_id} 的每月配額")
+                except Exception as e:
+                    print(f"⚠️ 自動重置配額寫回 DB 失敗：{e}")
+
+            return new_usage
 
         return usage
 

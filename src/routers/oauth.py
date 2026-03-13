@@ -17,6 +17,7 @@ from ..auth.jwt_handler import create_access_token, create_refresh_token
 from ..auth.dependencies import get_current_user
 from ..database.mongodb import get_database
 from ..database.repositories.user_repo import UserRepository
+from ..models.quota import QUOTA_TIERS, QuotaTier
 
 router = APIRouter(prefix="/auth", tags=["OAuth"])
 
@@ -142,15 +143,8 @@ async def google_auth(
             "is_active": True,  # Google 已驗證 email
             "email_verified": True,
             "quota": {
-                "tier": "free",
-                "max_transcriptions": 10,
-                "max_duration_minutes": 60,
-                "max_concurrent_tasks": 1,
-                "features": {
-                    "speaker_diarization": False,
-                    "punctuation": True,
-                    "batch_operations": False
-                }
+                "tier": QuotaTier.FREE,
+                **{k: v for k, v in QUOTA_TIERS[QuotaTier.FREE].items() if k not in ("name", "price")}
             },
             "usage": {
                 "transcriptions": 0,

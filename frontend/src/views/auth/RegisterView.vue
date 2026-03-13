@@ -153,15 +153,9 @@
 
           <div class="quota-info">
             <p class="quota-title">🎁 註冊即享免費配額</p>
-            <div class="quota-details">
-              <div class="quota-item">
-                <span class="quota-label">轉錄次數</span>
-                <span class="quota-value">10 次/月</span>
-              </div>
-              <div class="quota-item">
-                <span class="quota-label">轉錄時長</span>
-                <span class="quota-value">60 分鐘/月</span>
-              </div>
+            <div class="quota-details-single">
+              <span class="quota-label">每月轉錄時長</span>
+              <span class="quota-value">180 分鐘</span>
             </div>
           </div>
         </div>
@@ -650,17 +644,11 @@ function handleGoogleError(err) {
   font-weight: 600;
 }
 
-.quota-details {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 15px;
-}
-
-.quota-item {
+.quota-details-single {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  gap: 8px;
 }
 
 .quota-label {

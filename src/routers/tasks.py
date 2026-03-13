@@ -748,33 +748,34 @@ async def delete_task(
 
     deleted_files = []
 
-    # 物理刪除結果檔案（如果存在）
-    result_file_path = get_task_field(task, "result_file")
-    if result_file_path:
-        try:
-            result_file = _validate_file_path(result_file_path, _ALLOWED_OUTPUT_DIR)
-            if result_file.exists():
-                result_file.unlink()
-                deleted_files.append(result_file.name)
-                print(f"🗑️ 已刪除轉錄檔案：{result_file.name}")
-        except ValueError as e:
-            print(f"⚠️ 路徑驗證失敗，跳過刪除：{e}")
-        except Exception as e:
-            print(f"⚠️ 刪除轉錄檔案失敗：{e}")
+    # 物理刪除結果檔案（僅本地模式，AWS 模式結果存在 MongoDB）
+    if not is_aws():
+        result_file_path = get_task_field(task, "result_file")
+        if result_file_path:
+            try:
+                result_file = _validate_file_path(result_file_path, _ALLOWED_OUTPUT_DIR)
+                if result_file.exists():
+                    result_file.unlink()
+                    deleted_files.append(result_file.name)
+                    print(f"🗑️ 已刪除轉錄檔案：{result_file.name}")
+            except ValueError as e:
+                print(f"⚠️ 路徑驗證失敗，跳過刪除：{e}")
+            except Exception as e:
+                print(f"⚠️ 刪除轉錄檔案失敗：{e}")
 
-    # 物理刪除 segments 檔案（如果存在）
-    segments_file_path = get_task_field(task, "segments_file")
-    if segments_file_path:
-        try:
-            segments_file = _validate_file_path(segments_file_path, _ALLOWED_OUTPUT_DIR)
-            if segments_file.exists():
-                segments_file.unlink()
-                deleted_files.append(segments_file.name)
-                print(f"🗑️ 已刪除 segments 檔案：{segments_file.name}")
-        except ValueError as e:
-            print(f"⚠️ 路徑驗證失敗，跳過刪除：{e}")
-        except Exception as e:
-            print(f"⚠️ 刪除 segments 檔案失敗：{e}")
+        # 物理刪除 segments 檔案
+        segments_file_path = get_task_field(task, "segments_file")
+        if segments_file_path:
+            try:
+                segments_file = _validate_file_path(segments_file_path, _ALLOWED_OUTPUT_DIR)
+                if segments_file.exists():
+                    segments_file.unlink()
+                    deleted_files.append(segments_file.name)
+                    print(f"🗑️ 已刪除 segments 檔案：{segments_file.name}")
+            except ValueError as e:
+                print(f"⚠️ 路徑驗證失敗，跳過刪除：{e}")
+            except Exception as e:
+                print(f"⚠️ 刪除 segments 檔案失敗：{e}")
 
     # 物理刪除音檔（如果存在）
     # ⚠️ 手動刪除任務時，應刪除所有相關檔案（包括音檔）
@@ -1087,31 +1088,32 @@ async def batch_delete_tasks(
                 failed_count += 1
                 continue
 
-            # 物理刪除結果檔案（如果存在）
-            result_file_path = get_task_field(task, "result_file")
-            if result_file_path:
-                try:
-                    result_file = _validate_file_path(result_file_path, _ALLOWED_OUTPUT_DIR)
-                    if result_file.exists():
-                        result_file.unlink()
-                        print(f"🗑️ [批次] 已刪除轉錄檔案：{result_file.name}")
-                except ValueError as e:
-                    print(f"⚠️ [批次] 路徑驗證失敗，跳過刪除：{e}")
-                except Exception as e:
-                    print(f"⚠️ [批次] 刪除轉錄檔案失敗：{e}")
+            # 物理刪除結果檔案（僅本地模式，AWS 模式結果存在 MongoDB）
+            if not is_aws():
+                result_file_path = get_task_field(task, "result_file")
+                if result_file_path:
+                    try:
+                        result_file = _validate_file_path(result_file_path, _ALLOWED_OUTPUT_DIR)
+                        if result_file.exists():
+                            result_file.unlink()
+                            print(f"🗑️ [批次] 已刪除轉錄檔案：{result_file.name}")
+                    except ValueError as e:
+                        print(f"⚠️ [批次] 路徑驗證失敗，跳過刪除：{e}")
+                    except Exception as e:
+                        print(f"⚠️ [批次] 刪除轉錄檔案失敗：{e}")
 
-            # 物理刪除 segments 檔案（如果存在）
-            segments_file_path = get_task_field(task, "segments_file")
-            if segments_file_path:
-                try:
-                    segments_file = _validate_file_path(segments_file_path, _ALLOWED_OUTPUT_DIR)
-                    if segments_file.exists():
-                        segments_file.unlink()
-                        print(f"🗑️ [批次] 已刪除 segments 檔案：{segments_file.name}")
-                except ValueError as e:
-                    print(f"⚠️ [批次] 路徑驗證失敗，跳過刪除：{e}")
-                except Exception as e:
-                    print(f"⚠️ [批次] 刪除 segments 檔案失敗：{e}")
+                # 物理刪除 segments 檔案
+                segments_file_path = get_task_field(task, "segments_file")
+                if segments_file_path:
+                    try:
+                        segments_file = _validate_file_path(segments_file_path, _ALLOWED_OUTPUT_DIR)
+                        if segments_file.exists():
+                            segments_file.unlink()
+                            print(f"🗑️ [批次] 已刪除 segments 檔案：{segments_file.name}")
+                    except ValueError as e:
+                        print(f"⚠️ [批次] 路徑驗證失敗，跳過刪除：{e}")
+                    except Exception as e:
+                        print(f"⚠️ [批次] 刪除 segments 檔案失敗：{e}")
 
             # 物理刪除音檔（使用 storage_service）
             try:

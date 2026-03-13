@@ -68,15 +68,33 @@
             </span>
           </div>
           <div class="info-row">
-            <span class="label">註冊時間：</span>
-            <span class="value">{{ formatTimestamp(user.created_at) }}</span>
+            <span class="label">登入方式：</span>
+            <div class="auth-providers">
+              <span
+                v-for="provider in (user.auth_providers || [])"
+                :key="provider"
+                class="provider-badge"
+                :class="`provider-${provider}`"
+              >
+                {{ getProviderName(provider) }}
+              </span>
+              <span v-if="!user.auth_providers?.length" class="provider-badge provider-unknown">
+                未知
+              </span>
+            </div>
           </div>
           <div class="info-row">
-            <span class="label">密碼：</span>
-            <span class="value">••••••••</span>
+            <span class="label">密碼狀態：</span>
+            <span :class="user.has_password ? 'verified' : 'not-verified'">
+              {{ user.has_password ? '已設定' : '未設定' }}
+            </span>
             <button @click="showPasswordModal = true" class="edit-btn">
-              重設密碼
+              {{ user.has_password ? '重設密碼' : '設定密碼' }}
             </button>
+          </div>
+          <div class="info-row">
+            <span class="label">註冊時間：</span>
+            <span class="value">{{ formatTimestamp(user.created_at) }}</span>
           </div>
         </div>
 
@@ -414,6 +432,11 @@ async function resetPassword() {
   }
 }
 
+function getProviderName(provider) {
+  const names = { password: '密碼登入', google: 'Google' }
+  return names[provider] || provider
+}
+
 function getTierName(tier) {
   const names = { free: '免費版', basic: '基礎版', pro: '專業版', enterprise: '企業版' }
   return names[tier] || '免費版'
@@ -582,6 +605,23 @@ code {
 .tier-badge.tier-basic { background: #e3f2fd; color: #1976d2; }
 .tier-badge.tier-pro { background: #fff3e0; color: #f57c00; }
 .tier-badge.tier-enterprise { background: #fce4ec; color: #c2185b; }
+
+.auth-providers {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.provider-badge {
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.provider-badge.provider-password { background: #e3f2fd; color: #1976d2; }
+.provider-badge.provider-google { background: #fce4ec; color: #c2185b; }
+.provider-badge.provider-unknown { background: #f5f5f5; color: #757575; }
 
 .verified { color: #2e7d32; font-weight: 600; }
 .not-verified { color: #c62828; font-weight: 600; }

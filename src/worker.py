@@ -372,7 +372,7 @@ def process_task(message_body: dict):
 
         # 8. 保存音檔到永久位置（已在 S3 上，更新 DB 路徑）
         _update_task(db, task_id, {
-            "result.audio_file": f"s3://{os.getenv('S3_BUCKET')}/uploads/{task_id}.mp3",
+            "result.audio_file": f"s3://{os.getenv('S3_BUCKET')}/uploads/{user_tier}/{task_id}.mp3",
             "result.audio_filename": f"{task_id}.mp3",
         })
 
