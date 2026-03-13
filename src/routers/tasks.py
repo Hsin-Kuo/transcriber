@@ -14,7 +14,7 @@ from ..database.repositories.tag_repo import TagRepository
 from ..services.task_service import TaskService
 from ..services.tag_service import TagService
 from ..services.utils.async_utils import get_current_time
-from ..utils.storage_service import is_aws, delete_audio as storage_delete_audio
+from ..utils.storage_service import is_aws, delete_audio_by_path as storage_delete_audio_by_path, move_audio, extract_tier_from_path
 
 try:
     import psutil
@@ -780,7 +780,9 @@ async def delete_task(
     # ⚠️ 手動刪除任務時，應刪除所有相關檔案（包括音檔）
     # keep_audio 只控制「自動清理機制」，不影響「用戶手動刪除」
     try:
-        storage_delete_audio(task_id)
+        audio_file_path = task.get("result", {}).get("audio_file") if task else None
+        if audio_file_path:
+            storage_delete_audio_by_path(audio_file_path)
         deleted_files.append(f"{task_id}.mp3")
         print(f"🗑️ 已刪除音檔：{task_id}.mp3")
     except Exception as e:
@@ -966,12 +968,30 @@ async def update_keep_audio(
 
     new_keep_audio = keep_audio_data.get("keep_audio", False)
 
-    # 如果要設為 True，檢查保留數量限制
+    user_id = str(current_user["_id"])
+    from src.database.mongodb import MongoDB
+    db = MongoDB.get_db()
+
+    # 取得用戶方案的保留額度
+    from src.database.repositories.user_repo import UserRepository
+    user_repo = UserRepository(db)
+    full_user = await user_repo.get_by_id(user_id)
+    user_tier = full_user.get("quota", {}).get("tier", "free") if full_user else "free"
+
+    from src.models.quota import QUOTA_TIERS, QuotaTier
+    tier_config = QUOTA_TIERS.get(QuotaTier(user_tier), QUOTA_TIERS[QuotaTier.FREE])
+    max_keep = tier_config.get("max_keep_audio", 0)
+
     if new_keep_audio:
-        # 查詢該用戶目前有多少個已保留的音檔
-        user_id = str(current_user["_id"])
-        from src.database.mongodb import MongoDB
-        db = MongoDB.get_db()
+        # 免費方案不能手動保留
+        if max_keep <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "KEEP_AUDIO_NOT_AVAILABLE",
+                    "message": "目前方案不支援手動保留音檔，請升級方案"
+                }
+            )
 
         # 查詢已保留的音檔任務（排除當前任務和已刪除的任務）
         kept_tasks = await db.tasks.count_documents({
@@ -979,20 +999,35 @@ async def update_keep_audio(
             "keep_audio": True,
             "_id": {"$ne": task_id},
             "result.audio_file": {"$exists": True, "$ne": None},
-            "deleted": {"$ne": True}  # 排除已刪除的任務
+            "deleted": {"$ne": True}
         })
 
-        if kept_tasks >= 3:
+        if kept_tasks >= max_keep:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "error_code": "KEEP_AUDIO_LIMIT_EXCEEDED",
-                    "message": "最多只能保留 3 個音檔，請先取消其他音檔的保留設定"
+                    "message": f"最多只能保留 {max_keep} 個音檔，請先取消其他音檔的保留設定"
                 }
             )
 
+    # 在 AWS 模式下搬移音檔（tier 資料夾 ↔ kept 資料夾）
+    audio_file_path = task.get("result", {}).get("audio_file")
+    new_audio_path = audio_file_path
+    if is_aws() and audio_file_path:
+        current_tier = extract_tier_from_path(audio_file_path)
+        if new_keep_audio and current_tier and current_tier != "kept":
+            # 搬到 kept 資料夾（不受 Lifecycle 影響）
+            new_audio_path = move_audio(task_id, current_tier, "kept")
+        elif not new_keep_audio and current_tier == "kept":
+            # 搬回原本的 tier 資料夾（重新受 Lifecycle 管理）
+            new_audio_path = move_audio(task_id, "kept", user_tier)
+
     # 更新設定
-    await task_service.update_task_status(task_id, {"keep_audio": new_keep_audio})
+    update_fields = {"keep_audio": new_keep_audio}
+    if new_audio_path != audio_file_path:
+        update_fields["result.audio_file"] = new_audio_path
+    await task_service.update_task_status(task_id, update_fields)
 
     print(f"🎵 已更新任務 {task_id} 的保留音檔設定：{new_keep_audio}")
 
@@ -1080,7 +1115,9 @@ async def batch_delete_tasks(
 
             # 物理刪除音檔（使用 storage_service）
             try:
-                storage_delete_audio(task_id)
+                batch_audio_path = task.get("result", {}).get("audio_file") if task else None
+                if batch_audio_path:
+                    storage_delete_audio_by_path(batch_audio_path)
                 print(f"🗑️ [批次] 已刪除音檔：{task_id}.mp3")
             except Exception as e:
                 print(f"⚠️ [批次] 刪除音檔失敗：{e}")

@@ -845,38 +845,17 @@ class TranscriptionService:
 
             print(f"🔍 用戶 {user_id} 共有 {len(tasks_with_audio)} 個音檔")
 
-            # 如果超過 4 個，刪除最舊的（跳過勾選保留的）
-            if len(tasks_with_audio) > 4:
-                to_delete_count = len(tasks_with_audio) - 4
-                deleted_count = 0
+            # S3 Lifecycle 會自動清理過期音檔，這裡只需清除 DB 中
+            # 已被 Lifecycle 刪除的記錄（音檔不存在但 DB 還有路徑的情況）
+            # 以及在 local 模式下保留原有的數量限制邏輯
+            from src.utils.storage_service import delete_audio_by_path, audio_exists_by_path, is_aws as _is_aws
 
+            if _is_aws():
+                # AWS 模式：S3 Lifecycle 會處理過期，這裡只同步 DB 狀態
                 for old_task in tasks_with_audio:
-                    if deleted_count >= to_delete_count:
-                        break
-
-                    # 跳過勾選保留的
-                    if old_task.get("keep_audio", False):
-                        print(f"⏭️  跳過任務 {old_task['_id']}（用戶已勾選保留）")
-                        continue
-
-                    # 刪除音檔
                     audio_file_path = old_task.get("result", {}).get("audio_file")
-                    if audio_file_path:
-                        from pathlib import Path
-                        audio_file = Path(audio_file_path)
-
-                        # 刪除實際文件（如果存在）
-                        if audio_file.exists():
-                            try:
-                                audio_file.unlink()
-                                print(f"🗑️ 已刪除舊音檔：{audio_file_path}")
-                            except Exception as e:
-                                print(f"⚠️ 刪除音檔失敗：{e}")
-                        else:
-                            print(f"⚠️ 音檔文件不存在（僅清除資料庫記錄）：{audio_file_path}")
-
-                        # 無論文件是否存在，都更新資料庫並計數
-                        # 這樣可以避免資料庫和文件系統不一致的問題
+                    if audio_file_path and not audio_exists_by_path(audio_file_path):
+                        # 音檔已被 S3 Lifecycle 刪除，清除 DB 記錄
                         db.tasks.update_one(
                             {"_id": old_task["_id"]},
                             {"$set": {
@@ -884,9 +863,39 @@ class TranscriptionService:
                                 "result.audio_filename": None
                             }}
                         )
-                        deleted_count += 1
+                        print(f"🔄 音檔已過期（S3 Lifecycle），已清除 DB 記錄：{old_task['_id']}")
+            else:
+                # Local 模式：保留數量限制邏輯（最多 4 個）
+                if len(tasks_with_audio) > 4:
+                    to_delete_count = len(tasks_with_audio) - 4
+                    deleted_count = 0
 
-                print(f"✅ 自動清理完成，共刪除 {deleted_count} 個舊音檔")
+                    for old_task in tasks_with_audio:
+                        if deleted_count >= to_delete_count:
+                            break
+
+                        if old_task.get("keep_audio", False):
+                            print(f"⏭️  跳過任務 {old_task['_id']}（用戶已勾選保留）")
+                            continue
+
+                        audio_file_path = old_task.get("result", {}).get("audio_file")
+                        if audio_file_path:
+                            try:
+                                delete_audio_by_path(audio_file_path)
+                                print(f"🗑️ 已刪除舊音檔：{audio_file_path}")
+                            except Exception as e:
+                                print(f"⚠️ 刪除音檔失敗：{e}")
+
+                            db.tasks.update_one(
+                                {"_id": old_task["_id"]},
+                                {"$set": {
+                                    "result.audio_file": None,
+                                    "result.audio_filename": None
+                                }}
+                            )
+                            deleted_count += 1
+
+                    print(f"✅ 自動清理完成，共刪除 {deleted_count} 個舊音檔")
 
             client.close()
         except Exception as e:
@@ -922,8 +931,12 @@ class TranscriptionService:
             print(f"🔧 [_save_audio_file_sync] 找到 MP3: {mp3_file}")
             print(f"🔧 [_save_audio_file_sync] 音檔是否存在: {mp3_file.exists()}")
 
-            # 使用 storage_service 儲存（local: 移動到 uploads/，aws: 上傳 S3）
-            stored_path = save_audio(task_id, mp3_file)
+            # 從 task 取得用戶 tier
+            task = self._get_task_sync(task_id)
+            user_tier = task.get("user", {}).get("tier", "free") if task else "free"
+
+            # 使用 storage_service 儲存（local: 移動到 uploads/，aws: 上傳到 uploads/{tier}/）
+            stored_path = save_audio(task_id, mp3_file, tier=user_tier)
             print(f"💾 已儲存音檔: {stored_path}")
 
             # 使用同步方法更新任務的 audio_file 路徑

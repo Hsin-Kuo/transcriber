@@ -32,9 +32,11 @@ export function useSegmentMarkers() {
         return
       }
 
-      // 從上一次成功搜尋的位置之後開始搜尋
+      // 從上一次成功搜尋的位置之後開始搜尋（忽略英文大小寫）
       const searchStartIndex = lastSearchIndex
-      const foundIndex = content.indexOf(text, searchStartIndex)
+      const contentLower = content.toLowerCase()
+      const textLower = text.toLowerCase()
+      const foundIndex = contentLower.indexOf(textLower, searchStartIndex)
 
       if (foundIndex !== -1) {
         // 找到匹配

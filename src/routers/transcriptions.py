@@ -532,7 +532,8 @@ async def create_transcription(
             # 使用者資訊
             "user": {
                 "user_id": str(current_user["_id"]),
-                "user_email": current_user["email"]
+                "user_email": current_user["email"],
+                "tier": full_user_data.get("quota", {}).get("tier", "free")
             },
 
             # 檔案資訊
@@ -610,14 +611,15 @@ async def create_transcription(
             _bg_task_id = task_id
             _bg_temp_audio = temp_audio
             _bg_temp_dir = temp_dir
+            _bg_user_tier = full_user_data.get("quota", {}).get("tier", "free")
 
             async def _upload_to_s3_and_notify():
                 """背景執行 S3 上傳 + SQS 發送"""
                 try:
                     loop = asyncio.get_event_loop()
-                    # S3 上傳（blocking I/O）
-                    await loop.run_in_executor(None, save_audio, _bg_task_id, _bg_temp_audio)
-                    print(f"☁️  音檔已上傳到 S3: uploads/{_bg_task_id}.mp3")
+                    # S3 上傳（blocking I/O），依用戶方案放到對應資料夾
+                    await loop.run_in_executor(None, save_audio, _bg_task_id, _bg_temp_audio, _bg_user_tier)
+                    print(f"☁️  音檔已上傳到 S3: uploads/{_bg_user_tier}/{_bg_task_id}.mp3")
 
                     # 發送 SQS
                     if sqs_queue_url:
@@ -930,17 +932,26 @@ async def download_audio(
 
     if is_aws():
         # AWS 模式：回傳 S3 presigned URL redirect
-        from ..utils.storage_service import get_audio_presigned_url, audio_exists, S3_REGION
+        from ..utils.storage_service import audio_exists_by_path, get_presigned_url_by_path, S3_REGION
         from fastapi.responses import RedirectResponse
         from urllib.parse import urlparse
 
-        if not audio_exists(task_id):
+        audio_file_path = task.get("result", {}).get("audio_file")
+        if not audio_file_path or not audio_exists_by_path(audio_file_path):
+            # S3 Lifecycle 已刪除，順便清掉 DB 殘留記錄
+            if audio_file_path:
+                from ..database.repositories.task_repo import TaskRepository
+                task_repo = TaskRepository(db)
+                await task_repo.update(task_id, {
+                    "result.audio_file": None,
+                    "result.audio_filename": None
+                })
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="音檔不存在（可能已被刪除）"
+                detail="音檔已過期或已被刪除"
             )
 
-        presigned_url = get_audio_presigned_url(task_id, expires_in=3600)
+        presigned_url = get_presigned_url_by_path(audio_file_path, expires_in=3600)
 
         # 驗證 presigned URL 指向合法的 S3 域名，防止 open redirect
         parsed = urlparse(presigned_url)
@@ -1645,7 +1656,8 @@ async def create_batch_transcriptions(
                 "task_type": task_type,
                 "user": {
                     "user_id": str(current_user["_id"]),
-                    "user_email": current_user["email"]
+                    "user_email": current_user["email"],
+                    "tier": full_user_data.get("quota", {}).get("tier", "free")
                 },
                 "file": {
                     "filename": original_filename,
@@ -1707,16 +1719,18 @@ async def create_batch_transcriptions(
                 _bg_task_id = task_id
                 _bg_temp_audio = temp_audio
                 _bg_temp_dir = temp_dir
+                _bg_user_tier = full_user_data.get("quota", {}).get("tier", "free")
 
                 async def _batch_upload_to_s3_and_notify(
                     bg_task_id=_bg_task_id, bg_temp_audio=_bg_temp_audio,
-                    bg_temp_dir=_bg_temp_dir, bg_sqs_payload=sqs_payload
+                    bg_temp_dir=_bg_temp_dir, bg_sqs_payload=sqs_payload,
+                    bg_user_tier=_bg_user_tier
                 ):
                     """背景執行 S3 上傳 + SQS 發送（批次）"""
                     try:
                         loop = asyncio.get_event_loop()
-                        await loop.run_in_executor(None, save_audio, bg_task_id, bg_temp_audio)
-                        print(f"☁️  批次音檔已上傳到 S3: uploads/{bg_task_id}.mp3")
+                        await loop.run_in_executor(None, save_audio, bg_task_id, bg_temp_audio, bg_user_tier)
+                        print(f"☁️  批次音檔已上傳到 S3: uploads/{bg_user_tier}/{bg_task_id}.mp3")
 
                         if sqs_queue_url:
                             def _send_sqs():

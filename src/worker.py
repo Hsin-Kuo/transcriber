@@ -226,13 +226,17 @@ def process_task(message_body: dict):
     print(f"🎬 [Worker] 開始處理任務 {task_id}")
     _update_task(db, task_id, {"status": "processing", "progress": "Worker 開始處理..."})
 
+    # 從 task 取得用戶 tier（決定 S3 資料夾路徑）
+    task_doc = db.tasks.find_one({"_id": task_id})
+    user_tier = task_doc.get("user", {}).get("tier", "free") if task_doc else "free"
+
     temp_dir = Path(tempfile.mkdtemp())
 
     try:
         # 1. 從 S3 下載音檔
         _update_progress(db, task_id, "正在下載音檔...")
         audio_path = temp_dir / f"{task_id}.mp3"
-        download_audio(task_id, audio_path)
+        download_audio(task_id, audio_path, tier=user_tier)
         print(f"📥 已下載音檔: {audio_path} ({audio_path.stat().st_size / 1024 / 1024:.2f} MB)")
 
         # 2. 取得模型（快取，只在首次任務載入）
