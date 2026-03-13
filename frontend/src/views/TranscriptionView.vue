@@ -409,15 +409,17 @@ async function confirmAndUpload() {
     }
   } catch (error) {
     console.error($t('transcription.errorUpload') + ':', error)
+    const detail = error.response?.data?.detail
+    const errorMsg = typeof detail === 'object' ? detail?.message : (detail || error.message)
     if (showNotification) {
       showNotification({
         title: $t('transcription.uploadFailed'),
-        message: error.response?.data?.detail || error.message,
+        message: errorMsg,
         type: 'error',
         duration: 5000
       })
     } else {
-      alert($t('transcription.uploadFailedMessage', { message: error.response?.data?.detail || error.message }))
+      alert($t('transcription.uploadFailedMessage', { message: errorMsg }))
     }
   } finally {
     uploading.value = false
@@ -514,10 +516,12 @@ async function confirmBatchUpload(formData) {
 
   } catch (error) {
     console.error('批次上傳失敗:', error)
+    const detail = error.response?.data?.detail
+    const errorMsg = typeof detail === 'object' ? detail?.message : (detail || error.message)
     if (showNotification) {
       showNotification({
         title: $t('batchUpload.failed'),
-        message: error.response?.data?.detail || error.message,
+        message: errorMsg,
         type: 'error',
         duration: 5000
       })

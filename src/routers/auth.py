@@ -30,6 +30,7 @@ from ..database.repositories.user_repo import UserRepository
 from ..database.repositories.rate_limit_repo import RateLimitRepository
 from ..utils.audit_logger import get_audit_logger
 from ..utils.email_service import get_email_service
+from ..models.quota import QUOTA_TIERS, QuotaTier
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -80,15 +81,8 @@ async def register(
         "verification_token": verification_token,
         "verification_expires": verification_expires,
         "quota": {
-            "tier": "free",
-            "max_transcriptions": 10,      # 免費版: 10 次/月
-            "max_duration_minutes": 60,    # 免費版: 60 分鐘/月
-            "max_concurrent_tasks": 1,
-            "features": {
-                "speaker_diarization": False,
-                "punctuation": True,
-                "batch_operations": False
-            }
+            "tier": QuotaTier.FREE,
+            **{k: v for k, v in QUOTA_TIERS[QuotaTier.FREE].items() if k not in ("name", "price")}
         },
         "usage": {
             "transcriptions": 0,
@@ -527,6 +521,11 @@ async def get_current_user_info(
             detail="用戶不存在"
         )
 
+    # 跨月自動歸零配額
+    from src.auth.quota import QuotaManager
+    usage = full_user.get("usage", {})
+    usage = await QuotaManager._reset_monthly_quota_if_needed(full_user, usage, db=db)
+
     # 處理 created_at（可能是 datetime 或 int）
     created_at = full_user["created_at"]
     if hasattr(created_at, 'timestamp'):
@@ -534,7 +533,6 @@ async def get_current_user_info(
         created_at = int(created_at.timestamp())
 
     # 處理 usage.last_reset（可能是 datetime 或 int）
-    usage = full_user.get("usage", {})
     if usage and "last_reset" in usage:
         last_reset = usage["last_reset"]
         if hasattr(last_reset, 'timestamp'):
@@ -546,13 +544,17 @@ async def get_current_user_info(
     if not auth_providers and full_user.get("password_hash"):
         auth_providers = ["password"]
 
+    # 過濾掉次數相關欄位（只用時數限制）
+    quota_filtered = {k: v for k, v in full_user["quota"].items() if k != "max_transcriptions"}
+    usage_filtered = {k: v for k, v in usage.items() if k not in ("transcriptions", "total_transcriptions")}
+
     return UserResponse(
         id=str(full_user["_id"]),
         email=full_user["email"],
         role=full_user["role"],
         is_active=full_user["is_active"],
-        quota=full_user["quota"],
-        usage=usage,
+        quota=quota_filtered,
+        usage=usage_filtered,
         created_at=created_at,
         auth_providers=auth_providers,
         preferences=full_user.get("preferences", {})

@@ -59,14 +59,6 @@
           </span>
         </div>
 
-        <!-- 轉錄次數 -->
-        <div class="display-row usage-row">
-          <span class="display-value usage-value">{{ authStore.usage?.transcriptions || 0 }}/{{ authStore.quota?.max_transcriptions || 0 }}</span>
-        </div>
-        <div class="display-bar">
-          <span class="bar-fill" :style="{ width: (authStore.quotaPercentage?.transcriptions || 0) + '%' }"></span>
-        </div>
-
         <!-- 時長 -->
         <div class="display-row usage-row">
           <span class="display-value usage-value">{{ Math.round(authStore.usage?.duration_minutes || 0) }}/{{ authStore.quota?.max_duration_minutes || 0 }}m</span>

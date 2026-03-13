@@ -465,7 +465,8 @@ async def create_transcription(
         try:
             await QuotaManager.check_transcription_quota(
                 full_user_data,
-                audio_duration_seconds
+                audio_duration_seconds,
+                db=db
             )
         except HTTPException as quota_error:
             # 清理臨時檔案
@@ -940,7 +941,6 @@ async def download_audio(
         if not audio_file_path or not audio_exists_by_path(audio_file_path):
             # S3 Lifecycle 已刪除，順便清掉 DB 殘留記錄
             if audio_file_path:
-                from ..database.repositories.task_repo import TaskRepository
                 task_repo = TaskRepository(db)
                 await task_repo.update(task_id, {
                     "result.audio_file": None,
@@ -1562,6 +1562,7 @@ async def create_batch_transcriptions(
     results = []
     created_count = 0
     failed_count = 0
+    batch_duration_seconds = 0  # 累計本批次已提交的音檔時長（用於配額檢查）
 
     # 檢查當前處理中的任務數量（僅本地模式）
     processing_count = 0
@@ -1631,11 +1632,12 @@ async def create_batch_transcriptions(
             except Exception as e:
                 raise ValueError(f"無法讀取音檔資訊：{str(e)}")
 
-            # 檢查配額
+            # 檢查配額（加上本批次已提交的累計時長）
             try:
                 await QuotaManager.check_transcription_quota(
                     full_user_data,
-                    audio_duration_seconds
+                    audio_duration_seconds + batch_duration_seconds,
+                    db=db
                 )
             except HTTPException as quota_error:
                 raise ValueError(quota_error.detail)
@@ -1764,6 +1766,7 @@ async def create_batch_transcriptions(
                 file_result["task_id"] = task_id
                 file_result["status"] = "pending"
                 file_result["queue_position"] = created_count + 1
+                batch_duration_seconds += audio_duration_seconds
                 created_count += 1
                 print(f"☁️  批次任務 [{idx + 1}/{total_files}] {original_filename} -> {task_id} (SQS)")
             else:
@@ -1806,6 +1809,7 @@ async def create_batch_transcriptions(
                 file_result["task_id"] = task_id
                 file_result["status"] = "pending" if should_queue else "processing"
                 file_result["queue_position"] = queue_position
+                batch_duration_seconds += audio_duration_seconds
                 created_count += 1
 
                 print(f"✅ 批次任務 [{idx + 1}/{total_files}] {original_filename} -> {task_id}")

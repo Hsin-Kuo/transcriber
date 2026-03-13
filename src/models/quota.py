@@ -14,8 +14,8 @@ class QuotaTier(str, Enum):
 QUOTA_TIERS = {
     QuotaTier.FREE: {
         "name": "免費版",
-        "max_transcriptions": 10,          # 每月 10 次
-        "max_duration_minutes": 60,        # 每月 60 分鐘
+        "max_transcriptions": 999999,         # 不限次數
+        "max_duration_minutes": 180,        # 每月 180 分鐘
         "max_concurrent_tasks": 1,         # 同時 1 個任務
         "audio_retention_days": 3,         # 音檔保留天數（S3 Lifecycle）
         "max_keep_audio": 0,               # 手動保留音檔額度
@@ -29,7 +29,7 @@ QUOTA_TIERS = {
     },
     QuotaTier.BASIC: {
         "name": "基礎版",
-        "max_transcriptions": 100,         # 每月 100 次
+        "max_transcriptions": 999999,         # 不限次數
         "max_duration_minutes": 600,       # 每月 600 分鐘 (10 小時)
         "max_concurrent_tasks": 2,
         "audio_retention_days": 7,         # 音檔保留天數（S3 Lifecycle）
@@ -44,7 +44,7 @@ QUOTA_TIERS = {
     },
     QuotaTier.PRO: {
         "name": "專業版",
-        "max_transcriptions": 500,         # 每月 500 次
+        "max_transcriptions": 999999,         # 不限次數
         "max_duration_minutes": 3000,      # 每月 3000 分鐘 (50 小時)
         "max_concurrent_tasks": 5,
         "audio_retention_days": 7,         # 音檔保留天數（S3 Lifecycle）

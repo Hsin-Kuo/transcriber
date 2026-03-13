@@ -79,6 +79,7 @@
               <th>Email</th>
               <th>角色</th>
               <th>狀態</th>
+              <th>登入方式</th>
               <th>配額等級</th>
               <th>本月使用</th>
               <th>任務數</th>
@@ -102,6 +103,18 @@
                 <span class="status-badge" :class="user.is_active ? 'active' : 'inactive'">
                   {{ user.is_active ? '啟用' : '停用' }}
                 </span>
+              </td>
+              <td>
+                <div class="auth-providers">
+                  <span
+                    v-for="provider in (user.auth_providers || [])"
+                    :key="provider"
+                    class="provider-badge"
+                    :class="`provider-${provider}`"
+                  >
+                    {{ getProviderName(provider) }}
+                  </span>
+                </div>
               </td>
               <td>
                 <span class="tier-badge" :class="`tier-${user.quota?.tier || 'free'}`">
@@ -251,6 +264,11 @@ async function toggleUserStatus(user) {
   } catch (err) {
     alert(err.response?.data?.detail || `${action}失敗`)
   }
+}
+
+function getProviderName(provider) {
+  const names = { password: '密碼', google: 'Google' }
+  return names[provider] || provider
 }
 
 function getTierName(tier) {
@@ -461,6 +479,19 @@ onMounted(() => {
 .tier-badge.tier-basic { background: #e3f2fd; color: #1565c0; }
 .tier-badge.tier-pro { background: #fff3e0; color: #e65100; }
 .tier-badge.tier-enterprise { background: #fce4ec; color: #c2185b; }
+
+.auth-providers { display: flex; gap: 4px; flex-wrap: wrap; }
+
+.provider-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.provider-badge.provider-password { background: #e3f2fd; color: #1565c0; }
+.provider-badge.provider-google { background: #fce4ec; color: #c2185b; }
 
 .usage-info { font-size: 12px; }
 
