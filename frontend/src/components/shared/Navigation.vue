@@ -296,7 +296,7 @@ watch(() => route.path, (newPath, oldPath) => {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  padding-bottom: 20px;
+  padding-bottom: 14px;
   position: relative;
 }
 

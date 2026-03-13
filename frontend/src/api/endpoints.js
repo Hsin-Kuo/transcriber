@@ -53,6 +53,13 @@ export const NEW_ENDPOINTS = {
     download: (filename) => `/audio/download/${filename}`,
   },
 
+  // 分片上傳
+  uploads: {
+    init: '/uploads/init',
+    chunk: (uploadId, chunkIndex) => `/uploads/${uploadId}/chunks/${chunkIndex}`,
+    complete: (uploadId) => `/uploads/${uploadId}/complete`,
+  },
+
   // AI 摘要
   summaries: {
     generate: (taskId) => `/summaries/${taskId}`,

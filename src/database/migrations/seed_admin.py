@@ -5,22 +5,23 @@
 """
 import asyncio
 import sys
+import os
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
 
 # 添加專案根目錄到 Python 路徑
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from motor.motor_asyncio import AsyncIOMotorClient
-from src.auth.password import hash_password
-import os
-from dotenv import load_dotenv
-
-# 載入 .env 檔案
+# 必須在 import config_loader 之前載入 .env，因為 DEPLOY_ENV 在模組層級讀取
 load_dotenv()
 
-# 從環境變數讀取配置
-MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
+from motor.motor_asyncio import AsyncIOMotorClient
+from src.auth.password import hash_password
+from src.utils.config_loader import get_parameter
+
+# 從 SSM (AWS) 或環境變數 (local) 讀取配置
+MONGODB_URL = get_parameter("/transcriber/mongodb-url", fallback_env="MONGODB_URL", default="mongodb://localhost:27017")
 DB_NAME = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
 
 
@@ -43,8 +44,10 @@ async def create_admin():
     admin_user = {
         "email": admin_email,
         "password_hash": hash_password(admin_password),
+        "auth_providers": ["password"],
         "role": "admin",
         "is_active": True,
+        "email_verified": True,
         "quota": {
             "tier": "enterprise",
             "max_transcriptions": 999999,

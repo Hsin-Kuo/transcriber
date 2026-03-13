@@ -278,11 +278,31 @@ watch(() => props.matchWholeWord, (val) => {
   localMatchWholeWord.value = val
 })
 
+// 檢查焦點是否在浮窗內
+function hasFocus() {
+  return popupRef.value && popupRef.value.contains(document.activeElement)
+}
+
+// 聚焦搜尋輸入框並選取全部文字
+function focusAndSelect() {
+  nextTick(() => {
+    if (searchInputRef.value) {
+      searchInputRef.value.focus()
+      searchInputRef.value.select()
+    }
+  })
+}
+
 // 組件掛載時聚焦搜尋輸入框
 onMounted(() => {
   nextTick(() => {
     searchInputRef.value?.focus()
   })
+})
+
+defineExpose({
+  focusAndSelect,
+  hasFocus
 })
 </script>
 

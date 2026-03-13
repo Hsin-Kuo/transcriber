@@ -5,6 +5,7 @@ PunctuationProcessor - 標點符號處理器
 
 from typing import Optional, Tuple, Dict, Any, Callable
 import os
+import re
 
 
 class PunctuationProcessor:
@@ -73,6 +74,16 @@ class PunctuationProcessor:
 
     # ========== 私有方法 ==========
 
+    def _remove_cjk_latin_spaces(self, text: str) -> str:
+        """移除中英文、全形標點與英文之間被 AI 擅自插入的空白"""
+        # 中文字與英文/數字之間的空白
+        text = re.sub(r'([\u4e00-\u9fff])\s+([A-Za-z0-9])', r'\1\2', text)
+        text = re.sub(r'([A-Za-z0-9])\s+([\u4e00-\u9fff])', r'\1\2', text)
+        # 全形標點與英文/數字之間的空白
+        text = re.sub(r'([\u3000-\u303F\uFF00-\uFFEF])\s+([A-Za-z0-9])', r'\1\2', text)
+        text = re.sub(r'([A-Za-z0-9])\s+([\u3000-\u303F\uFF00-\uFFEF])', r'\1\2', text)
+        return text
+
     def _punctuate_with_openai(
         self,
         text: str,
@@ -104,6 +115,8 @@ class PunctuationProcessor:
         )
 
         result = resp.choices[0].message.content.strip()
+        if language == "zh":
+            result = self._remove_cjk_latin_spaces(result)
 
         # 提取 token 使用量
         token_usage = None
@@ -149,6 +162,8 @@ class PunctuationProcessor:
             system_msg, user_msg = self._get_punctuation_prompt(language, text)
             prompt = f"{system_msg}\n\n{user_msg}"
             result, model_used, token_usage = self._call_gemini_with_retry(prompt)
+            if language == "zh":
+                result = self._remove_cjk_latin_spaces(result)
             return result, model_used, token_usage
 
         # 長文本：分段處理
@@ -178,6 +193,8 @@ class PunctuationProcessor:
 
             # 調用 Gemini
             result, chunk_model, chunk_token_usage = self._call_gemini_with_retry(prompt)
+            if language == "zh":
+                result = self._remove_cjk_latin_spaces(result)
             results.append(result)
 
             # 記錄使用的模型（使用第一個成功的模型）
@@ -338,6 +355,7 @@ class PunctuationProcessor:
             user_msg = (
                 "請將以下『中文逐字稿』加上適當標點符號並合理分段。"
                 "不要省略或添加內容，不要意譯，保留固有名詞與數字。"
+                "不要在中英文之間插入空白，保持原文的空白狀態。"
                 "**重要：如果文字中有說話者標籤（例如 [SPEAKER_00]、[Speaker A] 等），請完整保留這些標籤，不要修改或刪除。**"
                 f"輸出純文字即可：\n\n{text}"
             )
@@ -399,6 +417,7 @@ class PunctuationProcessor:
             system_msg = (
                 "你是嚴謹的逐字稿潤飾助手。只做『中文標點補全與合理分段』，"
                 "不要省略或添加內容，不要意譯，非必要不要用刪節號，保留固有名詞與數字。"
+                "不要在中英文之間插入空白，保持原文的空白狀態。"
                 "**重要：如果文字中有說話者標籤（例如 [SPEAKER_00]、[Speaker A] 等），請完整保留這些標籤。**"
             )
             if chunk_idx == 1:

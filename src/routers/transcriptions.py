@@ -15,14 +15,26 @@ import mimetypes
 from ..auth.dependencies import get_current_user, check_quota
 from ..database.mongodb import get_database
 from ..database.repositories.task_repo import TaskRepository
+from ..database.repositories.tag_repo import TagRepository
 from ..services.task_service import TaskService
 from ..services.transcription_service import TranscriptionService
+from ..services.tag_service import TagService
 from ..services.utils.whisper_processor import WhisperProcessor
 from ..services.utils.punctuation_processor import PunctuationProcessor
 from ..services.utils.diarization_processor import DiarizationProcessor
 from ..utils.storage_service import is_aws
 from ..utils.config_loader import get_parameter
 import os
+import asyncio
+
+
+def _get_sync_db():
+    """取得同步 MongoDB 連線（用於背景任務，不依賴 FastAPI DI）"""
+    from pymongo import MongoClient
+    mongodb_url = get_parameter("/transcriber/mongodb-url", fallback_env="MONGODB_URL", default="mongodb://localhost:27017")
+    db_name = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
+    client = MongoClient(mongodb_url, serverSelectionTimeoutMS=5000)
+    return client, client[db_name]
 
 
 def _sign_sqs_message(payload: dict) -> dict:
@@ -203,6 +215,7 @@ async def create_transcription(
     max_speakers: Optional[int] = Form(None, description="最大講者人數（可選，2-10）"),
     language: str = Form("zh", description="轉錄語言 (zh/en/ja/ko/auto)"),
     tags: Optional[str] = Form(None, description="標籤（JSON 陣列字串）"),
+    upload_id: Optional[str] = Form(None, description="分片上傳完成後的 upload_id（替代直接上傳檔案）"),
     current_user: dict = Depends(get_current_user),
     db = Depends(get_database)
 ):
@@ -233,8 +246,28 @@ async def create_transcription(
     Raises:
         HTTPException: 服務未就緒或參數錯誤
     """
+    # ── 分片上傳模式：從已組裝的檔案讀取 ──
+    use_chunked_upload = False
+    chunked_temp_dir = None
+    chunked_audio_path = None
+
+    if upload_id:
+        from .uploads import get_upload_meta, remove_upload
+        meta = get_upload_meta(upload_id)
+        if not meta:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "upload_id 無效或尚未完成組裝")
+        if meta["user_id"] != str(current_user["_id"]):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "無權使用此上傳")
+        use_chunked_upload = True
+        chunked_temp_dir = meta["temp_dir"]
+        chunked_audio_path = meta["assembled_path"]
+        # 從 active_uploads 移除（後續由本函數管理 temp_dir 生命週期）
+        remove_upload(upload_id)
+
     # 處理檔案參數
-    if merge_files and files and len(files) > 0:
+    if use_chunked_upload:
+        uploaded_files = []  # 不需要 UploadFile，後面會直接使用 chunked_audio_path
+    elif merge_files and files and len(files) > 0:
         # 合併模式：多檔案
         if len(files) < 2:
             raise HTTPException(
@@ -248,17 +281,18 @@ async def create_transcription(
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="請提供音檔"
+            detail="請提供音檔或 upload_id"
         )
 
     # 檢查檔案總大小（注意：UploadFile.size 可能為 None）
-    total_size = sum(f.size or 0 for f in uploaded_files)
-    MAX_TOTAL_SIZE = 500 * 1024 * 1024  # 500MB
-    if total_size > 0 and total_size > MAX_TOTAL_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="檔案總大小超過限制（最大500MB）"
-        )
+    if not use_chunked_upload:
+        total_size = sum(f.size or 0 for f in uploaded_files)
+        MAX_TOTAL_SIZE = 500 * 1024 * 1024  # 500MB
+        if total_size > 0 and total_size > MAX_TOTAL_SIZE:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="檔案總大小超過限制（最大500MB）"
+            )
 
     # 驗證任務類型
     if task_type not in ["paragraph", "subtitle"]:
@@ -322,15 +356,23 @@ async def create_transcription(
     # 生成任務 ID
     task_id = str(uuid.uuid4())
 
-    # 建立臨時目錄
-    temp_dir = Path(tempfile.mkdtemp())
+    # 建立臨時目錄（分片上傳模式直接複用已有的 temp_dir）
+    if use_chunked_upload:
+        temp_dir = chunked_temp_dir
+    else:
+        temp_dir = Path(tempfile.mkdtemp())
 
     try:
         # 如果是多檔案，先合併
         # 導入 AudioService（用於合併音檔和獲取時長）
         from src.services.audio_service import AudioService
 
-        if len(uploaded_files) > 1:
+        if use_chunked_upload:
+            # ── 分片上傳：檔案已組裝好，直接使用 ──
+            temp_audio = chunked_audio_path
+            original_filename = custom_name.strip() if custom_name and custom_name.strip() else chunked_audio_path.name
+            print(f"📁 分片上傳模式：使用已組裝檔案 {chunked_audio_path.name} ({chunked_audio_path.stat().st_size / 1024 / 1024:.2f} MB)")
+        elif len(uploaded_files) > 1:
             print(f"🔄 合併模式：{len(uploaded_files)} 個檔案")
 
             # 保存上傳的檔案到臨時目錄
@@ -431,23 +473,25 @@ async def create_transcription(
             # 拋出配額不足異常
             raise quota_error
 
-        # 檢查 diarization 可用性
-        if diarize and not _diarization_processor:
+        # 檢查 diarization 可用性（僅在本地模式下檢查，AWS 模式由 GPU Worker 處理）
+        if diarize and not is_aws() and not _diarization_processor:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Speaker diarization 功能未啟用。請設定 HF_TOKEN 環境變數並重啟服務。"
             )
 
-        # 檢查當前處理中的任務數量（限流機制）
-        MAX_CONCURRENT_TASKS = 2  # 最多同時處理 2 個任務
-        processing_count = await transcription_service.task_service.count_processing_tasks()
-        pending_count = await transcription_service.task_service.count_pending_tasks()
+        # 檢查當前處理中的任務數量（限流機制，僅本地模式）
+        should_queue = False
+        if not is_aws() and transcription_service:
+            MAX_CONCURRENT_TASKS = 2  # 最多同時處理 2 個任務
+            processing_count = await transcription_service.task_service.count_processing_tasks()
+            pending_count = await transcription_service.task_service.count_pending_tasks()
 
-        # 判斷是否需要排隊
-        should_queue = processing_count >= MAX_CONCURRENT_TASKS
+            # 判斷是否需要排隊
+            should_queue = processing_count >= MAX_CONCURRENT_TASKS
 
-        if should_queue:
-            print(f"⚠️  系統忙碌中（{processing_count} 個任務處理中，{pending_count} 個任務排隊中），新任務加入隊列")
+            if should_queue:
+                print(f"⚠️  系統忙碌中（{processing_count} 個任務處理中，{pending_count} 個任務排隊中），新任務加入隊列")
 
         # 解析標籤
         task_tags = []
@@ -456,6 +500,23 @@ async def create_transcription(
                 task_tags = json.loads(tags)
             except:
                 task_tags = []
+
+        # 自動為新標籤建立 tags 集合記錄
+        if task_tags:
+            try:
+                tag_repo = TagRepository(db)
+                tag_service = TagService(tag_repo, TaskRepository(db))
+                user_id = str(current_user["_id"])
+                existing_tags = await tag_service.get_all_tags(user_id)
+                existing_names = {t["name"] for t in existing_tags}
+                for tag_name in task_tags:
+                    if tag_name and tag_name not in existing_names:
+                        try:
+                            await tag_service.create_tag(user_id=user_id, name=tag_name)
+                        except (ValueError, Exception):
+                            pass
+            except Exception as e:
+                print(f"⚠️ 上傳時自動建立標籤記錄失敗（不影響任務建立）：{e}")
 
         # 創建任務記錄
         from ..utils.time_utils import get_utc_timestamp
@@ -471,7 +532,8 @@ async def create_transcription(
             # 使用者資訊
             "user": {
                 "user_id": str(current_user["_id"]),
-                "user_email": current_user["email"]
+                "user_email": current_user["email"],
+                "tier": full_user_data.get("quota", {}).get("tier", "free")
             },
 
             # 檔案資訊
@@ -526,40 +588,69 @@ async def create_transcription(
         await task_repo.create(task_data)
 
         if is_aws():
-            # ===== AWS 模式：上傳 S3 + 發送 SQS =====
+            # ===== AWS 模式：背景上傳 S3 + 發送 SQS =====
             from ..utils.storage_service import save_audio
             import boto3
 
-            # 上傳音檔到 S3
-            save_audio(task_id, temp_audio)
-            print(f"☁️  音檔已上傳到 S3: uploads/{task_id}.mp3")
-
-            # 發送 SQS 訊息（帶簽名）
+            # 預先捕獲 SQS 配置
             sqs_queue_url = os.getenv("SQS_QUEUE_URL", "")
-            if sqs_queue_url:
-                sqs = boto3.client("sqs", region_name=os.getenv("S3_REGION", "ap-northeast-1"))
-                use_punctuation = punct_provider != "none"
-                language_code = None if language == "auto" else language
-                sqs_payload = _sign_sqs_message({
-                    "task_id": task_id,
-                    "language": language_code,
-                    "use_chunking": chunk_audio,
-                    "use_punctuation": use_punctuation,
-                    "punctuation_provider": punct_provider,
-                    "use_diarization": diarize,
-                    "max_speakers": max_speakers,
-                })
-                sqs.send_message(
-                    QueueUrl=sqs_queue_url,
-                    MessageBody=json.dumps(sqs_payload)
-                )
-                print(f"📨 已發送 SQS 訊息: {task_id}")
-            else:
-                print(f"⚠️  SQS_QUEUE_URL 未設定，任務 {task_id} 保持 pending 狀態")
+            sqs_region = os.getenv("S3_REGION", "ap-northeast-1")
+            use_punctuation = punct_provider != "none"
+            language_code = None if language == "auto" else language
+            sqs_payload = _sign_sqs_message({
+                "task_id": task_id,
+                "language": language_code,
+                "use_chunking": chunk_audio,
+                "use_punctuation": use_punctuation,
+                "punctuation_provider": punct_provider,
+                "use_diarization": diarize,
+                "max_speakers": max_speakers,
+            })
 
-            # 清理本地臨時目錄（音檔已上傳到 S3）
-            if temp_dir.exists():
-                shutil.rmtree(temp_dir)
+            # 捕獲背景任務所需的變數
+            _bg_task_id = task_id
+            _bg_temp_audio = temp_audio
+            _bg_temp_dir = temp_dir
+            _bg_user_tier = full_user_data.get("quota", {}).get("tier", "free")
+
+            async def _upload_to_s3_and_notify():
+                """背景執行 S3 上傳 + SQS 發送"""
+                try:
+                    loop = asyncio.get_event_loop()
+                    # S3 上傳（blocking I/O），依用戶方案放到對應資料夾
+                    await loop.run_in_executor(None, save_audio, _bg_task_id, _bg_temp_audio, _bg_user_tier)
+                    print(f"☁️  音檔已上傳到 S3: uploads/{_bg_user_tier}/{_bg_task_id}.mp3")
+
+                    # 發送 SQS
+                    if sqs_queue_url:
+                        def _send_sqs():
+                            sqs = boto3.client("sqs", region_name=sqs_region)
+                            sqs.send_message(
+                                QueueUrl=sqs_queue_url,
+                                MessageBody=json.dumps(sqs_payload)
+                            )
+                        await loop.run_in_executor(None, _send_sqs)
+                        print(f"📨 已發送 SQS 訊息: {_bg_task_id}")
+                    else:
+                        print(f"⚠️  SQS_QUEUE_URL 未設定，任務 {_bg_task_id} 保持 pending 狀態")
+
+                except Exception as e:
+                    print(f"❌ S3 上傳失敗: {_bg_task_id}: {e}")
+                    try:
+                        client, sync_db = _get_sync_db()
+                        sync_db.tasks.update_one(
+                            {"_id": _bg_task_id},
+                            {"$set": {"status": "failed", "error": {"message": f"音檔上傳失敗: {str(e)}"}}}
+                        )
+                        client.close()
+                    except Exception as db_err:
+                        print(f"❌ 更新任務狀態失敗: {_bg_task_id}: {db_err}")
+                finally:
+                    if _bg_temp_dir.exists():
+                        shutil.rmtree(_bg_temp_dir)
+
+            # 發射背景任務，不等待
+            asyncio.create_task(_upload_to_s3_and_notify())
         else:
             # ===== 本地模式：現有行為 =====
             # 初始化記憶體狀態（確保 SSE 能立即讀取到正確狀態）
@@ -656,13 +747,11 @@ async def create_transcription(
     except HTTPException:
         # 清理臨時檔案
         if temp_dir.exists():
-            import shutil
             shutil.rmtree(temp_dir)
         raise
     except Exception as e:
         # 清理臨時檔案
         if temp_dir.exists():
-            import shutil
             shutil.rmtree(temp_dir)
         print(f"❌ 建立轉錄任務失敗：{e}")
         raise HTTPException(
@@ -843,17 +932,26 @@ async def download_audio(
 
     if is_aws():
         # AWS 模式：回傳 S3 presigned URL redirect
-        from ..utils.storage_service import get_audio_presigned_url, audio_exists, S3_REGION
+        from ..utils.storage_service import audio_exists_by_path, get_presigned_url_by_path, S3_REGION
         from fastapi.responses import RedirectResponse
         from urllib.parse import urlparse
 
-        if not audio_exists(task_id):
+        audio_file_path = task.get("result", {}).get("audio_file")
+        if not audio_file_path or not audio_exists_by_path(audio_file_path):
+            # S3 Lifecycle 已刪除，順便清掉 DB 殘留記錄
+            if audio_file_path:
+                from ..database.repositories.task_repo import TaskRepository
+                task_repo = TaskRepository(db)
+                await task_repo.update(task_id, {
+                    "result.audio_file": None,
+                    "result.audio_filename": None
+                })
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="音檔不存在（可能已被刪除）"
+                detail="音檔已過期或已被刪除"
             )
 
-        presigned_url = get_audio_presigned_url(task_id, expires_in=3600)
+        presigned_url = get_presigned_url_by_path(audio_file_path, expires_in=3600)
 
         # 驗證 presigned URL 指向合法的 S3 域名，防止 open redirect
         parsed = urlparse(presigned_url)
@@ -1299,9 +1397,10 @@ async def update_subtitle_settings(
 @router.post("/batch")
 async def create_batch_transcriptions(
     request: Request,
-    files: List[UploadFile] = File(..., description="多個音檔（最多10個）"),
+    files: Optional[List[UploadFile]] = File(None, description="多個音檔（最多10個）"),
     default_config: str = Form(..., description="預設配置 JSON 字串"),
     overrides: str = Form("{}", description="單檔覆蓋設定 JSON 字串，格式：{索引: {tags, customName}}"),
+    upload_ids: Optional[str] = Form(None, description="分片上傳的 upload_id JSON 陣列，格式：{索引: upload_id}"),
     current_user: dict = Depends(get_current_user),
     db = Depends(get_database)
 ):
@@ -1323,15 +1422,30 @@ async def create_batch_transcriptions(
     Raises:
         HTTPException: 參數錯誤或服務未就緒
     """
+    # 解析分片上傳的 upload_ids（格式：{"索引": "upload_id"}）
+    chunked_uploads_map = {}
+    if upload_ids:
+        try:
+            chunked_uploads_map = json.loads(upload_ids)
+        except json.JSONDecodeError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "upload_ids 格式錯誤")
+
+    # 確保 files 是 list（可能為 None）
+    if files is None:
+        files = []
+
+    # 計算總檔案數（直接上傳 + 分片上傳）
+    total_files = len(files) + len(chunked_uploads_map)
+
     # 檢查檔案數量
     MAX_BATCH_FILES = 10
-    if len(files) > MAX_BATCH_FILES:
+    if total_files > MAX_BATCH_FILES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"批次上傳最多支援 {MAX_BATCH_FILES} 個檔案，您上傳了 {len(files)} 個"
+            detail=f"批次上傳最多支援 {MAX_BATCH_FILES} 個檔案，您提供了 {total_files} 個"
         )
 
-    if len(files) == 0:
+    if total_files == 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="請至少上傳一個檔案"
@@ -1369,6 +1483,27 @@ async def create_batch_transcriptions(
     language = config.get("language", "auto")
     default_tags = config.get("tags", [])
 
+    # 收集所有標籤（default + 各檔案覆蓋的）並自動建立 tags 集合記錄
+    all_upload_tags = set(default_tags)
+    for override in file_overrides.values():
+        if isinstance(override, dict):
+            all_upload_tags.update(override.get("tags", []))
+    if all_upload_tags:
+        try:
+            tag_repo = TagRepository(db)
+            tag_service = TagService(tag_repo, TaskRepository(db))
+            user_id = str(current_user["_id"])
+            existing_tags = await tag_service.get_all_tags(user_id)
+            existing_names = {t["name"] for t in existing_tags}
+            for tag_name in all_upload_tags:
+                if tag_name and tag_name not in existing_names:
+                    try:
+                        await tag_service.create_tag(user_id=user_id, name=tag_name)
+                    except (ValueError, Exception):
+                        pass
+        except Exception as e:
+            print(f"⚠️ 批次上傳時自動建立標籤記錄失敗（不影響任務建立）：{e}")
+
     # 驗證任務類型
     if task_type not in ["paragraph", "subtitle"]:
         raise HTTPException(
@@ -1396,8 +1531,8 @@ async def create_batch_transcriptions(
     if task_type == "subtitle":
         punct_provider = "none"
 
-    # 檢查 diarization 可用性
-    if diarize and not _diarization_processor:
+    # 檢查 diarization 可用性（僅在本地模式下檢查，AWS 模式由 GPU Worker 處理）
+    if diarize and not is_aws() and not _diarization_processor:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Speaker diarization 功能未啟用"
@@ -1428,16 +1563,39 @@ async def create_batch_transcriptions(
     created_count = 0
     failed_count = 0
 
-    # 檢查當前處理中的任務數量
-    MAX_CONCURRENT_TASKS = 2
-    processing_count = await transcription_service.task_service.count_processing_tasks()
-    pending_count = await transcription_service.task_service.count_pending_tasks()
+    # 檢查當前處理中的任務數量（僅本地模式）
+    processing_count = 0
+    pending_count = 0
+    if not is_aws() and transcription_service:
+        MAX_CONCURRENT_TASKS = 2
+        processing_count = await transcription_service.task_service.count_processing_tasks()
+        pending_count = await transcription_service.task_service.count_pending_tasks()
+
+    # 建立統一的處理列表：(global_idx, upload_file_or_None, chunked_meta_or_None)
+    _batch_items = []
+    # 直接上傳的檔案
+    for i, uf in enumerate(files):
+        _batch_items.append((i, uf, None))
+    # 分片上傳的檔案
+    if chunked_uploads_map:
+        from .uploads import get_upload_meta, remove_upload
+        for str_idx, uid in chunked_uploads_map.items():
+            global_idx = int(str_idx)
+            meta = get_upload_meta(uid)
+            if meta and meta["user_id"] == str(current_user["_id"]):
+                remove_upload(uid)
+                _batch_items.append((global_idx, None, meta))
+            else:
+                _batch_items.append((global_idx, None, None))  # 無效，後續會報錯
+    # 按 global_idx 排序
+    _batch_items.sort(key=lambda x: x[0])
 
     # 逐一處理每個檔案
-    for idx, upload_file in enumerate(files):
+    for idx, upload_file, chunked_meta in _batch_items:
+        display_name = upload_file.filename if upload_file else (chunked_meta["filename"] if chunked_meta else "unknown")
         file_result = {
             "index": idx,
-            "filename": upload_file.filename,
+            "filename": display_name,
             "task_id": None,
             "status": "pending",
             "error": None,
@@ -1446,15 +1604,24 @@ async def create_batch_transcriptions(
 
         temp_dir = None
         try:
-            # 建立臨時目錄
-            temp_dir = Path(tempfile.mkdtemp())
-            file_suffix = Path(upload_file.filename).suffix
-            temp_audio = temp_dir / f"input{file_suffix}"
+            if chunked_meta is None and upload_file is None:
+                raise ValueError("upload_id 無效或尚未完成組裝")
 
-            # 保存檔案
-            content = await upload_file.read()
-            with temp_audio.open("wb") as f:
-                f.write(content)
+            if chunked_meta:
+                # 分片上傳模式
+                temp_dir = chunked_meta["temp_dir"]
+                temp_audio = chunked_meta["assembled_path"]
+                original_filename = chunked_meta["filename"]
+            else:
+                # 直接上傳模式
+                temp_dir = Path(tempfile.mkdtemp())
+                file_suffix = Path(upload_file.filename).suffix
+                temp_audio = temp_dir / f"input{file_suffix}"
+
+                content = await upload_file.read()
+                with temp_audio.open("wb") as f:
+                    f.write(content)
+                original_filename = upload_file.filename
 
             # 獲取音檔資訊
             try:
@@ -1477,7 +1644,6 @@ async def create_batch_transcriptions(
             override = file_overrides.get(str(idx), {})
             file_tags = override.get("tags", default_tags.copy())
             custom_name = override.get("customName", None)
-            original_filename = upload_file.filename
 
             # 生成任務 ID
             task_id = str(uuid.uuid4())
@@ -1490,7 +1656,8 @@ async def create_batch_transcriptions(
                 "task_type": task_type,
                 "user": {
                     "user_id": str(current_user["_id"]),
-                    "user_email": current_user["email"]
+                    "user_email": current_user["email"],
+                    "tier": full_user_data.get("quota", {}).get("tier", "free")
                 },
                 "file": {
                     "filename": original_filename,
@@ -1529,41 +1696,76 @@ async def create_batch_transcriptions(
             await task_repo.create(task_data)
 
             if is_aws():
-                # ===== AWS 模式：上傳 S3 + 發送 SQS =====
+                # ===== AWS 模式：背景上傳 S3 + 發送 SQS =====
                 from ..utils.storage_service import save_audio
                 import boto3
 
-                save_audio(task_id, temp_audio)
-
+                # 預先捕獲配置
                 sqs_queue_url = os.getenv("SQS_QUEUE_URL", "")
-                if sqs_queue_url:
-                    sqs = boto3.client("sqs", region_name=os.getenv("S3_REGION", "ap-northeast-1"))
-                    use_punctuation = punct_provider != "none"
-                    language_code = None if language == "auto" else language
-                    sqs_payload = _sign_sqs_message({
-                        "task_id": task_id,
-                        "language": language_code,
-                        "use_chunking": True,
-                        "use_punctuation": use_punctuation,
-                        "punctuation_provider": punct_provider,
-                        "use_diarization": diarize,
-                        "max_speakers": max_speakers,
-                    })
-                    sqs.send_message(
-                        QueueUrl=sqs_queue_url,
-                        MessageBody=json.dumps(sqs_payload)
-                    )
+                sqs_region = os.getenv("S3_REGION", "ap-northeast-1")
+                use_punctuation = punct_provider != "none"
+                language_code = None if language == "auto" else language
+                sqs_payload = _sign_sqs_message({
+                    "task_id": task_id,
+                    "language": language_code,
+                    "use_chunking": True,
+                    "use_punctuation": use_punctuation,
+                    "punctuation_provider": punct_provider,
+                    "use_diarization": diarize,
+                    "max_speakers": max_speakers,
+                })
 
-                # 清理本地臨時目錄
-                if temp_dir.exists():
-                    shutil.rmtree(temp_dir)
-                    temp_dir = None  # 避免 except 中重複清理
+                # 捕獲背景任務所需的變數
+                _bg_task_id = task_id
+                _bg_temp_audio = temp_audio
+                _bg_temp_dir = temp_dir
+                _bg_user_tier = full_user_data.get("quota", {}).get("tier", "free")
+
+                async def _batch_upload_to_s3_and_notify(
+                    bg_task_id=_bg_task_id, bg_temp_audio=_bg_temp_audio,
+                    bg_temp_dir=_bg_temp_dir, bg_sqs_payload=sqs_payload,
+                    bg_user_tier=_bg_user_tier
+                ):
+                    """背景執行 S3 上傳 + SQS 發送（批次）"""
+                    try:
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(None, save_audio, bg_task_id, bg_temp_audio, bg_user_tier)
+                        print(f"☁️  批次音檔已上傳到 S3: uploads/{bg_user_tier}/{bg_task_id}.mp3")
+
+                        if sqs_queue_url:
+                            def _send_sqs():
+                                sqs = boto3.client("sqs", region_name=sqs_region)
+                                sqs.send_message(
+                                    QueueUrl=sqs_queue_url,
+                                    MessageBody=json.dumps(bg_sqs_payload)
+                                )
+                            await loop.run_in_executor(None, _send_sqs)
+                            print(f"📨 批次已發送 SQS 訊息: {bg_task_id}")
+
+                    except Exception as e:
+                        print(f"❌ 批次 S3 上傳失敗: {bg_task_id}: {e}")
+                        try:
+                            client, sync_db = _get_sync_db()
+                            sync_db.tasks.update_one(
+                                {"_id": bg_task_id},
+                                {"$set": {"status": "failed", "error": {"message": f"音檔上傳失敗: {str(e)}"}}}
+                            )
+                            client.close()
+                        except Exception as db_err:
+                            print(f"❌ 更新任務狀態失敗: {bg_task_id}: {db_err}")
+                    finally:
+                        if bg_temp_dir.exists():
+                            shutil.rmtree(bg_temp_dir)
+
+                # 發射背景任務，不等待
+                asyncio.create_task(_batch_upload_to_s3_and_notify())
+                temp_dir = None  # 避免 except 中重複清理
 
                 file_result["task_id"] = task_id
                 file_result["status"] = "pending"
                 file_result["queue_position"] = created_count + 1
                 created_count += 1
-                print(f"☁️  批次任務 [{idx + 1}/{len(files)}] {upload_file.filename} -> {task_id} (SQS)")
+                print(f"☁️  批次任務 [{idx + 1}/{total_files}] {original_filename} -> {task_id} (SQS)")
             else:
                 # ===== 本地模式：現有行為 =====
                 # 初始化記憶體狀態
@@ -1606,7 +1808,7 @@ async def create_batch_transcriptions(
                 file_result["queue_position"] = queue_position
                 created_count += 1
 
-                print(f"✅ 批次任務 [{idx + 1}/{len(files)}] {upload_file.filename} -> {task_id}")
+                print(f"✅ 批次任務 [{idx + 1}/{total_files}] {original_filename} -> {task_id}")
 
         except Exception as e:
             file_result["status"] = "failed"
@@ -1617,7 +1819,7 @@ async def create_batch_transcriptions(
             if temp_dir and temp_dir.exists():
                 shutil.rmtree(temp_dir)
 
-            print(f"❌ 批次任務 [{idx + 1}/{len(files)}] {upload_file.filename} 失敗: {e}")
+            print(f"❌ 批次任務 [{idx + 1}/{total_files}] {display_name} 失敗: {e}")
 
         results.append(file_result)
 
@@ -1634,7 +1836,7 @@ async def create_batch_transcriptions(
             message=f"批次建立 {created_count} 個轉錄任務（失敗 {failed_count} 個）",
             request_body={
                 "batch_id": batch_id,
-                "total": len(files),
+                "total": total_files,
                 "created": created_count,
                 "failed": failed_count,
                 "task_type": task_type,
@@ -1646,7 +1848,7 @@ async def create_batch_transcriptions(
 
     return {
         "batch_id": batch_id,
-        "total": len(files),
+        "total": total_files,
         "created": created_count,
         "failed": failed_count,
         "tasks": results

@@ -76,6 +76,8 @@ class TagService:
     async def get_all_tags(self, user_id: str) -> List[Dict[str, Any]]:
         """獲取用戶的所有標籤（按順序排序）
 
+        自動同步：若任務中有標籤但 tags 集合缺少對應記錄，會自動補建。
+
         Args:
             user_id: 用戶 ID
 
@@ -83,6 +85,23 @@ class TagService:
             標籤列表
         """
         tags = await self.tag_repo.get_all_by_user(user_id)
+
+        # 自動同步：補建任務中存在但 tags 集合缺少的標籤
+        try:
+            task_tags = await self.task_repo.get_all_user_tags(user_id)
+            existing_names = {tag["name"] for tag in tags}
+            missing = [t for t in task_tags if t not in existing_names]
+
+            if missing:
+                for name in missing:
+                    try:
+                        await self.tag_repo.create(user_id, name)
+                    except (ValueError, Exception):
+                        pass
+                tags = await self.tag_repo.get_all_by_user(user_id)
+        except Exception:
+            pass
+
         return tags
 
     async def update_tag(

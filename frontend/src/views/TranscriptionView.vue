@@ -200,7 +200,8 @@
           >
             <span v-if="uploading" class="btn-spinner"></span>
             <span v-else>{{ $t('transcription.startTranscription') }}</span>
-            <span v-if="uploading">{{ $t('transcription.uploading') }}</span>
+            <span v-if="uploading && uploadProgress > 0">{{ $t('transcription.uploading') }} {{ uploadProgress }}%</span>
+            <span v-else-if="uploading">{{ $t('transcription.uploading') }}</span>
           </button>
           <button class="btn btn-secondary btn-cancel" :disabled="uploading" @click="cancelUpload">{{ $t('transcription.cancel') }}</button>
         </div>
@@ -226,6 +227,7 @@ const { t: $t } = useI18n()
 
 const showNotification = inject('showNotification')
 const uploading = ref(false)
+const uploadProgress = ref(0) // 分片上傳進度 0-100
 const taskType = ref('paragraph')  // 任務類型：paragraph（段落）或 subtitle（字幕）
 const enableDiarization = ref(true)
 const maxSpeakers = ref(null)
@@ -379,8 +381,11 @@ async function confirmAndUpload() {
   }
 
   try {
-    // 使用新 API 服務層
-    const responseData = await transcriptionService.create(formData)
+    // 使用新 API 服務層（大檔自動走分片上傳）
+    uploadProgress.value = 0
+    const responseData = await transcriptionService.create(formData, {
+      onProgress: (pct) => { uploadProgress.value = pct }
+    })
 
     const newTask = {
       ...responseData,
@@ -416,6 +421,7 @@ async function confirmAndUpload() {
     }
   } finally {
     uploading.value = false
+    uploadProgress.value = 0
     pendingFile.value = null
     taskType.value = 'paragraph'  // 重置為預設值
     selectedTags.value = []
@@ -474,9 +480,12 @@ function cancelBatchUpload() {
 // 確認批次上傳
 async function confirmBatchUpload(formData) {
   uploading.value = true
+  uploadProgress.value = 0
 
   try {
-    const result = await transcriptionService.createBatch(formData)
+    const result = await transcriptionService.createBatch(formData, {
+      onProgress: (pct) => { uploadProgress.value = pct }
+    })
 
     // 顯示結果通知
     if (showNotification) {
@@ -515,6 +524,7 @@ async function confirmBatchUpload(formData) {
     }
   } finally {
     uploading.value = false
+    uploadProgress.value = 0
     cancelBatchUpload()
   }
 }
