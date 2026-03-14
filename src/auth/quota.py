@@ -134,7 +134,7 @@ class QuotaManager:
             }
 
             # 寫回 DB
-            if db:
+            if db is not None:
                 try:
                     from bson import ObjectId
                     user_id = str(user["_id"])
