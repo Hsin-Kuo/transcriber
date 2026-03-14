@@ -35,18 +35,39 @@ jobs:
               -czvf backend.tar.gz \
               src deploy requirements-web.txt requirements.txt
 
-      # ===== 前端原始碼打包（EC2 上用 Docker 建置）=====
-      - name: Package frontend source
-        run: |
-          tar --exclude='node_modules' \
-              --exclude='dist' \
-              -czvf frontend-src.tar.gz frontend
+      # ===== Frontend 建置 =====
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
 
-      - name: Package admin-frontend source
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          VITE_API_URL: ""
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
         run: |
-          tar --exclude='node_modules' \
-              --exclude='dist' \
-              -czvf admin-frontend-src.tar.gz admin-frontend
+          echo "VITE_API_URL=" > .env.production
+          echo "VITE_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}" >> .env.production
+          npm ci
+          npm run build
+
+      - name: Package frontend
+        working-directory: frontend
+        run: tar -czvf ../frontend.tar.gz dist
+
+      # ===== Admin Frontend 建置 =====
+      - name: Build admin-frontend
+        working-directory: admin-frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Package admin-frontend
+        working-directory: admin-frontend
+        run: tar -czvf ../admin-frontend.tar.gz dist
 
       # ===== SSH 部署 =====
       - name: Setup SSH key
@@ -59,8 +80,8 @@ jobs:
       - name: Upload packages to EC2
         run: |
           scp -i ~/.ssh/transcriber-key.pem backend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/
-          scp -i ~/.ssh/transcriber-key.pem frontend-src.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/
-          scp -i ~/.ssh/transcriber-key.pem admin-frontend-src.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/
+          scp -i ~/.ssh/transcriber-key.pem frontend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/
+          scp -i ~/.ssh/transcriber-key.pem admin-frontend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/
 
       - name: Deploy backend
         run: |
@@ -69,16 +90,14 @@ jobs:
           cd /opt/transcriber
           tar -xzf /tmp/backend.tar.gz
 
-          # 安裝新的依賴（如果有）
           python3.11 -m pip install --user -r requirements-web.txt -q
 
-          # 更新 Nginx 反向代理設定
+          # 更新 Nginx 設定
           sudo cp /opt/transcriber/deploy/nginx-ec2.conf /etc/nginx/conf.d/transcriber.conf
+          sudo rm -f /etc/nginx/conf.d/default.conf
           sudo nginx -t && sudo systemctl reload nginx
 
-          # 重啟後端服務
           sudo systemctl restart transcriber
-
           echo "=== Backend deployed ==="
           ENDSSH
 
@@ -86,19 +105,12 @@ jobs:
         run: |
           ssh -i ~/.ssh/transcriber-key.pem ${{ env.EC2_USER }}@${{ env.EC2_HOST }} << 'ENDSSH'
           echo "=== Deploying Frontend ==="
-          cd /opt/transcriber
-          tar -xzf /tmp/frontend-src.tar.gz
-
-          # 重建 Docker 映像並重啟容器
-          sudo docker build -t transcriber-frontend ./frontend
-          sudo docker rm -f whisper-frontend 2>/dev/null || true
-          sudo docker run -d \
-              --name whisper-frontend \
-              --restart unless-stopped \
-              -p 3000:3000 \
-              -e API_UPSTREAM=172.17.0.1:8000 \
-              transcriber-frontend
-
+          cd /tmp
+          tar -xzf frontend.tar.gz
+          sudo mkdir -p /var/www/transcriber
+          sudo rm -rf /var/www/transcriber/*
+          sudo cp -r dist/* /var/www/transcriber/
+          sudo chown -R nginx:nginx /var/www/transcriber
           echo "=== Frontend deployed ==="
           ENDSSH
 
@@ -106,19 +118,12 @@ jobs:
         run: |
           ssh -i ~/.ssh/transcriber-key.pem ${{ env.EC2_USER }}@${{ env.EC2_HOST }} << 'ENDSSH'
           echo "=== Deploying Admin Frontend ==="
-          cd /opt/transcriber
-          tar -xzf /tmp/admin-frontend-src.tar.gz
-
-          # 重建 Docker 映像並重啟容器
-          sudo docker build -t transcriber-admin ./admin-frontend
-          sudo docker rm -f whisper-admin-frontend 2>/dev/null || true
-          sudo docker run -d \
-              --name whisper-admin-frontend \
-              --restart unless-stopped \
-              -p 3003:3003 \
-              -e API_UPSTREAM=172.17.0.1:8000 \
-              transcriber-admin
-
+          cd /tmp
+          tar -xzf admin-frontend.tar.gz
+          sudo mkdir -p /var/www/admin
+          sudo rm -rf /var/www/admin/*
+          sudo cp -r dist/* /var/www/admin/
+          sudo chown -R nginx:nginx /var/www/admin
           echo "=== Admin Frontend deployed ==="
           ENDSSH
 

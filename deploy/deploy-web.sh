@@ -6,7 +6,7 @@ set -e
 
 echo "=== 安裝系統依賴 ==="
 sudo dnf update -y
-sudo dnf install -y python3.11 python3.11-pip git
+sudo dnf install -y python3.11 python3.11-pip git nginx
 
 echo "=== 建立應用目錄 ==="
 sudo mkdir -p /opt/transcriber
@@ -77,48 +77,19 @@ sudo systemctl daemon-reload
 sudo systemctl enable transcriber
 sudo systemctl start transcriber
 
-echo "=== 安裝 Docker（如尚未安裝）==="
-if ! command -v docker &> /dev/null; then
-    sudo dnf install -y docker
-    sudo systemctl enable docker
-    sudo systemctl start docker
-    sudo usermod -aG docker ec2-user
-    echo "⚠️ Docker 已安裝，請重新登入以套用 docker 群組權限"
-fi
+echo "=== 建立前端目錄 ==="
+sudo mkdir -p /var/www/transcriber
+sudo mkdir -p /var/www/admin
+sudo chown -R nginx:nginx /var/www/transcriber /var/www/admin
 
-echo "=== 部署前端容器 ==="
-cd /opt/transcriber
-
-# 主前端（port 3000）
-docker build -t transcriber-frontend ./frontend
-docker rm -f whisper-frontend 2>/dev/null || true
-docker run -d \
-    --name whisper-frontend \
-    --restart unless-stopped \
-    -p 3000:3000 \
-    -e API_UPSTREAM=172.17.0.1:8000 \
-    transcriber-frontend
-
-# 管理後台前端（port 3003）
-docker build -t transcriber-admin ./admin-frontend
-docker rm -f whisper-admin-frontend 2>/dev/null || true
-docker run -d \
-    --name whisper-admin-frontend \
-    --restart unless-stopped \
-    -p 3003:3003 \
-    -e API_UPSTREAM=172.17.0.1:8000 \
-    transcriber-admin
-
-echo "=== 設定 Nginx 反向代理 ==="
-sudo dnf install -y nginx
+echo "=== 設定 Nginx ==="
 sudo cp /opt/transcriber/deploy/nginx-ec2.conf /etc/nginx/conf.d/transcriber.conf
-
-# 移除預設設定（避免衝突）
 sudo rm -f /etc/nginx/conf.d/default.conf
-
 sudo nginx -t && sudo systemctl enable nginx && sudo systemctl restart nginx
 
 echo "=== 部署完成 ==="
 echo "Web Server API:  http://localhost:8000"
-echo "前端:            https://soundlite.app (port 3000)"
-echo "管理後台:        https://admin.soundlite.app (port 3003)"
+echo "前端:            https://soundlite.app"
+echo "管理後台:        https://admin.soundlite.app"
+echo ""
+echo "前端靜態檔案請透過 GitHub Actions CI/CD 部署"
