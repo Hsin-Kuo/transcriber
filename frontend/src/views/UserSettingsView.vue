@@ -2,61 +2,61 @@
   <div class="settings-container">
     <!-- 使用者資訊顯示面板 -->
     <div class="user-display-wrapper">
-      <!-- 左側標籤 -->
-      <div class="display-labels">
-        <span class="label-item">{{ $t('userSettings.account') }}</span>
-        <span class="label-item">{{ $t('userSettings.language') }}</span>
-        <span class="label-item">{{ $t('userSettings.timezone') }}</span>
-        <span class="label-item">{{ $t('userSettings.theme') }}</span>
-        <span class="label-item label-usage">{{ $t('userSettings.duration') }}</span>
-        <span class="label-bar"></span>
-        <span class="label-item label-usage">{{ $t('userSettings.aiSummary') }}</span>
-        <span class="label-bar"></span>
-      </div>
-
-      <!-- 右側顯示面板 -->
+      <!-- 顯示面板 -->
       <div class="user-display-panel">
+        <span class="panel-label">{{ $t('userSettings.account') }}</span>
         <div class="display-row">
           <span class="display-value">{{ authStore.user?.email || '---' }}</span>
         </div>
+        <span class="panel-label">{{ $t('userSettings.language') }}</span>
         <div class="display-row">
           <span class="display-value">{{ currentLanguageLabel }}</span>
         </div>
-        <div class="display-row">
-          <span class="display-value">{{ getTimezoneShort(currentTimezone) }}</span>
-        </div>
-        <div class="display-row">
-          <span class="display-value theme-icons">
-            <!-- 太陽 -->
-            <svg :class="{ active: currentTheme === 'light' }" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="5"></circle>
-              <line x1="12" y1="1" x2="12" y2="3"></line>
-              <line x1="12" y1="21" x2="12" y2="23"></line>
-              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-              <line x1="1" y1="12" x2="3" y2="12"></line>
-              <line x1="21" y1="12" x2="23" y2="12"></line>
-              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-            </svg>
-            <!-- 月亮 -->
-            <svg :class="{ active: currentTheme === 'dark' }" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-            </svg>
-          </span>
+        <div class="display-row-inline">
+          <div class="display-col">
+            <span class="panel-label">{{ $t('userSettings.timezone') }}</span>
+            <div class="display-row">
+              <span class="display-value">{{ getTimezoneShort(currentTimezone) }}</span>
+            </div>
+          </div>
+          <div class="display-col">
+            <span class="panel-label">{{ $t('userSettings.theme') }}</span>
+            <div class="display-row">
+              <span class="display-value theme-icons">
+                <!-- 太陽 -->
+                <svg :class="{ active: currentTheme === 'light' }" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="5"></circle>
+                  <line x1="12" y1="1" x2="12" y2="3"></line>
+                  <line x1="12" y1="21" x2="12" y2="23"></line>
+                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                  <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                  <line x1="1" y1="12" x2="3" y2="12"></line>
+                  <line x1="21" y1="12" x2="23" y2="12"></line>
+                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                  <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </svg>
+                <!-- 月亮 -->
+                <svg :class="{ active: currentTheme === 'dark' }" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+              </span>
+            </div>
+          </div>
         </div>
 
         <!-- 時長 -->
-        <div class="display-row usage-row">
-          <span class="display-value usage-value">{{ Math.round(authStore.usage?.duration_minutes || 0) }}/{{ authStore.quota?.max_duration_minutes || 0 }}m</span>
+        <div class="usage-label-row" style="margin-top: 8px;">
+          <span class="panel-label">{{ $t('userSettings.duration') }}</span>
+          <span class="display-value usage-value"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px; vertical-align: middle;"><circle cx="12" cy="14" r="8"></circle><polyline points="12 10 12 14 15 16"></polyline><line x1="12" y1="2" x2="12" y2="6"></line><line x1="8" y1="2" x2="16" y2="2"></line></svg>{{ Math.round(authStore.usage?.duration_minutes || 0) }}/{{ authStore.quota?.max_duration_minutes || 0 }}min</span>
         </div>
         <div class="display-bar">
           <span class="bar-fill" :style="{ width: (authStore.quotaPercentage?.duration || 0) + '%' }"></span>
         </div>
 
         <!-- AI 摘要 -->
-        <div class="display-row usage-row">
-          <span class="display-value usage-value">{{ authStore.usage?.ai_summaries || 0 }}/{{ authStore.quota?.max_ai_summaries || 0 }}</span>
+        <div class="usage-label-row">
+          <span class="panel-label">{{ $t('userSettings.aiSummary') }}</span>
+          <span class="display-value usage-value"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 4px; vertical-align: middle;"><path d="M12 1L14.5 9.5L23 12L14.5 14.5L12 23L9.5 14.5L1 12L9.5 9.5Z" /></svg>{{ authStore.usage?.ai_summaries || 0 }}/{{ authStore.quota?.max_ai_summaries || 0 }}</span>
         </div>
         <div class="display-bar">
           <span class="bar-fill" :style="{ width: aiSummaryPercentage + '%' }"></span>
@@ -65,6 +65,10 @@
 
       <!-- 方案指標 -->
       <div class="plan-indicator-wrapper">
+        <svg class="corner-screw corner-tl" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="0.8"/><rect x="4" y="9" width="12" height="2" rx="0.5" fill="currentColor"/></svg>
+        <svg class="corner-screw corner-tr" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="0.8"/><rect x="4" y="9" width="12" height="2" rx="0.5" fill="currentColor"/></svg>
+        <svg class="corner-screw corner-bl" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="0.8"/><rect x="4" y="9" width="12" height="2" rx="0.5" fill="currentColor"/></svg>
+        <svg class="corner-screw corner-br" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="0.8"/><rect x="4" y="9" width="12" height="2" rx="0.5" fill="currentColor"/></svg>
         <span class="plan-indicator-title">{{ $t('userSettings.plan') }}</span>
         <div class="plan-indicator">
           <div class="plan-indicator-pointer-track">
@@ -910,35 +914,17 @@ async function setPassword() {
   margin: 90px 0 32px 0;
 }
 
-/* 左側標籤 */
-.display-labels {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 16px 0;
-  text-align: right;
-}
-
-.display-labels .label-item {
+/* 面板內標籤 */
+.panel-label {
   font-family: 'VT323', monospace;
-  font-size: 12px;
-  color: var(--main-text-light);
+  font-size: 11px;
+  color: #888888;
   letter-spacing: 1px;
-  padding: 6px 0;
-  line-height: 18px;
+  margin-top: 4px;
+  line-height: 1;
 }
 
-
-.display-labels .label-item.label-usage {
-  padding-bottom: 2px;
-}
-
-.display-labels .label-bar {
-  height: 6px;
-  margin-bottom: 0px;
-}
-
-/* 右側顯示面板 */
+/* 顯示面板 */
 .user-display-panel {
   display: flex;
   flex-direction: column;
@@ -948,10 +934,27 @@ async function setPassword() {
   color: #ffffff;
   background: #1a1a1a;
   padding: 10px 18px;
-  border-radius: 14px;
-  min-width: 280px;
+  border-radius: 10px;
+  width: 280px;
   border: 14px solid #000000;
   letter-spacing: 2.5px;
+}
+
+.display-row-inline {
+  display: flex;
+  gap: 16px;
+}
+
+.display-row-inline .display-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.display-row-inline .display-row {
+  border-bottom: none;
+  padding: 0;
 }
 
 .user-display-panel .display-row {
@@ -1035,20 +1038,40 @@ async function setPassword() {
   z-index: 1;
 }
 
+.usage-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.usage-label-row .panel-label {
+  margin-top: 0;
+}
+
 /* 主題色 icons */
+.user-display-panel .display-row:has(.theme-icons) {
+  padding: 0;
+}
+
 .user-display-panel .theme-icons {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
 }
 
 .user-display-panel .theme-icons svg {
-  color: #444;
-  transition: color 0.2s ease;
+  color: #1a1a1a;
+  background: #333;
+  padding: 6px;
+  border-radius: 6px;
+  width: 32px;
+  height: 28px;
+  transition: all 0.2s ease;
 }
 
 .user-display-panel .theme-icons svg.active {
-  color: #fff;
+  color: #000;
+  background: #fff;
 }
 
 /* 方案層級 */
@@ -1075,13 +1098,31 @@ async function setPassword() {
   flex-direction: column;
   align-items: flex-start;
   align-self: center;
+  border: 0.5px solid var(--main-text);
+  border-radius: 10px;
+  padding: 29px;
+  width: 280px;
+  box-sizing: border-box;
+  position: relative;
 }
+
+.corner-screw {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  color: var(--main-text);
+}
+
+.corner-tl { top: 6px; left: 6px; transform: rotate(-45deg); }
+.corner-tr { top: 6px; right: 6px; transform: rotate(45deg); }
+.corner-bl { bottom: 6px; left: 6px; transform: rotate(45deg); }
+.corner-br { bottom: 6px; right: 6px; transform: rotate(-45deg); }
 
 .plan-indicator-title {
   font-family: 'VT323', monospace;
-  font-size: 20px;
-  margin-left: 35px;
-  margin-bottom: 10px;
+  font-size: 23px;
+  margin-left: 15px;
+  margin-bottom: 5px;
   color: var(--main-text);
   letter-spacing: 1px;
   opacity: 1;
@@ -1196,7 +1237,8 @@ async function setPassword() {
 .plan-indicator-actions {
   display: flex;
   gap: 14px;
-  margin-top: 12px;
+  margin-top: 13px;
+  margin-bottom: 6px;
   align-self: center;
 }
 
@@ -1827,9 +1869,9 @@ async function setPassword() {
   }
 
   .plan-indicator-title {
-    margin-left: 0;
-    text-align: center;
-    align-self: center;
+    margin-left: 15px;
+    text-align: left;
+    align-self: flex-start;
   }
 
   .settings-grid {

@@ -723,6 +723,29 @@ watch(() => route.path, (newPath, oldPath) => {
   .logout-btn {
     display: none;
   }
+
+  /* 覆蓋 collapsed 狀態，確保底部 bar 正常 */
+  .navigation.collapsed {
+    width: 100%;
+    min-width: 100%;
+    flex-direction: row;
+    align-items: center;
+    padding: 8px 12px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .navigation.collapsed .nav-user {
+    flex-direction: row;
+    gap: 8px;
+    padding: 0;
+    margin: 0;
+    background: transparent;
+    border-top: none;
+  }
+
+  .navigation.collapsed .nav-user::before {
+    display: none;
+  }
 }
 
 /* 小手機進一步調整 */
