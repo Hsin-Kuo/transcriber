@@ -4,8 +4,8 @@
 import axios from 'axios'
 import router from '../router'
 
-// /api 前綴配合 Nginx 和 Vite proxy 代理到後端
-const API_BASE = import.meta.env.VITE_API_URL || '/api'
+// 生產環境由 Nginx 代理，開發環境由 Vite proxy 處理
+const API_BASE = import.meta.env.VITE_API_URL || ''
 
 // 創建 axios 實例
 const api = axios.create({

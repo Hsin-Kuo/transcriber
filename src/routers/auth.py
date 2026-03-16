@@ -38,6 +38,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 @router.post("/register")
 async def register(
     user_data: UserRegister,
+    request: Request,
     db=Depends(get_database)
 ):
     """用戶註冊
@@ -54,12 +55,19 @@ async def register(
     """
     user_repo = UserRepository(db)
     email_service = get_email_service()
+    audit_logger = get_audit_logger()
 
     # 檢查 Email 是否已存在
     existing_user = await user_repo.get_by_email(user_data.email)
     if existing_user:
         # 為防止 email 枚舉攻擊，回傳與新註冊相同的訊息
         # 可選：發送「有人嘗試用您的 email 註冊」的通知信
+        await audit_logger.log_auth(
+            request=request,
+            action="register_duplicate",
+            status_code=200,
+            message=f"重複註冊嘗試: {user_data.email}"
+        )
         return {
             "message": "註冊成功！請檢查您的信箱以完成驗證",
             "email": user_data.email
@@ -87,9 +95,11 @@ async def register(
         "usage": {
             "transcriptions": 0,
             "duration_minutes": 0,
+            "ai_summaries": 0,
             "last_reset": now,
             "total_transcriptions": 0,
-            "total_duration_minutes": 0
+            "total_duration_minutes": 0,
+            "total_ai_summaries": 0
         },
         "refresh_tokens": [],
         "created_at": now,
@@ -105,10 +115,25 @@ async def register(
     if not email_sent:
         # 如果郵件發送失敗，刪除剛創建的用戶
         await user_repo.delete(str(user["_id"]))
+        await audit_logger.log_auth(
+            request=request,
+            action="register_failed",
+            user_id=str(user["_id"]),
+            status_code=500,
+            message=f"註冊失敗（郵件發送失敗）: {user_data.email}"
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="發送驗證郵件失敗，請稍後再試"
         )
+
+    await audit_logger.log_auth(
+        request=request,
+        action="register",
+        user_id=str(user["_id"]),
+        status_code=200,
+        message=f"新用戶註冊: {user_data.email}"
+    )
 
     return {
         "message": "註冊成功！請查看您的郵箱完成驗證",
@@ -302,7 +327,8 @@ async def login(
     })
     refresh_token = create_refresh_token({
         "sub": str(user["_id"]),
-        "email": user["email"]
+        "email": user["email"],
+        "role": user["role"]
     })
 
     # 存儲 Refresh Token
@@ -544,8 +570,14 @@ async def get_current_user_info(
     if not auth_providers and full_user.get("password_hash"):
         auth_providers = ["password"]
 
+    # 從 tier 定義補齊缺少的 quota 欄位（相容舊用戶）
+    user_quota = full_user.get("quota", {})
+    tier = user_quota.get("tier", QuotaTier.FREE)
+    tier_defaults = {k: v for k, v in QUOTA_TIERS.get(tier, QUOTA_TIERS[QuotaTier.FREE]).items() if k not in ("name", "price")}
+    merged_quota = {**tier_defaults, **user_quota}
+
     # 過濾掉次數相關欄位（只用時數限制）
-    quota_filtered = {k: v for k, v in full_user["quota"].items() if k != "max_transcriptions"}
+    quota_filtered = {k: v for k, v in merged_quota.items() if k != "max_transcriptions"}
     usage_filtered = {k: v for k, v in usage.items() if k not in ("transcriptions", "total_transcriptions")}
 
     return UserResponse(

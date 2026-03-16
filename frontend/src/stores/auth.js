@@ -39,11 +39,12 @@ export const useAuthStore = defineStore('auth', () => {
 
   // 剩餘配額
   const remainingQuota = computed(() => {
-    if (!user.value) return { transcriptions: 0, duration: 0 }
+    if (!user.value) return { transcriptions: 0, duration: 0, aiSummaries: 0 }
 
     return {
       transcriptions: Math.max(0, (quota.value.max_transcriptions || 0) - (usage.value.transcriptions || 0)),
-      duration: Math.max(0, (quota.value.max_duration_minutes || 0) - (usage.value.duration_minutes || 0))
+      duration: Math.max(0, (quota.value.max_duration_minutes || 0) - (usage.value.duration_minutes || 0)),
+      aiSummaries: Math.max(0, (quota.value.max_ai_summaries || 0) - (usage.value.ai_summaries || 0))
     }
   })
 

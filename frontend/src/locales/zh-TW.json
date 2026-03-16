@@ -36,6 +36,9 @@
     "tasks": "任務數",
     "transcriptions": "轉錄次數",
     "duration": "轉錄時長",
+    "aiSummary": "AI 摘要",
+    "showPlan": "檢視方案",
+    "upgrade": "升級",
     "storage": "儲存空間",
     "remaining": "剩餘",
     "minutes": "分鐘",
@@ -472,6 +475,8 @@
     "typeInterview": "訪談",
     "typeGeneral": "一般",
     "copySummary": "複製摘要",
-    "copied": "已複製"
+    "copied": "已複製",
+    "quotaRemaining": "本月剩餘 {count} 次",
+    "quotaExhausted": "本月 AI 摘要次數已用完"
   }
 }

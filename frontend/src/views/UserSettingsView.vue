@@ -1,21 +1,16 @@
 <template>
   <div class="settings-container">
-    <div class="settings-header">
-      <h1>{{ $t('userSettings.title') }}</h1>
-    </div>
-
     <!-- 使用者資訊顯示面板 -->
     <div class="user-display-wrapper">
       <!-- 左側標籤 -->
       <div class="display-labels">
         <span class="label-item">{{ $t('userSettings.account') }}</span>
-        <span class="label-item">{{ $t('userSettings.plan') }}</span>
         <span class="label-item">{{ $t('userSettings.language') }}</span>
         <span class="label-item">{{ $t('userSettings.timezone') }}</span>
         <span class="label-item">{{ $t('userSettings.theme') }}</span>
-        <span class="label-item">{{ $t('userSettings.tasks') }}</span>
+        <span class="label-item label-usage">{{ $t('userSettings.duration') }}</span>
         <span class="label-bar"></span>
-        <span class="label-item">{{ $t('userSettings.duration') }}</span>
+        <span class="label-item label-usage">{{ $t('userSettings.aiSummary') }}</span>
         <span class="label-bar"></span>
       </div>
 
@@ -23,14 +18,6 @@
       <div class="user-display-panel">
         <div class="display-row">
           <span class="display-value">{{ authStore.user?.email || '---' }}</span>
-        </div>
-        <div class="display-row">
-          <span class="display-value plan-tiers">
-            <span :class="{ active: currentTier === 'free' }">FREE</span>
-            <span :class="{ active: currentTier === 'basic' }">BASIC</span>
-            <span :class="{ active: currentTier === 'pro' }">PRO</span>
-            <span :class="{ active: currentTier === 'enterprise' }">ENT</span>
-          </span>
         </div>
         <div class="display-row">
           <span class="display-value">{{ currentLanguageLabel }}</span>
@@ -65,6 +52,48 @@
         </div>
         <div class="display-bar">
           <span class="bar-fill" :style="{ width: (authStore.quotaPercentage?.duration || 0) + '%' }"></span>
+        </div>
+
+        <!-- AI 摘要 -->
+        <div class="display-row usage-row">
+          <span class="display-value usage-value">{{ authStore.usage?.ai_summaries || 0 }}/{{ authStore.quota?.max_ai_summaries || 0 }}</span>
+        </div>
+        <div class="display-bar">
+          <span class="bar-fill" :style="{ width: aiSummaryPercentage + '%' }"></span>
+        </div>
+      </div>
+
+      <!-- 方案指標 -->
+      <div class="plan-indicator-wrapper">
+        <span class="plan-indicator-title">{{ $t('userSettings.plan') }}</span>
+        <div class="plan-indicator">
+          <div class="plan-indicator-pointer-track">
+            <svg class="plan-pointer" :class="'point-to-' + previewTier" viewBox="0 0 18 60" xmlns="http://www.w3.org/2000/svg">
+              <path d="M9,0 L16,18 Q18,22 18,26 L18,56 Q18,60 14,60 L4,60 Q0,60 0,56 L0,26 Q0,22 2,18 Z" fill="currentColor" />
+            </svg>
+          </div>
+          <div class="plan-indicator-lines">
+            <div class="plan-indicator-item" :class="{ active: previewTier === 'free' }" @click="previewTier = 'free'">
+              <span class="plan-arc-wrapper"><svg class="plan-arc plan-arc-long" viewBox="0 0 70 18"><path d="M0,18 Q14,7 28,7 L70,7" fill="none" stroke="currentColor" stroke-width="1"/></svg></span>
+              <span class="plan-indicator-dot"></span><span class="plan-indicator-label">FREE</span>
+            </div>
+            <div class="plan-indicator-item" :class="{ active: previewTier === 'basic' }" @click="previewTier = 'basic'">
+              <span class="plan-arc-wrapper"><svg class="plan-arc plan-arc-short" viewBox="0 0 50 14"><path d="M0,12 Q8,7 16,7 L50,7" fill="none" stroke="currentColor" stroke-width="1"/></svg></span>
+              <span class="plan-indicator-dot"></span><span class="plan-indicator-label">BASIC</span>
+            </div>
+            <div class="plan-indicator-item" :class="{ active: previewTier === 'pro' }" @click="previewTier = 'pro'">
+              <span class="plan-arc-wrapper"><svg class="plan-arc plan-arc-short" viewBox="0 0 50 14"><path d="M0,2 Q8,7 16,7 L50,7" fill="none" stroke="currentColor" stroke-width="1"/></svg></span>
+              <span class="plan-indicator-dot"></span><span class="plan-indicator-label">PRO</span>
+            </div>
+            <div class="plan-indicator-item" :class="{ active: previewTier === 'enterprise' }" @click="previewTier = 'enterprise'">
+              <span class="plan-arc-wrapper"><svg class="plan-arc plan-arc-long" viewBox="0 0 70 18"><path d="M0,0 Q14,11 28,11 L70,11" fill="none" stroke="currentColor" stroke-width="1"/></svg></span>
+              <span class="plan-indicator-dot"></span><span class="plan-indicator-label">ENT</span>
+            </div>
+          </div>
+        </div>
+        <div class="plan-indicator-actions">
+          <button class="plan-btn plan-btn-outline">{{ $t('userSettings.showPlan') }}</button>
+          <button class="plan-btn plan-btn-primary"><svg class="plan-btn-icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M8,1 A7,7 0 1,0 8,15 A7,7 0 1,0 8,1 Z M8,6.5 A1.5,1.5 0 1,1 8,9.5 A1.5,1.5 0 1,1 8,6.5 Z M7.5,1 L8.5,1 L8.5,5.5 L7.5,5.5 Z" fill="currentColor" fill-rule="evenodd"/></svg>{{ $t('userSettings.upgrade') }}</button>
         </div>
       </div>
     </div>
@@ -650,6 +679,17 @@ onUnmounted(() => {
 // 當前方案層級
 const currentTier = computed(() => authStore.quota?.tier || 'free')
 
+// [測試用] 點擊切換指標，不影響後端
+const previewTier = ref(currentTier.value)
+
+// AI 摘要使用百分比
+const aiSummaryPercentage = computed(() => {
+  const used = authStore.usage?.ai_summaries || 0
+  const limit = authStore.quota?.max_ai_summaries || 1
+  return Math.min((used / limit) * 100, 100)
+})
+
+
 // 切換語言
 function changeLanguage() {
   locale.value = currentLanguage.value
@@ -864,10 +904,10 @@ async function setPassword() {
 /* 使用者資訊顯示面板 - 像素風格 */
 .user-display-wrapper {
   display: flex;
-  justify-content: flex-start;
+  justify-content: center;
   align-items: flex-start;
   gap: 12px;
-  margin: 0 0 32px 22px;
+  margin: 90px 0 32px 0;
 }
 
 /* 左側標籤 */
@@ -889,9 +929,13 @@ async function setPassword() {
 }
 
 
+.display-labels .label-item.label-usage {
+  padding-bottom: 2px;
+}
+
 .display-labels .label-bar {
-  height: 10px;
-  margin-bottom: 12px;
+  height: 6px;
+  margin-bottom: 0px;
 }
 
 /* 右側顯示面板 */
@@ -956,7 +1000,7 @@ async function setPassword() {
   background: #1a1a1a;
   border: 1px solid #333;
   border-radius: 2px;
-  margin-bottom: 12px;
+  margin-bottom: 0px;
   overflow: hidden;
 }
 
@@ -1025,23 +1069,182 @@ async function setPassword() {
   color: #fff;
 }
 
-.settings-header {
-  margin-top: 30px;
-  margin-bottom: 32px;
-  text-align: center;
+
+/* 方案指標 */
+.plan-indicator-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  align-self: center;
 }
 
-.settings-header h1 {
-  font-size: 2rem;
-  color: var(--main-primary);
-  margin: 0 0 8px 0;
+.plan-indicator-title {
+  font-family: 'VT323', monospace;
+  font-size: 20px;
+  margin-left: 35px;
+  margin-bottom: 10px;
+  color: var(--main-text);
+  letter-spacing: 1px;
+  opacity: 1;
+}
+
+.plan-indicator {
+  display: flex;
+  align-items: flex-start;
+  gap: 15px;
+  padding: 16px 30px;
+  align-self: center;
+}
+
+.plan-indicator-pointer-track {
+  position: relative;
+  width: 60px;
+  flex-shrink: 0;
+  align-self: stretch;
+}
+
+.plan-pointer {
+  position: absolute;
+  width: 16px;
+  height: 56px;
+  color: var(--main-text);
+  opacity: 0.75;
+  /* 固定在 lines 容器垂直中心 */
+  top: 35%;
+  left: 50%;
+  margin-top: -28px;
+  margin-left: -8px;
+  /* 旋轉中心：水平置中，牆壁下方 1/3（牆壁 y:20~60，高 40，1/3 from bottom ≈ y:47 → 78%） */
+  transform-origin: 50% 78%;
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 旋轉角度：基準 90° 朝右，依各方案偏移 */
+.plan-pointer.point-to-free       { transform: rotate(50deg); }
+.plan-pointer.point-to-basic      { transform: rotate(79deg); }
+.plan-pointer.point-to-pro        { transform: rotate(102deg); }
+.plan-pointer.point-to-enterprise { transform: rotate(133deg); }
+
+.plan-indicator-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.plan-indicator-item {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  cursor: pointer; /* 測試用 */
+}
+
+.plan-arc-wrapper {
+  width: 56px;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.plan-arc {
+  height: 16px;
+  color: var(--main-text-light);
+  opacity: 0.8;
+}
+
+.plan-arc.plan-arc-short {
+  width: 40px;
+}
+
+.plan-arc.plan-arc-long {
+  width: 56px;
+}
+
+.plan-indicator-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #aaa;
+  flex-shrink: 0;
+  margin-left: 12px;
+  margin-right: 0px;
+}
+
+.plan-indicator-label {
+  font-family: 'VT323', monospace;
+  font-size: 14px;
+  color: var(--main-text-light);
+  letter-spacing: 1px;
+  padding-left: 4px;
+  opacity: 1;
+  white-space: nowrap;
+}
+
+.plan-indicator-item.active .plan-arc {
+  color: var(--main-text);
+  opacity: 0.5;
+}
+
+.plan-indicator-item.active .plan-indicator-dot {
+  background: var(--nav-active-bg);
+}
+
+.plan-indicator-item.active .plan-indicator-label {
+  color: var(--main-text);
+  opacity: 1;
   font-weight: 700;
 }
 
-.settings-header p {
+.plan-indicator-actions {
+  display: flex;
+  gap: 14px;
+  margin-top: 12px;
+  align-self: center;
+}
+
+.plan-btn {
+  font-family: 'VT323', monospace;
+  font-size: 15px;
+  letter-spacing: 1px;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.plan-btn-outline {
+  background: transparent;
+  border: 1px solid var(--main-text-light);
   color: var(--main-text-light);
-  margin: 0;
-  font-size: 1rem;
+  opacity: 1;
+}
+
+.plan-btn-outline:hover {
+  opacity: 0.8;
+}
+
+.plan-btn-primary {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--nav-active-bg);
+  border: 1px solid var(--main-text-light);
+  color: #fff;
+}
+
+.plan-btn-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  animation: spin-icon 3s linear infinite;
+}
+
+@keyframes spin-icon {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.plan-btn-primary:hover {
+  opacity: 0.85;
 }
 
 .settings-grid {
@@ -1602,10 +1805,6 @@ async function setPassword() {
     padding: 0 16px;
   }
 
-  .settings-header h1 {
-    font-size: 1.75rem;
-  }
-
   .user-display-wrapper {
     max-width: 100%;
     margin-bottom: 24px;
@@ -1614,6 +1813,10 @@ async function setPassword() {
   .user-display-panel {
     min-width: auto;
     flex: 1;
+  }
+
+  .plan-indicator-wrapper {
+    display: none;
   }
 
   .settings-grid {
@@ -1639,19 +1842,6 @@ async function setPassword() {
 @media (max-width: 480px) {
   .settings-container {
     padding: 0 12px;
-  }
-
-  .settings-header {
-    margin-top: 20px;
-    margin-bottom: 20px;
-  }
-
-  .settings-header h1 {
-    font-size: 1.5rem;
-  }
-
-  .settings-header p {
-    font-size: 0.9rem;
   }
 
   .user-display-wrapper {

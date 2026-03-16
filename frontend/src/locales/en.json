@@ -36,6 +36,9 @@
     "tasks": "Tasks",
     "transcriptions": "Transcriptions",
     "duration": "Duration",
+    "aiSummary": "AI Summary",
+    "showPlan": "Show Plan",
+    "upgrade": "Upgrade",
     "storage": "Storage",
     "remaining": "Remaining",
     "minutes": "minutes",
@@ -472,6 +475,8 @@
     "typeInterview": "Interview",
     "typeGeneral": "General",
     "copySummary": "Copy Summary",
-    "copied": "Copied"
+    "copied": "Copied",
+    "quotaRemaining": "{count} remaining this month",
+    "quotaExhausted": "AI summary quota exhausted this month"
   }
 }

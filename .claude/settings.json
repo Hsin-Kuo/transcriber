@@ -3,7 +3,8 @@
     "allow": [
       "Bash(aws ses verify-domain-dkim:*)",
       "Bash(aws ec2 get-console-output --instance-id i-058f381c59210c00a --region ap-northeast-1 --query 'Output' --output text)",
-      "Bash(git merge main)"
+      "Bash(git merge main)",
+      "Bash(git pull origin aws)"
     ]
   }
 }
