@@ -946,12 +946,11 @@ async function setPassword() {
   font-family: 'VT323', monospace;
   font-size: 18px;
   color: #ffffff;
-  background: #101010;
-  padding: 16px 20px;
-  border-radius: 6px;
+  background: #1a1a1a;
+  padding: 10px 18px;
+  border-radius: 14px;
   min-width: 280px;
-  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.7);
-  border: 1px solid #333;
+  border: 14px solid #000000;
   letter-spacing: 2.5px;
 }
 

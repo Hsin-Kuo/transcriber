@@ -3,16 +3,13 @@
 # 音檔處理（ffmpeg 前處理、合併等）
 pydub
 
+# 時區
+pytz
+
 # API 相關
 fastapi
 uvicorn[standard]
 python-multipart
-
-# 系統監控
-psutil
-
-# HTTP 客戶端
-requests
 
 # Google OAuth
 google-auth
