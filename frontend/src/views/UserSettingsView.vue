@@ -1808,6 +1808,8 @@ async function setPassword() {
   .user-display-wrapper {
     max-width: 100%;
     margin-bottom: 24px;
+    flex-wrap: wrap;
+    justify-content: center;
   }
 
   .user-display-panel {
@@ -1816,7 +1818,19 @@ async function setPassword() {
   }
 
   .plan-indicator-wrapper {
-    display: none;
+    width: 100%;
+    align-items: center;
+    margin-top: 8px;
+  }
+
+  .plan-indicator {
+    padding: 8px 16px;
+  }
+
+  .plan-indicator-title {
+    margin-left: 0;
+    text-align: center;
+    align-self: center;
   }
 
   .settings-grid {
