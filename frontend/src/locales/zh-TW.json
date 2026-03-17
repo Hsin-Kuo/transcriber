@@ -93,7 +93,21 @@
     "deleting": "刪除中...",
     "errorEmailConfirmMismatch": "Email 不符",
     "errorDeletePasswordRequired": "請輸入密碼",
-    "errorDeleteFailed": "刪除帳號失敗，請稍後再試"
+    "errorDeleteFailed": "刪除帳號失敗，請稍後再試",
+    "securityDesc": "密碼、Google 帳號、刪除帳號",
+    "preferencesDesc": "語言、時區、色調、AI 摘要",
+    "supportDesc": "幫助中心、常見問題、聯繫",
+    "documentsDesc": "隱私權政策、服務條款",
+    "teamDesc": "關於我們的團隊",
+    "support": "支援",
+    "helpCenter": "前往幫助中心",
+    "faq": "常見問題",
+    "contactUs": "聯繫我們",
+    "documents": "文件",
+    "privacyPolicy": "隱私權政策",
+    "termsOfService": "服務條款",
+    "team": "團隊",
+    "aboutUs": "關於我們"
   },
   "navigation": {
     "expandSidebar": "展開側欄",

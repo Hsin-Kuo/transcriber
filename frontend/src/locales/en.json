@@ -93,7 +93,21 @@
     "deleting": "Deleting...",
     "errorEmailConfirmMismatch": "Email does not match",
     "errorDeletePasswordRequired": "Please enter your password",
-    "errorDeleteFailed": "Failed to delete account, please try again"
+    "errorDeleteFailed": "Failed to delete account, please try again",
+    "securityDesc": "Password, Google account, delete account",
+    "preferencesDesc": "Language, timezone, theme, AI summary",
+    "supportDesc": "Help center, FAQ, contact",
+    "documentsDesc": "Privacy policy, terms of service",
+    "teamDesc": "About our team",
+    "support": "Support",
+    "helpCenter": "Visit Help Center",
+    "faq": "FAQ",
+    "contactUs": "Contact Us",
+    "documents": "Documents",
+    "privacyPolicy": "Privacy Policy",
+    "termsOfService": "Terms of Service",
+    "team": "Team",
+    "aboutUs": "About Us"
   },
   "navigation": {
     "expandSidebar": "Expand Sidebar",

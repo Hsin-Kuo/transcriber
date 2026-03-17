@@ -104,13 +104,14 @@
 
     <div class="settings-grid">
       <!-- 帳戶安全 -->
-      <div class="card security-card">
+      <div class="card security-card" :class="{ expanded: securityExpanded }">
         <h2 class="card-toggle" @click="securityExpanded = !securityExpanded">
-          {{ $t('userSettings.security') }}
+          <span class="card-title-left"><svg class="card-icon" :class="{ active: securityExpanded }" width="33" height="27" viewBox="0 0 28 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 10l16-8 10 8v12a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2z"></path></svg>{{ $t('userSettings.security') }}</span>
           <svg class="toggle-arrow" :class="{ expanded: securityExpanded }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 9 12 15 18 9"></polyline>
           </svg>
         </h2>
+        <p v-if="!securityExpanded" class="card-subtitle">{{ $t('userSettings.securityDesc') }}</p>
         <div class="card-body" :class="{ expanded: securityExpanded }">
 
         <!-- 密碼設定 -->
@@ -180,13 +181,14 @@
       </div>
 
       <!-- 介面設定 -->
-      <div class="card interface-card">
+      <div class="card interface-card" :class="{ expanded: preferencesExpanded }">
         <h2 class="card-toggle" @click="preferencesExpanded = !preferencesExpanded">
-          {{ $t('userSettings.interface') }}
+          <span class="card-title-left"><svg class="card-icon" :class="{ active: preferencesExpanded }" width="50" height="27" viewBox="0 0 28 24" preserveAspectRatio="none" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 10l16-8 10 8v12a2 2 0 0 1-2 2H11v-10H5v10H3a2 2 0 0 1-2-2z"></path></svg><svg class="card-icon-person" width="7" height="14" viewBox="0 0 10 20" fill="var(--main-primary)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L.8 20H3l1.5-4h1l.8 4h1.8l-.1-5.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z"/></svg>{{ $t('userSettings.interface') }}</span>
           <svg class="toggle-arrow" :class="{ expanded: preferencesExpanded }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 9 12 15 18 9"></polyline>
           </svg>
         </h2>
+        <p v-if="!preferencesExpanded" class="card-subtitle">{{ $t('userSettings.preferencesDesc') }}</p>
         <div class="card-body" :class="{ expanded: preferencesExpanded }">
 
         <!-- 語言 -->
@@ -297,6 +299,69 @@
             </div>
           </div>
         </div>
+        </div>
+      </div>
+
+      <!-- Support -->
+      <div class="card support-card" :class="{ expanded: supportExpanded }">
+        <h2 class="card-toggle" @click="supportExpanded = !supportExpanded">
+          <span class="card-title-left"><svg class="card-icon" :class="{ active: supportExpanded }" width="22" height="27" viewBox="0 0 20 26" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l17 5v18H2a1 1 0 0 1-1-1z"/></svg><svg class="card-icon-person" width="7" height="12" viewBox="0 0 10 20" fill="var(--main-primary)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L2.2 20H4l.5-4h1l.3 2H7.8l-.2-3.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z"/></svg><svg class="card-icon-person card-icon-person-second" width="7" height="14" viewBox="0 0 10 20" fill="var(--main-primary)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L.8 20H3l1.5-4h1l.8 4h1.8l-.1-5.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z"/><path d="M2.4 7.5L-3 10v1.5L2.4 9z"/></svg>{{ $t('userSettings.support') }}</span>
+          <svg class="toggle-arrow" :class="{ expanded: supportExpanded }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </h2>
+        <p v-if="!supportExpanded" class="card-subtitle">{{ $t('userSettings.supportDesc') }}</p>
+        <div class="card-body" :class="{ expanded: supportExpanded }">
+          <a class="setting-item link-item" href="#" target="_blank">
+            <span class="setting-label">{{ $t('userSettings.helpCenter') }}</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+          </a>
+          <a class="setting-item link-item" href="#" target="_blank">
+            <span class="setting-label">{{ $t('userSettings.faq') }}</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+          </a>
+          <a class="setting-item link-item" href="#" target="_blank">
+            <span class="setting-label">{{ $t('userSettings.contactUs') }}</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+          </a>
+        </div>
+      </div>
+
+      <!-- Documents -->
+      <div class="card documents-card" :class="{ expanded: documentsExpanded }">
+        <h2 class="card-toggle" @click="documentsExpanded = !documentsExpanded">
+          <span class="card-title-left"><svg class="card-icon" :class="{ active: documentsExpanded }" width="50" height="27" viewBox="0 0 28 24" preserveAspectRatio="none" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8L27 2V22a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2z M3 11h5v19H3z M20 8h7v10h-7z" fill-rule="evenodd"></path></svg>{{ $t('userSettings.documents') }}</span>
+          <svg class="toggle-arrow" :class="{ expanded: documentsExpanded }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </h2>
+        <p v-if="!documentsExpanded" class="card-subtitle">{{ $t('userSettings.documentsDesc') }}</p>
+        <div class="card-body" :class="{ expanded: documentsExpanded }">
+          <a class="setting-item link-item" href="#" target="_blank">
+            <span class="setting-label">{{ $t('userSettings.privacyPolicy') }}</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+          </a>
+          <a class="setting-item link-item" href="#" target="_blank">
+            <span class="setting-label">{{ $t('userSettings.termsOfService') }}</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+          </a>
+        </div>
+      </div>
+
+      <!-- Team -->
+      <div class="card team-card" :class="{ expanded: teamExpanded }">
+        <h2 class="card-toggle" @click="teamExpanded = !teamExpanded">
+          <span class="card-title-left"><svg class="card-icon-person card-icon-person-left" width="7" height="14" viewBox="0 0 10 20" fill="var(--main-primary)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L.8 20H3l1.5-4h1l.8 4h1.8l-.1-5.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z"/></svg><svg class="card-icon-person card-icon-person-left-second" width="7" height="14" viewBox="0 0 10 20" fill="var(--main-primary)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L.8 20H3l1.5-4h1l.8 4h1.8l-.1-5.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z"/></svg><svg class="card-icon" :class="{ active: teamExpanded }" width="44" height="33" viewBox="0 0 28 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 3h16l10-1v20H18V12H2v10H1z"></path></svg>{{ $t('userSettings.team') }}</span>
+          <svg class="toggle-arrow" :class="{ expanded: teamExpanded }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </h2>
+        <p v-if="!teamExpanded" class="card-subtitle">{{ $t('userSettings.teamDesc') }}</p>
+        <div class="card-body" :class="{ expanded: teamExpanded }">
+          <a class="setting-item link-item" href="#" target="_blank">
+            <span class="setting-label">{{ $t('userSettings.aboutUs') }}</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+          </a>
         </div>
       </div>
     </div>
@@ -557,6 +622,9 @@ const newPasswordChecks = ref({
 // 卡片展開狀態
 const securityExpanded = ref(false)
 const preferencesExpanded = ref(false)
+const supportExpanded = ref(false)
+const documentsExpanded = ref(false)
+const teamExpanded = ref(false)
 
 // Google 綁定相關狀態
 const googleLoading = ref(false)
@@ -1408,22 +1476,103 @@ async function confirmDeleteAccount() {
 }
 
 .settings-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   gap: 24px;
+  max-width: 800px;
+  margin: 0 auto;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.settings-grid .card {
+  width: 250px;
+  min-width: 250px;
+  max-width: 250px;
+  box-sizing: border-box;
+  border: 0.5px solid var(--main-text-light);
+  border-radius: 10px;
+  background: transparent;
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+
+.settings-grid .security-card,
+.settings-grid .interface-card,
+.settings-grid .security-card.expanded,
+.settings-grid .interface-card.expanded {
+  width: calc(50% - 12px);
+  min-width: calc(50% - 12px);
+  max-width: calc(50% - 12px);
 }
 
 .quota-card {
-  grid-column: 1 / -1;
+  width: 100% !important;
 }
 
 .user-info-card h2,
 .interface-card h2,
-.security-card h2 {
+.security-card h2,
+.support-card h2,
+.documents-card h2,
+.team-card h2 {
   font-size: 1.25rem;
   color: var(--main-primary);
   margin: 0;
   font-weight: 600;
+}
+
+.card-title-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-icon {
+  flex-shrink: 0;
+  color: var(--main-text-light);
+  transition: color 0.3s ease;
+}
+
+.card-icon.active {
+  color: var(--nav-active-bg);
+}
+
+.card-icon-person {
+  flex-shrink: 0;
+  margin-left: -6px;
+  margin-top: 12px;
+  position: relative;
+  z-index: 1;
+}
+
+.card-icon-person-left {
+  margin-left: 0;
+  margin-right: -6px;
+  margin-top: 16px;
+}
+
+.card-icon-person-left-second {
+  margin-left: -3px;
+  margin-right: -32px;
+  margin-top: 16px;
+}
+
+.interface-card .card-icon-person {
+
+  margin: 17px 10px 0px -22px;
+}
+
+.card-icon-person-second {
+  margin-left: -10px;
+}
+
+.card-subtitle {
+  font-size: 0.75rem;
+  color: var(--main-text-light);
+  margin: 6px 0 0 0;
+  font-weight: 400;
+  line-height: 1.4;
 }
 
 /* 卡片 toggle */
@@ -1441,12 +1590,14 @@ async function confirmDeleteAccount() {
 }
 
 .toggle-arrow {
-  transition: transform 0.3s ease;
+  transition: transform 0.3s ease, opacity 0.3s ease;
   color: var(--main-text-light);
+  opacity: 0;
 }
 
 .toggle-arrow.expanded {
   transform: rotate(180deg);
+  opacity: 1;
 }
 
 .card-body {
@@ -1457,6 +1608,21 @@ async function confirmDeleteAccount() {
 
 .card-body.expanded {
   max-height: 600px;
+}
+
+.link-item {
+  text-decoration: none;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+
+.link-item:hover {
+  opacity: 0.7;
+}
+
+.link-item svg {
+  color: var(--main-text-light);
+  flex-shrink: 0;
 }
 
 .info-item {
@@ -2098,12 +2264,8 @@ async function confirmDeleteAccount() {
     align-self: flex-start;
   }
 
-  .settings-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .quota-card {
-    grid-column: 1;
+  .settings-grid .card.expanded {
+    width: 100%;
   }
 
   .quota-header {
