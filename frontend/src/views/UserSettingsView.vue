@@ -105,7 +105,13 @@
     <div class="settings-grid">
       <!-- 帳戶安全 -->
       <div class="card security-card">
-        <h2>{{ $t('userSettings.security') }}</h2>
+        <h2 class="card-toggle" @click="securityExpanded = !securityExpanded">
+          {{ $t('userSettings.security') }}
+          <svg class="toggle-arrow" :class="{ expanded: securityExpanded }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </h2>
+        <div class="card-body" :class="{ expanded: securityExpanded }">
 
         <!-- 密碼設定 -->
         <div class="setting-item">
@@ -170,11 +176,18 @@
             {{ $t('userSettings.deleteAccount') }}
           </button>
         </div>
+        </div>
       </div>
 
       <!-- 介面設定 -->
       <div class="card interface-card">
-        <h2>{{ $t('userSettings.interface') }}</h2>
+        <h2 class="card-toggle" @click="preferencesExpanded = !preferencesExpanded">
+          {{ $t('userSettings.interface') }}
+          <svg class="toggle-arrow" :class="{ expanded: preferencesExpanded }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </h2>
+        <div class="card-body" :class="{ expanded: preferencesExpanded }">
 
         <!-- 語言 -->
         <div class="setting-item">
@@ -283,6 +296,7 @@
               </div>
             </div>
           </div>
+        </div>
         </div>
       </div>
     </div>
@@ -539,6 +553,10 @@ const newPasswordChecks = ref({
   hasLower: false,
   hasNumber: false
 })
+
+// 卡片展開狀態
+const securityExpanded = ref(false)
+const preferencesExpanded = ref(false)
 
 // Google 綁定相關狀態
 const googleLoading = ref(false)
@@ -1404,8 +1422,41 @@ async function confirmDeleteAccount() {
 .security-card h2 {
   font-size: 1.25rem;
   color: var(--main-primary);
-  margin: 0 0 20px 0;
+  margin: 0;
   font-weight: 600;
+}
+
+/* 卡片 toggle */
+.card-toggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  transition: margin 0.3s ease;
+}
+
+.card-toggle:hover {
+  opacity: 0.8;
+}
+
+.toggle-arrow {
+  transition: transform 0.3s ease;
+  color: var(--main-text-light);
+}
+
+.toggle-arrow.expanded {
+  transform: rotate(180deg);
+}
+
+.card-body {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+}
+
+.card-body.expanded {
+  max-height: 600px;
 }
 
 .info-item {
