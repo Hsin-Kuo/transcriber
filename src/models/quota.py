@@ -17,6 +17,7 @@ QUOTA_TIERS = {
         "max_transcriptions": 999999,         # 不限次數
         "max_duration_minutes": 180,        # 每月 180 分鐘
         "max_concurrent_tasks": 1,         # 同時 1 個任務
+        "max_ai_summaries": 3,             # 每月 AI 摘要次數
         "audio_retention_days": 3,         # 音檔保留天數（S3 Lifecycle）
         "max_keep_audio": 0,               # 手動保留音檔額度
         "features": {
@@ -32,6 +33,7 @@ QUOTA_TIERS = {
         "max_transcriptions": 999999,         # 不限次數
         "max_duration_minutes": 600,       # 每月 600 分鐘 (10 小時)
         "max_concurrent_tasks": 2,
+        "max_ai_summaries": 30,            # 每月 AI 摘要次數
         "audio_retention_days": 7,         # 音檔保留天數（S3 Lifecycle）
         "max_keep_audio": 10,              # 手動保留音檔額度
         "features": {
@@ -47,6 +49,7 @@ QUOTA_TIERS = {
         "max_transcriptions": 999999,         # 不限次數
         "max_duration_minutes": 3000,      # 每月 3000 分鐘 (50 小時)
         "max_concurrent_tasks": 5,
+        "max_ai_summaries": 100,           # 每月 AI 摘要次數
         "audio_retention_days": 7,         # 音檔保留天數（S3 Lifecycle）
         "max_keep_audio": 30,              # 手動保留音檔額度
         "features": {
@@ -62,6 +65,7 @@ QUOTA_TIERS = {
         "max_transcriptions": 999999,      # 無限制
         "max_duration_minutes": 999999,
         "max_concurrent_tasks": 10,
+        "max_ai_summaries": 999999,        # 無限制
         "audio_retention_days": 7,         # 音檔保留天數（S3 Lifecycle）
         "max_keep_audio": 999999,          # 無限制手動保留
         "features": {

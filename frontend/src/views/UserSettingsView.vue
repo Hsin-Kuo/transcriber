@@ -1,70 +1,103 @@
 <template>
   <div class="settings-container">
-    <div class="settings-header">
-      <h1>{{ $t('userSettings.title') }}</h1>
-    </div>
-
     <!-- 使用者資訊顯示面板 -->
     <div class="user-display-wrapper">
-      <!-- 左側標籤 -->
-      <div class="display-labels">
-        <span class="label-item">{{ $t('userSettings.account') }}</span>
-        <span class="label-item">{{ $t('userSettings.plan') }}</span>
-        <span class="label-item">{{ $t('userSettings.language') }}</span>
-        <span class="label-item">{{ $t('userSettings.timezone') }}</span>
-        <span class="label-item">{{ $t('userSettings.theme') }}</span>
-        <span class="label-item">{{ $t('userSettings.tasks') }}</span>
-        <span class="label-bar"></span>
-        <span class="label-item">{{ $t('userSettings.duration') }}</span>
-        <span class="label-bar"></span>
-      </div>
-
-      <!-- 右側顯示面板 -->
+      <!-- 顯示面板 -->
       <div class="user-display-panel">
+        <span class="panel-label">{{ $t('userSettings.account') }}</span>
         <div class="display-row">
           <span class="display-value">{{ authStore.user?.email || '---' }}</span>
         </div>
-        <div class="display-row">
-          <span class="display-value plan-tiers">
-            <span :class="{ active: currentTier === 'free' }">FREE</span>
-            <span :class="{ active: currentTier === 'basic' }">BASIC</span>
-            <span :class="{ active: currentTier === 'pro' }">PRO</span>
-            <span :class="{ active: currentTier === 'enterprise' }">ENT</span>
-          </span>
-        </div>
+        <span class="panel-label">{{ $t('userSettings.language') }}</span>
         <div class="display-row">
           <span class="display-value">{{ currentLanguageLabel }}</span>
         </div>
-        <div class="display-row">
-          <span class="display-value">{{ getTimezoneShort(currentTimezone) }}</span>
-        </div>
-        <div class="display-row">
-          <span class="display-value theme-icons">
-            <!-- 太陽 -->
-            <svg :class="{ active: currentTheme === 'light' }" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="5"></circle>
-              <line x1="12" y1="1" x2="12" y2="3"></line>
-              <line x1="12" y1="21" x2="12" y2="23"></line>
-              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-              <line x1="1" y1="12" x2="3" y2="12"></line>
-              <line x1="21" y1="12" x2="23" y2="12"></line>
-              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-            </svg>
-            <!-- 月亮 -->
-            <svg :class="{ active: currentTheme === 'dark' }" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-            </svg>
-          </span>
+        <div class="display-row-inline">
+          <div class="display-col">
+            <span class="panel-label">{{ $t('userSettings.timezone') }}</span>
+            <div class="display-row">
+              <span class="display-value">{{ getTimezoneShort(currentTimezone) }}</span>
+            </div>
+          </div>
+          <div class="display-col">
+            <span class="panel-label">{{ $t('userSettings.theme') }}</span>
+            <div class="display-row">
+              <span class="display-value theme-icons">
+                <!-- 太陽 -->
+                <svg :class="{ active: currentTheme === 'light' }" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="5"></circle>
+                  <line x1="12" y1="1" x2="12" y2="3"></line>
+                  <line x1="12" y1="21" x2="12" y2="23"></line>
+                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                  <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                  <line x1="1" y1="12" x2="3" y2="12"></line>
+                  <line x1="21" y1="12" x2="23" y2="12"></line>
+                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                  <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </svg>
+                <!-- 月亮 -->
+                <svg :class="{ active: currentTheme === 'dark' }" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+              </span>
+            </div>
+          </div>
         </div>
 
         <!-- 時長 -->
-        <div class="display-row usage-row">
-          <span class="display-value usage-value">{{ Math.round(authStore.usage?.duration_minutes || 0) }}/{{ authStore.quota?.max_duration_minutes || 0 }}m</span>
+        <div class="usage-label-row" style="margin-top: 8px;">
+          <span class="panel-label">{{ $t('userSettings.duration') }}</span>
+          <span class="display-value usage-value"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px; vertical-align: middle;"><circle cx="12" cy="14" r="8"></circle><polyline points="12 10 12 14 15 16"></polyline><line x1="12" y1="2" x2="12" y2="6"></line><line x1="8" y1="2" x2="16" y2="2"></line></svg>{{ Math.round(authStore.usage?.duration_minutes || 0) }}/{{ authStore.quota?.max_duration_minutes || 0 }}min</span>
         </div>
         <div class="display-bar">
           <span class="bar-fill" :style="{ width: (authStore.quotaPercentage?.duration || 0) + '%' }"></span>
+        </div>
+
+        <!-- AI 摘要 -->
+        <div class="usage-label-row">
+          <span class="panel-label">{{ $t('userSettings.aiSummary') }}</span>
+          <span class="display-value usage-value"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 4px; vertical-align: middle;"><path d="M12 1L14.5 9.5L23 12L14.5 14.5L12 23L9.5 14.5L1 12L9.5 9.5Z" /></svg>{{ authStore.usage?.ai_summaries || 0 }}/{{ authStore.quota?.max_ai_summaries || 0 }}</span>
+        </div>
+        <div class="display-bar">
+          <span class="bar-fill" :style="{ width: aiSummaryPercentage + '%' }"></span>
+        </div>
+      </div>
+
+      <!-- 方案指標 -->
+      <div class="plan-indicator-wrapper">
+        <svg class="corner-screw corner-tl" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="0.8"/><rect x="4" y="9" width="12" height="2" rx="0.5" fill="currentColor"/></svg>
+        <svg class="corner-screw corner-tr" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="0.8"/><rect x="4" y="9" width="12" height="2" rx="0.5" fill="currentColor"/></svg>
+        <svg class="corner-screw corner-bl" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="0.8"/><rect x="4" y="9" width="12" height="2" rx="0.5" fill="currentColor"/></svg>
+        <svg class="corner-screw corner-br" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="0.8"/><rect x="4" y="9" width="12" height="2" rx="0.5" fill="currentColor"/></svg>
+        <span class="plan-indicator-title">{{ $t('userSettings.plan') }}</span>
+        <div class="plan-indicator">
+          <div class="plan-indicator-pointer-track">
+            <svg class="plan-pointer" :class="'point-to-' + previewTier" viewBox="0 0 18 60" xmlns="http://www.w3.org/2000/svg">
+              <path d="M9,0 L16,18 Q18,22 18,26 L18,56 Q18,60 14,60 L4,60 Q0,60 0,56 L0,26 Q0,22 2,18 Z" fill="currentColor" />
+            </svg>
+          </div>
+          <div class="plan-indicator-lines">
+            <div class="plan-indicator-item" :class="{ active: previewTier === 'free' }" @click="previewTier = 'free'">
+              <span class="plan-arc-wrapper"><svg class="plan-arc plan-arc-long" viewBox="0 0 70 18"><path d="M0,18 Q14,7 28,7 L70,7" fill="none" stroke="currentColor" stroke-width="1"/></svg></span>
+              <span class="plan-indicator-dot"></span><span class="plan-indicator-label">FREE</span>
+            </div>
+            <div class="plan-indicator-item" :class="{ active: previewTier === 'basic' }" @click="previewTier = 'basic'">
+              <span class="plan-arc-wrapper"><svg class="plan-arc plan-arc-short" viewBox="0 0 50 14"><path d="M0,12 Q8,7 16,7 L50,7" fill="none" stroke="currentColor" stroke-width="1"/></svg></span>
+              <span class="plan-indicator-dot"></span><span class="plan-indicator-label">BASIC</span>
+            </div>
+            <div class="plan-indicator-item" :class="{ active: previewTier === 'pro' }" @click="previewTier = 'pro'">
+              <span class="plan-arc-wrapper"><svg class="plan-arc plan-arc-short" viewBox="0 0 50 14"><path d="M0,2 Q8,7 16,7 L50,7" fill="none" stroke="currentColor" stroke-width="1"/></svg></span>
+              <span class="plan-indicator-dot"></span><span class="plan-indicator-label">PRO</span>
+            </div>
+            <div class="plan-indicator-item" :class="{ active: previewTier === 'enterprise' }" @click="previewTier = 'enterprise'">
+              <span class="plan-arc-wrapper"><svg class="plan-arc plan-arc-long" viewBox="0 0 70 18"><path d="M0,0 Q14,11 28,11 L70,11" fill="none" stroke="currentColor" stroke-width="1"/></svg></span>
+              <span class="plan-indicator-dot"></span><span class="plan-indicator-label">ENT</span>
+            </div>
+          </div>
+        </div>
+        <div class="plan-indicator-actions">
+          <button class="plan-btn plan-btn-outline">{{ $t('userSettings.showPlan') }}</button>
+          <button class="plan-btn plan-btn-primary"><svg class="plan-btn-icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M8,1 A7,7 0 1,0 8,15 A7,7 0 1,0 8,1 Z M8,6.5 A1.5,1.5 0 1,1 8,9.5 A1.5,1.5 0 1,1 8,6.5 Z M7.5,1 L8.5,1 L8.5,5.5 L7.5,5.5 Z" fill="currentColor" fill-rule="evenodd"/></svg>{{ $t('userSettings.upgrade') }}</button>
         </div>
       </div>
     </div>
@@ -72,7 +105,13 @@
     <div class="settings-grid">
       <!-- 帳戶安全 -->
       <div class="card security-card">
-        <h2>{{ $t('userSettings.security') }}</h2>
+        <h2 class="card-toggle" @click="securityExpanded = !securityExpanded">
+          {{ $t('userSettings.security') }}
+          <svg class="toggle-arrow" :class="{ expanded: securityExpanded }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </h2>
+        <div class="card-body" :class="{ expanded: securityExpanded }">
 
         <!-- 密碼設定 -->
         <div class="setting-item">
@@ -129,11 +168,26 @@
         <!-- Google 操作訊息 -->
         <div v-if="googleError" class="google-message error">{{ googleError }}</div>
         <div v-if="googleSuccess" class="google-message success">{{ googleSuccess }}</div>
+
+        <!-- 刪除帳號 -->
+        <div class="setting-item delete-account-item">
+          <span class="setting-label delete-label">{{ $t('userSettings.deleteAccount') }}</span>
+          <button class="delete-account-btn" @click="showDeleteAccountModal = true">
+            {{ $t('userSettings.deleteAccount') }}
+          </button>
+        </div>
+        </div>
       </div>
 
       <!-- 介面設定 -->
       <div class="card interface-card">
-        <h2>{{ $t('userSettings.interface') }}</h2>
+        <h2 class="card-toggle" @click="preferencesExpanded = !preferencesExpanded">
+          {{ $t('userSettings.interface') }}
+          <svg class="toggle-arrow" :class="{ expanded: preferencesExpanded }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </h2>
+        <div class="card-body" :class="{ expanded: preferencesExpanded }">
 
         <!-- 語言 -->
         <div class="setting-item">
@@ -243,6 +297,7 @@
             </div>
           </div>
         </div>
+        </div>
       </div>
     </div>
 
@@ -341,6 +396,50 @@
       </div>
     </div>
 
+    <!-- 刪除帳號 Modal -->
+    <div v-if="showDeleteAccountModal" class="modal-overlay" @click.self="closeDeleteAccountModal">
+      <div class="modal delete-modal">
+        <h3 class="delete-modal-title">{{ $t('userSettings.deleteAccount') }}</h3>
+        <div class="modal-body">
+          <p class="delete-description">{{ $t('userSettings.deleteAccountDescription') }}</p>
+          <ul class="delete-items">
+            <li>{{ $t('userSettings.deleteAccountItem1') }}</li>
+            <li>{{ $t('userSettings.deleteAccountItem2') }}</li>
+            <li>{{ $t('userSettings.deleteAccountItem3') }}</li>
+          </ul>
+          <p class="delete-warning">{{ $t('userSettings.deleteAccountWarning') }}</p>
+
+          <div class="form-group">
+            <label>{{ $t('userSettings.deleteAccountConfirmLabel') }}</label>
+            <input
+              v-model="deleteAccountForm.confirmation"
+              type="email"
+              class="form-input"
+              :placeholder="authStore.user?.email"
+            />
+          </div>
+
+          <div v-if="authStore.hasPassword" class="form-group">
+            <label>{{ $t('userSettings.deleteAccountPasswordLabel') }}</label>
+            <input
+              v-model="deleteAccountForm.password"
+              type="password"
+              class="form-input"
+              :placeholder="$t('userSettings.deleteAccountPasswordPlaceholder')"
+            />
+          </div>
+
+          <p v-if="deleteAccountError" class="error-text">{{ deleteAccountError }}</p>
+        </div>
+        <div class="modal-footer">
+          <button @click="closeDeleteAccountModal" class="btn-cancel">{{ $t('userSettings.cancel') }}</button>
+          <button @click="confirmDeleteAccount" class="btn-delete" :disabled="isDeletingAccount">
+            {{ isDeletingAccount ? $t('userSettings.deleting') : $t('userSettings.deleteAccount') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- 設定密碼 Modal (OAuth 用戶) -->
     <div v-if="showSetPasswordModal" class="modal-overlay" @click.self="closeSetPasswordModal">
       <div class="modal">
@@ -420,12 +519,14 @@
 
 <script setup>
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useI18n } from 'vue-i18n'
 import api from '../utils/api'
 import { detectTimezone, detectTheme } from '../utils/defaults'
 import GoogleSignInButton from '../components/GoogleSignInButton.vue'
 
+const router = useRouter()
 const authStore = useAuthStore()
 const { t: $t, locale } = useI18n()
 
@@ -452,6 +553,10 @@ const newPasswordChecks = ref({
   hasLower: false,
   hasNumber: false
 })
+
+// 卡片展開狀態
+const securityExpanded = ref(false)
+const preferencesExpanded = ref(false)
 
 // Google 綁定相關狀態
 const googleLoading = ref(false)
@@ -649,6 +754,17 @@ onUnmounted(() => {
 
 // 當前方案層級
 const currentTier = computed(() => authStore.quota?.tier || 'free')
+
+// [測試用] 點擊切換指標，不影響後端
+const previewTier = ref(currentTier.value)
+
+// AI 摘要使用百分比
+const aiSummaryPercentage = computed(() => {
+  const used = authStore.usage?.ai_summaries || 0
+  const limit = authStore.quota?.max_ai_summaries || 1
+  return Math.min((used / limit) * 100, 100)
+})
+
 
 // 切換語言
 function changeLanguage() {
@@ -850,6 +966,53 @@ async function setPassword() {
 
   isSettingPassword.value = false
 }
+
+// 刪除帳號相關狀態
+const showDeleteAccountModal = ref(false)
+const isDeletingAccount = ref(false)
+const deleteAccountError = ref('')
+const deleteAccountForm = ref({
+  confirmation: '',
+  password: ''
+})
+
+function closeDeleteAccountModal() {
+  showDeleteAccountModal.value = false
+  deleteAccountForm.value = { confirmation: '', password: '' }
+  deleteAccountError.value = ''
+}
+
+async function confirmDeleteAccount() {
+  deleteAccountError.value = ''
+
+  // 驗證 email 確認
+  if (deleteAccountForm.value.confirmation !== authStore.user?.email) {
+    deleteAccountError.value = $t('userSettings.errorEmailConfirmMismatch')
+    return
+  }
+
+  // 密碼用戶需輸入密碼
+  if (authStore.hasPassword && !deleteAccountForm.value.password) {
+    deleteAccountError.value = $t('userSettings.errorDeletePasswordRequired')
+    return
+  }
+
+  isDeletingAccount.value = true
+
+  const result = await authStore.deleteAccount(
+    deleteAccountForm.value.password || null,
+    deleteAccountForm.value.confirmation
+  )
+
+  if (result.success) {
+    closeDeleteAccountModal()
+    router.push('/login')
+  } else {
+    deleteAccountError.value = result.error || $t('userSettings.errorDeleteFailed')
+  }
+
+  isDeletingAccount.value = false
+}
 </script>
 
 <style scoped>
@@ -864,37 +1027,23 @@ async function setPassword() {
 /* 使用者資訊顯示面板 - 像素風格 */
 .user-display-wrapper {
   display: flex;
-  justify-content: flex-start;
+  justify-content: center;
   align-items: flex-start;
   gap: 12px;
-  margin: 0 0 32px 22px;
+  margin: 90px 0 32px 0;
 }
 
-/* 左側標籤 */
-.display-labels {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 16px 0;
-  text-align: right;
-}
-
-.display-labels .label-item {
+/* 面板內標籤 */
+.panel-label {
   font-family: 'VT323', monospace;
-  font-size: 12px;
-  color: var(--main-text-light);
+  font-size: 11px;
+  color: #888888;
   letter-spacing: 1px;
-  padding: 6px 0;
-  line-height: 18px;
+  margin-top: 4px;
+  line-height: 1;
 }
 
-
-.display-labels .label-bar {
-  height: 10px;
-  margin-bottom: 12px;
-}
-
-/* 右側顯示面板 */
+/* 顯示面板 */
 .user-display-panel {
   display: flex;
   flex-direction: column;
@@ -902,13 +1051,29 @@ async function setPassword() {
   font-family: 'VT323', monospace;
   font-size: 18px;
   color: #ffffff;
-  background: #101010;
-  padding: 16px 20px;
-  border-radius: 6px;
-  min-width: 280px;
-  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.7);
-  border: 1px solid #333;
+  background: #1a1a1a;
+  padding: 10px 18px;
+  border-radius: 10px;
+  width: 280px;
+  border: 14px solid #000000;
   letter-spacing: 2.5px;
+}
+
+.display-row-inline {
+  display: flex;
+  gap: 16px;
+}
+
+.display-row-inline .display-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.display-row-inline .display-row {
+  border-bottom: none;
+  padding: 0;
 }
 
 .user-display-panel .display-row {
@@ -956,7 +1121,7 @@ async function setPassword() {
   background: #1a1a1a;
   border: 1px solid #333;
   border-radius: 2px;
-  margin-bottom: 12px;
+  margin-bottom: 0px;
   overflow: hidden;
 }
 
@@ -992,20 +1157,40 @@ async function setPassword() {
   z-index: 1;
 }
 
+.usage-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.usage-label-row .panel-label {
+  margin-top: 0;
+}
+
 /* 主題色 icons */
+.user-display-panel .display-row:has(.theme-icons) {
+  padding: 0;
+}
+
 .user-display-panel .theme-icons {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
 }
 
 .user-display-panel .theme-icons svg {
-  color: #444;
-  transition: color 0.2s ease;
+  color: #1a1a1a;
+  background: #333;
+  padding: 6px;
+  border-radius: 6px;
+  width: 32px;
+  height: 28px;
+  transition: all 0.2s ease;
 }
 
 .user-display-panel .theme-icons svg.active {
-  color: #fff;
+  color: #000;
+  background: #fff;
 }
 
 /* 方案層級 */
@@ -1025,23 +1210,201 @@ async function setPassword() {
   color: #fff;
 }
 
-.settings-header {
-  margin-top: 30px;
-  margin-bottom: 32px;
-  text-align: center;
+
+/* 方案指標 */
+.plan-indicator-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  align-self: center;
+  border: 0.5px solid var(--main-text-light);
+  border-radius: 10px;
+  padding: 29px;
+  width: 280px;
+  box-sizing: border-box;
+  position: relative;
 }
 
-.settings-header h1 {
-  font-size: 2rem;
-  color: var(--main-primary);
-  margin: 0 0 8px 0;
+.corner-screw {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  color: var(--main-text);
+}
+
+.corner-tl { top: 6px; left: 6px; transform: rotate(-45deg); }
+.corner-tr { top: 6px; right: 6px; transform: rotate(45deg); }
+.corner-bl { bottom: 6px; left: 6px; transform: rotate(45deg); }
+.corner-br { bottom: 6px; right: 6px; transform: rotate(-45deg); }
+
+.plan-indicator-title {
+  font-family: 'VT323', monospace;
+  font-size: 23px;
+  margin-left: 15px;
+  margin-bottom: 5px;
+  color: var(--main-text);
+  letter-spacing: 1px;
+  opacity: 1;
+}
+
+.plan-indicator {
+  display: flex;
+  align-items: flex-start;
+  gap: 15px;
+  padding: 16px 30px;
+  align-self: center;
+}
+
+.plan-indicator-pointer-track {
+  position: relative;
+  width: 60px;
+  flex-shrink: 0;
+  align-self: stretch;
+}
+
+.plan-pointer {
+  position: absolute;
+  width: 16px;
+  height: 56px;
+  color: var(--main-text);
+  opacity: 0.75;
+  /* 固定在 lines 容器垂直中心 */
+  top: 35%;
+  left: 50%;
+  margin-top: -28px;
+  margin-left: -8px;
+  /* 旋轉中心：水平置中，牆壁下方 1/3（牆壁 y:20~60，高 40，1/3 from bottom ≈ y:47 → 78%） */
+  transform-origin: 50% 78%;
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 旋轉角度：基準 90° 朝右，依各方案偏移 */
+.plan-pointer.point-to-free       { transform: rotate(50deg); }
+.plan-pointer.point-to-basic      { transform: rotate(79deg); }
+.plan-pointer.point-to-pro        { transform: rotate(102deg); }
+.plan-pointer.point-to-enterprise { transform: rotate(133deg); }
+
+.plan-indicator-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.plan-indicator-item {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  cursor: pointer; /* 測試用 */
+}
+
+.plan-arc-wrapper {
+  width: 56px;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.plan-arc {
+  height: 16px;
+  color: var(--main-text-light);
+  opacity: 0.8;
+}
+
+.plan-arc.plan-arc-short {
+  width: 40px;
+}
+
+.plan-arc.plan-arc-long {
+  width: 56px;
+}
+
+.plan-indicator-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #aaa;
+  flex-shrink: 0;
+  margin-left: 12px;
+  margin-right: 0px;
+}
+
+.plan-indicator-label {
+  font-family: 'VT323', monospace;
+  font-size: 14px;
+  color: var(--main-text-light);
+  letter-spacing: 1px;
+  padding-left: 4px;
+  opacity: 1;
+  white-space: nowrap;
+}
+
+.plan-indicator-item.active .plan-arc {
+  color: var(--main-text);
+  opacity: 0.5;
+}
+
+.plan-indicator-item.active .plan-indicator-dot {
+  background: var(--nav-active-bg);
+}
+
+.plan-indicator-item.active .plan-indicator-label {
+  color: var(--main-text);
+  opacity: 1;
   font-weight: 700;
 }
 
-.settings-header p {
+.plan-indicator-actions {
+  display: flex;
+  gap: 14px;
+  margin-top: 12px;
+  margin-bottom: 5px;
+  align-self: center;
+}
+
+.plan-btn {
+  font-family: 'VT323', monospace;
+  font-size: 15px;
+  letter-spacing: 1px;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.plan-btn-outline {
+  background: transparent;
+  border: 1px solid var(--main-text-light);
   color: var(--main-text-light);
-  margin: 0;
-  font-size: 1rem;
+  opacity: 1;
+}
+
+.plan-btn-outline:hover {
+  opacity: 0.8;
+}
+
+.plan-btn-primary {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--nav-active-bg);
+  border: 1px solid var(--main-text-light);
+  color: #fff;
+}
+
+.plan-btn-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  animation: spin-icon 3s linear infinite;
+}
+
+@keyframes spin-icon {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.plan-btn-primary:hover {
+  opacity: 0.85;
 }
 
 .settings-grid {
@@ -1059,8 +1422,41 @@ async function setPassword() {
 .security-card h2 {
   font-size: 1.25rem;
   color: var(--main-primary);
-  margin: 0 0 20px 0;
+  margin: 0;
   font-weight: 600;
+}
+
+/* 卡片 toggle */
+.card-toggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  transition: margin 0.3s ease;
+}
+
+.card-toggle:hover {
+  opacity: 0.8;
+}
+
+.toggle-arrow {
+  transition: transform 0.3s ease;
+  color: var(--main-text-light);
+}
+
+.toggle-arrow.expanded {
+  transform: rotate(180deg);
+}
+
+.card-body {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+}
+
+.card-body.expanded {
+  max-height: 600px;
 }
 
 .info-item {
@@ -1514,6 +1910,78 @@ async function setPassword() {
   margin: -10px 0 20px 0;
 }
 
+/* 刪除帳號 */
+.delete-account-item {
+  padding-top: 16px;
+}
+
+.delete-label {
+  color: var(--main-text-light) !important;
+}
+
+.delete-account-btn {
+  padding: 8px 16px;
+  background: transparent;
+  color: var(--color-danger, #dc3545);
+  border: 1px solid var(--color-danger, #dc3545);
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.delete-account-btn:hover {
+  background: var(--color-danger, #dc3545);
+  color: white;
+}
+
+.delete-modal-title {
+  color: var(--color-danger, #dc3545) !important;
+}
+
+.delete-description {
+  color: var(--main-text);
+  font-size: 0.9rem;
+  margin: 0 0 8px 0;
+}
+
+.delete-items {
+  margin: 0 0 12px 0;
+  padding-left: 20px;
+  color: var(--main-text-light);
+  font-size: 0.85rem;
+  line-height: 1.8;
+}
+
+.delete-warning {
+  color: var(--color-danger, #dc3545);
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin: 0 0 16px 0;
+}
+
+.btn-delete {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: var(--color-danger, #dc3545);
+  color: white;
+}
+
+.btn-delete:hover {
+  opacity: 0.9;
+}
+
+.btn-delete:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* 配額卡片樣式 */
 
 .quota-content {
@@ -1602,18 +2070,32 @@ async function setPassword() {
     padding: 0 16px;
   }
 
-  .settings-header h1 {
-    font-size: 1.75rem;
-  }
-
   .user-display-wrapper {
     max-width: 100%;
     margin-bottom: 24px;
+    flex-wrap: wrap;
+    justify-content: center;
   }
 
   .user-display-panel {
     min-width: auto;
     flex: 1;
+  }
+
+  .plan-indicator-wrapper {
+    width: 100%;
+    align-items: center;
+    margin-top: 8px;
+  }
+
+  .plan-indicator {
+    padding: 8px 16px;
+  }
+
+  .plan-indicator-title {
+    margin-left: 15px;
+    text-align: left;
+    align-self: flex-start;
   }
 
   .settings-grid {
@@ -1639,19 +2121,6 @@ async function setPassword() {
 @media (max-width: 480px) {
   .settings-container {
     padding: 0 12px;
-  }
-
-  .settings-header {
-    margin-top: 20px;
-    margin-bottom: 20px;
-  }
-
-  .settings-header h1 {
-    font-size: 1.5rem;
-  }
-
-  .settings-header p {
-    font-size: 0.9rem;
   }
 
   .user-display-wrapper {

@@ -149,9 +149,11 @@ async def google_auth(
             "usage": {
                 "transcriptions": 0,
                 "duration_minutes": 0,
+                "ai_summaries": 0,
                 "last_reset": now,
                 "total_transcriptions": 0,
-                "total_duration_minutes": 0
+                "total_duration_minutes": 0,
+                "total_ai_summaries": 0
             },
             "refresh_tokens": [],
             "created_at": now,
@@ -166,7 +168,8 @@ async def google_auth(
     })
     refresh_token = create_refresh_token({
         "sub": str(user["_id"]),
-        "email": user["email"]
+        "email": user["email"],
+        "role": user["role"]
     })
 
     # 存儲 Refresh Token

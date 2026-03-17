@@ -1,11 +1,8 @@
 # Whisper 相關
 faster-whisper
-torch<2.6
-torchaudio<2.6
 
 # Speaker Diarization
 pyannote.audio
-huggingface-hub>=0.21,<0.22
 
 # 音檔處理
 pydub
@@ -14,12 +11,6 @@ pydub
 fastapi
 uvicorn[standard]
 python-multipart
-
-# 系統監控
-psutil
-
-# HTTP 客戶端
-requests
 
 # Google OAuth
 google-auth

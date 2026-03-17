@@ -164,6 +164,52 @@ def _get_diarization_pipeline():
     return _cached_diarization_pipeline
 
 
+def _convert_to_mp3(audio_path: Path) -> Path:
+    """統一將音檔轉為 MP3 格式（128kbps, mono）
+
+    不管原始格式（ALAC, AAC, WAV, FLAC 等），一律轉為 MP3。
+    如果已經是 MP3 則跳過。轉碼後刪除原始檔案以節省空間。
+
+    Returns:
+        轉碼後的 MP3 路徑（與輸入同名 .mp3）
+    """
+    try:
+        # 用 ffprobe 檢查是否已經是 MP3
+        result = subprocess.run(
+            ['ffprobe', '-v', 'quiet', '-print_format', 'json',
+             '-show_streams', str(audio_path)],
+            capture_output=True, text=True, timeout=30
+        )
+        import json
+        probe = json.loads(result.stdout)
+        codec = probe.get("streams", [{}])[0].get("codec_name", "")
+
+        if codec == "mp3":
+            print(f"✅ 音檔已是 MP3 格式，無需轉碼")
+            return audio_path
+
+        print(f"🔄 音檔格式 {codec}，轉碼為 MP3 128kbps...")
+        original_size = audio_path.stat().st_size / 1024 / 1024
+        mp3_path = audio_path.with_suffix('.mp3.tmp')
+        subprocess.run([
+            'ffmpeg', '-y', '-i', str(audio_path),
+            '-vn',
+            '-acodec', 'libmp3lame',
+            '-b:a', '128k',
+            '-ac', '1',
+            str(mp3_path)
+        ], check=True, capture_output=True, timeout=600)
+
+        # 替換原檔案
+        mp3_path.rename(audio_path)
+        new_size = audio_path.stat().st_size / 1024 / 1024
+        print(f"✅ MP3 轉碼完成: {original_size:.1f} MB → {new_size:.1f} MB")
+        return audio_path
+    except Exception as e:
+        print(f"⚠️ MP3 轉碼失敗: {e}，使用原始檔案")
+        return audio_path
+
+
 def _convert_to_wav(audio_path: Path, wav_path: Path) -> Path:
     """將音檔轉換為 WAV 格式（pyannote 需要）"""
     try:
@@ -238,6 +284,19 @@ def process_task(message_body: dict):
         audio_path = temp_dir / f"{task_id}.mp3"
         download_audio(task_id, audio_path, tier=user_tier)
         print(f"📥 已下載音檔: {audio_path} ({audio_path.stat().st_size / 1024 / 1024:.2f} MB)")
+
+        # 1.5 統一轉為 MP3（節省空間 + 確保瀏覽器可播放）
+        original_size = audio_path.stat().st_size
+        _update_progress(db, task_id, "正在轉換音檔格式...")
+        audio_path = _convert_to_mp3(audio_path)
+        if audio_path.stat().st_size != original_size:
+            # 檔案被轉碼了，重新上傳到 S3 覆蓋原始檔案
+            _update_progress(db, task_id, "正在上傳轉碼後的音檔...")
+            s3_key = f"uploads/{user_tier}/{task_id}.mp3"
+            boto3.client("s3", region_name=os.getenv("S3_REGION", "ap-northeast-1")).upload_file(
+                str(audio_path), os.getenv("S3_BUCKET"), s3_key
+            )
+            print(f"☁️ 已上傳轉碼後的音檔到 S3: {s3_key}")
 
         # 2. 取得模型（快取，只在首次任務載入）
         _update_progress(db, task_id, "正在準備模型...")

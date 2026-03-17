@@ -20,7 +20,8 @@ from ..models.auth import (
     UserResponse,
     ForgotPasswordRequest,
     ResetPasswordRequest,
-    UpdatePreferencesRequest
+    UpdatePreferencesRequest,
+    DeleteAccountRequest
 )
 from ..auth.password import hash_password, verify_password
 from ..auth.jwt_handler import create_access_token, create_refresh_token, verify_token
@@ -38,6 +39,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 @router.post("/register")
 async def register(
     user_data: UserRegister,
+    request: Request,
     db=Depends(get_database)
 ):
     """用戶註冊
@@ -54,12 +56,19 @@ async def register(
     """
     user_repo = UserRepository(db)
     email_service = get_email_service()
+    audit_logger = get_audit_logger()
 
     # 檢查 Email 是否已存在
     existing_user = await user_repo.get_by_email(user_data.email)
     if existing_user:
         # 為防止 email 枚舉攻擊，回傳與新註冊相同的訊息
         # 可選：發送「有人嘗試用您的 email 註冊」的通知信
+        await audit_logger.log_auth(
+            request=request,
+            action="register_duplicate",
+            status_code=200,
+            message=f"重複註冊嘗試: {user_data.email}"
+        )
         return {
             "message": "註冊成功！請檢查您的信箱以完成驗證",
             "email": user_data.email
@@ -87,9 +96,11 @@ async def register(
         "usage": {
             "transcriptions": 0,
             "duration_minutes": 0,
+            "ai_summaries": 0,
             "last_reset": now,
             "total_transcriptions": 0,
-            "total_duration_minutes": 0
+            "total_duration_minutes": 0,
+            "total_ai_summaries": 0
         },
         "refresh_tokens": [],
         "created_at": now,
@@ -105,10 +116,25 @@ async def register(
     if not email_sent:
         # 如果郵件發送失敗，刪除剛創建的用戶
         await user_repo.delete(str(user["_id"]))
+        await audit_logger.log_auth(
+            request=request,
+            action="register_failed",
+            user_id=str(user["_id"]),
+            status_code=500,
+            message=f"註冊失敗（郵件發送失敗）: {user_data.email}"
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="發送驗證郵件失敗，請稍後再試"
         )
+
+    await audit_logger.log_auth(
+        request=request,
+        action="register",
+        user_id=str(user["_id"]),
+        status_code=200,
+        message=f"新用戶註冊: {user_data.email}"
+    )
 
     return {
         "message": "註冊成功！請查看您的郵箱完成驗證",
@@ -302,7 +328,8 @@ async def login(
     })
     refresh_token = create_refresh_token({
         "sub": str(user["_id"]),
-        "email": user["email"]
+        "email": user["email"],
+        "role": user["role"]
     })
 
     # 存儲 Refresh Token
@@ -544,8 +571,14 @@ async def get_current_user_info(
     if not auth_providers and full_user.get("password_hash"):
         auth_providers = ["password"]
 
+    # 從 tier 定義補齊缺少的 quota 欄位（相容舊用戶）
+    user_quota = full_user.get("quota", {})
+    tier = user_quota.get("tier", QuotaTier.FREE)
+    tier_defaults = {k: v for k, v in QUOTA_TIERS.get(tier, QUOTA_TIERS[QuotaTier.FREE]).items() if k not in ("name", "price")}
+    merged_quota = {**tier_defaults, **user_quota}
+
     # 過濾掉次數相關欄位（只用時數限制）
-    quota_filtered = {k: v for k, v in full_user["quota"].items() if k != "max_transcriptions"}
+    quota_filtered = {k: v for k, v in merged_quota.items() if k != "max_transcriptions"}
     usage_filtered = {k: v for k, v in usage.items() if k not in ("transcriptions", "total_transcriptions")}
 
     return UserResponse(
@@ -787,3 +820,123 @@ async def reset_password(
     )
 
     return {"message": "密碼已重設成功，請使用新密碼登入"}
+
+
+@router.delete("/account")
+async def delete_account(
+    http_request: Request,
+    request: DeleteAccountRequest,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database)
+):
+    """刪除帳號
+
+    永久刪除用戶帳號及所有相關資料，使用紀錄去識別化保留。
+
+    Args:
+        http_request: HTTP Request 對象
+        request: 刪除帳號請求（confirmation, password）
+        current_user: 當前用戶
+        db: 資料庫實例
+
+    Returns:
+        成功訊息
+
+    Raises:
+        HTTPException: 驗證失敗
+    """
+    user_repo = UserRepository(db)
+    audit_logger = get_audit_logger()
+    user_id = str(current_user["_id"])
+
+    # 從資料庫獲取完整用戶資料
+    user = await user_repo.get_by_id(user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="用戶不存在"
+        )
+
+    # 驗證 email 確認
+    if request.confirmation != user["email"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email 確認不符"
+        )
+
+    # 密碼用戶需驗證密碼
+    auth_providers = user.get("auth_providers", [])
+    if "password" in auth_providers:
+        if not request.password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="請輸入密碼以確認刪除"
+            )
+        if not verify_password(request.password, user["password_hash"]):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="密碼錯誤"
+            )
+
+    # 記錄刪除操作（在刪除前記錄）
+    await audit_logger.log_auth(
+        request=http_request,
+        action="delete_account",
+        user_id=user_id,
+        status_code=200,
+        message=f"帳號刪除: {user['email']}"
+    )
+
+    # 1. 取得用戶所有任務（用於刪除關聯資料）
+    from ..database.repositories.task_repo import TaskRepository
+    task_repo = TaskRepository(db)
+    user_tasks = await task_repo.collection.find(
+        {"$or": [{"user.user_id": user_id}, {"user_id": user_id}]},
+        {"_id": 1, "result.audio_file": 1, "audio_file": 1}
+    ).to_list(length=None)
+
+    task_ids = [task["_id"] for task in user_tasks]
+
+    # 2. 刪除 S3/本地音檔
+    from ..utils.storage_service import delete_audio_by_path
+    for task in user_tasks:
+        audio_path = task.get("result", {}).get("audio_file") or task.get("audio_file")
+        if audio_path:
+            try:
+                delete_audio_by_path(audio_path)
+            except Exception as e:
+                print(f"⚠️ 刪除音檔失敗 (task {task['_id']}): {e}")
+
+    # 3. 刪除關聯資料
+    if task_ids:
+        await db.transcriptions.delete_many({"_id": {"$in": task_ids}})
+        await db.segments.delete_many({"_id": {"$in": task_ids}})
+        await db.summaries.delete_many({"_id": {"$in": task_ids}})
+
+    # 4. 刪除任務
+    await task_repo.collection.delete_many(
+        {"$or": [{"user.user_id": user_id}, {"user_id": user_id}]}
+    )
+
+    # 5. 刪除標籤
+    await db.tags.delete_many({"user_id": user_id})
+
+    # 6. 抹除用戶個人資訊（軟刪除，保留 _id 讓 audit_logs 等仍可關聯到去識別帳號）
+    now = get_utc_timestamp()
+    await user_repo.update(user_id, {
+        "email": None,
+        "password_hash": None,
+        "google_id": None,
+        "auth_providers": [],
+        "is_active": False,
+        "deleted_at": now,
+        "refresh_tokens": [],
+        "preferences": {},
+        "verification_token": None,
+        "verification_expires": None,
+        "password_reset_token": None,
+        "password_reset_expires": None,
+        "password_reset_requested_at": None
+    })
+
+    return {"message": "帳號已永久刪除"}

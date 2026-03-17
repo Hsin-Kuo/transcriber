@@ -153,23 +153,29 @@
         </div>
 
         <!-- 重新生成按鈕 -->
-        <button class="regenerate-btn" @click="generateSummary" :disabled="isLoading">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
-          </svg>
-          {{ $t('aiSummary.regenerate') }}
-        </button>
+        <div class="regenerate-row">
+          <button class="regenerate-btn" @click="generateSummary" :disabled="isLoading || !hasAiSummaryQuota">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+            </svg>
+            {{ $t('aiSummary.regenerate') }}
+          </button>
+          <span v-if="!hasAiSummaryQuota" class="quota-exhausted">{{ $t('aiSummary.quotaExhausted') }}</span>
+          <span v-else class="quota-remaining">{{ $t('aiSummary.quotaRemaining', { count: aiSummaryRemaining }) }}</span>
+        </div>
       </div>
 
       <!-- 尚未生成 -->
       <div v-else class="empty-state">
-        <button class="generate-btn" @click="generateSummary" :disabled="isLoading">
+        <button class="generate-btn" @click="generateSummary" :disabled="isLoading || !hasAiSummaryQuota">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
             <path d="M17 4a2 2 0 0 0 2 2a2 2 0 0 0 -2 2a2 2 0 0 0 -2 -2a2 2 0 0 0 2 -2" />
           </svg>
           {{ $t('aiSummary.generate') }}
         </button>
+        <span v-if="!hasAiSummaryQuota" class="quota-exhausted">{{ $t('aiSummary.quotaExhausted') }}</span>
+        <span v-else class="quota-remaining">{{ $t('aiSummary.quotaRemaining', { count: aiSummaryRemaining }) }}</span>
       </div>
     </div>
   </div>
@@ -221,6 +227,10 @@ const error = ref(null)
 const summary = ref(null)
 const summaryStatus = ref(props.initialSummaryStatus)
 const isCopied = ref(false)
+
+// AI 摘要配額
+const aiSummaryRemaining = computed(() => authStore.remainingQuota.aiSummaries ?? 0)
+const hasAiSummaryQuota = computed(() => aiSummaryRemaining.value > 0)
 
 // Computed
 const keyPoints = computed(() => {
@@ -381,6 +391,8 @@ async function generateSummary() {
       summary.value = result.summary
       summaryStatus.value = 'completed'
       emit('summary-updated', { taskId: props.taskId, status: 'completed' })
+      // 重新拉取用戶資料以更新配額顯示
+      authStore.fetchCurrentUser()
     } else {
       error.value = result.error || $t('aiSummary.generateError')
       summaryStatus.value = 'failed'
@@ -388,7 +400,13 @@ async function generateSummary() {
     }
   } catch (err) {
     console.error('生成摘要失敗:', err)
-    error.value = err.response?.data?.detail || $t('aiSummary.generateError')
+    if (err.response?.status === 429 && err.response?.data?.detail?.quota?.type === 'ai_summaries') {
+      error.value = err.response.data.detail.message
+      // 重新拉取用戶資料以更新配額顯示
+      await authStore.fetchCurrentUser()
+    } else {
+      error.value = err.response?.data?.detail || $t('aiSummary.generateError')
+    }
     summaryStatus.value = 'failed'
     emit('summary-updated', { taskId: props.taskId, status: 'failed' })
   } finally {
@@ -790,7 +808,6 @@ onMounted(() => {
   font-size: 13px;
   cursor: pointer;
   transition: all 0.2s ease;
-  margin-top: 8px;
 }
 
 .regenerate-btn:hover:not(:disabled) {
@@ -837,6 +854,24 @@ onMounted(() => {
 .generate-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* 配額顯示 */
+.quota-remaining {
+  font-size: 12px;
+  color: var(--main-text-light);
+}
+
+.quota-exhausted {
+  font-size: 12px;
+  color: var(--color-danger);
+}
+
+.regenerate-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
 }
 
 /* 深色模式 */

@@ -39,11 +39,12 @@ export const useAuthStore = defineStore('auth', () => {
 
   // 剩餘配額
   const remainingQuota = computed(() => {
-    if (!user.value) return { transcriptions: 0, duration: 0 }
+    if (!user.value) return { transcriptions: 0, duration: 0, aiSummaries: 0 }
 
     return {
       transcriptions: Math.max(0, (quota.value.max_transcriptions || 0) - (usage.value.transcriptions || 0)),
-      duration: Math.max(0, (quota.value.max_duration_minutes || 0) - (usage.value.duration_minutes || 0))
+      duration: Math.max(0, (quota.value.max_duration_minutes || 0) - (usage.value.duration_minutes || 0)),
+      aiSummaries: Math.max(0, (quota.value.max_ai_summaries || 0) - (usage.value.ai_summaries || 0))
     }
   })
 
@@ -281,6 +282,28 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function deleteAccount(password, confirmation) {
+    loading.value = true
+    error.value = null
+
+    try {
+      await api.delete('/auth/account', {
+        data: { password, confirmation }
+      })
+      TokenManager.clearTokens()
+      user.value = null
+      return { success: true }
+    } catch (err) {
+      error.value = err.response?.data?.detail || '刪除帳號失敗'
+      return {
+        success: false,
+        error: error.value
+      }
+    } finally {
+      loading.value = false
+    }
+  }
+
   async function setPassword(newPassword) {
     loading.value = true
     error.value = null
@@ -332,6 +355,7 @@ export const useAuthStore = defineStore('auth', () => {
     googleLogin,
     bindGoogle,
     unbindGoogle,
+    deleteAccount,
     setPassword,
     updatePreferences
   }

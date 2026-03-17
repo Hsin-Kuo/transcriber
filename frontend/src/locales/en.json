@@ -26,7 +26,7 @@
     "plan": "Plan",
     "email": "Email",
     "accountType": "Account Type",
-    "interface": "Interface",
+    "interface": "Preferences",
     "language": "Language",
     "timezone": "Timezone",
     "theme": "Theme",
@@ -36,10 +36,13 @@
     "tasks": "Tasks",
     "transcriptions": "Transcriptions",
     "duration": "Duration",
+    "aiSummary": "AI Summary",
+    "showPlan": "Show Plan",
+    "upgrade": "Upgrade",
     "storage": "Storage",
     "remaining": "Remaining",
     "minutes": "minutes",
-    "security": "Account Security",
+    "security": "Account",
     "password": "Password",
     "changePassword": "Change Password",
     "currentPassword": "Current Password",
@@ -77,7 +80,20 @@
     "summaryExpand": "AI Summary Expand",
     "summaryAlwaysOpen": "Always Open",
     "summaryAlwaysCollapsed": "Always Collapsed",
-    "summaryFollowLast": "Remember Last State"
+    "summaryFollowLast": "Remember Last State",
+    "deleteAccount": "Delete Account",
+    "deleteAccountDescription": "This will permanently delete your account and all data, including:",
+    "deleteAccountItem1": "Personal information (email, password, Google link)",
+    "deleteAccountItem2": "All transcription tasks and audio files",
+    "deleteAccountItem3": "AI summaries and tags",
+    "deleteAccountWarning": "This action cannot be undone.",
+    "deleteAccountConfirmLabel": "Enter your email to confirm deletion",
+    "deleteAccountPasswordLabel": "Enter your password to confirm",
+    "deleteAccountPasswordPlaceholder": "Enter password",
+    "deleting": "Deleting...",
+    "errorEmailConfirmMismatch": "Email does not match",
+    "errorDeletePasswordRequired": "Please enter your password",
+    "errorDeleteFailed": "Failed to delete account, please try again"
   },
   "navigation": {
     "expandSidebar": "Expand Sidebar",
@@ -472,6 +488,8 @@
     "typeInterview": "Interview",
     "typeGeneral": "General",
     "copySummary": "Copy Summary",
-    "copied": "Copied"
+    "copied": "Copied",
+    "quotaRemaining": "{count} remaining this month",
+    "quotaExhausted": "AI summary quota exhausted this month"
   }
 }
