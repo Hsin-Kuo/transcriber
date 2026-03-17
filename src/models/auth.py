@@ -127,3 +127,9 @@ class GoogleBindRequest(BaseModel):
 class SetPasswordRequest(BaseModel):
     """設定密碼請求（給 OAuth 用戶首次設定密碼）"""
     new_password: str = Field(..., min_length=8, description="新密碼至少 8 個字元")
+
+
+class DeleteAccountRequest(BaseModel):
+    """刪除帳號請求"""
+    password: Optional[str] = Field(None, description="密碼驗證（密碼用戶必填）")
+    confirmation: str = Field(..., description="用戶輸入的 email 確認")

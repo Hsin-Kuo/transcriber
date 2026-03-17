@@ -20,7 +20,8 @@ from ..models.auth import (
     UserResponse,
     ForgotPasswordRequest,
     ResetPasswordRequest,
-    UpdatePreferencesRequest
+    UpdatePreferencesRequest,
+    DeleteAccountRequest
 )
 from ..auth.password import hash_password, verify_password
 from ..auth.jwt_handler import create_access_token, create_refresh_token, verify_token
@@ -819,3 +820,123 @@ async def reset_password(
     )
 
     return {"message": "密碼已重設成功，請使用新密碼登入"}
+
+
+@router.delete("/account")
+async def delete_account(
+    http_request: Request,
+    request: DeleteAccountRequest,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database)
+):
+    """刪除帳號
+
+    永久刪除用戶帳號及所有相關資料，使用紀錄去識別化保留。
+
+    Args:
+        http_request: HTTP Request 對象
+        request: 刪除帳號請求（confirmation, password）
+        current_user: 當前用戶
+        db: 資料庫實例
+
+    Returns:
+        成功訊息
+
+    Raises:
+        HTTPException: 驗證失敗
+    """
+    user_repo = UserRepository(db)
+    audit_logger = get_audit_logger()
+    user_id = str(current_user["_id"])
+
+    # 從資料庫獲取完整用戶資料
+    user = await user_repo.get_by_id(user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="用戶不存在"
+        )
+
+    # 驗證 email 確認
+    if request.confirmation != user["email"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email 確認不符"
+        )
+
+    # 密碼用戶需驗證密碼
+    auth_providers = user.get("auth_providers", [])
+    if "password" in auth_providers:
+        if not request.password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="請輸入密碼以確認刪除"
+            )
+        if not verify_password(request.password, user["password_hash"]):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="密碼錯誤"
+            )
+
+    # 記錄刪除操作（在刪除前記錄）
+    await audit_logger.log_auth(
+        request=http_request,
+        action="delete_account",
+        user_id=user_id,
+        status_code=200,
+        message=f"帳號刪除: {user['email']}"
+    )
+
+    # 1. 取得用戶所有任務（用於刪除關聯資料）
+    from ..database.repositories.task_repo import TaskRepository
+    task_repo = TaskRepository(db)
+    user_tasks = await task_repo.collection.find(
+        {"$or": [{"user.user_id": user_id}, {"user_id": user_id}]},
+        {"_id": 1, "result.audio_file": 1, "audio_file": 1}
+    ).to_list(length=None)
+
+    task_ids = [task["_id"] for task in user_tasks]
+
+    # 2. 刪除 S3/本地音檔
+    from ..utils.storage_service import delete_audio_by_path
+    for task in user_tasks:
+        audio_path = task.get("result", {}).get("audio_file") or task.get("audio_file")
+        if audio_path:
+            try:
+                delete_audio_by_path(audio_path)
+            except Exception as e:
+                print(f"⚠️ 刪除音檔失敗 (task {task['_id']}): {e}")
+
+    # 3. 刪除關聯資料
+    if task_ids:
+        await db.transcriptions.delete_many({"_id": {"$in": task_ids}})
+        await db.segments.delete_many({"_id": {"$in": task_ids}})
+        await db.summaries.delete_many({"_id": {"$in": task_ids}})
+
+    # 4. 刪除任務
+    await task_repo.collection.delete_many(
+        {"$or": [{"user.user_id": user_id}, {"user_id": user_id}]}
+    )
+
+    # 5. 刪除標籤
+    await db.tags.delete_many({"user_id": user_id})
+
+    # 6. 抹除用戶個人資訊（軟刪除，保留 _id 讓 audit_logs 等仍可關聯到去識別帳號）
+    now = get_utc_timestamp()
+    await user_repo.update(user_id, {
+        "email": None,
+        "password_hash": None,
+        "google_id": None,
+        "auth_providers": [],
+        "is_active": False,
+        "deleted_at": now,
+        "refresh_tokens": [],
+        "preferences": {},
+        "verification_token": None,
+        "verification_expires": None,
+        "password_reset_token": None,
+        "password_reset_expires": None,
+        "password_reset_requested_at": None
+    })
+
+    return {"message": "帳號已永久刪除"}

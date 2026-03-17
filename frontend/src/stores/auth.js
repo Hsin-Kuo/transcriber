@@ -282,6 +282,28 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function deleteAccount(password, confirmation) {
+    loading.value = true
+    error.value = null
+
+    try {
+      await api.delete('/auth/account', {
+        data: { password, confirmation }
+      })
+      TokenManager.clearTokens()
+      user.value = null
+      return { success: true }
+    } catch (err) {
+      error.value = err.response?.data?.detail || '刪除帳號失敗'
+      return {
+        success: false,
+        error: error.value
+      }
+    } finally {
+      loading.value = false
+    }
+  }
+
   async function setPassword(newPassword) {
     loading.value = true
     error.value = null
@@ -333,6 +355,7 @@ export const useAuthStore = defineStore('auth', () => {
     googleLogin,
     bindGoogle,
     unbindGoogle,
+    deleteAccount,
     setPassword,
     updatePreferences
   }

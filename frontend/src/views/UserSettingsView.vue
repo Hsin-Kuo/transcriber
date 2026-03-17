@@ -162,6 +162,14 @@
         <!-- Google 操作訊息 -->
         <div v-if="googleError" class="google-message error">{{ googleError }}</div>
         <div v-if="googleSuccess" class="google-message success">{{ googleSuccess }}</div>
+
+        <!-- 刪除帳號 -->
+        <div class="setting-item delete-account-item">
+          <span class="setting-label delete-label">{{ $t('userSettings.deleteAccount') }}</span>
+          <button class="delete-account-btn" @click="showDeleteAccountModal = true">
+            {{ $t('userSettings.deleteAccount') }}
+          </button>
+        </div>
       </div>
 
       <!-- 介面設定 -->
@@ -374,6 +382,50 @@
       </div>
     </div>
 
+    <!-- 刪除帳號 Modal -->
+    <div v-if="showDeleteAccountModal" class="modal-overlay" @click.self="closeDeleteAccountModal">
+      <div class="modal delete-modal">
+        <h3 class="delete-modal-title">{{ $t('userSettings.deleteAccount') }}</h3>
+        <div class="modal-body">
+          <p class="delete-description">{{ $t('userSettings.deleteAccountDescription') }}</p>
+          <ul class="delete-items">
+            <li>{{ $t('userSettings.deleteAccountItem1') }}</li>
+            <li>{{ $t('userSettings.deleteAccountItem2') }}</li>
+            <li>{{ $t('userSettings.deleteAccountItem3') }}</li>
+          </ul>
+          <p class="delete-warning">{{ $t('userSettings.deleteAccountWarning') }}</p>
+
+          <div class="form-group">
+            <label>{{ $t('userSettings.deleteAccountConfirmLabel') }}</label>
+            <input
+              v-model="deleteAccountForm.confirmation"
+              type="email"
+              class="form-input"
+              :placeholder="authStore.user?.email"
+            />
+          </div>
+
+          <div v-if="authStore.hasPassword" class="form-group">
+            <label>{{ $t('userSettings.deleteAccountPasswordLabel') }}</label>
+            <input
+              v-model="deleteAccountForm.password"
+              type="password"
+              class="form-input"
+              :placeholder="$t('userSettings.deleteAccountPasswordPlaceholder')"
+            />
+          </div>
+
+          <p v-if="deleteAccountError" class="error-text">{{ deleteAccountError }}</p>
+        </div>
+        <div class="modal-footer">
+          <button @click="closeDeleteAccountModal" class="btn-cancel">{{ $t('userSettings.cancel') }}</button>
+          <button @click="confirmDeleteAccount" class="btn-delete" :disabled="isDeletingAccount">
+            {{ isDeletingAccount ? $t('userSettings.deleting') : $t('userSettings.deleteAccount') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- 設定密碼 Modal (OAuth 用戶) -->
     <div v-if="showSetPasswordModal" class="modal-overlay" @click.self="closeSetPasswordModal">
       <div class="modal">
@@ -453,12 +505,14 @@
 
 <script setup>
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useI18n } from 'vue-i18n'
 import api from '../utils/api'
 import { detectTimezone, detectTheme } from '../utils/defaults'
 import GoogleSignInButton from '../components/GoogleSignInButton.vue'
 
+const router = useRouter()
 const authStore = useAuthStore()
 const { t: $t, locale } = useI18n()
 
@@ -894,6 +948,53 @@ async function setPassword() {
 
   isSettingPassword.value = false
 }
+
+// 刪除帳號相關狀態
+const showDeleteAccountModal = ref(false)
+const isDeletingAccount = ref(false)
+const deleteAccountError = ref('')
+const deleteAccountForm = ref({
+  confirmation: '',
+  password: ''
+})
+
+function closeDeleteAccountModal() {
+  showDeleteAccountModal.value = false
+  deleteAccountForm.value = { confirmation: '', password: '' }
+  deleteAccountError.value = ''
+}
+
+async function confirmDeleteAccount() {
+  deleteAccountError.value = ''
+
+  // 驗證 email 確認
+  if (deleteAccountForm.value.confirmation !== authStore.user?.email) {
+    deleteAccountError.value = $t('userSettings.errorEmailConfirmMismatch')
+    return
+  }
+
+  // 密碼用戶需輸入密碼
+  if (authStore.hasPassword && !deleteAccountForm.value.password) {
+    deleteAccountError.value = $t('userSettings.errorDeletePasswordRequired')
+    return
+  }
+
+  isDeletingAccount.value = true
+
+  const result = await authStore.deleteAccount(
+    deleteAccountForm.value.password || null,
+    deleteAccountForm.value.confirmation
+  )
+
+  if (result.success) {
+    closeDeleteAccountModal()
+    router.push('/login')
+  } else {
+    deleteAccountError.value = result.error || $t('userSettings.errorDeleteFailed')
+  }
+
+  isDeletingAccount.value = false
+}
 </script>
 
 <style scoped>
@@ -1098,7 +1199,7 @@ async function setPassword() {
   flex-direction: column;
   align-items: flex-start;
   align-self: center;
-  border: 0.5px solid var(--main-text);
+  border: 0.5px solid var(--main-text-light);
   border-radius: 10px;
   padding: 29px;
   width: 280px;
@@ -1237,8 +1338,8 @@ async function setPassword() {
 .plan-indicator-actions {
   display: flex;
   gap: 14px;
-  margin-top: 13px;
-  margin-bottom: 6px;
+  margin-top: 12px;
+  margin-bottom: 5px;
   align-self: center;
 }
 
@@ -1756,6 +1857,78 @@ async function setPassword() {
   color: var(--main-text-light);
   font-size: 0.9rem;
   margin: -10px 0 20px 0;
+}
+
+/* 刪除帳號 */
+.delete-account-item {
+  padding-top: 16px;
+}
+
+.delete-label {
+  color: var(--main-text-light) !important;
+}
+
+.delete-account-btn {
+  padding: 8px 16px;
+  background: transparent;
+  color: var(--color-danger, #dc3545);
+  border: 1px solid var(--color-danger, #dc3545);
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.delete-account-btn:hover {
+  background: var(--color-danger, #dc3545);
+  color: white;
+}
+
+.delete-modal-title {
+  color: var(--color-danger, #dc3545) !important;
+}
+
+.delete-description {
+  color: var(--main-text);
+  font-size: 0.9rem;
+  margin: 0 0 8px 0;
+}
+
+.delete-items {
+  margin: 0 0 12px 0;
+  padding-left: 20px;
+  color: var(--main-text-light);
+  font-size: 0.85rem;
+  line-height: 1.8;
+}
+
+.delete-warning {
+  color: var(--color-danger, #dc3545);
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin: 0 0 16px 0;
+}
+
+.btn-delete {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: var(--color-danger, #dc3545);
+  color: white;
+}
+
+.btn-delete:hover {
+  opacity: 0.9;
+}
+
+.btn-delete:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* 配額卡片樣式 */

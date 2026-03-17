@@ -80,7 +80,20 @@
     "summaryExpand": "AI 摘要展開",
     "summaryAlwaysOpen": "總是展開",
     "summaryAlwaysCollapsed": "總是收合",
-    "summaryFollowLast": "記住上次狀態"
+    "summaryFollowLast": "記住上次狀態",
+    "deleteAccount": "刪除帳號",
+    "deleteAccountDescription": "此操作將永久刪除您的帳號及所有資料，包括：",
+    "deleteAccountItem1": "個人資料（Email、密碼、Google 綁定）",
+    "deleteAccountItem2": "所有轉錄任務及音檔",
+    "deleteAccountItem3": "AI 摘要及標籤",
+    "deleteAccountWarning": "此操作無法復原。",
+    "deleteAccountConfirmLabel": "請輸入您的 Email 以確認刪除",
+    "deleteAccountPasswordLabel": "請輸入密碼以確認",
+    "deleteAccountPasswordPlaceholder": "請輸入密碼",
+    "deleting": "刪除中...",
+    "errorEmailConfirmMismatch": "Email 不符",
+    "errorDeletePasswordRequired": "請輸入密碼",
+    "errorDeleteFailed": "刪除帳號失敗，請稍後再試"
   },
   "navigation": {
     "expandSidebar": "展開側欄",
