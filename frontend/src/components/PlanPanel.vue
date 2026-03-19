@@ -52,6 +52,7 @@
           <button
             v-if="currentTier !== plan.key"
             class="plan-select-btn"
+            @click="selectPlan(plan.key)"
           >
             {{ $t('userSettings.planPanel.selectPlan') }}
           </button>
@@ -116,16 +117,23 @@
 
 <script setup>
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
 const { t: $t } = useI18n()
+const router = useRouter()
 
-defineProps({
+const props = defineProps({
   modelValue: { type: Boolean, default: false },
   currentTier: { type: String, default: 'free' }
 })
 
-defineEmits(['update:modelValue'])
+const emit = defineEmits(['update:modelValue'])
+
+function selectPlan(planKey) {
+  emit('update:modelValue', false)
+  router.push({ path: '/checkout', query: { plan: planKey, billing: billing.value } })
+}
 
 const billing = ref('monthly')
 
