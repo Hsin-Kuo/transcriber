@@ -22,7 +22,7 @@ const routes = [
     }
   },
   {
-    path: '/tasks',
+    path: '/all',
     name: 'tasks',
     component: TasksView,
     meta: {

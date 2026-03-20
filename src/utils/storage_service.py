@@ -111,7 +111,10 @@ def save_audio(task_id: str, local_path: Path, tier: str = "free") -> str:
     _validate_task_id(task_id)
     if is_aws():
         key = _audio_s3_key(task_id, tier)
-        _get_s3().upload_file(str(local_path), S3_BUCKET, key)
+        _get_s3().upload_file(
+            str(local_path), S3_BUCKET, key,
+            ExtraArgs={"ContentType": "audio/mpeg"}
+        )
         local_path.unlink(missing_ok=True)
         return f"s3://{S3_BUCKET}/{key}"
     else:
@@ -156,7 +159,11 @@ def get_audio_presigned_url(task_id: str, expires_in: int = 3600, tier: str = "f
     key = _audio_s3_key(task_id, tier)
     return _get_s3().generate_presigned_url(
         "get_object",
-        Params={"Bucket": S3_BUCKET, "Key": key},
+        Params={
+            "Bucket": S3_BUCKET,
+            "Key": key,
+            "ResponseContentType": "audio/mpeg",
+        },
         ExpiresIn=expires_in,
     )
 
@@ -303,7 +310,11 @@ def get_presigned_url_by_path(audio_file_path: str, expires_in: int = 3600) -> O
     expires_in = min(expires_in, MAX_PRESIGNED_URL_TTL)
     return _get_s3().generate_presigned_url(
         "get_object",
-        Params={"Bucket": S3_BUCKET, "Key": key},
+        Params={
+            "Bucket": S3_BUCKET,
+            "Key": key,
+            "ResponseContentType": "audio/mpeg",
+        },
         ExpiresIn=expires_in,
     )
 
