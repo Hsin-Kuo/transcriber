@@ -139,7 +139,7 @@ function updateNavWidth() {
 async function loadRecentTasks() {
   if (!authStore.isAuthenticated) return
   try {
-    const response = await api.get('/all/recent', {
+    const response = await api.get('/tasks/recent', {
       params: { limit: 10 }
     })
     recentTasks.value = response.data.tasks || []
