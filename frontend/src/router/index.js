@@ -4,6 +4,7 @@ import TranscriptionView from '../views/TranscriptionView.vue'
 import TasksView from '../views/TasksView.vue'
 import UserSettingsView from '../views/UserSettingsView.vue'
 import TranscriptDetailView from '../views/TranscriptDetailView.vue'
+import CheckoutView from '../views/CheckoutView.vue'
 import LoginView from '../views/auth/LoginView.vue'
 import RegisterView from '../views/auth/RegisterView.vue'
 import VerifyEmailView from '../views/auth/VerifyEmailView.vue'
@@ -36,6 +37,16 @@ const routes = [
     meta: {
       title: '使用者設定',
       requiresAuth: true
+    }
+  },
+  {
+    path: '/checkout',
+    name: 'checkout',
+    component: CheckoutView,
+    meta: {
+      title: '結帳',
+      requiresAuth: true,
+      hideNav: true
     }
   },
   {

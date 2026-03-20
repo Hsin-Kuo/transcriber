@@ -11,7 +11,7 @@
 
   /* 背景色系 */
   --color-bg: var(--palette-gray-50);
-  --color-bg-light: var(--palette-cream-light);
+  --color-bg-light: var(--palette-cream-lighter);
   --color-bg-lighter: var(--palette-cream-lighter);
   --color-bg-dark: var(--palette-blue-gray-light);
 

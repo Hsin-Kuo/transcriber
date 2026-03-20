@@ -36,7 +36,7 @@ const notificationToast = ref(null)
 
 // 判斷是否顯示導航欄（訪客頁面不顯示）
 const showNavigation = computed(() => {
-  return !route.meta.guest
+  return !route.meta.guest && !route.meta.hideNav
 })
 
 // 提供全局通知方法

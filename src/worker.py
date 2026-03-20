@@ -479,7 +479,6 @@ def process_task(message_body: dict):
 def _shutdown_instance():
     """關閉當前 EC2 實例"""
     try:
-        # 獲取當前實例 ID
         import urllib.request
         token_req = urllib.request.Request(
             "http://169.254.169.254/latest/api/token",
