@@ -36,7 +36,7 @@
       </router-link> -->
 
       <!-- 所有任務按鈕 -->
-      <router-link v-if="authStore.isAuthenticated" to="/tasks" class="nav-link" active-class="active" :title="isCollapsed ? $t('navigation.allTasks') : ''" @click="clearTaskFilters">
+      <router-link v-if="authStore.isAuthenticated" to="/all" class="nav-link" active-class="active" :title="isCollapsed ? $t('navigation.allTasks') : ''" @click="clearTaskFilters">
         <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           <!-- 9條-45度斜線構成的正方形 -->
           <!-- 線 2 -->
@@ -139,7 +139,7 @@ function updateNavWidth() {
 async function loadRecentTasks() {
   if (!authStore.isAuthenticated) return
   try {
-    const response = await api.get('/tasks/recent', {
+    const response = await api.get('/all/recent', {
       params: { limit: 10 }
     })
     recentTasks.value = response.data.tasks || []
@@ -203,7 +203,7 @@ watch(() => authStore.isAuthenticated, (isAuth) => {
 
 // 可選：監聽路由變化，從任務頁面返回時刷新
 watch(() => route.path, (newPath, oldPath) => {
-  if (newPath === '/' && oldPath === '/tasks') {
+  if (newPath === '/' && oldPath === '/all') {
     loadRecentTasks()
   }
 })
