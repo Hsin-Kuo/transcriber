@@ -99,9 +99,10 @@ async def get_shared_task(
     # 取得逐字稿內容
     content = ""
     result_info = task.get("result", {})
+    task_id = str(task["_id"])
 
-    # 從 transcriptions collection 讀取
-    content_doc = await db.transcriptions.find_one({"task_id": str(task["_id"])})
+    # 從 transcriptions collection 讀取（_id = task_id）
+    content_doc = await db.transcriptions.find_one({"_id": task_id})
     if content_doc:
         content = content_doc.get("content", "")
     else:
@@ -116,20 +117,24 @@ async def get_shared_task(
     # 取得 segments
     segments = []
     speaker_names = task.get("speaker_names", {})
-    segment_doc = await db.segments.find_one({"task_id": str(task["_id"])})
+    segment_doc = await db.segments.find_one({"_id": task_id})
     if segment_doc:
         segments = segment_doc.get("segments", [])
 
     # 判斷音檔是否可用
     has_audio = bool(result_info.get("audio_file"))
 
+    # 序列化日期
+    created_at = task.get("timestamps", {}).get("completed_at") or task.get("timestamps", {}).get("created_at")
+    if isinstance(created_at, datetime):
+        created_at = created_at.isoformat()
+
     # 準備返回的公開資料（僅包含必要欄位）
-    task_id = str(task["_id"])
     return {
         "task_id": task_id,
         "display_name": task.get("custom_name") or task.get("file", {}).get("filename", ""),
         "task_type": task.get("task_type", "paragraph"),
-        "created_at": task.get("timestamps", {}).get("completed_at") or task.get("timestamps", {}).get("created_at"),
+        "created_at": created_at,
         "duration_text": _format_duration(task.get("stats", {}).get("duration_seconds")),
         "text_length": result_info.get("text_length"),
         "content": content,
