@@ -293,6 +293,7 @@
     "keepAudioTooltipNewest": "Audio from newest task is kept automatically (not counted in 3-file limit)",
     "keepAudioTooltipFull": "Maximum 3 audio files can be kept",
     "keepAudioTooltipNormal": "Check to keep this audio file (max 3)",
+    "confirmUnpinAudio": "Are you sure you want to unpin this audio?\n\nThe audio file will be automatically deleted if it has exceeded the retention period based on its original upload time.",
     "errorFetchTagColors": "Failed to fetch tag colors",
     "errorFetchTagOrder": "Failed to fetch tag order",
     "errorUpdateTags": "Failed to update tags",

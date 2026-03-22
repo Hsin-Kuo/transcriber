@@ -293,6 +293,7 @@
     "keepAudioTooltipNewest": "最新音檔會自動保留（不計入3個勾選限制）",
     "keepAudioTooltipFull": "最多只能勾選3個音檔",
     "keepAudioTooltipNormal": "勾選以保留此音檔（最多3個）",
+    "confirmUnpinAudio": "確定要取消保留音檔嗎？\n\n該音檔將根據原始上傳時間判斷，若已超過保留期限將會被自動刪除。",
     "errorFetchTagColors": "獲取標籤顏色失敗",
     "errorFetchTagOrder": "獲取標籤順序失敗",
     "errorUpdateTags": "更新標籤失敗",
