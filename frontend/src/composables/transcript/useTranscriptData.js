@@ -66,6 +66,7 @@ export function useTranscriptData() {
         task_type: task.task_type || 'paragraph',
         summary_status: task.summary_status || null,
         tags: task.tags || [],
+        share_token: task.share_token || null,
         content: ''
       }
 

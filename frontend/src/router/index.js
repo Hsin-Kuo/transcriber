@@ -10,6 +10,7 @@ import RegisterView from '../views/auth/RegisterView.vue'
 import VerifyEmailView from '../views/auth/VerifyEmailView.vue'
 import ForgotPasswordView from '../views/auth/ForgotPasswordView.vue'
 import ResetPasswordView from '../views/auth/ResetPasswordView.vue'
+import SharedTranscriptView from '../views/SharedTranscriptView.vue'
 
 const routes = [
   {
@@ -101,6 +102,16 @@ const routes = [
     meta: {
       title: '重設密碼',
       guest: true
+    }
+  },
+  {
+    path: '/s/:token',
+    name: 'sharedTranscript',
+    component: SharedTranscriptView,
+    meta: {
+      title: '分享的逐字稿',
+      public: true,
+      hideNav: true
     }
   }
 ]

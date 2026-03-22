@@ -285,6 +285,7 @@ class TaskRepository:
         await self.collection.create_index([("user_id", 1), ("created_at", -1)])
         await self.collection.create_index([("user_id", 1), ("status", 1)])
         await self.collection.create_index("status")
+        await self.collection.create_index("share_token", sparse=True)
         print("✅ 任務索引已建立")
 
     async def bulk_update_tags_add(self, task_ids: List[str], user_id: str, tags_to_add: List[str]) -> int:

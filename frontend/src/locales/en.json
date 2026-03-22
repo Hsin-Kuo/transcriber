@@ -570,5 +570,25 @@
     "copied": "Copied",
     "quotaRemaining": "{count} remaining this month",
     "quotaExhausted": "AI summary quota exhausted this month"
+  },
+  "shared": {
+    "publicLink": "Public Link",
+    "loading": "Loading...",
+    "notFound": "This share link is invalid or has been revoked",
+    "loadError": "Failed to load shared content",
+    "audioLoadError": "Failed to load audio",
+    "chars": "chars",
+    "poweredBy": "Powered by Sound Lite",
+    "shareButton": "Share",
+    "shareTitle": "Public Sharing",
+    "shareDesc": "Once enabled, anyone with the link can view this transcript",
+    "shareEnabled": "Public sharing enabled",
+    "shareDisabled": "Public sharing disabled",
+    "copyLink": "Copy Link",
+    "linkCopied": "Link copied",
+    "disableShare": "Disable Sharing",
+    "paidOnly": "Public sharing is only available for paid plans",
+    "enableShare": "Enable Sharing",
+    "onlyCompleted": "Only completed tasks can be shared"
   }
 }

@@ -570,5 +570,25 @@
     "copied": "已複製",
     "quotaRemaining": "本月剩餘 {count} 次",
     "quotaExhausted": "本月 AI 摘要次數已用完"
+  },
+  "shared": {
+    "publicLink": "公開連結",
+    "loading": "載入中...",
+    "notFound": "此分享連結無效或已被取消",
+    "loadError": "載入分享內容失敗",
+    "audioLoadError": "音檔載入失敗",
+    "chars": "字",
+    "poweredBy": "由 Sound Lite 提供",
+    "shareButton": "分享",
+    "shareTitle": "公開分享",
+    "shareDesc": "開啟後，任何人都可以透過連結閱覽此逐字稿",
+    "shareEnabled": "已開啟公開分享",
+    "shareDisabled": "已取消公開分享",
+    "copyLink": "複製連結",
+    "linkCopied": "連結已複製",
+    "disableShare": "取消分享",
+    "paidOnly": "公開分享功能僅限付費方案使用",
+    "enableShare": "開啟分享",
+    "onlyCompleted": "只有已完成的任務可以分享"
   }
 }
