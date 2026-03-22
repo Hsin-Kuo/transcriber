@@ -124,9 +124,11 @@ async def get_shared_task(
     # 判斷音檔是否可用
     has_audio = bool(result_info.get("audio_file"))
 
-    # 序列化日期
+    # 序列化日期（timestamps 儲存為 Unix epoch 秒數）
     created_at = task.get("timestamps", {}).get("completed_at") or task.get("timestamps", {}).get("created_at")
-    if isinstance(created_at, datetime):
+    if isinstance(created_at, (int, float)):
+        created_at = datetime.fromtimestamp(created_at, tz=timezone.utc).isoformat()
+    elif isinstance(created_at, datetime):
         created_at = created_at.isoformat()
 
     # 準備返回的公開資料（僅包含必要欄位）
