@@ -391,7 +391,9 @@ def _is_audio_expired(task: Dict[str, Any], retention_days: int) -> bool:
     if not completed_at:
         return False
 
-    if isinstance(completed_at, str):
+    if isinstance(completed_at, (int, float)):
+        completed_at = datetime.fromtimestamp(completed_at, tz=timezone.utc)
+    elif isinstance(completed_at, str):
         completed_at = datetime.fromisoformat(completed_at)
 
     if completed_at.tzinfo is None:
