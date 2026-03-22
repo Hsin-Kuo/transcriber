@@ -105,6 +105,7 @@
               <label class="toggle-label">
                 <div class="toggle-pin-wrapper">
                   <input
+                    ref="keepAudioCheckbox"
                     type="checkbox"
                     :checked="task.keep_audio"
                     @change="handleToggleKeepAudio"
@@ -180,6 +181,7 @@
 </template>
 
 <script setup>
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTaskHelpers } from '../../composables/task/useTaskHelpers'
 import TaskTagsSection from './TaskTagsSection.vue'
@@ -262,7 +264,19 @@ function handleCardClick() {
   }
 }
 
+const keepAudioCheckbox = ref(null)
+
 function handleToggleKeepAudio() {
+  // 取消釘選時，提醒用戶音檔可能被刪除
+  if (props.task.keep_audio) {
+    if (!confirm($t('taskList.confirmUnpinAudio'))) {
+      // 恢復 checkbox 狀態
+      if (keepAudioCheckbox.value) {
+        keepAudioCheckbox.value.checked = true
+      }
+      return
+    }
+  }
   emit('toggle-keep-audio', props.task)
 }
 

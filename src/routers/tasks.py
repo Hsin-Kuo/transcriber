@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import StreamingResponse
 from typing import Dict, Any
 from pathlib import Path
+from datetime import datetime, timezone
 import asyncio
 import json
 import os
@@ -181,6 +182,12 @@ async def get_tasks(
     Returns:
         任務列表
     """
+    # 取得用戶 tier 的音檔保留天數
+    from ..models.quota import QUOTA_TIERS, QuotaTier
+    user_tier = current_user.get("quota", {}).get("tier", "free")
+    tier_config = QUOTA_TIERS.get(QuotaTier(user_tier), QUOTA_TIERS[QuotaTier.FREE])
+    retention_days = tier_config.get("audio_retention_days", 7)
+
     # 解析標籤參數
     tags_list = None
     if tags:
@@ -206,7 +213,7 @@ async def get_tasks(
             enriched_task = await task_service.get_task(task_id, str(current_user["_id"]))
             if enriched_task and enriched_task.get("status") in ["pending", "processing"]:
                 enriched = enrich_task_data(enriched_task)
-                filtered = filter_task_for_list(enriched)
+                filtered = filter_task_for_list(enriched, retention_days)
                 active_tasks.append(filtered)
 
         return {
@@ -235,7 +242,7 @@ async def get_tasks(
             enriched_task = await task_service.get_task(task_id, str(current_user["_id"]))
             if enriched_task:
                 enriched = enrich_task_data(enriched_task)
-                filtered = filter_task_for_list(enriched)
+                filtered = filter_task_for_list(enriched, retention_days)
                 enriched_tasks.append(filtered)
 
         # 計算總數（包含 task_type 和 tags 篩選）
@@ -364,11 +371,43 @@ def get_task_field(task: Dict[str, Any], field: str) -> Any:
     return value
 
 
-def filter_task_for_list(task: Dict[str, Any]) -> Dict[str, Any]:
+def _is_audio_expired(task: Dict[str, Any], retention_days: int) -> bool:
+    """判斷音檔是否已被 S3 Lifecycle 自動刪除
+
+    根據完成時間 + tier 保留天數計算，不需要呼叫 S3。
+    keep_audio 的音檔存在 kept/ 資料夾，不受 lifecycle 影響。
+
+    Args:
+        task: 任務數據
+        retention_days: 該 tier 的保留天數
+
+    Returns:
+        True 表示音檔已過期
+    """
+    if task.get("keep_audio"):
+        return False  # 釘選的音檔不會被 lifecycle 刪除
+
+    completed_at = task.get("timestamps", {}).get("completed_at")
+    if not completed_at:
+        return False
+
+    if isinstance(completed_at, str):
+        completed_at = datetime.fromisoformat(completed_at)
+
+    if completed_at.tzinfo is None:
+        completed_at = completed_at.replace(tzinfo=timezone.utc)
+
+    from datetime import timedelta
+    expiry_time = completed_at + timedelta(days=retention_days)
+    return datetime.now(timezone.utc) > expiry_time
+
+
+def filter_task_for_list(task: Dict[str, Any], retention_days: int = 7) -> Dict[str, Any]:
     """過濾任務數據，只返回前端列表需要的字段
 
     Args:
         task: 完整的任務數據
+        retention_days: 用戶 tier 的音檔保留天數
 
     Returns:
         過濾後的任務數據（只包含前端需要的字段）
@@ -398,11 +437,19 @@ def filter_task_for_list(task: Dict[str, Any]) -> Dict[str, Any]:
 
     # result 信息（只保留前端需要的）
     if task.get("result"):
+        audio_file = task["result"].get("audio_file")
+        audio_filename = task["result"].get("audio_filename")
+
+        # 音檔已被 S3 Lifecycle 自動刪除時，不回傳 audio_file
+        if audio_file and _is_audio_expired(task, retention_days):
+            audio_file = None
+            audio_filename = None
+
         filtered["result"] = {
             "text_length": task["result"].get("text_length"),
             "word_count": task["result"].get("word_count"),
-            "audio_file": task["result"].get("audio_file"),
-            "audio_filename": task["result"].get("audio_filename")
+            "audio_file": audio_file,
+            "audio_filename": audio_filename
         }
 
     # error 信息（失敗時需要）
@@ -1021,8 +1068,15 @@ async def update_keep_audio(
             # 搬到 kept 資料夾（不受 Lifecycle 影響）
             new_audio_path = move_audio(task_id, current_tier, "kept")
         elif not new_keep_audio and current_tier == "kept":
-            # 搬回原本的 tier 資料夾（重新受 Lifecycle 管理）
-            new_audio_path = move_audio(task_id, "kept", user_tier)
+            # 檢查音檔是否已超過保留期限
+            if _is_audio_expired(task, tier_config.get("audio_retention_days", 7)):
+                # 已過期，直接刪除
+                storage_delete_audio_by_path(audio_file_path)
+                new_audio_path = None
+                print(f"🗑️ 音檔已超過保留期限，直接刪除: {audio_file_path}")
+            else:
+                # 未過期，搬回原本的 tier 資料夾（重新受 Lifecycle 管理）
+                new_audio_path = move_audio(task_id, "kept", user_tier)
 
     # 更新設定
     update_fields = {"keep_audio": new_keep_audio}

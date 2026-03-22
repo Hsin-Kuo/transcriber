@@ -60,6 +60,13 @@ export const NEW_ENDPOINTS = {
     complete: (uploadId) => `/uploads/${uploadId}/complete`,
   },
 
+  // 公開分享
+  shared: {
+    toggle: (taskId) => `/shared/${taskId}/toggle`,
+    get: (token) => `/shared/${token}`,
+    audio: (token) => `/shared/${token}/audio`,
+  },
+
   // AI 摘要
   summaries: {
     generate: (taskId) => `/summaries/${taskId}`,

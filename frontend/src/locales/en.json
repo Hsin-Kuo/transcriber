@@ -293,6 +293,7 @@
     "keepAudioTooltipNewest": "Audio from newest task is kept automatically (not counted in 3-file limit)",
     "keepAudioTooltipFull": "Maximum 3 audio files can be kept",
     "keepAudioTooltipNormal": "Check to keep this audio file (max 3)",
+    "confirmUnpinAudio": "Are you sure you want to unpin this audio?\n\nThe audio file will be automatically deleted if it has exceeded the retention period based on its original upload time.",
     "errorFetchTagColors": "Failed to fetch tag colors",
     "errorFetchTagOrder": "Failed to fetch tag order",
     "errorUpdateTags": "Failed to update tags",
@@ -569,5 +570,25 @@
     "copied": "Copied",
     "quotaRemaining": "{count} remaining this month",
     "quotaExhausted": "AI summary quota exhausted this month"
+  },
+  "shared": {
+    "publicLink": "Public Link",
+    "loading": "Loading...",
+    "notFound": "This share link is invalid or has been revoked",
+    "loadError": "Failed to load shared content",
+    "audioLoadError": "Failed to load audio",
+    "chars": "chars",
+    "poweredBy": "Powered by Sound Lite",
+    "shareButton": "Share",
+    "shareTitle": "Public Sharing",
+    "shareDesc": "Once enabled, anyone with the link can view this transcript",
+    "shareEnabled": "Public sharing enabled",
+    "shareDisabled": "Public sharing disabled",
+    "copyLink": "Copy Link",
+    "linkCopied": "Link copied",
+    "disableShare": "Disable Sharing",
+    "paidOnly": "Public sharing is only available for paid plans",
+    "enableShare": "Enable Sharing",
+    "onlyCompleted": "Only completed tasks can be shared"
   }
 }
