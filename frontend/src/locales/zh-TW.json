@@ -482,7 +482,11 @@
     "successMessage": "成功建立 {count} 個轉錄任務",
     "partialSuccess": "部分建立成功",
     "partialSuccessMessage": "成功建立 {created} 個任務，{failed} 個失敗",
-    "failed": "批次建立失敗"
+    "failed": "批次建立失敗",
+    "uploadingFiles": "上傳中...",
+    "uploadingProgress": "正在上傳第 {current}/{total} 個檔案",
+    "preparing": "準備中...",
+    "progressHint": "上傳期間可以切換分頁，不影響進度。重新整理也不會影響已建立的任務。"
   },
   "auth": {
     "loadingGoogle": "載入 Google 登入...",
@@ -572,7 +576,7 @@
     "quotaExhausted": "本月 AI 摘要次數已用完"
   },
   "shared": {
-    "publicLink": "公開連結",
+    "publicLink": "公開分享",
     "loading": "載入中...",
     "notFound": "此分享連結無效或已被取消",
     "loadError": "載入分享內容失敗",
@@ -589,6 +593,11 @@
     "disableShare": "取消分享",
     "paidOnly": "公開分享功能僅限付費方案使用",
     "enableShare": "開啟分享",
-    "onlyCompleted": "只有已完成的任務可以分享"
+    "onlyCompleted": "只有已完成的任務可以分享",
+    "aiSummary": "AI 總結",
+    "summaryTitle": "摘要",
+    "keyPoints": "重點",
+    "contentSegments": "內容段落",
+    "actionItems": "待辦事項"
   }
 }

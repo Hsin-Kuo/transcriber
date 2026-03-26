@@ -23,7 +23,7 @@ from ..services.utils.whisper_processor import WhisperProcessor
 from ..services.utils.punctuation_processor import PunctuationProcessor
 from ..services.utils.diarization_processor import DiarizationProcessor
 from ..utils.storage_service import is_aws
-from ..utils.config_loader import get_parameter
+from ..utils.config_loader import get_parameter, get_temp_dir
 import os
 import asyncio
 
@@ -216,6 +216,7 @@ async def create_transcription(
     language: str = Form("zh", description="轉錄語言 (zh/en/ja/ko/auto)"),
     tags: Optional[str] = Form(None, description="標籤（JSON 陣列字串）"),
     upload_id: Optional[str] = Form(None, description="分片上傳完成後的 upload_id（替代直接上傳檔案）"),
+    merge_upload_ids: Optional[str] = Form(None, description="合併模式分片上傳的 upload_id 陣列（JSON）"),
     current_user: dict = Depends(get_current_user),
     db = Depends(get_database)
 ):
@@ -237,6 +238,8 @@ async def create_transcription(
         max_speakers: 最大講者人數（2-10）
         language: 轉錄語言
         tags: 標籤
+        upload_id: 分片上傳的 upload_id（單檔）
+        merge_upload_ids: 合併模式分片上傳的 upload_id 陣列（JSON）
         current_user: 當前用戶
         db: 資料庫實例
 
@@ -264,9 +267,46 @@ async def create_transcription(
         # 從 active_uploads 移除（後續由本函數管理 temp_dir 生命週期）
         remove_upload(upload_id)
 
+    # ── 合併模式分片上傳：多個 upload_id 組成合併任務 ──
+    use_merge_chunked = False
+    merge_chunked_paths = []
+    merge_temp_dirs = []
+
+    if merge_upload_ids:
+        from .uploads import get_upload_meta, remove_upload
+        try:
+            uid_list = json.loads(merge_upload_ids)
+        except json.JSONDecodeError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "merge_upload_ids 格式錯誤")
+
+        if len(uid_list) < 2:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "合併模式至少需要 2 個檔案")
+
+        for uid in uid_list:
+            meta = get_upload_meta(uid)
+            if not meta:
+                # 清理已取出的 temp_dirs
+                for d in merge_temp_dirs:
+                    if d.exists():
+                        shutil.rmtree(d)
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, f"upload_id {uid} 無效或尚未完成組裝")
+            if meta["user_id"] != str(current_user["_id"]):
+                for d in merge_temp_dirs:
+                    if d.exists():
+                        shutil.rmtree(d)
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "無權使用此上傳")
+            remove_upload(uid)
+            merge_chunked_paths.append(meta["assembled_path"])
+            merge_temp_dirs.append(meta["temp_dir"])
+
+        use_merge_chunked = True
+        merge_files = True  # 強制進入合併流程
+
     # 處理檔案參數
     if use_chunked_upload:
         uploaded_files = []  # 不需要 UploadFile，後面會直接使用 chunked_audio_path
+    elif use_merge_chunked:
+        uploaded_files = []  # 合併分片模式，後面會直接使用 merge_chunked_paths
     elif merge_files and files and len(files) > 0:
         # 合併模式：多檔案
         if len(files) < 2:
@@ -359,8 +399,10 @@ async def create_transcription(
     # 建立臨時目錄（分片上傳模式直接複用已有的 temp_dir）
     if use_chunked_upload:
         temp_dir = chunked_temp_dir
+    elif use_merge_chunked:
+        temp_dir = get_temp_dir()  # 合併結果輸出到新的暫存目錄
     else:
-        temp_dir = Path(tempfile.mkdtemp())
+        temp_dir = get_temp_dir()
 
     try:
         # 如果是多檔案，先合併
@@ -372,6 +414,33 @@ async def create_transcription(
             temp_audio = chunked_audio_path
             original_filename = custom_name.strip() if custom_name and custom_name.strip() else chunked_audio_path.name
             print(f"📁 分片上傳模式：使用已組裝檔案 {chunked_audio_path.name} ({chunked_audio_path.stat().st_size / 1024 / 1024:.2f} MB)")
+        elif use_merge_chunked:
+            # ── 合併模式（分片上傳）：多個已組裝檔案合併 ──
+            print(f"🔄 合併模式（分片）：{len(merge_chunked_paths)} 個檔案")
+            for idx, p in enumerate(merge_chunked_paths):
+                print(f"  📁 {idx + 1}. {p.name} ({p.stat().st_size / 1024 / 1024:.2f} MB)")
+
+            audio_service = AudioService()
+            unique_id = str(uuid.uuid4())[:8]
+            merged_output_path = temp_dir / f"merged_{unique_id}.mp3"
+            merged_audio_path = audio_service.merge_audio_files(
+                merge_chunked_paths,
+                output_path=merged_output_path
+            )
+            temp_audio = merged_audio_path
+
+            if custom_name and custom_name.strip():
+                original_filename = f"{custom_name.strip()}.mp3"
+            else:
+                original_filename = merge_chunked_paths[0].name.rsplit('.', 1)[0] + '.mp3'
+
+            print(f"✅ 合併完成：{merged_audio_path}")
+            print(f"   任務名稱：{original_filename}")
+
+            # 清理分片上傳的暫存目錄（合併結果已在 temp_dir 中）
+            for d in merge_temp_dirs:
+                if d.exists():
+                    shutil.rmtree(d, ignore_errors=True)
         elif len(uploaded_files) > 1:
             print(f"🔄 合併模式：{len(uploaded_files)} 個檔案")
 
@@ -1615,7 +1684,7 @@ async def create_batch_transcriptions(
                 original_filename = chunked_meta["filename"]
             else:
                 # 直接上傳模式
-                temp_dir = Path(tempfile.mkdtemp())
+                temp_dir = get_temp_dir()
                 file_suffix = Path(upload_file.filename).suffix
                 temp_audio = temp_dir / f"input{file_suffix}"
 

@@ -33,7 +33,7 @@ from pymongo import MongoClient
 
 from src.utils.storage_service import download_audio, save_audio
 from src.utils.time_utils import get_utc_timestamp
-from src.utils.config_loader import get_parameter
+from src.utils.config_loader import get_parameter, get_temp_dir
 
 
 # ===== 設定 =====
@@ -276,7 +276,7 @@ def process_task(message_body: dict):
     task_doc = db.tasks.find_one({"_id": task_id})
     user_tier = task_doc.get("user", {}).get("tier", "free") if task_doc else "free"
 
-    temp_dir = Path(tempfile.mkdtemp())
+    temp_dir = get_temp_dir()
 
     try:
         # 1. 從 S3 下載音檔

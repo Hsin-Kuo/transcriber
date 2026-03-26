@@ -9,6 +9,7 @@ import shutil
 
 from ..auth.dependencies import get_current_user
 from ..services.audio_service import AudioService
+from ..utils.config_loader import get_temp_dir
 
 
 router = APIRouter(prefix="/audio", tags=["Audio"])
@@ -56,7 +57,7 @@ def get_audio_service() -> AudioService:
 #             ]
 #         }
 #     """
-#     temp_dir = Path(tempfile.mkdtemp())
+#     temp_dir = get_temp_dir()
 
 #     try:
 #         # 保存上傳的音檔
@@ -287,7 +288,7 @@ async def merge_audio_files(
         )
 
     # 創建臨時目錄
-    temp_dir = Path(tempfile.mkdtemp())
+    temp_dir = get_temp_dir()
 
     try:
         # 保存上傳的檔案

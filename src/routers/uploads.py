@@ -2,7 +2,6 @@
 import uuid
 import asyncio
 import shutil
-import tempfile
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
@@ -10,6 +9,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 
 from ..auth.dependencies import get_current_user
+from ..utils.config_loader import get_temp_dir
 
 router = APIRouter(prefix="/uploads", tags=["Uploads"])
 
@@ -38,7 +38,7 @@ async def init_upload(
 
     total_chunks = (total_size + CHUNK_SIZE - 1) // CHUNK_SIZE
     upload_id = str(uuid.uuid4())
-    temp_dir = Path(tempfile.mkdtemp(prefix="chunk_"))
+    temp_dir = get_temp_dir(prefix="chunk_")
 
     _active_uploads[upload_id] = {
         "user_id": str(current_user["_id"]),

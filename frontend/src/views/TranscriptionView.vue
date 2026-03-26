@@ -24,6 +24,10 @@
       v-if="batchMode.isActive"
       :initial-files="batchMode.files"
       :existing-tags="allTags"
+      :uploading="uploading"
+      :upload-progress="uploadProgress"
+      :upload-current-file="batchUploadCurrent"
+      :upload-total-files="batchUploadTotal"
       @close="cancelBatchUpload"
       @submit="confirmBatchUpload"
     />
@@ -228,6 +232,8 @@ const { t: $t } = useI18n()
 const showNotification = inject('showNotification')
 const uploading = ref(false)
 const uploadProgress = ref(0) // 分片上傳進度 0-100
+const batchUploadCurrent = ref(0) // 批次上傳：目前第幾個檔案
+const batchUploadTotal = ref(0) // 批次上傳：總共幾個檔案
 const taskType = ref('paragraph')  // 任務類型：paragraph（段落）或 subtitle（字幕）
 const enableDiarization = ref(true)
 const maxSpeakers = ref(null)
@@ -483,10 +489,16 @@ function cancelBatchUpload() {
 async function confirmBatchUpload(formData) {
   uploading.value = true
   uploadProgress.value = 0
+  batchUploadCurrent.value = 0
+  batchUploadTotal.value = formData.getAll('files').length
 
   try {
     const result = await transcriptionService.createBatch(formData, {
-      onProgress: (pct) => { uploadProgress.value = pct }
+      onProgress: (pct) => { uploadProgress.value = pct },
+      onFileProgress: (current, total) => {
+        batchUploadCurrent.value = current
+        batchUploadTotal.value = total
+      }
     })
 
     // 顯示結果通知
@@ -529,6 +541,8 @@ async function confirmBatchUpload(formData) {
   } finally {
     uploading.value = false
     uploadProgress.value = 0
+    batchUploadCurrent.value = 0
+    batchUploadTotal.value = 0
     cancelBatchUpload()
   }
 }

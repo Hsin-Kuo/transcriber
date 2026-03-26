@@ -3,7 +3,7 @@
     <!-- 頂部標題列 -->
     <header class="shared-header">
       <div class="header-content">
-        <h1 class="brand">Sound Lite</h1>
+        <a href="https://soundlite.app" class="brand">Sound Lite</a>
         <span class="shared-badge">{{ $t('shared.publicLink') }}</span>
       </div>
     </header>
@@ -55,6 +55,72 @@
         <p v-if="audioError" class="audio-error">{{ audioError }}</p>
       </div>
 
+      <!-- AI 摘要 -->
+      <div v-if="taskData.summary" class="summary-section">
+        <div class="summary-header" @click="summaryExpanded = !summaryExpanded">
+          <div class="summary-header-left">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+              <path d="M17 4a2 2 0 0 0 2 2a2 2 0 0 0 -2 2a2 2 0 0 0 -2 -2a2 2 0 0 0 2 -2" />
+              <path d="M19 11h2m-1 -1v2" />
+            </svg>
+            <span>{{ $t('shared.aiSummary') }}</span>
+          </div>
+          <svg
+            class="expand-icon"
+            :class="{ expanded: summaryExpanded }"
+            width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+
+        <div v-show="summaryExpanded" class="summary-body">
+          <!-- Meta -->
+          <div v-if="taskData.summary.content.meta" class="summary-meta">
+            <span class="summary-type-badge">{{ taskData.summary.content.meta.type }}</span>
+            <span v-if="taskData.summary.content.meta.detected_topic" class="summary-topic">
+              {{ taskData.summary.content.meta.detected_topic }}
+            </span>
+          </div>
+
+          <!-- 摘要 -->
+          <div v-if="taskData.summary.content.summary" class="summary-block">
+            <h4>{{ $t('shared.summaryTitle') }}</h4>
+            <p>{{ taskData.summary.content.summary }}</p>
+          </div>
+
+          <!-- 重點 -->
+          <div v-if="taskData.summary.content.key_points?.length" class="summary-block">
+            <h4>{{ $t('shared.keyPoints') }}</h4>
+            <ul>
+              <li v-for="(point, i) in taskData.summary.content.key_points" :key="i">{{ point }}</li>
+            </ul>
+          </div>
+
+          <!-- 段落 -->
+          <div v-if="taskData.summary.content.segments?.length" class="summary-block">
+            <h4>{{ $t('shared.contentSegments') }}</h4>
+            <div v-for="(seg, i) in taskData.summary.content.segments" :key="i" class="summary-segment">
+              <h5>{{ seg.topic }}</h5>
+              <p>{{ seg.content }}</p>
+              <div v-if="seg.keywords?.length" class="summary-keywords">
+                <span v-for="(kw, j) in seg.keywords" :key="j" class="keyword-tag">{{ kw }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 待辦事項 -->
+          <div v-if="taskData.summary.content.action_items?.length" class="summary-block">
+            <h4>{{ $t('shared.actionItems') }}</h4>
+            <div v-for="(item, i) in taskData.summary.content.action_items" :key="i" class="action-item">
+              <span class="action-task">{{ item.task }}</span>
+              <span v-if="item.owner" class="action-owner">{{ item.owner }}</span>
+              <span v-if="item.deadline" class="action-deadline">{{ item.deadline }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 逐字稿 -->
       <div class="transcript-section">
         <!-- 段落模式 -->
@@ -102,6 +168,7 @@ const error = ref(null)
 const taskData = ref({})
 const audioError = ref(null)
 const audioEl = ref(null)
+const summaryExpanded = ref(false)
 
 const API_BASE = import.meta.env.VITE_API_URL ?? ''
 
@@ -180,6 +247,12 @@ function seekTo(time) {
   font-weight: 600;
   color: #78716c;
   margin: 0;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.brand:hover {
+  color: #44403c;
 }
 
 .shared-badge {
@@ -264,6 +337,171 @@ function seekTo(time) {
   color: #dc2626;
   font-size: 13px;
   margin-top: 8px;
+}
+
+/* AI 摘要 */
+.summary-section {
+  background: white;
+  border: 1px solid #e7e5e4;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.summary-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+
+.summary-header:hover {
+  background: #fafaf9;
+}
+
+.summary-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #44403c;
+}
+
+.summary-header-left svg {
+  color: #a78bfa;
+}
+
+.expand-icon {
+  color: #a8a29e;
+  transition: transform 0.2s;
+}
+
+.expand-icon.expanded {
+  transform: rotate(180deg);
+}
+
+.summary-body {
+  padding: 0 20px 20px;
+  border-top: 1px solid #f5f5f4;
+}
+
+.summary-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  margin-bottom: 12px;
+}
+
+.summary-type-badge {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 10px;
+  border-radius: 10px;
+  background: #f3e8ff;
+  color: #7c3aed;
+}
+
+.summary-topic {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1c1917;
+}
+
+.summary-block {
+  margin-top: 16px;
+}
+
+.summary-block h4 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #78716c;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin: 0 0 8px 0;
+}
+
+.summary-block p {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #292524;
+  margin: 0;
+}
+
+.summary-block ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.summary-block li {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #292524;
+  margin-bottom: 4px;
+}
+
+.summary-segment {
+  padding: 12px;
+  background: #fafaf9;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.summary-segment h5 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1c1917;
+  margin: 0 0 6px 0;
+}
+
+.summary-segment p {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #44403c;
+  margin: 0;
+}
+
+.summary-keywords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.keyword-tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #f5f5f4;
+  color: #78716c;
+}
+
+.action-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f5f5f4;
+  font-size: 14px;
+}
+
+.action-item:last-child {
+  border-bottom: none;
+}
+
+.action-task {
+  flex: 1;
+  color: #292524;
+}
+
+.action-owner,
+.action-deadline {
+  font-size: 12px;
+  color: #78716c;
 }
 
 .transcript-section {

@@ -2,7 +2,18 @@
 from datetime import datetime, timedelta
 from fastapi import HTTPException, status
 
+from src.models.quota import QUOTA_TIERS, QuotaTier
 from src.utils.time_utils import timestamp_to_datetime
+
+
+def _get_tier_default(user: dict, field: str, fallback):
+    """根據使用者的 tier 從 QUOTA_TIERS 查表取得預設值"""
+    tier_str = user.get("quota", {}).get("tier", "free")
+    try:
+        tier_enum = QuotaTier(tier_str)
+        return QUOTA_TIERS[tier_enum].get(field, fallback)
+    except (ValueError, KeyError):
+        return fallback
 
 
 class QuotaManager:
@@ -29,7 +40,7 @@ class QuotaManager:
         # 檢查轉錄時數
         duration_minutes = audio_duration / 60
         current_usage = usage.get("duration_minutes", 0)
-        quota_limit = quota.get("max_duration_minutes", 60)
+        quota_limit = quota.get("max_duration_minutes") or _get_tier_default(user, "max_duration_minutes", 60)
 
         if current_usage + duration_minutes > quota_limit:
             remaining = max(0, quota_limit - current_usage)
@@ -60,7 +71,7 @@ class QuotaManager:
             HTTPException: 超過並發限制
         """
         quota = user.get("quota", {})
-        max_concurrent = quota.get("max_concurrent_tasks", 1)
+        max_concurrent = quota.get("max_concurrent_tasks") or _get_tier_default(user, "max_concurrent_tasks", 1)
 
         if active_count >= max_concurrent:
             raise HTTPException(
@@ -93,7 +104,7 @@ class QuotaManager:
         usage = await QuotaManager._reset_monthly_quota_if_needed(user, usage, db=db)
 
         current_usage = usage.get("ai_summaries", 0)
-        quota_limit = quota.get("max_ai_summaries", 3)
+        quota_limit = quota.get("max_ai_summaries") or _get_tier_default(user, "max_ai_summaries", 3)
 
         if current_usage >= quota_limit:
             raise HTTPException(

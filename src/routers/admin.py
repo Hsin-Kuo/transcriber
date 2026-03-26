@@ -310,6 +310,9 @@ async def update_user_quota(
                 "max_transcriptions": tier_quota["max_transcriptions"],
                 "max_duration_minutes": tier_quota["max_duration_minutes"],
                 "max_concurrent_tasks": tier_quota["max_concurrent_tasks"],
+                "max_ai_summaries": tier_quota["max_ai_summaries"],
+                "max_keep_audio": tier_quota["max_keep_audio"],
+                "audio_retention_days": tier_quota["audio_retention_days"],
                 "features": tier_quota["features"]
             }
         except (ValueError, KeyError):

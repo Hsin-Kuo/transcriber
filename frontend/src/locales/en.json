@@ -482,7 +482,11 @@
     "successMessage": "Successfully created {count} transcription tasks",
     "partialSuccess": "Partially Successful",
     "partialSuccessMessage": "Created {created} tasks, {failed} failed",
-    "failed": "Batch Creation Failed"
+    "failed": "Batch Creation Failed",
+    "uploadingFiles": "Uploading...",
+    "uploadingProgress": "Uploading file {current}/{total}",
+    "preparing": "Preparing...",
+    "progressHint": "You can switch tabs during upload. Refreshing won't affect tasks already created."
   },
   "auth": {
     "loadingGoogle": "Loading Google Sign-In...",
@@ -589,6 +593,11 @@
     "disableShare": "Disable Sharing",
     "paidOnly": "Public sharing is only available for paid plans",
     "enableShare": "Enable Sharing",
-    "onlyCompleted": "Only completed tasks can be shared"
+    "onlyCompleted": "Only completed tasks can be shared",
+    "aiSummary": "AI Summary",
+    "summaryTitle": "Summary",
+    "keyPoints": "Key Points",
+    "contentSegments": "Content Segments",
+    "actionItems": "Action Items"
   }
 }

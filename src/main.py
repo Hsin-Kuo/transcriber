@@ -197,6 +197,10 @@ async def startup_event():
         validate_aws_config()
         print("✅ AWS 設定驗證通過", flush=True)
 
+    # 清理殘留的暫存目錄（處理 crash/重啟後的孤兒檔案）
+    from src.utils.config_loader import cleanup_stale_temp_dirs
+    cleanup_stale_temp_dirs()
+
     # 清理殘留的 ProcessPoolExecutor worker 進程
     print("🧹 清理殘留的 worker 進程...", flush=True)
     try:

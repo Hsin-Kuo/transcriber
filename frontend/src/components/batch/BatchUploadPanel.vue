@@ -191,18 +191,31 @@
       </div>
     </div>
 
+    <!-- 上傳進度條 -->
+    <div v-if="uploading" class="upload-progress-section">
+      <div class="progress-info">
+        <span class="progress-text">{{ uploadStatusText }}</span>
+        <span class="progress-pct">{{ uploadProgress }}%</span>
+      </div>
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill" :style="{ width: uploadProgress + '%' }"></div>
+      </div>
+      <p class="progress-hint">{{ $t('batchUpload.progressHint') }}</p>
+    </div>
+
     <!-- 底部動作區 -->
     <div class="panel-actions">
-      <button class="btn btn-secondary" @click="triggerAddFiles" :disabled="files.length >= maxFiles">
+      <button class="btn btn-secondary" @click="triggerAddFiles" :disabled="files.length >= maxFiles || uploading">
         {{ $t('batchUpload.addMoreFiles') }}
       </button>
       <button
         class="btn btn-primary"
         @click="submitBatch"
-        :disabled="files.length === 0 || submitting"
+        :disabled="files.length === 0 || submitting || uploading"
       >
-        <span v-if="submitting" class="spinner"></span>
-        <span v-else>{{ $t('batchUpload.createTasks', { count: files.length }) }}</span>
+        <span v-if="submitting && !uploading" class="spinner"></span>
+        <span v-else-if="!uploading">{{ $t('batchUpload.createTasks', { count: files.length }) }}</span>
+        <span v-else>{{ $t('batchUpload.uploadingFiles') }}</span>
       </button>
     </div>
 
@@ -232,10 +245,36 @@ const props = defineProps({
   existingTags: {
     type: Array,
     default: () => []
+  },
+  uploading: {
+    type: Boolean,
+    default: false
+  },
+  uploadProgress: {
+    type: Number,
+    default: 0
+  },
+  uploadCurrentFile: {
+    type: Number,
+    default: 0
+  },
+  uploadTotalFiles: {
+    type: Number,
+    default: 0
   }
 })
 
 const emit = defineEmits(['close', 'submit'])
+
+const uploadStatusText = computed(() => {
+  if (props.uploadTotalFiles > 0) {
+    return $t('batchUpload.uploadingProgress', {
+      current: props.uploadCurrentFile,
+      total: props.uploadTotalFiles
+    })
+  }
+  return $t('batchUpload.preparing')
+})
 
 const maxFiles = 10
 const additionalFileInput = ref(null)
@@ -893,6 +932,51 @@ watch(() => props.initialFiles, (newFiles) => {
 .remove-tag:hover {
   background: color-mix(in srgb, var(--color-danger) 20%, transparent);
   color: var(--color-danger);
+}
+
+/* 上傳進度條 */
+.upload-progress-section {
+  padding: 16px 20px;
+  border-top: 1px solid rgba(var(--color-divider-rgb), 0.2);
+}
+
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.progress-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--main-text);
+}
+
+.progress-pct {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.progress-bar-track {
+  height: 8px;
+  background: rgba(var(--color-primary-rgb), 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.progress-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: rgba(var(--color-text-dark-rgb), 0.5);
 }
 
 /* 底部動作區 */

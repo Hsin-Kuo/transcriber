@@ -17,13 +17,38 @@ export const transcriptionService = {
    * @returns {Promise} API 響應
    */
   async create(formData, { onProgress } = {}) {
-    // 檢查是否有大檔案需要分片上傳
+    // 單檔模式：檢查是否需要分片上傳
     const file = formData.get('file')
     if (file && needsChunking(file)) {
-      // 大檔案：先分片上傳拿 upload_id，再用 upload_id 建立轉錄
       const uploadId = await uploadChunked(file, { onProgress })
       formData.delete('file')
       formData.append('upload_id', uploadId)
+    }
+
+    // 合併模式：多個檔案可能總大小超過 Cloudflare 100MB 限制
+    // 逐一分片上傳後，用 upload_ids 替代
+    const mergeFiles = formData.getAll('files')
+    if (mergeFiles.length > 0) {
+      const totalSize = mergeFiles.reduce((sum, f) => sum + f.size, 0)
+      if (totalSize >= 95 * 1024 * 1024) {
+        const uploadIds = []
+        let done = 0
+        for (const f of mergeFiles) {
+          const uploadId = await uploadChunked(f, {
+            onProgress: onProgress
+              ? (pct) => {
+                  const overall = Math.round(((done + pct / 100) / mergeFiles.length) * 100)
+                  onProgress(overall)
+                }
+              : undefined,
+          })
+          uploadIds.push(uploadId)
+          done++
+        }
+        formData.delete('files')
+        formData.append('merge_upload_ids', JSON.stringify(uploadIds))
+        if (onProgress) onProgress(100)
+      }
     }
 
     const response = await api.post(NEW_ENDPOINTS.transcriptions.create, formData, {
@@ -98,28 +123,31 @@ export const transcriptionService = {
    *   - overrides: JSON 字串，格式 {"0": {tags, customName}, ...}
    * @returns {Promise} 批次建立結果
    */
-  async createBatch(formData, { onProgress } = {}) {
+  async createBatch(formData, { onProgress, onFileProgress } = {}) {
     // 檢查是否有大檔案需要分片上傳
     const files = formData.getAll('files')
     const chunkedMap = {} // { 原始索引: upload_id }
     const smallFiles = [] // 小檔案保留直接上傳
 
+    const totalFiles = files.length
     let chunkedDone = 0
     const chunkedTotal = files.filter((f) => needsChunking(f)).length
 
     for (let i = 0; i < files.length; i++) {
       if (needsChunking(files[i])) {
+        if (onFileProgress) onFileProgress(chunkedDone + 1, totalFiles)
         const uploadId = await uploadChunked(files[i], {
           onProgress: onProgress
             ? (pct) => {
-                // 粗略整體進度 = (已完成分片檔數 + 當前進度%) / 總分片檔數
-                const overall = Math.round(((chunkedDone + pct / 100) / chunkedTotal) * 100)
+                // 整體進度 = (已完成檔數 + 當前進度%) / 總檔數
+                const overall = Math.round(((chunkedDone + pct / 100) / totalFiles) * 100)
                 onProgress(overall)
               }
             : undefined,
         })
         chunkedMap[String(i)] = uploadId
         chunkedDone++
+        if (onProgress) onProgress(Math.round((chunkedDone / totalFiles) * 100))
       } else {
         smallFiles.push({ index: i, file: files[i] })
       }
@@ -134,10 +162,13 @@ export const transcriptionService = {
       formData.append('upload_ids', JSON.stringify(chunkedMap))
     }
 
+    // 提交建立任務（小檔案在這一步上傳）
+    if (onFileProgress) onFileProgress(totalFiles, totalFiles)
     const response = await api.post(NEW_ENDPOINTS.transcriptions.createBatch, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 3600000,
     })
+    if (onProgress) onProgress(100)
     return response.data
   },
 }

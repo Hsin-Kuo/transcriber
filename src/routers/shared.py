@@ -131,6 +131,18 @@ async def get_shared_task(
     elif isinstance(created_at, datetime):
         created_at = created_at.isoformat()
 
+    # 取得 AI 摘要（如果有）
+    summary = None
+    if task.get("summary_status") == "completed":
+        summary_doc = await db.summaries.find_one({"_id": task_id})
+        if summary_doc:
+            summary = {
+                "content": summary_doc.get("content", {}),
+                "metadata": {
+                    "model": summary_doc.get("metadata", {}).get("model", ""),
+                }
+            }
+
     # 準備返回的公開資料（僅包含必要欄位）
     return {
         "task_id": task_id,
@@ -144,6 +156,7 @@ async def get_shared_task(
         "speaker_names": speaker_names,
         "has_audio": has_audio,
         "subtitle_settings": task.get("subtitle_settings", {}),
+        "summary": summary,
     }
 
 

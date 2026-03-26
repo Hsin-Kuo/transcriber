@@ -11,11 +11,61 @@
 """
 
 import os
+import time
+import shutil
+import tempfile
+from pathlib import Path
 from typing import Optional
 from functools import lru_cache
 
 
 DEPLOY_ENV = os.getenv("DEPLOY_ENV", "local")
+
+# AWS 上 /tmp 是 tmpfs（記憶體），空間有限，改用磁碟路徑
+_TEMP_BASE = Path(os.getenv("TEMP_DIR", "/opt/transcriber/tmp" if DEPLOY_ENV == "aws" else tempfile.gettempdir()))
+
+
+def get_temp_dir(prefix: str = "") -> Path:
+    """建立暫存目錄，AWS 模式使用磁碟路徑避免 tmpfs 空間不足
+
+    Args:
+        prefix: 目錄名稱前綴
+
+    Returns:
+        暫存目錄路徑
+    """
+    _TEMP_BASE.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=prefix, dir=_TEMP_BASE))
+
+
+def cleanup_stale_temp_dirs(max_age_hours: int = 2):
+    """清理超過指定時間的暫存目錄（服務啟動時呼叫）
+
+    處理伺服器 crash/重啟後殘留的孤兒暫存檔案。
+
+    Args:
+        max_age_hours: 超過幾小時視為過期
+    """
+    if not _TEMP_BASE.exists():
+        return
+
+    now = time.time()
+    max_age_seconds = max_age_hours * 3600
+    cleaned = 0
+
+    for entry in _TEMP_BASE.iterdir():
+        if not entry.is_dir():
+            continue
+        try:
+            age = now - entry.stat().st_mtime
+            if age > max_age_seconds:
+                shutil.rmtree(entry, ignore_errors=True)
+                cleaned += 1
+        except OSError:
+            pass
+
+    if cleaned:
+        print(f"🧹 啟動清理：移除 {cleaned} 個過期暫存目錄（>{max_age_hours}h）")
 
 # Lazy-init SSM client
 _ssm_client = None
