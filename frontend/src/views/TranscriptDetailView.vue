@@ -2095,8 +2095,8 @@ function handleReplaceAllNew(newReplaceText) {
     const regex = new RegExp(escapedText, flags)
     const replacedContent = content.replace(regex, newReplaceText)
 
-    // 更新內容
-    updateContentAfterReplace(replacedContent)
+    // 更新內容（傳入 regex 讓 marker 同步更新 segment 文字）
+    updateContentAfterReplace(replacedContent, regex, newReplaceText)
 
     // 清空搜尋結果
     searchMatches.value = []
@@ -2123,7 +2123,7 @@ function handleReplaceAllNew(newReplaceText) {
 }
 
 // 更新內容（取代後）
-function updateContentAfterReplace(replacedContent) {
+function updateContentAfterReplace(replacedContent, replaceAllRegex = null, replaceAllText = '') {
   // 保存滾動位置
   let savedScrollTop = 0
   if (textareaRef.value) {
@@ -2144,7 +2144,16 @@ function updateContentAfterReplace(replacedContent) {
 
   // 重新生成標記
   if (segments.value && currentTranscript.value.content) {
-    generateSegmentMarkers(segments.value, currentTranscript.value.content)
+    if (replaceAllRegex) {
+      // 全部取代時，segment 文字也套用同樣替換，才能在新 content 裡找到正確位置
+      const updatedSegments = segments.value.map(seg => ({
+        ...seg,
+        text: seg.text ? seg.text.replace(replaceAllRegex, replaceAllText) : seg.text
+      }))
+      generateSegmentMarkers(updatedSegments, currentTranscript.value.content)
+    } else {
+      generateSegmentMarkers(segments.value, currentTranscript.value.content)
+    }
   }
 
   // 使用 setTimeout 給 Vue 足夠時間完成 DOM 清理，避免 insertBefore 錯誤
