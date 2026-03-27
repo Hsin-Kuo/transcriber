@@ -590,7 +590,8 @@ async def get_current_user_info(
         usage=usage_filtered,
         created_at=created_at,
         auth_providers=auth_providers,
-        preferences=full_user.get("preferences", {})
+        preferences=full_user.get("preferences", {}),
+        subscription=full_user.get("subscription"),
     )
 
 

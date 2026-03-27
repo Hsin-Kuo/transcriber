@@ -52,9 +52,11 @@
           <button
             v-if="currentTier !== plan.key"
             class="plan-select-btn"
+            :class="{ 'upgrade-btn': isUpgrade(plan.key), 'downgrade-btn': isDowngrade(plan.key) }"
+            :disabled="changingPlan"
             @click="selectPlan(plan.key)"
           >
-            {{ $t('userSettings.planPanel.selectPlan') }}
+            {{ getButtonLabel(plan.key) }}
           </button>
           <div v-else class="plan-current-badge">
             {{ $t('userSettings.planPanel.currentPlan') }}
@@ -119,20 +121,76 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { useAuthStore } from '../stores/auth'
 
 const { t: $t } = useI18n()
 const router = useRouter()
+const authStore = useAuthStore()
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
   currentTier: { type: String, default: 'free' }
 })
 
-const emit = defineEmits(['update:modelValue'])
+const emit = defineEmits(['update:modelValue', 'planChanged'])
 
-function selectPlan(planKey) {
-  emit('update:modelValue', false)
-  router.push({ path: '/checkout', query: { plan: planKey, billing: billing.value } })
+const changingPlan = ref(false)
+const tierOrder = { free: 0, basic: 1, pro: 2 }
+
+function isUpgrade(planKey) {
+  return tierOrder[planKey] > tierOrder[props.currentTier]
+}
+
+function isDowngrade(planKey) {
+  return tierOrder[planKey] < tierOrder[props.currentTier]
+}
+
+function getButtonLabel(planKey) {
+  if (changingPlan.value) return $t('userSettings.planPanel.processing')
+  if (props.currentTier === 'free') return $t('userSettings.planPanel.selectPlan')
+  if (isUpgrade(planKey)) return $t('userSettings.planPanel.upgrade')
+  if (isDowngrade(planKey)) {
+    return planKey === 'free'
+      ? $t('userSettings.planPanel.cancelSubscription')
+      : $t('userSettings.planPanel.downgrade')
+  }
+  return $t('userSettings.planPanel.selectPlan')
+}
+
+async function selectPlan(planKey) {
+  // Free user or downgrading to free → different flows
+  if (props.currentTier === 'free') {
+    // New subscription: go to checkout
+    if (planKey === 'free') return
+    emit('update:modelValue', false)
+    router.push({ path: '/checkout', query: { plan: planKey, billing: billing.value } })
+    return
+  }
+
+  // Paid user changing plan
+  if (planKey === 'free') {
+    // Cancel subscription (go to settings, handled there)
+    emit('update:modelValue', false)
+    emit('planChanged', { action: 'cancel' })
+    return
+  }
+
+  changingPlan.value = true
+  try {
+    const result = await authStore.changePlan(planKey, billing.value)
+    emit('update:modelValue', false)
+    emit('planChanged', {
+      action: isUpgrade(planKey) ? 'upgraded' : 'downgraded',
+      tier: planKey,
+      effective: result.effective,
+      currentPeriodEnd: result.current_period_end,
+    })
+  } catch (err) {
+    const detail = err.response?.data?.detail || $t('userSettings.planPanel.changeFailed')
+    alert(detail)
+  } finally {
+    changingPlan.value = false
+  }
 }
 
 const billing = ref('monthly')
@@ -367,6 +425,21 @@ function getPrice(plan) {
   background: var(--main-primary);
   border-color: var(--main-primary);
   color: white;
+}
+
+.plan-select-btn.upgrade-btn {
+  background: var(--main-primary);
+  border-color: var(--main-primary);
+  color: white;
+}
+
+.plan-select-btn.upgrade-btn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.plan-select-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .plan-current-badge {

@@ -35,6 +35,7 @@ from src.routers import summaries as summaries_router
 from src.routers import admin as admin_router
 from src.routers import uploads as uploads_router
 from src.routers import shared as shared_router
+from src.routers import subscriptions as subscriptions_router
 
 # Services
 from src.services.utils.diarization_processor import DiarizationProcessor
@@ -144,6 +145,7 @@ app.include_router(summaries_router.router)
 app.include_router(admin_router.router)
 app.include_router(uploads_router.router)
 app.include_router(shared_router.router)
+app.include_router(subscriptions_router.router)
 
 
 # ========== 進程清理工具函數 ==========

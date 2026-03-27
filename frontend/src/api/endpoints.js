@@ -73,5 +73,15 @@ export const NEW_ENDPOINTS = {
     get: (taskId) => `/summaries/${taskId}`,
     delete: (taskId) => `/summaries/${taskId}`,
   },
+
+  // 訂閱管理
+  subscriptions: {
+    checkout: '/subscriptions/checkout',
+    status: '/subscriptions/status',
+    cancel: '/subscriptions/cancel',
+    reactivate: '/subscriptions/reactivate',
+    change: '/subscriptions/change',
+    portal: '/subscriptions/portal',
+  },
 }
 

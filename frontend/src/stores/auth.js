@@ -21,6 +21,10 @@ export const useAuthStore = defineStore('auth', () => {
   const hasPassword = computed(() => authProviders.value.includes('password'))
   const hasGoogle = computed(() => authProviders.value.includes('google'))
   const preferences = computed(() => user.value?.preferences || {})
+  const subscription = computed(() => user.value?.subscription || {})
+  const hasActiveSubscription = computed(() =>
+    ['active', 'trialing'].includes(subscription.value?.status)
+  )
 
   // 計算配額使用百分比
   const quotaPercentage = computed(() => {
@@ -282,6 +286,36 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  // ===== 訂閱相關 =====
+
+  async function createCheckoutSession(tier, billing) {
+    const response = await api.post('/subscriptions/checkout', { tier, billing })
+    return response.data
+  }
+
+  async function cancelSubscription() {
+    const response = await api.post('/subscriptions/cancel')
+    await fetchCurrentUser()
+    return response.data
+  }
+
+  async function reactivateSubscription() {
+    const response = await api.post('/subscriptions/reactivate')
+    await fetchCurrentUser()
+    return response.data
+  }
+
+  async function changePlan(tier, billing) {
+    const response = await api.post('/subscriptions/change', { tier, billing })
+    await fetchCurrentUser()
+    return response.data
+  }
+
+  async function getPortalUrl() {
+    const response = await api.get('/subscriptions/portal')
+    return response.data
+  }
+
   async function deleteAccount(password, confirmation) {
     loading.value = true
     error.value = null
@@ -344,6 +378,8 @@ export const useAuthStore = defineStore('auth', () => {
     hasPassword,
     hasGoogle,
     preferences,
+    subscription,
+    hasActiveSubscription,
     // Actions
     register,
     login,
@@ -357,6 +393,11 @@ export const useAuthStore = defineStore('auth', () => {
     unbindGoogle,
     deleteAccount,
     setPassword,
-    updatePreferences
+    updatePreferences,
+    createCheckoutSession,
+    cancelSubscription,
+    reactivateSubscription,
+    changePlan,
+    getPortalUrl,
   }
 })

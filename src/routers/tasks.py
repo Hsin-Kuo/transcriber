@@ -182,9 +182,12 @@ async def get_tasks(
     Returns:
         任務列表
     """
-    # 取得用戶 tier 的音檔保留天數
+    # 取得用戶 tier 的音檔保留天數（JWT 不含 quota，需查 DB）
     from ..models.quota import QUOTA_TIERS, QuotaTier
-    user_tier = current_user.get("quota", {}).get("tier", "free")
+    from ..database.repositories.user_repo import UserRepository
+    user_repo = UserRepository(task_service.task_repo.db)
+    full_user = await user_repo.get_by_id(str(current_user["_id"]))
+    user_tier = full_user.get("quota", {}).get("tier", "free") if full_user else "free"
     tier_config = QUOTA_TIERS.get(QuotaTier(user_tier), QUOTA_TIERS[QuotaTier.FREE])
     retention_days = tier_config.get("audio_retention_days", 7)
 

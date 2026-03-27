@@ -133,7 +133,34 @@
       "speakerDiarization": "說話者辨識",
       "punctuation": "自動標點",
       "batchOperations": "批次操作",
-      "priorityProcessing": "優先處理"
+      "priorityProcessing": "優先處理",
+      "upgrade": "立即升級",
+      "downgrade": "降級方案",
+      "cancelSubscription": "取消訂閱",
+      "processing": "處理中...",
+      "changeFailed": "方案變更失敗，請稍後再試"
+    },
+    "subscription": {
+      "currentPlan": "目前方案",
+      "billingCycle": "計費週期",
+      "monthly": "月付",
+      "yearly": "年付",
+      "nextBillingDate": "下次扣款日",
+      "cancelScheduled": "訂閱將於 {date} 取消",
+      "pendingDowngrade": "將於 {date} 降級為 {tier}",
+      "reactivate": "重新啟用",
+      "cancelSubscription": "取消訂閱",
+      "manageBilling": "管理帳單",
+      "cancelConfirmTitle": "確定要取消訂閱嗎？",
+      "cancelConfirmMessage": "取消後，您的方案將在目前計費週期結束時失效，不會退費。",
+      "cancelConfirmBtn": "確定取消",
+      "cancelSuccess": "訂閱已排定取消",
+      "reactivateSuccess": "訂閱已重新啟用",
+      "upgradedSuccess": "方案已立即升級！",
+      "downgradedSuccess": "方案將於計費週期結束時降級",
+      "checkoutSuccess": "付款成功！方案已更新",
+      "checkoutCanceled": "付款已取消",
+      "error": "操作失敗，請稍後再試"
     },
     "checkout": {
       "title": "結帳",
@@ -170,7 +197,8 @@
       "yearlyDiscount": "年付優惠（省一個月）",
       "pay": "確認付款",
       "processing": "處理中...",
-      "secure": "所有交易均經過加密保護"
+      "secure": "所有交易均經過加密保護",
+      "error": "付款失敗，請稍後再試"
     }
   },
   "navigation": {

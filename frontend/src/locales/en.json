@@ -133,7 +133,34 @@
       "speakerDiarization": "Speaker diarization",
       "punctuation": "Auto punctuation",
       "batchOperations": "Batch operations",
-      "priorityProcessing": "Priority processing"
+      "priorityProcessing": "Priority processing",
+      "upgrade": "Upgrade Now",
+      "downgrade": "Downgrade",
+      "cancelSubscription": "Cancel Subscription",
+      "processing": "Processing...",
+      "changeFailed": "Failed to change plan, please try again"
+    },
+    "subscription": {
+      "currentPlan": "Current Plan",
+      "billingCycle": "Billing Cycle",
+      "monthly": "Monthly",
+      "yearly": "Yearly",
+      "nextBillingDate": "Next billing date",
+      "cancelScheduled": "Subscription will cancel on {date}",
+      "pendingDowngrade": "Will downgrade to {tier} on {date}",
+      "reactivate": "Reactivate",
+      "cancelSubscription": "Cancel Subscription",
+      "manageBilling": "Manage Billing",
+      "cancelConfirmTitle": "Cancel subscription?",
+      "cancelConfirmMessage": "Your plan will remain active until the end of the current billing period. No refunds will be issued.",
+      "cancelConfirmBtn": "Confirm Cancel",
+      "cancelSuccess": "Subscription cancellation scheduled",
+      "reactivateSuccess": "Subscription reactivated",
+      "upgradedSuccess": "Plan upgraded immediately!",
+      "downgradedSuccess": "Plan will downgrade at end of billing period",
+      "checkoutSuccess": "Payment successful! Plan updated",
+      "checkoutCanceled": "Payment canceled",
+      "error": "Operation failed, please try again"
     },
     "checkout": {
       "title": "Checkout",
@@ -170,7 +197,8 @@
       "yearlyDiscount": "Yearly discount (1 month free)",
       "pay": "Confirm Payment",
       "processing": "Processing...",
-      "secure": "All transactions are encrypted and secure"
+      "secure": "All transactions are encrypted and secure",
+      "error": "Payment failed, please try again"
     }
   },
   "navigation": {

@@ -145,6 +145,14 @@ class UserRepository:
         )
         return result.modified_count > 0
 
+    async def get_by_stripe_customer_id(self, customer_id: str) -> Optional[Dict[str, Any]]:
+        """根據 Stripe Customer ID 獲取用戶"""
+        return await self.collection.find_one({"subscription.stripe_customer_id": customer_id})
+
+    async def update_subscription(self, user_id: str, subscription_data: Dict[str, Any]) -> bool:
+        """更新用戶訂閱資料"""
+        return await self.update(user_id, {"subscription": subscription_data})
+
     async def count(self, filters: Dict[str, Any] = None) -> int:
         """計算用戶數量"""
         if filters is None:

@@ -10,6 +10,22 @@ class QuotaTier(str, Enum):
     ENTERPRISE = "enterprise"
 
 
+# 等級排序（用於判斷升降級）
+TIER_ORDER = {
+    QuotaTier.FREE: 0,
+    QuotaTier.BASIC: 1,
+    QuotaTier.PRO: 2,
+    QuotaTier.ENTERPRISE: 3,
+}
+
+
+def is_upgrade(from_tier: str, to_tier: str) -> bool:
+    """判斷是否為升級"""
+    from_order = TIER_ORDER.get(QuotaTier(from_tier), 0)
+    to_order = TIER_ORDER.get(QuotaTier(to_tier), 0)
+    return to_order > from_order
+
+
 # 配額等級詳細定義
 QUOTA_TIERS = {
     QuotaTier.FREE: {

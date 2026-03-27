@@ -98,6 +98,7 @@ class UserResponse(BaseModel):
     created_at: int  # UTC Unix timestamp
     auth_providers: List[str] = []  # ["password", "google", "apple"]
     preferences: dict = {}
+    subscription: Optional[dict] = None
 
     class Config:
         from_attributes = True

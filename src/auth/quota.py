@@ -175,6 +175,9 @@ class QuotaManager:
     async def _reset_monthly_quota_if_needed(user: dict, usage: dict, db=None) -> dict:
         """重置每月配額 (如果需要)
 
+        - 免費用戶：日曆月制（每月 1 號重置）
+        - 付費用戶：跟 Stripe 計費週期對齊（current_period_start 變更時重置）
+
         Args:
             user: 用戶資料
             usage: 使用量資料
@@ -192,9 +195,32 @@ class QuotaManager:
         if isinstance(last_reset, (int, float)):
             last_reset = timestamp_to_datetime(last_reset)
 
-        # 檢查是否跨月
         now = datetime.utcnow()
-        if now.month != last_reset.month or now.year != last_reset.year:
+        should_reset = False
+
+        # 判斷是否需要重置
+        sub = user.get("subscription", {})
+        sub_status = sub.get("status")
+
+        if sub_status in ("active", "trialing"):
+            # 付費用戶：比對 Stripe 的 current_period_start
+            period_start = sub.get("current_period_start")
+            if period_start:
+                if isinstance(period_start, (int, float)):
+                    period_start_dt = datetime.utcfromtimestamp(period_start)
+                elif isinstance(period_start, datetime):
+                    period_start_dt = period_start
+                else:
+                    period_start_dt = None
+
+                if period_start_dt and period_start_dt > last_reset:
+                    should_reset = True
+        else:
+            # 免費用戶：日曆月制
+            if now.month != last_reset.month or now.year != last_reset.year:
+                should_reset = True
+
+        if should_reset:
             new_usage = {
                 "transcriptions": 0,
                 "duration_minutes": 0,

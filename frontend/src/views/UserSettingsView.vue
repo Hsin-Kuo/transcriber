@@ -99,6 +99,37 @@
           <button class="plan-btn plan-btn-outline" @click="showPlanPanel = true">{{ $t('userSettings.showPlan') }}</button>
           <button class="plan-btn plan-btn-primary" @click="showPlanPanel = true"><svg class="plan-btn-icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M8,1 A7,7 0 1,0 8,15 A7,7 0 1,0 8,1 Z M8,6.5 A1.5,1.5 0 1,1 8,9.5 A1.5,1.5 0 1,1 8,6.5 Z M7.5,1 L8.5,1 L8.5,5.5 L7.5,5.5 Z" fill="currentColor" fill-rule="evenodd"/></svg>{{ $t('userSettings.upgrade') }}</button>
         </div>
+
+        <!-- Subscription management (only for paid users) -->
+        <div v-if="authStore.hasActiveSubscription" class="subscription-info">
+          <div class="sub-row">
+            <span class="sub-label">{{ $t('userSettings.subscription.billingCycle') }}</span>
+            <span class="sub-value">{{ authStore.subscription?.billing_cycle === 'yearly' ? $t('userSettings.subscription.yearly') : $t('userSettings.subscription.monthly') }}</span>
+          </div>
+          <div class="sub-row">
+            <span class="sub-label">{{ $t('userSettings.subscription.nextBillingDate') }}</span>
+            <span class="sub-value">{{ formatDate(authStore.subscription?.current_period_end) }}</span>
+          </div>
+
+          <div v-if="authStore.subscription?.cancel_at_period_end" class="sub-notice warning">
+            {{ $t('userSettings.subscription.cancelScheduled', { date: formatDate(authStore.subscription?.current_period_end) }) }}
+          </div>
+          <div v-if="authStore.subscription?.pending_plan_change" class="sub-notice info">
+            {{ $t('userSettings.subscription.pendingDowngrade', { date: formatDate(authStore.subscription?.current_period_end), tier: authStore.subscription?.pending_plan_change?.tier?.toUpperCase() }) }}
+          </div>
+
+          <div class="sub-actions">
+            <button v-if="authStore.subscription?.cancel_at_period_end" class="sub-btn sub-btn-primary" @click="handleReactivate">
+              {{ $t('userSettings.subscription.reactivate') }}
+            </button>
+            <button v-else class="sub-btn sub-btn-outline" @click="showCancelModal = true">
+              {{ $t('userSettings.subscription.cancelSubscription') }}
+            </button>
+            <button class="sub-btn sub-btn-outline" @click="openBillingPortal">
+              {{ $t('userSettings.subscription.manageBilling') }}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -579,13 +610,34 @@
         </div>
       </div>
     </div>
-    <PlanPanel v-model="showPlanPanel" :current-tier="currentTier" />
+    <PlanPanel v-model="showPlanPanel" :current-tier="currentTier" @plan-changed="handlePlanChanged" />
+
+    <!-- 取消訂閱確認 Modal -->
+    <div v-if="showCancelModal" class="modal-overlay" @click.self="showCancelModal = false">
+      <div class="modal-content">
+        <h3 class="modal-title">{{ $t('userSettings.subscription.cancelConfirmTitle') }}</h3>
+        <p class="modal-message">{{ $t('userSettings.subscription.cancelConfirmMessage') }}</p>
+        <div class="modal-actions">
+          <button @click="showCancelModal = false" class="btn-cancel">{{ $t('userSettings.cancel') }}</button>
+          <button @click="confirmCancelSubscription" class="btn-confirm btn-danger" :disabled="cancelingSubscription">
+            {{ cancelingSubscription ? $t('userSettings.processing') : $t('userSettings.subscription.cancelConfirmBtn') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast 提示 -->
+    <Transition name="toast">
+      <div v-if="toastMsg" class="toast-notification" :class="toastType">
+        {{ toastMsg }}
+      </div>
+    </Transition>
   </div>
 </template>
 
 <script setup>
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useI18n } from 'vue-i18n'
 import api from '../utils/api'
@@ -594,6 +646,7 @@ import GoogleSignInButton from '../components/GoogleSignInButton.vue'
 import PlanPanel from '../components/PlanPanel.vue'
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 const { t: $t, locale } = useI18n()
 
@@ -623,6 +676,69 @@ const newPasswordChecks = ref({
 
 // Plan panel
 const showPlanPanel = ref(false)
+
+// Subscription management
+const showCancelModal = ref(false)
+const cancelingSubscription = ref(false)
+const toastMsg = ref('')
+const toastType = ref('success')
+let toastTimer = null
+
+function showToast(msg, type = 'success') {
+  toastMsg.value = msg
+  toastType.value = type
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { toastMsg.value = '' }, 3500)
+}
+
+function handlePlanChanged(event) {
+  if (event.action === 'cancel') {
+    showCancelModal.value = true
+  } else if (event.action === 'upgraded') {
+    showToast($t('userSettings.subscription.upgradedSuccess'))
+  } else if (event.action === 'downgraded') {
+    showToast($t('userSettings.subscription.downgradedSuccess'))
+  }
+}
+
+async function confirmCancelSubscription() {
+  cancelingSubscription.value = true
+  try {
+    await authStore.cancelSubscription()
+    showCancelModal.value = false
+    showToast($t('userSettings.subscription.cancelSuccess'))
+  } catch (err) {
+    showToast(err.response?.data?.detail || $t('userSettings.subscription.error'), 'error')
+  } finally {
+    cancelingSubscription.value = false
+  }
+}
+
+async function handleReactivate() {
+  try {
+    await authStore.reactivateSubscription()
+    showToast($t('userSettings.subscription.reactivateSuccess'))
+  } catch (err) {
+    showToast(err.response?.data?.detail || $t('userSettings.subscription.error'), 'error')
+  }
+}
+
+async function openBillingPortal() {
+  try {
+    const data = await authStore.getPortalUrl()
+    window.location.href = data.portal_url
+  } catch (err) {
+    showToast(err.response?.data?.detail || $t('userSettings.subscription.error'), 'error')
+  }
+}
+
+function formatDate(timestamp) {
+  if (!timestamp) return ''
+  const d = new Date(typeof timestamp === 'number' && timestamp < 1e12 ? timestamp * 1000 : timestamp)
+  return d.toLocaleDateString(locale.value === 'zh-TW' ? 'zh-TW' : 'en-US', {
+    year: 'numeric', month: 'long', day: 'numeric'
+  })
+}
 
 // 卡片展開狀態
 const securityExpanded = ref(false)
@@ -801,8 +917,19 @@ watch(
   { deep: true }
 )
 
-onMounted(() => {
+onMounted(async () => {
   document.addEventListener('click', handleClickOutside)
+
+  // Handle checkout redirect
+  const checkout = route.query.checkout
+  if (checkout === 'success') {
+    await authStore.fetchCurrentUser()
+    showToast($t('userSettings.subscription.checkoutSuccess'))
+    router.replace({ path: '/settings' })
+  } else if (checkout === 'canceled') {
+    showToast($t('userSettings.subscription.checkoutCanceled'), 'error')
+    router.replace({ path: '/settings' })
+  }
 
   // 如果 localStorage 已有值但後端沒有，首次同步寫入後端
   const prefs = authStore.preferences
@@ -1478,6 +1605,131 @@ async function confirmDeleteAccount() {
 
 .plan-btn-primary:hover {
   opacity: 0.85;
+}
+
+/* Subscription info */
+.subscription-info {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-divider, rgba(163, 177, 198, 0.2));
+}
+
+.sub-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.sub-label {
+  font-size: 12px;
+  color: var(--main-text-light);
+}
+
+.sub-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--main-text);
+}
+
+.sub-notice {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.sub-notice.warning {
+  background: rgba(255, 193, 7, 0.1);
+  color: #e6a100;
+}
+
+.sub-notice.info {
+  background: rgba(23, 162, 184, 0.1);
+  color: #138496;
+}
+
+.sub-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.sub-btn {
+  flex: 1;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.sub-btn-outline {
+  background: transparent;
+  border: 1px solid var(--color-divider, rgba(163, 177, 198, 0.3));
+  color: var(--main-text-light);
+}
+
+.sub-btn-outline:hover {
+  border-color: var(--main-text-light);
+  color: var(--main-text);
+}
+
+.sub-btn-primary {
+  background: var(--main-primary);
+  border: 1px solid var(--main-primary);
+  color: white;
+}
+
+.sub-btn-primary:hover {
+  opacity: 0.9;
+}
+
+/* Toast notification */
+.toast-notification {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  z-index: 9999;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.toast-notification.success {
+  background: var(--color-success, #28a745);
+  color: white;
+}
+
+.toast-notification.error {
+  background: var(--color-danger, #dc3545);
+  color: white;
+}
+
+.toast-enter-active,
+.toast-leave-active {
+  transition: all 0.3s ease;
+}
+
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-10px);
+}
+
+/* Cancel modal danger button */
+.btn-danger {
+  background: var(--color-danger, #dc3545) !important;
+  border-color: var(--color-danger, #dc3545) !important;
+  color: white !important;
+}
+
+.btn-danger:hover:not(:disabled) {
+  opacity: 0.9;
 }
 
 .settings-grid {
