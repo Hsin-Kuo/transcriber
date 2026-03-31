@@ -123,11 +123,11 @@
               </td>
               <td class="usage">
                 <div class="usage-info">
-                  <span>{{ user.usage?.transcriptions || 0 }} / {{ user.quota?.max_transcriptions || 0 }} 次</span>
+                  <span>{{ user.usage?.transcriptions || 0 }} / {{ user.quota?.max_transcriptions >= 999999 ? '不限' : user.quota?.max_transcriptions || 0 }} 次</span>
                   <div class="usage-bar">
                     <div
                       class="usage-fill"
-                      :style="{ width: getUsagePercent(user.usage?.transcriptions, user.quota?.max_transcriptions) + '%' }"
+                      :style="{ width: user.quota?.max_transcriptions >= 999999 ? '5%' : getUsagePercent(user.usage?.transcriptions, user.quota?.max_transcriptions) + '%' }"
                     ></div>
                   </div>
                 </div>

@@ -10,11 +10,12 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 3001,  // Admin 後台使用 port 3001
     proxy: {
-      '/api': {
-        target: API_TARGET,
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, '')
-      }
+      '/api': { target: API_TARGET, changeOrigin: true },
+      '/auth': { target: API_TARGET, changeOrigin: true },
+      '/admin': { target: API_TARGET, changeOrigin: true },
+      '/tasks': { target: API_TARGET, changeOrigin: true },
+      '/transcriptions': { target: API_TARGET, changeOrigin: true },
+      '/health': { target: API_TARGET, changeOrigin: true }
     }
   }
 })

@@ -110,11 +110,15 @@
           </div>
           <div class="info-row">
             <span class="label">每月轉錄次數：</span>
-            <span class="value">{{ user.quota?.max_transcriptions || 0 }} 次</span>
+            <span class="value">{{ user.quota?.max_transcriptions >= 999999 ? '不限' : (user.quota?.max_transcriptions || 0) + ' 次' }}</span>
           </div>
           <div class="info-row">
             <span class="label">每月轉錄時長：</span>
-            <span class="value">{{ user.quota?.max_duration_minutes || 0 }} 分鐘</span>
+            <span class="value">{{ user.quota?.max_duration_minutes >= 999999 ? '不限' : (user.quota?.max_duration_minutes || 0) + ' 分鐘' }}</span>
+          </div>
+          <div class="info-row">
+            <span class="label">每月 AI 摘要：</span>
+            <span class="value">{{ user.quota?.max_ai_summaries >= 999999 ? '不限' : (user.quota?.max_ai_summaries ?? '—') + (user.quota?.max_ai_summaries < 999999 ? ' 次' : '') }}</span>
           </div>
           <div class="info-row">
             <span class="label">並發任務數：</span>
@@ -135,13 +139,13 @@
             <div class="usage-header">
               <span class="label">轉錄次數</span>
               <span class="usage-text">
-                {{ user.usage?.transcriptions || 0 }} / {{ user.quota?.max_transcriptions || 0 }}
+                {{ user.usage?.transcriptions || 0 }} / {{ user.quota?.max_transcriptions >= 999999 ? '不限' : user.quota?.max_transcriptions || 0 }}
               </span>
             </div>
             <div class="usage-bar">
               <div
                 class="usage-fill"
-                :style="{ width: getUsagePercent(user.usage?.transcriptions, user.quota?.max_transcriptions) + '%' }"
+                :style="{ width: user.quota?.max_transcriptions >= 999999 ? '5%' : getUsagePercent(user.usage?.transcriptions, user.quota?.max_transcriptions) + '%' }"
               ></div>
             </div>
           </div>
@@ -149,13 +153,27 @@
             <div class="usage-header">
               <span class="label">轉錄時長（分鐘）</span>
               <span class="usage-text">
-                {{ (user.usage?.duration_minutes || 0).toFixed(1) }} / {{ user.quota?.max_duration_minutes || 0 }}
+                {{ (user.usage?.duration_minutes || 0).toFixed(1) }} / {{ user.quota?.max_duration_minutes >= 999999 ? '不限' : user.quota?.max_duration_minutes || 0 }}
               </span>
             </div>
             <div class="usage-bar">
               <div
                 class="usage-fill"
-                :style="{ width: getUsagePercent(user.usage?.duration_minutes, user.quota?.max_duration_minutes) + '%' }"
+                :style="{ width: user.quota?.max_duration_minutes >= 999999 ? '5%' : getUsagePercent(user.usage?.duration_minutes, user.quota?.max_duration_minutes) + '%' }"
+              ></div>
+            </div>
+          </div>
+          <div class="usage-item">
+            <div class="usage-header">
+              <span class="label">AI 摘要次數</span>
+              <span class="usage-text">
+                {{ user.usage?.ai_summaries || 0 }} / {{ user.quota?.max_ai_summaries >= 999999 ? '不限' : (user.quota?.max_ai_summaries ?? '—') }}
+              </span>
+            </div>
+            <div class="usage-bar" v-if="user.quota?.max_ai_summaries < 999999">
+              <div
+                class="usage-fill"
+                :style="{ width: getUsagePercent(user.usage?.ai_summaries, user.quota?.max_ai_summaries) + '%' }"
               ></div>
             </div>
           </div>
