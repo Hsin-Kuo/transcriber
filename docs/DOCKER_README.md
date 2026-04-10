@@ -1,6 +1,6 @@
-# Whisper 轉錄服務 - Docker 部署指南
+# Sound Lite 轉錄服務 - Docker 部署指南
 
-使用 Docker 部署 Whisper 轉錄服務，模型只需載入一次，可重複使用。
+使用 Docker 部署 Sound Lite 轉錄服務，模型只需載入一次，可重複使用。
 
 ## 快速開始
 

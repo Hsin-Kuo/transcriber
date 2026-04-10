@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PID_FILE="$SCRIPT_DIR/backend.pid"
 LOG_FILE="$SCRIPT_DIR/backend.log"
 
-echo "📊 Whisper 後端服務狀態"
+echo "📊 Sound Lite 後端服務狀態"
 echo "========================"
 echo ""
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 啟動腳本：在背景運行 Whisper 後端（守護進程模式）
+# 啟動腳本：在背景運行 Sound Lite 後端（守護進程模式）
 # 用法：bash start_backend_daemon.sh
 
 set -e
@@ -43,7 +43,7 @@ if [ ! -f "$SCRIPT_DIR/.env" ]; then
     exit 1
 fi
 
-echo "🚀 啟動 Whisper 後端服務（守護進程模式）..."
+echo "🚀 啟動 Sound Lite 後端服務（守護進程模式）..."
 
 # 激活虛擬環境
 source "$SCRIPT_DIR/venv/bin/activate"

@@ -45,7 +45,7 @@ def convert_segments_punctuation(segments: List[Dict]) -> List[Dict]:
     """將 segments 中的半形標點符號轉換為全形
 
     Args:
-        segments: Whisper 輸出的 segments 列表
+        segments: Sound Lite 輸出的 segments 列表
 
     Returns:
         轉換後的 segments 列表

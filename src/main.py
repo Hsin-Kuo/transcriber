@@ -1,5 +1,5 @@
 """
-Whisper 轉錄服務 - 新應用入口
+Sound Lite 轉錄服務 - 新應用入口
 採用清晰的三層架構設計
 """
 
@@ -91,7 +91,7 @@ else:
 # ========== 創建 FastAPI 應用 ==========
 
 app = FastAPI(
-    title="Whisper 轉錄服務",
+    title="Sound Lite 轉錄服務",
     description="基於三層架構的音檔轉錄服務",
     version="3.0.0"
 )
@@ -190,7 +190,7 @@ async def startup_event():
     """應用啟動時的初始化"""
     global whisper_model, current_model_name, task_repo, tag_repo, audit_log_repo, main_loop, diarization_pipeline
 
-    print("🚀 啟動 Whisper 轉錄服務 v3.0.0", flush=True)
+    print("🚀 啟動 Sound Lite 轉錄服務 v3.0.0", flush=True)
     print("=" * 50, flush=True)
 
     # AWS 模式：驗證必要的環境變數

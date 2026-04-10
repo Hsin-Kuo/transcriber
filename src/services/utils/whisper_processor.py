@@ -643,7 +643,7 @@ class WhisperProcessor:
         """合併轉錄文字和說話者標記
 
         Args:
-            transcription_segments: Whisper 轉錄結果 (帶時間戳)
+            transcription_segments: Sound Lite 轉錄結果 (帶時間戳)
             diarization_segments: Speaker diarization 結果
 
         Returns:
@@ -709,7 +709,7 @@ class WhisperProcessor:
         用於字幕模式：不改變文字內容，而是在 segments 中添加 speaker 欄位
 
         Args:
-            transcription_segments: Whisper 轉錄結果 (帶時間戳)
+            transcription_segments: Sound Lite 轉錄結果 (帶時間戳)
             diarization_segments: Speaker diarization 結果
 
         Returns:

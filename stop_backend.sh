@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 停止腳本：停止背景運行的 Whisper 後端
+# 停止腳本：停止背景運行的 Sound Lite 後端
 # 用法：bash stop_backend.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

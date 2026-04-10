@@ -1,6 +1,6 @@
 # Whisper Transcriber Frontend
 
-Vue 3 前端介面，用於 Whisper 轉錄服務。
+Vue 3 前端介面，用於 Sound Lite 轉錄服務。
 
 ## 功能特色
 

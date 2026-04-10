@@ -3,7 +3,7 @@
     <div class="auth-card">
       <div class="auth-content">
           <h1 class="auth-title">註冊帳號</h1>
-          <p class="auth-subtitle">Whisper 轉錄服務</p>
+          <p class="auth-subtitle">Sound Lite</p>
 
           <form @submit.prevent="handleRegister" class="auth-form">
             <div class="form-group">

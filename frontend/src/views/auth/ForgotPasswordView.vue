@@ -3,7 +3,7 @@
     <div class="auth-card">
       <div class="auth-content">
           <h1 class="auth-title">忘記密碼</h1>
-          <p class="auth-subtitle">Whisper 轉錄服務</p>
+          <p class="auth-subtitle">Sound Lite 轉錄服務</p>
 
           <form v-if="!success" @submit.prevent="handleSubmit" class="auth-form">
             <p class="form-description">

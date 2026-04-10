@@ -3,7 +3,7 @@
     <div class="auth-card">
       <div class="auth-content">
           <h1 class="auth-title">重設密碼</h1>
-          <p class="auth-subtitle">Whisper 轉錄服務</p>
+          <p class="auth-subtitle">Sound Lite 轉錄服務</p>
 
           <!-- 無效 token 狀態 -->
           <div v-if="invalidToken" class="error-state">

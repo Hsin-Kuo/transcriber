@@ -5,7 +5,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "🔄 重啟 Whisper 後端服務..."
+echo "🔄 重啟 Sound Lite 後端服務..."
 echo ""
 
 # 停止服務（忽略錯誤碼，確保總是能繼續）

@@ -17,7 +17,7 @@ class EmailService:
         self.smtp_user = os.getenv("SMTP_USER", "")
         self.smtp_password = os.getenv("SMTP_PASSWORD", "")
         self.from_email = os.getenv("FROM_EMAIL", self.smtp_user)
-        self.from_name = os.getenv("FROM_NAME", "Whisper 轉錄服務")
+        self.from_name = os.getenv("FROM_NAME", "Sound Lite 服務")
         self.frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
     async def send_verification_email(
@@ -45,7 +45,7 @@ class EmailService:
         </head>
         <body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
             <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-                <h1 style="margin: 0; color: white;">歡迎使用 Whisper 轉錄服務</h1>
+                <h1 style="margin: 0; color: white;">歡迎使用 Sound Lite 服務</h1>
             </div>
             <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
                 <h2 style="margin-top: 0;">請驗證您的電子郵件地址</h2>
@@ -73,7 +73,7 @@ class EmailService:
                 <p>如果您沒有註冊此帳號，請忽略此郵件。</p>
             </div>
             <div style="text-align: center; margin-top: 30px; color: #666; font-size: 12px;">
-                <p>© 2024 Whisper 轉錄服務. All rights reserved.</p>
+                <p>© 2026 Sound Lite. All rights reserved.</p>
             </div>
         </body>
         </html>
@@ -84,7 +84,7 @@ class EmailService:
 
         # 純文字版本（備用）
         text_content = f"""
-        歡迎使用 Whisper 轉錄服務！
+        歡迎使用 Sound Lite 轉錄服務！
 
         請點擊以下連結驗證您的 email：
         {verification_url}
@@ -96,7 +96,7 @@ class EmailService:
 
         return await self._send_email(
             to_email=to_email,
-            subject="驗證您的 Email - Whisper 轉錄服務",
+            subject="驗證您的 Email - Sound Lite",
             html_content=html_content,
             text_content=text_content
         )
@@ -154,7 +154,7 @@ class EmailService:
                 </div>
             </div>
             <div style="text-align: center; margin-top: 30px; color: #666; font-size: 12px;">
-                <p>© 2024 Whisper 轉錄服務. All rights reserved.</p>
+                <p>© 2026 Sound Lite. All rights reserved.</p>
             </div>
         </body>
         </html>
@@ -165,7 +165,7 @@ class EmailService:
 
         # 純文字版本（備用）
         text_content = f"""
-        密碼重設請求 - Whisper 轉錄服務
+        密碼重設請求 - Sound Lite
 
         我們收到了您的密碼重設請求。請點擊以下連結重設您的密碼：
         {reset_url}
@@ -177,7 +177,7 @@ class EmailService:
 
         return await self._send_email(
             to_email=to_email,
-            subject="重設您的密碼 - Whisper 轉錄服務",
+            subject="重設您的密碼 - Sound Lite",
             html_content=html_content,
             text_content=text_content
         )
