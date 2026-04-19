@@ -595,6 +595,7 @@ async def task_status_events(
             # 持續推送狀態更新
             previous_status = None
             previous_progress = None
+            heartbeat_counter = 0
 
             while True:
                 if is_aws():
@@ -629,6 +630,13 @@ async def task_status_events(
                     yield f"data: {json.dumps(serialized_data)}\n\n"
                     previous_status = current_status
                     previous_progress = current_progress
+                    heartbeat_counter = 0
+                else:
+                    # 每 25 秒送一次 heartbeat comment，防止 ALB / proxy 因 idle timeout 斷線
+                    heartbeat_counter += 1
+                    if heartbeat_counter >= (25 // poll_interval):
+                        yield ": heartbeat\n\n"
+                        heartbeat_counter = 0
 
                 # 如果任務已完成或失敗，結束推送
                 if current_status in ["completed", "failed", "cancelled"]:
