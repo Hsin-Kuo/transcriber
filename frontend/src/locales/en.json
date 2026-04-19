@@ -437,7 +437,9 @@
     "networkError": "Network error, cannot load audio. Please check your network connection or if authorization has expired.",
     "audioDecodeError": "Audio format is invalid or corrupted, cannot decode.",
     "audioLoadFailed": "Audio loading failed. Please try again later or refresh the page.",
-    "playbackFailed": "Playback failed"
+    "playbackFailed": "Playback failed",
+    "audioExpiredTitle": "Audio file has been deleted",
+    "audioExpiredTooltip": "This task's audio file has been automatically deleted (retention period: {days} days). To keep audio files, use the pin feature on the task list page."
   },
   "replaceToolbar": {
     "find": "Find",

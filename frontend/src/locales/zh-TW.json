@@ -437,7 +437,9 @@
     "networkError": "網路錯誤，無法載入音檔。請檢查網路連線或授權是否過期。",
     "audioDecodeError": "音檔格式錯誤或損壞，無法解碼。",
     "audioLoadFailed": "音檔載入失敗。請稍後再試或重新整理頁面。",
-    "playbackFailed": "播放失敗"
+    "playbackFailed": "播放失敗",
+    "audioExpiredTitle": "音檔已被自動刪除",
+    "audioExpiredTooltip": "此任務的音檔已被系統自動刪除（保留期為 {days} 天）。若希望保留音檔，請在任務列表頁面使用釘選功能。"
   },
   "replaceToolbar": {
     "find": "尋找",

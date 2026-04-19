@@ -63,6 +63,8 @@ export function useTranscriptData() {
         text_length: task.result?.text_length || task.text_length,
         duration_text: task.duration_text,
         hasAudio: !!(task.result?.audio_file || task.audio_file),
+        audioExpired: task.audio_expired || false,
+        audioRetentionDays: task.audio_retention_days || 7,
         task_type: task.task_type || 'paragraph',
         summary_status: task.summary_status || null,
         tags: task.tags || [],

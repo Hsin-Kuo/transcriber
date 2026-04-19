@@ -248,6 +248,24 @@
           </template>
         </div>
 
+        <!-- C-alt) 音檔已過期時顯示提示 icon -->
+        <div
+          v-if="currentTranscript.audioExpired"
+          v-show="!isEffectivelyCollapsed"
+          class="audio-expired-info"
+        >
+          <div class="audio-expired-icon-wrapper">
+            <svg class="audio-expired-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            <div class="audio-expired-tooltip">
+              {{ $t('audioPlayer.audioExpiredTooltip', { days: currentTranscript.audioRetentionDays }) }}
+            </div>
+          </div>
+        </div>
+
         <!-- C) AudioPlayer 始終掛載，收合時隱藏（保持 audio element 活躍） -->
         <AudioPlayer
           v-if="currentTranscript.hasAudio"
@@ -406,6 +424,19 @@
         </div>
 
       </div>
+    </div>
+
+    <!-- 手機版音檔過期提示 -->
+    <div
+      v-if="currentTranscript.audioExpired"
+      class="mobile-audio-player mobile-audio-expired-info"
+    >
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="8" x2="12" y2="12"/>
+        <line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      <span>{{ $t('audioPlayer.audioExpiredTitle') }}</span>
     </div>
 
     <!-- 手機版音訊播放器（固定在底部） -->
@@ -3285,6 +3316,76 @@ watch(displayMode, () => {
   font-size: 12px;
 }
 
+/* === 音訊過期提示 === */
+.audio-expired-info {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 16px 8px;
+}
+
+.audio-expired-icon-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: default;
+}
+
+.audio-expired-icon {
+  color: var(--main-text);
+  opacity: 0.45;
+  transition: opacity 0.2s ease;
+}
+
+.audio-expired-icon-wrapper:hover .audio-expired-icon {
+  opacity: 0.75;
+}
+
+.audio-expired-tooltip {
+  display: none;
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  background: var(--nav-bg);
+  color: var(--main-text);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  padding: 8px 12px;
+  border-radius: 8px;
+  width: 220px;
+  text-align: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  pointer-events: none;
+  z-index: 200;
+  white-space: normal;
+}
+
+.audio-expired-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: var(--nav-bg);
+}
+
+.audio-expired-icon-wrapper:hover .audio-expired-tooltip {
+  display: block;
+}
+
+/* 手機版過期提示 */
+.mobile-audio-expired-info {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  color: var(--main-text);
+  opacity: 0.55;
+  font-size: 0.8rem;
+  padding: 8px 12px;
+}
+
 /* === 音訊播放器顯示控制 === */
 
 /* 手機版播放器：桌面隱藏 */
@@ -3417,6 +3518,11 @@ watch(displayMode, () => {
   /* 顯示手機版播放器 */
   .mobile-audio-player {
     display: block;
+  }
+
+  /* 顯示手機版過期提示 */
+  .mobile-audio-expired-info {
+    display: flex;
   }
 
   /* 移動端：隱藏收合按鈕和收合側邊欄 */

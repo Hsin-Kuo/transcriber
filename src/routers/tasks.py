@@ -380,9 +380,12 @@ def _is_audio_expired(task: Dict[str, Any], retention_days: int) -> bool:
     根據完成時間 + tier 保留天數計算，不需要呼叫 S3。
     keep_audio 的音檔存在 kept/ 資料夾，不受 lifecycle 影響。
 
+    retention_days 作為 fallback；優先從音檔路徑推導原始 tier 的天數，
+    避免用戶升降方案後計算錯誤。
+
     Args:
         task: 任務數據
-        retention_days: 該 tier 的保留天數
+        retention_days: 該 tier 的保留天數（fallback）
 
     Returns:
         True 表示音檔已過期
@@ -401,6 +404,22 @@ def _is_audio_expired(task: Dict[str, Any], retention_days: int) -> bool:
 
     if completed_at.tzinfo is None:
         completed_at = completed_at.replace(tzinfo=timezone.utc)
+
+    # 從音檔路徑取得上傳時的 tier，對應正確的 S3 Lifecycle 天數
+    # 避免用戶升降方案後 retention_days 與實際 lifecycle 不符
+    audio_file = task.get("result", {}).get("audio_file") or task.get("audio_file")
+    if audio_file:
+        from ..utils.storage_service import extract_tier_from_path
+        from ..models.quota import QUOTA_TIERS, QuotaTier
+        path_tier = extract_tier_from_path(audio_file)
+        # kept 資料夾不受 lifecycle 管理（keep_audio 檢查已在上面處理）
+        if path_tier and path_tier != "kept":
+            try:
+                tier_config = QUOTA_TIERS.get(QuotaTier(path_tier))
+                if tier_config:
+                    retention_days = tier_config.get("audio_retention_days", retention_days)
+            except ValueError:
+                pass  # 未知 tier，沿用傳入的 retention_days
 
     from datetime import timedelta
     expiry_time = completed_at + timedelta(days=retention_days)
@@ -558,6 +577,26 @@ async def get_task(
 
     # 豐富任務數據
     enriched_task = enrich_task_data(task)
+
+    # 取得用戶 tier 的音檔保留天數
+    from ..database.repositories.user_repo import UserRepository
+    from ..models.quota import QUOTA_TIERS, QuotaTier
+    user_repo = UserRepository(task_service.task_repo.db)
+    full_user = await user_repo.get_by_id(str(current_user["_id"]))
+    user_tier = full_user.get("quota", {}).get("tier", "free") if full_user else "free"
+    tier_config = QUOTA_TIERS.get(QuotaTier(user_tier), QUOTA_TIERS[QuotaTier.FREE])
+    retention_days = tier_config.get("audio_retention_days", 7)
+
+    enriched_task["audio_retention_days"] = retention_days
+
+    # 若音檔已過期，清除 audio_file 並標記
+    audio_file = enriched_task.get("result", {}).get("audio_file")
+    if audio_file and _is_audio_expired(enriched_task, retention_days):
+        enriched_task["audio_expired"] = True
+        enriched_task["result"]["audio_file"] = None
+        enriched_task["result"]["audio_filename"] = None
+    else:
+        enriched_task["audio_expired"] = False
 
     return enriched_task
 
