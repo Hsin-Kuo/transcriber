@@ -100,6 +100,121 @@ admin-frontend/             # 管理後台
 | 國際化 | Vue I18n |
 | 容器化 | Docker + Docker Compose |
 
+## AWS 部署架構
+
+### 整體架構
+
+```mermaid
+graph TB
+    subgraph "Users"
+        U[User Browser<br/>soundlite.app]
+        A[Admin Browser<br/>admin.soundlite.app]
+    end
+
+    subgraph "DNS"
+        R53[Route 53<br/>soundlite.app<br/>admin.soundlite.app]
+    end
+
+    subgraph "EC2 t3.small — ap-northeast-1"
+        Nginx["Nginx<br/>Reverse Proxy + Static Files<br/>port 80 / 443"]
+        FE["Frontend Static<br/>/var/www/transcriber"]
+        AdminFE["Admin Static<br/>/var/www/admin"]
+        API["FastAPI<br/>uvicorn :8000<br/>APP_ROLE=server"]
+    end
+
+    subgraph "AWS ap-northeast-1"
+        SQS[SQS<br/>transcriber-tasks]
+        S3[S3<br/>transcriber-files<br/>uploads/ · output/]
+        SSM[SSM Parameter Store<br/>JWT / MongoDB / API Keys]
+    end
+
+    subgraph "EC2 g4dn.xlarge Spot — ap-northeast-1"
+        Worker["AI Worker<br/>APP_ROLE=worker<br/>faster-whisper + pyannote<br/>idle 5min → 自動關機"]
+    end
+
+    subgraph "External Services"
+        MongoDB[(MongoDB Atlas<br/>ap-northeast-1)]
+        Resend[Resend<br/>Email]
+        Stripe[Stripe<br/>Subscriptions]
+        Google[Google<br/>OAuth · Gemini API]
+    end
+
+    subgraph "CI/CD"
+        GHA["GitHub Actions<br/>push to branch: aws"]
+    end
+
+    U -->|HTTPS| R53
+    A -->|HTTPS| R53
+    R53 --> Nginx
+    Nginx -->|"soundlite.app / *"| FE
+    Nginx -->|"admin.soundlite.app / *"| AdminFE
+    Nginx -->|"/auth /tasks /transcriptions<br/>/uploads /subscriptions ..."| API
+
+    API --> MongoDB
+    API --> S3
+    API --> SQS
+    API --> SSM
+    API --> Resend
+    API --> Stripe
+    API --> Google
+
+    SQS -->|Poll| Worker
+    Worker --> MongoDB
+    Worker --> S3
+    Worker --> SSM
+    Worker --> Google
+
+    GHA -->|"SSH deploy<br/>backend + frontend"| Nginx
+```
+
+### 音檔轉錄任務流程
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant Nginx
+    participant API as FastAPI (Web Server)
+    participant S3
+    participant SQS
+    participant MongoDB
+    participant Worker as AI Worker (GPU)
+
+    Browser->>Nginx: POST /uploads (mp4/mp3/wav...)
+    Nginx->>API: proxy
+    API->>API: ffmpeg 音訊提取 (mp4→mp3)<br/>ffprobe 取得時長，檢查配額
+    API->>S3: 上傳 mp3 (uploads/{task_id}.mp3)
+    API->>MongoDB: 建立 Task 記錄 (status: pending)
+    API->>SQS: 發送任務訊息 (HMAC 簽名)
+    API-->>Browser: 202 { task_id }
+
+    Browser->>Nginx: GET /tasks/{task_id}/events (SSE)
+    Nginx->>API: proxy (proxy_buffering off)
+
+    loop 轉錄進行中，每 2 秒 poll MongoDB
+        API->>MongoDB: 查詢 task progress
+        API-->>Browser: SSE progress event
+    end
+
+    Worker->>SQS: Long Poll 接收任務
+    Worker->>S3: 下載 mp3
+    Worker->>Worker: Whisper 轉錄<br/>Gemini 標點強化<br/>pyannote 說話者辨識
+    Worker->>MongoDB: 更新進度 + 寫入 transcription
+    Worker->>S3: 上傳輸出檔 (output/{task_id}/)
+    Worker->>MongoDB: status → completed
+    API-->>Browser: SSE completed
+```
+
+### 本地開發 vs AWS 環境切換
+
+| 服務 | 本地 (`DEPLOY_ENV=local`) | AWS (`DEPLOY_ENV=aws`) |
+|------|--------------------------|------------------------|
+| 音檔儲存 | 本機 `uploads/` | AWS S3 |
+| 任務派發 | 直接呼叫 Service | SQS 訊息佇列 |
+| Whisper 模型 | 同進程載入 | 僅 Worker 載入 |
+| SSE 狀態 | in-memory dict | MongoDB polling |
+| Email | Console 印出 | Resend |
+| 密鑰 | `.env` 檔案 | SSM Parameter Store |
+
 ## 目錄結構
 
 ```

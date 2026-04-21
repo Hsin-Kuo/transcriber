@@ -104,11 +104,25 @@ def _verify_message_signature(body: dict) -> bool:
     return True
 
 
+# ===== MongoDB 連線池（module-level 單例，避免每個任務重建連線）=====
+_mongo_client = None
+
+# ===== Spot 中斷狀態（背景執行緒與主迴圈共享）=====
+_spot_interruption_detected = False
+_current_task_id = None          # 正在處理的任務 ID
+_current_receipt_handle = None   # 正在處理的 SQS receipt handle
+
 # ===== MongoDB 同步 helpers =====
 
 def _get_db():
-    client = MongoClient(MONGODB_URL, serverSelectionTimeoutMS=5000)
-    return client[MONGODB_DB_NAME]
+    global _mongo_client
+    if _mongo_client is None:
+        _mongo_client = MongoClient(
+            MONGODB_URL,
+            serverSelectionTimeoutMS=5000,
+            maxPoolSize=5,
+        )
+    return _mongo_client[MONGODB_DB_NAME]
 
 
 def _update_task(db, task_id: str, updates: dict):
@@ -268,6 +282,12 @@ def process_task(message_body: dict):
     max_speakers = message_body.get("max_speakers")
 
     db = _get_db()
+
+    # 防止重複處理（Spot 中斷恢復後可能收到相同 SQS 訊息）
+    task_doc = db.tasks.find_one({"_id": task_id}, {"status": 1})
+    if task_doc and task_doc.get("status") == "completed":
+        print(f"⏭️ [Worker] 任務 {task_id} 已完成，跳過重複處理")
+        return
 
     print(f"🎬 [Worker] 開始處理任務 {task_id}")
     _update_task(db, task_id, {"status": "processing", "progress": "Worker 開始處理..."})
@@ -501,12 +521,74 @@ def _shutdown_instance():
         print(f"⚠️ 無法自動關機: {e}")
 
 
+def _check_spot_interruption() -> bool:
+    """輪詢 EC2 metadata，偵測 Spot 中斷預警（約 2 分鐘前出現）"""
+    try:
+        import urllib.request
+        token_req = urllib.request.Request(
+            "http://169.254.169.254/latest/api/token",
+            headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"},
+            method="PUT"
+        )
+        token = urllib.request.urlopen(token_req, timeout=1).read().decode()
+        req = urllib.request.Request(
+            "http://169.254.169.254/latest/meta-data/spot/termination-time",
+            headers={"X-aws-ec2-metadata-token": token}
+        )
+        urllib.request.urlopen(req, timeout=1)
+        return True   # endpoint 有回應 → 確定即將中斷
+    except Exception:
+        return False  # 404 或 timeout 都視為正常（未中斷）
+
+
+def _handle_spot_interruption(sqs):
+    """偵測到 Spot 中斷後：重置任務狀態，讓另一台 Worker 接手"""
+    global _current_task_id, _current_receipt_handle
+    print("⚠️ [Spot] 收到中斷預警！開始清理，約 2 分鐘後關機...")
+
+    if _current_task_id:
+        try:
+            db = _get_db()
+            _update_task(db, _current_task_id, {
+                "status": "pending",
+                "progress": "Worker 被 Spot 中斷，重新排隊等待處理...",
+            })
+            print(f"🔄 [Spot] 已將任務 {_current_task_id} 重置為 pending")
+        except Exception as e:
+            print(f"⚠️ [Spot] 無法重置任務狀態: {e}")
+
+    if _current_receipt_handle and SQS_QUEUE_URL:
+        try:
+            sqs.change_message_visibility(
+                QueueUrl=SQS_QUEUE_URL,
+                ReceiptHandle=_current_receipt_handle,
+                VisibilityTimeout=30,  # 30 秒後讓其他 Worker 可見
+            )
+            print("📨 [Spot] SQS 消息可見時間已縮短，其他 Worker 30 秒後可接手")
+        except Exception as e:
+            print(f"⚠️ [Spot] 無法修改 SQS 可見時間: {e}")
+
+
+def _spot_monitor(sqs):
+    """背景執行緒：每 30 秒輪詢 Spot 中斷預警"""
+    global _spot_interruption_detected, _shutdown
+    while not _shutdown:
+        time.sleep(30)
+        if not _shutdown and _check_spot_interruption():
+            _spot_interruption_detected = True
+            _shutdown = True
+            _handle_spot_interruption(sqs)
+            break
+    print("🛑 [Spot Monitor] 執行緒已結束")
+
+
 def main():
     """SQS Consumer 主迴圈"""
     if not SQS_QUEUE_URL:
         print("❌ SQS_QUEUE_URL 未設定，無法啟動 Worker")
         sys.exit(1)
 
+    import threading
     sqs = boto3.client("sqs", region_name=S3_REGION)
     print(f"🚀 AI Worker 已啟動")
     print(f"   SQS Queue: {SQS_QUEUE_URL}")
@@ -514,6 +596,13 @@ def main():
     print(f"   MongoDB: {MONGODB_DB_NAME}")
     print(f"   Auto Shutdown: {AUTO_SHUTDOWN_IDLE_MINUTES} 分鐘空閒後")
     print(f"   平行處理: 轉錄 + 語者辨識同時執行")
+
+    # 啟動 Spot 中斷監控背景執行緒
+    monitor_thread = threading.Thread(
+        target=_spot_monitor, args=(sqs,), daemon=True, name="SpotMonitor"
+    )
+    monitor_thread.start()
+    print(f"🔍 Spot 中斷監控已啟動（每 30 秒輪詢）")
 
     # 預先載入模型，不用等第一個任務才載入
     _get_whisper_processor()
@@ -563,9 +652,23 @@ def main():
                     print(f"🚫 已丟棄無效簽名的訊息: {body.get('task_id', 'unknown')}")
                     continue
 
+                # 記錄當前處理的任務（供 Spot 監控執行緒使用）
+                global _current_task_id, _current_receipt_handle
+                _current_task_id = body.get("task_id")
+                _current_receipt_handle = receipt_handle
+
                 process_task(body)
 
-                # 處理成功，刪除訊息
+                # 清除追蹤
+                _current_task_id = None
+                _current_receipt_handle = None
+
+                # Spot 中斷時保留 SQS 訊息（已由監控執行緒縮短 visibility），讓其他 Worker 接手
+                if _spot_interruption_detected:
+                    print(f"⚠️ [Spot] 保留 SQS 訊息，其他 Worker 將接手任務")
+                    break
+
+                # 正常完成，刪除訊息
                 sqs.delete_message(
                     QueueUrl=SQS_QUEUE_URL,
                     ReceiptHandle=receipt_handle,

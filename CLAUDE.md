@@ -14,9 +14,27 @@
 
 ```
 src/                  # 後端 (FastAPI)
-  routers/            # API 路由 (auth, tasks, transcriptions, uploads, subscriptions...)
+  main.py             # 應用入口（uvicorn）
+  worker.py           # AWS GPU Worker（SQS consumer，APP_ROLE=worker 時啟動）
+  routers/            # API 路由
+    auth.py           # 認證（註冊/登入/email驗證/密碼重設）
+    oauth.py          # Google OAuth
+    tasks.py          # 任務狀態、SSE 進度推送
+    transcriptions.py # 上傳音檔、建立轉錄任務
+    uploads.py        # 批次上傳
+    audio.py          # 音檔下載
+    tags.py           # 標籤管理
+    summaries.py      # AI 摘要
+    shared.py         # 分享連結（無需登入可看）
+    subscriptions.py  # Stripe 訂閱付款
+    admin.py          # 管理後台 API
   services/           # 業務邏輯
-    utils/            # Whisper、diarization、標點處理
+    utils/            # 工具類
+      whisper_processor.py      # faster-whisper 轉錄
+      punctuation_processor.py  # Gemini 標點強化
+      diarization_processor.py  # pyannote 說話者辨識
+      storage_service.py        # 檔案存取（local/S3 自動切換）
+      config_loader.py          # 密鑰讀取（SSM / .env fallback）
   database/
     repositories/     # MongoDB CRUD
   auth/               # JWT、密碼、依賴注入
@@ -24,6 +42,9 @@ src/                  # 後端 (FastAPI)
 frontend/             # 使用者前端 (Vue 3 + Vite, port 5173/3000)
 admin-frontend/       # 管理後台 (Vue 3 + Vite, port 5174/3003)
 deploy/               # AWS 部署腳本
+  nginx-ec2.conf      # Nginx 設定（生產用）
+  deploy-web.sh       # Web Server 初始部署腳本
+  deploy-gpu-worker.sh# GPU Worker 初始部署腳本
 ```
 
 ---
@@ -88,9 +109,15 @@ tail -f backend.log    # 即時 log
 | `GOOGLE_CLIENT_ID` | Google OAuth |
 | `DEPLOY_ENV` | `local` 或 `aws` |
 | `STRIPE_SECRET_KEY` | Stripe 訂閱付款 |
-| `EMAIL_PROVIDER` | `console` / `smtp` / `ses` |
+| `EMAIL_PROVIDER` | `console` / `smtp` / `resend`（生產用 Resend，非 SES） |
 
 AWS 部署時額外需要：`S3_BUCKET`, `SQS_QUEUE_URL`, `WORKER_SECRET`, `APP_ROLE`
+
+AWS 生產環境實際值（ap-northeast-1）：
+- `S3_BUCKET` = `transcriber-files-696637902131`
+- `SQS_QUEUE_URL` = `https://sqs.ap-northeast-1.amazonaws.com/696637902131/transcriber-tasks`
+- Web Server EC2 Elastic IP = `3.112.209.96`
+- 敏感密鑰由 SSM Parameter Store 統一管理（`/transcriber/*`）
 
 ---
 
@@ -110,16 +137,27 @@ AWS 部署時額外需要：`S3_BUCKET`, `SQS_QUEUE_URL`, `WORKER_SECRET`, `APP_
 ```
 DEPLOY_ENV=local  → Whisper 在同一進程執行
 DEPLOY_ENV=aws    → Web Server (APP_ROLE=server) + GPU Worker (APP_ROLE=worker) 分離
-                    SQS 佇列 → Lambda 自動啟動 GPU → 空閒 5 分鐘後關機
+                    Web Server 發 SQS 訊息 → GPU Worker (src/worker.py) Long Poll 接收
+                    GPU Worker 空閒 5 分鐘後自行呼叫 shutdown（無 Lambda）
 ```
 
+### AWS 生產部署架構
+- **Web Server**：EC2 t3.small + Nginx（反向代理 + 靜態檔案 serve）
+- **前端**：build 後直接部署到 EC2 `/var/www/transcriber`（非 S3+CloudFront）
+- **GPU Worker**：EC2 g4dn.xlarge Spot，`src/worker.py` 作為 SQS consumer
+- **CI/CD**：GitHub Actions，push 到 **`aws` 分支**觸發部署（非 `main`）
+
 ### MongoDB Collections
-- `users` — 帳號、角色、使用配額
-- `tasks` — 轉錄任務記錄
+- `users` — 帳號、角色、使用配額、Stripe 訂閱 ID
+- `tasks` — 轉錄任務記錄（含 AWS 模式下的 progress 供 SSE polling）
 - `transcriptions` — 轉錄文字與中繼資料
 - `tags` — 使用者標籤
 - `summaries` — AI 摘要
 - `audit_logs` — 管理員操作記錄
+
+### SSE 進度推送（本地 vs AWS 行為不同）
+- `DEPLOY_ENV=local`：in-memory dict，Worker 直接更新
+- `DEPLOY_ENV=aws`：Web Server SSE endpoint 每 2 秒 poll MongoDB，GPU Worker 寫入進度
 
 ---
 

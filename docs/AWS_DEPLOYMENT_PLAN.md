@@ -1,6 +1,25 @@
 # AWS 部署計畫 (Whisper Transcriber)
 
-> 最後更新：2026-02-04
+> 最後更新：2026-04-22
+
+> **⚠️ 注意：此文件為原始規劃文件，部分設計在實際部署時有所調整。**
+> 實際現況與規劃的主要差異請見下方「[現況與規劃差異](#現況與規劃差異)」章節。
+
+---
+
+## 現況與規劃差異
+
+以下為實際部署與本文件規劃的已知差異（2026-04-22 確認）：
+
+| 項目 | 本文件規劃 | 實際現況 |
+|------|-----------|---------|
+| **HTTPS 反向代理** | Caddy（自動 SSL） | **Nginx** |
+| **前端部署** | S3 + CloudFront | **EC2 Nginx 直接 serve**（`/var/www/transcriber`, `/var/www/admin`） |
+| **CI/CD 前端** | `aws s3 sync` | **GitHub Actions SSH 到 EC2**，解壓縮到 `/var/www/` |
+| **Email 服務** | Amazon SES | **Resend**（`EMAIL_PROVIDER=resend`） |
+| **GPU 啟動機制** | Lambda 觸發 / Auto Scaling Group | **Worker 自管**：SQS Long Poll + 空閒 5 分鐘後自行呼叫 `shutdown` |
+| **Stripe** | 未提及 | **已整合**（訂閱付款） |
+| **DNS** | Route 53 → 分別指向 CloudFront / EC2 | Route 53 → EC2 Elastic IP（單一入口） |
 
 ---
 
@@ -31,18 +50,19 @@
 
 採用 **Web / AI Worker 分離架構**，以 SQS 解耦，GPU 機器可獨立擴展與關機。
 
+> **實際現況**（2026-04-22）：前端靜態檔案由 EC2 Nginx 直接 serve，未使用 CloudFront + S3。
+
 ```
                        Route 53 (DNS)
                             │
-                       CloudFront (CDN)
-                  ┌─────────┼─────────┐
-             S3 Bucket      │      S3 Bucket
-          (User Frontend) (Admin Frontend)
-                            │
-              ┌─────── t3.small (Web Server) ───────┐
-              │   FastAPI (API / Auth / S3簽名)      │
-              │   Caddy (HTTPS reverse proxy)        │
-              └──────┬──────────────┬────────────────┘
+              ┌─────── t3.small (Web Server) ───────────────┐
+              │   Nginx (HTTPS reverse proxy + static serve) │
+              │   soundlite.app → /var/www/transcriber       │
+              │   admin.soundlite.app → /var/www/admin       │
+              │   /api/* → FastAPI :8000                     │
+              │                                             │
+              │   FastAPI (API / Auth / S3 簽名)             │
+              └──────┬──────────────┬───────────────────────┘
                      │              │
                   MongoDB       AWS SQS
                   Atlas         (任務佇列)
@@ -51,6 +71,7 @@
               │   g4dn.xlarge (AI Worker - Spot)     │
               │   faster-whisper + pyannote.audio     │
               │   監聽 SQS → 下載 S3 → 轉錄 → 寫回 DB │
+              │   空閒 5 分鐘 → 自行關機              │
               └──────────────────────────────────────┘
                                 │
                            AWS S3
@@ -201,72 +222,61 @@ subprocess.run([
 
 ## 4. 前端部署策略
 
-兩個 Vue 3 前端 (user frontend + admin frontend) 均部署到 S3 + CloudFront。
+> **實際現況**（2026-04-22）：前端靜態檔案部署在 EC2 t3.small 上，由 Nginx 直接 serve，**未使用 S3 + CloudFront**。
 
-### S3 Bucket 設定
+### 實際部署方式（GitHub Actions → EC2）
 
-- 建立兩個 Bucket（或同一 Bucket 不同 prefix）：
-  - `transcriber-frontend` → 用戶端
-  - `transcriber-admin` → 管理後台
-- 啟用靜態網站託管
-- Bucket Policy 允許 CloudFront OAI 讀取
-
-### CloudFront 設定
-
-- **Origins**：指向 S3 Bucket
-- **Default Root Object**：`index.html`
-- **Error Pages**：403/404 均導向 `index.html`（SPA fallback）
-- **Cache Behavior**：
-  - `/api/*` → 轉發到 Web Server (t3.small)
-  - `/*` → 從 S3 讀取靜態檔案
-- **SSL**：使用 ACM 憑證（免費）
-- **備用方案**：也可在 t3.small 上用 nginx serve 前端靜態檔（省 CloudFront 費用，但效能差）
-
-### 部署流程
+兩個 Vue 3 前端在 GitHub Actions 建置後，透過 SSH 直接部署到 EC2：
 
 ```bash
-# User Frontend
-cd frontend && npm run build
-aws s3 sync dist/ s3://transcriber-frontend/ --delete
-aws cloudfront create-invalidation --distribution-id $DIST_ID --paths "/*"
+# GitHub Actions 自動在 push to aws branch 時執行
 
-# Admin Frontend
+# User Frontend → /var/www/transcriber
+cd frontend && npm run build
+scp frontend.tar.gz ec2-user@<EC2_IP>:/tmp/
+ssh ec2-user@<EC2_IP> "tar -xzf /tmp/frontend.tar.gz && sudo cp -r dist/* /var/www/transcriber/"
+
+# Admin Frontend → /var/www/admin
 cd admin-frontend && npm run build
-aws s3 sync dist/ s3://transcriber-admin/ --delete
-aws cloudfront create-invalidation --distribution-id $DIST_ID --paths "/*"
+scp admin-frontend.tar.gz ec2-user@<EC2_IP>:/tmp/
+ssh ec2-user@<EC2_IP> "tar -xzf /tmp/admin-frontend.tar.gz && sudo cp -r dist/* /var/www/admin/"
 ```
+
+Nginx 設定負責 SPA fallback 與靜態資源快取（詳見 `deploy/nginx-ec2.conf`）。
+
+### 備用方案（原規劃）
+
+如未來流量增長，可遷移至 S3 + CloudFront：
+- 建立兩個 Bucket：`transcriber-frontend`、`transcriber-admin`
+- 設定 CloudFront Distribution（SPA fallback、HTTPS、ACM 憑證）
+- 修改 CI/CD 改用 `aws s3 sync` + `cloudfront create-invalidation`
 
 ---
 
 ## 5. HTTPS 與域名
 
-### 方案：Caddy (Web Server 上)
+> **實際現況**（2026-04-22）：使用 **Nginx** 作為反向代理，非 Caddy。
 
-在 t3.small 上使用 Caddy 作為 reverse proxy，自動管理 Let's Encrypt 憑證。
+### 實際方案：Nginx (Web Server 上)
 
-```
-Caddyfile 範例：
-api.your-domain.com {
-    reverse_proxy localhost:8000
-}
-```
+在 t3.small 上使用 Nginx 作為 HTTPS reverse proxy，搭配 Let's Encrypt / Certbot 管理 SSL 憑證。設定檔位於 `deploy/nginx-ec2.conf`。
 
 **優點**：
 - 成本 $0（不需 ALB ~$22/月）
-- 自動續約 SSL 憑證
-- 設定簡單
+- 同時處理靜態檔案 serve 與 API proxy
+- 設定彈性高
 
 **注意**：
 - 需要域名 A record 指向 t3.small 的 Elastic IP
+- SSL 憑證需另行設定 Certbot 自動續約
 - 如果未來需要多台 Web Server 負載均衡，再改用 ALB
 
 ### DNS 設定 (Route 53)
 
 | Record | Type | Target |
 |--------|------|--------|
-| `your-domain.com` | A (Alias) | CloudFront Distribution |
-| `admin.your-domain.com` | A (Alias) | CloudFront Distribution (admin) |
-| `api.your-domain.com` | A | EC2 Elastic IP (t3.small) |
+| `soundlite.app` | A | EC2 Elastic IP (t3.small) |
+| `admin.soundlite.app` | A | EC2 Elastic IP (t3.small) |
 
 ---
 
@@ -370,47 +380,30 @@ EC2 Instance Role 需要：
 
 ---
 
-## 8. Email 服務遷移
+## 8. Email 服務
 
-### 現況
+> **實際現況**（2026-04-22）：使用 **Resend**（`EMAIL_PROVIDER=resend`），非 Amazon SES。
 
-使用 Gmail SMTP（`src/utils/email_service.py`）。
+### 實際方案：Resend
 
-### 遷移至 Amazon SES
+環境變數設定：
 
-**優點**：
-- 每月 62,000 封免費（從 EC2 發送）
-- 不依賴 Gmail App Password
-- 高送達率
-
-**設定步驟**：
-
-1. 在 SES 驗證寄件域名（SPF/DKIM）
-2. 申請移出 Sandbox（正式環境需要）
-3. 修改 `email_service.py`，新增 SES 發信模式
-
-```python
-import boto3
-
-ses_client = boto3.client('ses', region_name='ap-northeast-1')
-
-async def send_email_ses(to: str, subject: str, html_body: str, text_body: str):
-    ses_client.send_email(
-        Source=f"{FROM_NAME} <{FROM_EMAIL}>",
-        Destination={"ToAddresses": [to]},
-        Message={
-            "Subject": {"Data": subject},
-            "Body": {
-                "Html": {"Data": html_body},
-                "Text": {"Data": text_body}
-            }
-        }
-    )
+```bash
+EMAIL_PROVIDER=resend
+FROM_EMAIL=noreply@soundlite.app
+FROM_NAME=Soundlite
+RESEND_API_KEY=...  # 從 SSM Parameter Store 載入
 ```
 
-### 過渡期
+**優點**：
+- 設定簡單，不需申請 SES Sandbox 移出流程
+- 支援 SPF/DKIM 自動設定
+- 每月 3,000 封免費
 
-可保留 SMTP 作為 fallback，新增環境變數 `EMAIL_PROVIDER=ses|smtp` 切換。
+### 備用方案（原規劃：Amazon SES）
+
+如未來有更高寄信量需求，可遷移至 SES（每月 62,000 封免費）。
+切換時只需修改 `EMAIL_PROVIDER=ses` 並在 `email_service.py` 加入 SES 分支。
 
 ---
 
