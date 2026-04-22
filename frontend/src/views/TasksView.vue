@@ -50,6 +50,7 @@ const { t } = useI18n()
 const showNotification = inject('showNotification')
 const tasks = ref([])
 const eventSources = new Map() // SSE 連接管理
+let pollTimer = null // 進行中任務的輪詢備用計時器
 
 // 分頁相關狀態
 const currentPage = ref(1)
@@ -189,12 +190,18 @@ async function refreshTasks() {
       }
     })
 
-    // 為正在進行的任務建立 SSE 連接
+    // 為正在進行的任務建立 SSE 連接，並啟動輪詢備用
+    const hasActiveTasks = tasks.value.some(task => ['pending', 'processing'].includes(task.status))
     tasks.value.forEach(task => {
       if (['pending', 'processing'].includes(task.status)) {
         connectTaskSSE(task.task_id)
       }
     })
+    if (hasActiveTasks) {
+      startPollTimer()
+    } else {
+      stopPollTimer()
+    }
   } catch (error) {
     console.error('Failed to refresh task list:', error)
   }
@@ -454,10 +461,47 @@ function disconnectAllSSE() {
   eventSources.clear()
 }
 
+// 輪詢備用：當有進行中任務時，每 5 秒直接查 API 更新進度
+// 確保即使 SSE 被 Cloudflare/nginx 緩衝，進度仍能更新
+function startPollTimer() {
+  if (pollTimer) return
+  pollTimer = setInterval(async () => {
+    const activeTasks = tasks.value.filter(t => ['pending', 'processing'].includes(t.status))
+    if (activeTasks.length === 0) {
+      stopPollTimer()
+      return
+    }
+    for (const t of activeTasks) {
+      try {
+        const response = await taskService.get(t.task_id)
+        const updated = response.task || response
+        const taskInList = tasks.value.find(lt => lt.task_id === t.task_id)
+        if (taskInList && updated.progress) {
+          taskInList.progress = updated.progress
+          if (updated.progress_percentage != null) {
+            taskInList.progress_percentage = updated.progress_percentage
+          }
+          if (updated.status !== taskInList.status) {
+            taskInList.status = updated.status
+          }
+        }
+      } catch (_) { /* ignore */ }
+    }
+  }, 5000)
+}
+
+function stopPollTimer() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
 // 組件卸載前斷開所有連接
 onBeforeUnmount(() => {
   console.log('🔌 組件即將卸載，關閉所有 SSE 連接')
   disconnectAllSSE()
+  stopPollTimer()
 })
 </script>
 

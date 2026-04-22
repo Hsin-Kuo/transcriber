@@ -97,6 +97,40 @@ def is_aws() -> bool:
 
 # ==================== 音檔操作 ====================
 
+_AUDIO_MIME_TYPES = {
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".mp4": "audio/mp4",
+    ".wav": "audio/wav",
+    ".ogg": "audio/ogg",
+    ".flac": "audio/flac",
+    ".aac": "audio/aac",
+    ".opus": "audio/opus",
+    ".wma": "audio/x-ms-wma",
+    ".webm": "audio/webm",
+}
+
+
+def _detect_content_type(local_path: Path) -> str:
+    """從檔案前幾個位元組偵測實際 MIME type"""
+    try:
+        with open(local_path, "rb") as f:
+            header = f.read(12)
+        if header[4:8] == b"ftyp":
+            return "audio/mp4"
+        if header[:3] == b"ID3" or (header[0] == 0xFF and (header[1] & 0xE0) == 0xE0):
+            return "audio/mpeg"
+        if header[:4] == b"OggS":
+            return "audio/ogg"
+        if header[:4] == b"RIFF" and header[8:12] == b"WAVE":
+            return "audio/wav"
+        if header[:4] == b"fLaC":
+            return "audio/flac"
+    except Exception:
+        pass
+    return _AUDIO_MIME_TYPES.get(local_path.suffix.lower(), "audio/mpeg")
+
+
 def save_audio(task_id: str, local_path: Path, tier: str = "free") -> str:
     """儲存音檔（上傳後呼叫）
 
@@ -110,10 +144,11 @@ def save_audio(task_id: str, local_path: Path, tier: str = "free") -> str:
     """
     _validate_task_id(task_id)
     if is_aws():
+        content_type = _detect_content_type(local_path)
         key = _audio_s3_key(task_id, tier)
         _get_s3().upload_file(
             str(local_path), S3_BUCKET, key,
-            ExtraArgs={"ContentType": "audio/mpeg"}
+            ExtraArgs={"ContentType": content_type}
         )
         local_path.unlink(missing_ok=True)
         return f"s3://{S3_BUCKET}/{key}"
@@ -159,11 +194,7 @@ def get_audio_presigned_url(task_id: str, expires_in: int = 3600, tier: str = "f
     key = _audio_s3_key(task_id, tier)
     return _get_s3().generate_presigned_url(
         "get_object",
-        Params={
-            "Bucket": S3_BUCKET,
-            "Key": key,
-            "ResponseContentType": "audio/mpeg",
-        },
+        Params={"Bucket": S3_BUCKET, "Key": key},
         ExpiresIn=expires_in,
     )
 
@@ -310,11 +341,7 @@ def get_presigned_url_by_path(audio_file_path: str, expires_in: int = 3600) -> O
     expires_in = min(expires_in, MAX_PRESIGNED_URL_TTL)
     return _get_s3().generate_presigned_url(
         "get_object",
-        Params={
-            "Bucket": S3_BUCKET,
-            "Key": key,
-            "ResponseContentType": "audio/mpeg",
-        },
+        Params={"Bucket": S3_BUCKET, "Key": key},
         ExpiresIn=expires_in,
     )
 
