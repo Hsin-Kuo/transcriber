@@ -37,43 +37,31 @@
 - **狀態**：✅ 已完成（2026-04-22）
 - 改為 module-level MongoClient 單例（`_mongo_client`，`maxPoolSize=5`），避免每個任務重新建立連線
 
-### ⬜ 1-C　EC2 自動恢復（CloudWatch）
+### ✅ 1-C　EC2 自動恢復（CloudWatch）
 - **類型**：AWS Console 操作（約 5 分鐘）
 - **成本**：$0
-- EC2 → 監控 → 建立 Alarm：
-  - 指標：`StatusCheckFailed_System` > 0，持續 2 分鐘
-  - 動作：`EC2 action → Recover this instance`
-- 說明：不是 reboot，是 AWS 層硬體遷移，能救回大多數機器異常
+- **狀態**：✅ 已完成（2026-04-22）— alarm `transcriber-ec2-auto-recover` 已建立
 
-### ⬜ 1-D　SQS Dead Letter Queue
+### ✅ 1-D　SQS Dead Letter Queue
 - **類型**：AWS Console 操作（約 5 分鐘）
 - **成本**：$0
-- SQS → 建立 Queue `transcriber-tasks-dlq`（Standard）
-  - 原 Queue `transcriber-tasks` → Redrive policy → DLQ = 上方新建的 Queue，maxReceiveCount = 3
-  - 意義：任務失敗 3 次後移入 DLQ，不會無限重試，可事後人工調查
+- **狀態**：✅ 已完成（2026-04-22）— `transcriber-tasks-dlq` 已建立，maxReceiveCount=3
 
-### ⬜ 1-E　Certbot 自動續約 cron
+### ✅ 1-E　Certbot 自動續約 cron
 - **類型**：SSH 到 EC2 執行一次
 - **成本**：$0
-- ```bash
-  # SSH 進去後執行
-  echo "0 3 * * * root certbot renew --quiet && systemctl reload nginx" \
-    | sudo tee /etc/cron.d/certbot-renewal
-  # 測試
-  sudo certbot renew --dry-run
-  ```
+- **狀態**：✅ 不適用（2026-04-22）— SSL 由 Cloudflare 管理，不需 certbot
 
-### ⬜ 1-F　CloudWatch 基本警報
+### ✅ 1-F　CloudWatch 基本警報
 - **類型**：AWS Console 操作（約 15 分鐘）
 - **成本**：$0（SNS Email 免費）
-- 建立以下 Alarms，動作均為 SNS Email 通知：
+- **狀態**：✅ 已完成（2026-04-22）— SNS topic `transcriber-alerts` → hsinforwork@gmail.com
 
-  | 警報名稱 | 指標 | 條件 |
-  |---------|------|------|
-  | `web-cpu-high` | EC2 CPUUtilization | > 85%，持續 10 分鐘 |
-  | `web-disk-high` | disk_used_percent（需 CloudWatch Agent） | > 80% |
-  | `sqs-queue-depth` | SQS ApproximateNumberOfMessagesVisible | > 10，持續 5 分鐘（代表 Worker 可能掛掉） |
-  | `worker-spot-relaunch` | 與上方 SQS alarm 搭配 | 收到通知時人工確認並重啟 Worker |
+  | 警報名稱 | 指標 | 條件 | 狀態 |
+  |---------|------|------|------|
+  | `web-cpu-high` | EC2 CPUUtilization | > 85%，持續 10 分鐘 | ✅ |
+  | `web-disk-high` | disk_used_percent（需 CloudWatch Agent） | > 80% | ⬜ 需裝 Agent |
+  | `sqs-queue-depth` | SQS ApproximateNumberOfMessagesVisible | > 10，持續 5 分鐘 | ✅ |
 
 ### ⬜ 1-G　EC2 磁碟擴容 + 暫存清理
 - **類型**：AWS Console + SSH
@@ -105,14 +93,9 @@
   - 建 CloudFront Distribution × 2
   - 更新 `.github/workflows/deploy-aws.yml`：改為 `aws s3 sync` + `cloudfront create-invalidation`
 
-### ⬜ 2-C　Nginx API Rate Limiting
+### ✅ 2-C　Nginx API Rate Limiting
 - **成本**：$0（Nginx 原生支援）
-- 在 `deploy/nginx-ec2.conf` 加入：
-  ```nginx
-  limit_req_zone $binary_remote_addr zone=api:10m rate=30r/m;
-  # 在各 API location block 加：
-  limit_req zone=api burst=10 nodelay;
-  ```
+- **狀態**：✅ 已完成（2026-04-22）— 每 IP 30 req/min，burst 10，超過回 429
 
 ### ⬜ 2-D　GPU Worker Auto Scaling Group
 - **成本**：$0（停機時不計費）

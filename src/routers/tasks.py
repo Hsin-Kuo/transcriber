@@ -487,6 +487,31 @@ def filter_task_for_list(task: Dict[str, Any], retention_days: int = 7) -> Dict[
     return filtered
 
 
+_PROGRESS_TEXT_TO_PERCENTAGE = {
+    "Worker 開始處理": 3,
+    "正在下載音檔": 5,
+    "正在轉換音檔格式": 10,
+    "正在上傳轉碼後的音檔": 15,
+    "正在準備模型": 20,
+    "正在轉錄音檔與說話者辨識": 30,
+    "正在轉錄音檔": 30,
+    "語者辨識完成": 70,
+    "正在添加標點符號": 80,
+    "標點處理完成": 90,
+    "標點處理失敗": 90,
+    "正在保存結果": 95,
+    "轉錄完成": 100,
+}
+
+
+def _infer_progress_percentage(progress_text: str) -> int:
+    """依照 progress 文字推算百分比（當 worker 未回報時使用）"""
+    for keyword, pct in _PROGRESS_TEXT_TO_PERCENTAGE.items():
+        if keyword in progress_text:
+            return pct
+    return 5
+
+
 def enrich_task_data(task: Dict[str, Any]) -> Dict[str, Any]:
     """豐富任務數據，添加計算欄位
 
@@ -508,10 +533,16 @@ def enrich_task_data(task: Dict[str, Any]) -> Dict[str, Any]:
             enriched["progress"] = "等待處理中..."
             enriched["progress_percentage"] = 0
         elif status == "processing":
-            # 如果是處理中但沒有具體進度，提供一個默認進度
-            enriched["progress"] = enriched.get("progress", "轉錄處理中...")
-            if "progress_percentage" not in enriched or enriched["progress_percentage"] is None:
-                enriched["progress_percentage"] = 5  # 給一個小的進度值表示已開始
+            enriched["progress"] = "轉錄處理中..."
+            if not enriched.get("progress_percentage"):
+                enriched["progress_percentage"] = 5
+
+    # 若 worker 沒有寫入 progress_percentage，從 progress 文字推算
+    if enriched.get("progress") and (
+        enriched.get("progress_percentage") is None
+        or enriched.get("progress_percentage") == 0
+    ) and status == "processing":
+        enriched["progress_percentage"] = _infer_progress_percentage(enriched["progress"])
 
     # 確保 progress_percentage 總是數字
     if "progress_percentage" in enriched and enriched["progress_percentage"] is not None:
