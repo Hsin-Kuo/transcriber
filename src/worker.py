@@ -58,6 +58,15 @@ if _google_api_key_2:
 _shutdown = False
 
 
+def _resolve_punct_language(language, detected_language, ui_language):
+    """決定標點處理語言：明確指定繁/簡 > zh 時依 UI 語言 > 其他語言"""
+    if language in ("zh-TW", "zh-CN"):
+        return language
+    if detected_language == "zh":
+        return "zh-CN" if ui_language == "zh-CN" else "zh-TW"
+    return detected_language or language or "zh"
+
+
 def _signal_handler(signum, frame):
     global _shutdown
     print(f"\n🛑 收到停止訊號 ({signum})，等待當前任務完成後退出...")
@@ -292,26 +301,27 @@ def process_task(message_body: dict):
     print(f"🎬 [Worker] 開始處理任務 {task_id}")
     _update_task(db, task_id, {"status": "processing", "progress": "Worker 開始處理..."})
 
-    # 從 task 取得用戶 tier（決定 S3 資料夾路徑）
+    # 從 task 取得用戶 tier 與 UI 語言設定
     task_doc = db.tasks.find_one({"_id": task_id})
     user_tier = task_doc.get("user", {}).get("tier", "free") if task_doc else "free"
+    ui_language = task_doc.get("config", {}).get("ui_language") if task_doc else None
 
     temp_dir = get_temp_dir()
 
     try:
         # 1. 從 S3 下載音檔
-        _update_progress(db, task_id, "正在下載音檔...")
+        _update_progress(db, task_id, "正在下載音檔...", {"progress_percentage": 5})
         audio_path = temp_dir / f"{task_id}.mp3"
         download_audio(task_id, audio_path, tier=user_tier)
         print(f"📥 已下載音檔: {audio_path} ({audio_path.stat().st_size / 1024 / 1024:.2f} MB)")
 
         # 1.5 統一轉為 MP3（節省空間 + 確保瀏覽器可播放）
         original_size = audio_path.stat().st_size
-        _update_progress(db, task_id, "正在轉換音檔格式...")
+        _update_progress(db, task_id, "正在轉換音檔格式...", {"progress_percentage": 10})
         audio_path = _convert_to_mp3(audio_path)
         if audio_path.stat().st_size != original_size:
             # 檔案被轉碼了，重新上傳到 S3 覆蓋原始檔案
-            _update_progress(db, task_id, "正在上傳轉碼後的音檔...")
+            _update_progress(db, task_id, "正在上傳轉碼後的音檔...", {"progress_percentage": 15})
             s3_key = f"uploads/{user_tier}/{task_id}.mp3"
             boto3.client("s3", region_name=os.getenv("S3_REGION", "ap-northeast-1")).upload_file(
                 str(audio_path), os.getenv("S3_BUCKET"), s3_key
@@ -319,7 +329,7 @@ def process_task(message_body: dict):
             print(f"☁️ 已上傳轉碼後的音檔到 S3: {s3_key}")
 
         # 2. 取得模型（快取，只在首次任務載入）
-        _update_progress(db, task_id, "正在準備模型...")
+        _update_progress(db, task_id, "正在準備模型...", {"progress_percentage": 20})
         from src.services.utils.punctuation_processor import PunctuationProcessor
 
         whisper_processor = _get_whisper_processor()
@@ -333,7 +343,7 @@ def process_task(message_body: dict):
 
         if use_diarization and diarization_pipeline:
             # ===== 平行處理模式 =====
-            _update_progress(db, task_id, "正在轉錄音檔與說話者辨識（平行處理）...")
+            _update_progress(db, task_id, "正在轉錄音檔與說話者辨識（平行處理）...", {"progress_percentage": 30})
             print(f"🚀 [平行模式] 同時執行轉錄與說話者辨識")
 
             # 先轉換 WAV（這步很快，不需要平行）
@@ -380,11 +390,12 @@ def process_task(message_body: dict):
                     )
 
                 _update_progress(db, task_id, "語者辨識完成", {
-                    "stats.diarization.num_speakers": num_speakers
+                    "stats.diarization.num_speakers": num_speakers,
+                    "progress_percentage": 70,
                 })
         else:
             # ===== 僅轉錄模式 =====
-            _update_progress(db, task_id, "正在轉錄音檔...")
+            _update_progress(db, task_id, "正在轉錄音檔...", {"progress_percentage": 30})
             if use_chunking:
                 full_text, segments, detected_language = whisper_processor.transcribe_in_chunks(
                     str(audio_path), language=language
@@ -398,30 +409,40 @@ def process_task(message_body: dict):
         if full_text is None:
             raise ValueError("轉錄結果為空")
 
-        # 5. 標點處理（可選）
+        # 5. 中文繁簡清洗（標點前先統一字型，減少 LLM 複雜度並保持 segments 一致）
+        punct_language = _resolve_punct_language(language, detected_language, ui_language)
+        if punct_language in ("zh-TW", "zh-CN"):
+            from src.services.utils.whisper_processor import _convert_chinese_script
+            full_text = _convert_chinese_script(full_text, punct_language)
+            segments = [
+                {**seg, "text": _convert_chinese_script(seg["text"], punct_language)}
+                for seg in segments
+            ]
+
+        # 6. 標點處理（可選）
         punctuation_model = None
         punctuation_token_usage = None
         if use_punctuation:
-            _update_progress(db, task_id, "正在添加標點符號...")
+            _update_progress(db, task_id, "正在添加標點符號...", {"progress_percentage": 80})
             try:
                 punctuation_processor = PunctuationProcessor()
                 punctuated_text, punctuation_model, punctuation_token_usage = punctuation_processor.process(
                     full_text,
                     provider=punctuation_provider,
-                    language=detected_language or language or "zh",
+                    language=punct_language,
                 )
                 full_text = punctuated_text
-                _update_progress(db, task_id, "標點處理完成")
+                _update_progress(db, task_id, "標點處理完成", {"progress_percentage": 90})
             except Exception as e:
                 print(f"⚠️ 標點處理失敗: {e}")
-                _update_progress(db, task_id, f"標點處理失敗，使用原始文字")
+                _update_progress(db, task_id, f"標點處理失敗，使用原始文字", {"progress_percentage": 90})
 
-        # 6. 轉換 segments 標點
+        # 7. 轉換 segments 標點
         from src.utils.text_utils import convert_segments_punctuation
         converted_segments = convert_segments_punctuation(segments)
 
-        # 7. 保存結果到 MongoDB
-        _update_progress(db, task_id, "正在保存結果...")
+        # 8. 保存結果到 MongoDB
+        _update_progress(db, task_id, "正在保存結果...", {"progress_percentage": 95})
         now = get_utc_timestamp()
 
         db.transcriptions.replace_one(
@@ -449,13 +470,13 @@ def process_task(message_body: dict):
                 upsert=True,
             )
 
-        # 8. 保存音檔到永久位置（已在 S3 上，更新 DB 路徑）
+        # 9. 保存音檔到永久位置（已在 S3 上，更新 DB 路徑）
         _update_task(db, task_id, {
             "result.audio_file": f"s3://{os.getenv('S3_BUCKET')}/uploads/{user_tier}/{task_id}.mp3",
             "result.audio_filename": f"{task_id}.mp3",
         })
 
-        # 9. 標記完成
+        # 10. 標記完成
         text_length = len(full_text)
         word_count = len(full_text.split())
 

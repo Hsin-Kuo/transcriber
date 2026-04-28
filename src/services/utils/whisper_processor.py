@@ -23,6 +23,24 @@ else:
     WhisperModel = None  # AWS Web Server 不需要
 
 
+def _normalize_language(language: Optional[str]) -> Optional[str]:
+    """Map zh-TW/zh-CN to zh for Whisper (which only supports 'zh')."""
+    if language in ("zh-TW", "zh-CN"):
+        return "zh"
+    return language
+
+
+def _convert_chinese_script(text: str, language: Optional[str]) -> str:
+    """Convert Chinese text to Traditional or Simplified after transcription."""
+    if language == "zh-TW":
+        from zhconv import convert
+        return convert(text, "zh-hant")
+    elif language == "zh-CN":
+        from zhconv import convert
+        return convert(text, "zh-hans")
+    return text
+
+
 def transcribe_chunk_worker(
     chunk_path: str,
     model_name: str,
@@ -69,16 +87,15 @@ def transcribe_chunk_worker(
 
     print(f"[Worker {chunk_idx}] 開始轉錄", flush=True)
 
-    # 執行轉錄
     segments_list, info = model.transcribe(
         chunk_path,
-        language=language,
+        language=_normalize_language(language),
         beam_size=5,
         vad_filter=True,
         vad_parameters=dict(min_silence_duration_ms=500)
     )
 
-    # 收集結果
+    # 收集結果（字型轉換由呼叫端的清洗步驟統一處理）
     segments = []
     text_parts = []
     for segment in segments_list:
@@ -441,7 +458,7 @@ class WhisperProcessor:
         print(f"⏳ [_transcribe_with_timestamps] 調用 model.transcribe()...")
         segments, info = self.model.transcribe(
             str(audio_path),
-            language=language,
+            language=_normalize_language(language),
             beam_size=5,
             vad_filter=True,
             vad_parameters=dict(min_silence_duration_ms=500),
@@ -451,6 +468,7 @@ class WhisperProcessor:
         # 獲取 Whisper 偵測到的語言
         detected_language = info.language if hasattr(info, 'language') else None
 
+        # 字型轉換由呼叫端的清洗步驟統一處理
         for segment in segments:
             segments_list.append({
                 "start": segment.start,

@@ -23,6 +23,21 @@ from src.utils.time_utils import get_utc_timestamp
 from src.utils.text_utils import convert_segments_punctuation
 
 
+def _resolve_punct_language(language: Optional[str], detected_language: Optional[str], ui_language: Optional[str]) -> str:
+    """決定標點處理用的語言代碼。
+
+    優先順序：
+    1. 使用者明確指定繁/簡體 → 直接用
+    2. Whisper 偵測到 zh（包含自動偵測）→ 依 UI 語言決定繁/簡，其他 UI 語言預設繁體
+    3. 其他語言 → 用偵測到的語言或指定語言
+    """
+    if language in ("zh-TW", "zh-CN"):
+        return language
+    if detected_language == "zh":
+        return "zh-CN" if ui_language == "zh-CN" else "zh-TW"
+    return detected_language or language or "zh"
+
+
 class TranscriptionService:
     """轉錄協調服務
 
@@ -61,7 +76,8 @@ class TranscriptionService:
         use_punctuation: bool = True,
         punctuation_provider: str = "gemini",
         use_diarization: bool = False,
-        max_speakers: Optional[int] = None
+        max_speakers: Optional[int] = None,
+        ui_language: Optional[str] = None,
     ) -> None:
         """啟動轉錄任務（異步執行）
 
@@ -94,7 +110,8 @@ class TranscriptionService:
                 use_punctuation,
                 punctuation_provider,
                 use_diarization,
-                max_speakers
+                max_speakers,
+                ui_language,
             )
             print(f"✅ [start_transcription] 任務 {task_id} 已成功提交到線程池")
             print(f"🔧 [start_transcription] Future 狀態: {future}")
@@ -112,7 +129,8 @@ class TranscriptionService:
         use_punctuation: bool,
         punctuation_provider: str,
         use_diarization: bool,
-        max_speakers: Optional[int]
+        max_speakers: Optional[int],
+        ui_language: Optional[str] = None,
     ) -> None:
         """轉錄流程協調（同步執行，在背景線程中調用）
 
@@ -280,7 +298,17 @@ class TranscriptionService:
                 self.task_service.cleanup_task_memory(task_id)
                 return
 
-            # 3. 標點處理（可選）
+            # 3. 中文繁簡清洗（標點前先統一字型，減少 LLM 複雜度並保持 segments 一致）
+            punct_language = _resolve_punct_language(language, detected_language, ui_language)
+            if punct_language in ("zh-TW", "zh-CN"):
+                from .utils.whisper_processor import _convert_chinese_script
+                full_text = _convert_chinese_script(full_text, punct_language)
+                segments = [
+                    {**seg, "text": _convert_chinese_script(seg["text"], punct_language)}
+                    for seg in segments
+                ]
+
+            # 4. 標點處理（可選）
             punctuation_model = None
             punctuation_token_usage = None
             if use_punctuation:
@@ -292,7 +320,7 @@ class TranscriptionService:
                     punctuated_text, punctuation_model, punctuation_token_usage = self.punctuation.process(
                         full_text,
                         provider=punctuation_provider,
-                        language=detected_language or language or "zh",
+                        language=punct_language,
                         progress_callback=lambda idx, total: self._update_punctuation_progress(
                             task_id, idx, total
                         )

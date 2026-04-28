@@ -145,6 +145,20 @@
         </div>
       </div>
 
+      <!-- 語言選擇 -->
+      <div class="setting-row">
+        <label class="setting-label">語言</label>
+        <select v-model="config.language" class="language-select">
+          <option value="auto">自動偵測</option>
+          <option value="zh-TW">繁體中文</option>
+          <option value="zh-CN">简体中文</option>
+          <option value="zh">中文（不指定）</option>
+          <option value="en">English</option>
+          <option value="ja">日本語</option>
+          <option value="ko">한국어</option>
+        </select>
+      </div>
+
       <!-- 統一標籤 -->
       <div class="setting-row">
         <label class="setting-label">{{ $t('transcription.tags') }}</label>
@@ -235,7 +249,7 @@
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-const { t: $t } = useI18n()
+const { t: $t, locale } = useI18n()
 
 const props = defineProps({
   initialFiles: {
@@ -431,6 +445,7 @@ async function submitBatch() {
       tags: config.tags
     }
     formData.append('default_config', JSON.stringify(defaultConfig))
+    formData.append('ui_language', locale.value)
 
     // 加入單檔覆蓋設定
     const overrides = {}
@@ -807,6 +822,22 @@ watch(() => props.initialFiles, (newFiles) => {
 }
 
 .number-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+/* 語言選擇 */
+.language-select {
+  padding: 8px 10px;
+  font-size: 14px;
+  border: 2px solid rgba(var(--color-primary-rgb), 0.3);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--color-text-dark);
+  cursor: pointer;
+}
+
+.language-select:focus {
   outline: none;
   border-color: var(--color-primary);
 }

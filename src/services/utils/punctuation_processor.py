@@ -115,7 +115,7 @@ class PunctuationProcessor:
         )
 
         result = resp.choices[0].message.content.strip()
-        if language == "zh":
+        if language in ("zh", "zh-TW", "zh-CN"):
             result = self._remove_cjk_latin_spaces(result)
 
         # 提取 token 使用量
@@ -152,7 +152,7 @@ class PunctuationProcessor:
 
         # 自動決定 chunk_size（考慮輸出限制 65,536 tokens）
         if chunk_size is None:
-            if language in ("zh", "ja", "ko"):
+            if language in ("zh", "zh-TW", "zh-CN", "ja", "ko"):
                 chunk_size = 20000  # 中日韓：每字約 1-1.5 tokens，需較小 chunk
             else:
                 chunk_size = 60000  # 英文等拉丁語系：每字元約 0.3 tokens
@@ -162,7 +162,7 @@ class PunctuationProcessor:
             system_msg, user_msg = self._get_punctuation_prompt(language, text)
             prompt = f"{system_msg}\n\n{user_msg}"
             result, model_used, token_usage = self._call_gemini_with_retry(prompt)
-            if language == "zh":
+            if language in ("zh", "zh-TW", "zh-CN"):
                 result = self._remove_cjk_latin_spaces(result)
             return result, model_used, token_usage
 
@@ -193,7 +193,7 @@ class PunctuationProcessor:
 
             # 調用 Gemini
             result, chunk_model, chunk_token_usage = self._call_gemini_with_retry(prompt)
-            if language == "zh":
+            if language in ("zh", "zh-TW", "zh-CN"):
                 result = self._remove_cjk_latin_spaces(result)
             results.append(result)
 
@@ -350,10 +350,16 @@ class PunctuationProcessor:
         Returns:
             (system_message, user_message) 元組
         """
-        if language == "zh":
+        if language in ("zh", "zh-TW", "zh-CN"):
+            if language == "zh-TW":
+                script_note = "請使用『繁體中文』輸出。"
+            elif language == "zh-CN":
+                script_note = "请使用『简体中文』输出。"
+            else:
+                script_note = ""
             system_msg = "你是嚴謹的逐字稿潤飾助手，只做標點與分段。"
             user_msg = (
-                "請將以下『中文逐字稿』加上適當標點符號並合理分段。"
+                f"請將以下『中文逐字稿』加上適當標點符號並合理分段。{script_note}"
                 "不要省略或添加內容，不要意譯，保留固有名詞與數字。"
                 "不要在中英文之間插入空白，保持原文的空白狀態。"
                 "**重要：如果文字中有說話者標籤（例如 [SPEAKER_00]、[Speaker A] 等），請完整保留這些標籤，不要修改或刪除。**"
@@ -413,9 +419,15 @@ class PunctuationProcessor:
         Returns:
             (system_message, user_message) 元組
         """
-        if language == "zh":
+        if language in ("zh", "zh-TW", "zh-CN"):
+            if language == "zh-TW":
+                script_note = "請使用『繁體中文』輸出。"
+            elif language == "zh-CN":
+                script_note = "请使用『简体中文』输出。"
+            else:
+                script_note = ""
             system_msg = (
-                "你是嚴謹的逐字稿潤飾助手。只做『中文標點補全與合理分段』，"
+                f"你是嚴謹的逐字稿潤飾助手。只做『中文標點補全與合理分段』，{script_note}"
                 "不要省略或添加內容，不要意譯，非必要不要用刪節號，保留固有名詞與數字。"
                 "不要在中英文之間插入空白，保持原文的空白狀態。"
                 "**重要：如果文字中有說話者標籤（例如 [SPEAKER_00]、[Speaker A] 等），請完整保留這些標籤。**"

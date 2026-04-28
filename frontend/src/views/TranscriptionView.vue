@@ -105,6 +105,20 @@
             </div>
           </div>
 
+          <!-- 語言選擇 -->
+          <div class="modal-section language-section">
+            <label class="section-label">語言</label>
+            <select v-model="selectedLanguage" class="language-select">
+              <option value="auto">自動偵測</option>
+              <option value="zh-TW">繁體中文</option>
+              <option value="zh-CN">简体中文</option>
+              <option value="zh">中文（不指定）</option>
+              <option value="en">English</option>
+              <option value="ja">日本語</option>
+              <option value="ko">한국어</option>
+            </select>
+          </div>
+
           <!-- 說話者辨識 -->
           <div class="modal-section diarize-section">
             <label class="section-label">{{ $t('transcription.speakerDiarization') }}</label>
@@ -227,7 +241,7 @@ import BatchUploadPanel from '../components/batch/BatchUploadPanel.vue'
 // 新 API 服務層
 import { transcriptionService, taskService } from '../api/services'
 
-const { t: $t } = useI18n()
+const { t: $t, locale } = useI18n()
 
 const showNotification = inject('showNotification')
 const uploading = ref(false)
@@ -235,6 +249,7 @@ const uploadProgress = ref(0) // 分片上傳進度 0-100
 const batchUploadCurrent = ref(0) // 批次上傳：目前第幾個檔案
 const batchUploadTotal = ref(0) // 批次上傳：總共幾個檔案
 const taskType = ref('paragraph')  // 任務類型：paragraph（段落）或 subtitle（字幕）
+const selectedLanguage = ref('auto')
 const enableDiarization = ref(true)
 const maxSpeakers = ref(null)
 const pendingFile = ref(null)
@@ -377,7 +392,8 @@ async function confirmAndUpload() {
   formData.append('task_type', taskType.value)
   formData.append('punct_provider', 'gemini')
   formData.append('chunk_audio', 'true')
-  formData.append('language', 'auto')  // 使用 Whisper 自動偵測語言
+  formData.append('language', selectedLanguage.value)
+  formData.append('ui_language', locale.value)
   formData.append('diarize', enableDiarization.value ? 'true' : 'false')
   if (enableDiarization.value && maxSpeakers.value) {
     formData.append('max_speakers', maxSpeakers.value.toString())
@@ -861,6 +877,25 @@ onUnmounted(() => {
 
 .number-input::placeholder {
   color: rgba(var(--color-text-dark-rgb), 0.4);
+}
+
+/* 語言選擇 */
+.language-select {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  border: 2px solid rgba(var(--color-primary-rgb), 0.3);
+  border-radius: 8px;
+  background: var(--color-bg-light);
+  color: var(--color-text-dark);
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.language-select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.1);
 }
 
 /* 標籤輸入樣式 */

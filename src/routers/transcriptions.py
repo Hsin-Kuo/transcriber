@@ -213,10 +213,11 @@ async def create_transcription(
     chunk_minutes: int = Form(10, description="分段長度（分鐘）"),
     diarize: bool = Form(False, description="是否啟用說話者辨識"),
     max_speakers: Optional[int] = Form(None, description="最大講者人數（可選，2-10）"),
-    language: str = Form("zh", description="轉錄語言 (zh/en/ja/ko/auto)"),
+    language: str = Form("zh", description="轉錄語言 (zh/zh-TW/zh-CN/en/ja/ko/auto)"),
     tags: Optional[str] = Form(None, description="標籤（JSON 陣列字串）"),
     upload_id: Optional[str] = Form(None, description="分片上傳完成後的 upload_id（替代直接上傳檔案）"),
     merge_upload_ids: Optional[str] = Form(None, description="合併模式分片上傳的 upload_id 陣列（JSON）"),
+    ui_language: Optional[str] = Form(None, description="使用者介面語言（用於自動偵測中文時判斷繁簡體）"),
     current_user: dict = Depends(get_current_user),
     db = Depends(get_database)
 ):
@@ -356,7 +357,7 @@ async def create_transcription(
         )
 
     # 驗證 language（白名單）
-    ALLOWED_LANGUAGES = {"zh", "en", "ja", "ko", "auto"}
+    ALLOWED_LANGUAGES = {"zh", "zh-TW", "zh-CN", "en", "ja", "ko", "auto"}
     if language not in ALLOWED_LANGUAGES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -619,7 +620,8 @@ async def create_transcription(
                 "chunk_minutes": chunk_minutes,
                 "diarize": diarize,
                 "max_speakers": max_speakers,
-                "language": language
+                "language": language,
+                "ui_language": ui_language,
             },
 
             # 狀態
@@ -756,7 +758,8 @@ async def create_transcription(
                     use_punctuation=use_punctuation,
                     punctuation_provider=punct_provider,
                     use_diarization=diarize,
-                    max_speakers=max_speakers
+                    max_speakers=max_speakers,
+                    ui_language=ui_language,
                 )
 
                 print(f"✅ 任務 {task_id} 已建立，正在背景執行轉錄...")
@@ -1470,6 +1473,7 @@ async def create_batch_transcriptions(
     default_config: str = Form(..., description="預設配置 JSON 字串"),
     overrides: str = Form("{}", description="單檔覆蓋設定 JSON 字串，格式：{索引: {tags, customName}}"),
     upload_ids: Optional[str] = Form(None, description="分片上傳的 upload_id JSON 陣列，格式：{索引: upload_id}"),
+    ui_language: Optional[str] = Form(None, description="使用者介面語言（用於自動偵測中文時判斷繁簡體）"),
     current_user: dict = Depends(get_current_user),
     db = Depends(get_database)
 ):
@@ -1588,7 +1592,7 @@ async def create_batch_transcriptions(
         )
 
     # 驗證 language（白名單）
-    ALLOWED_LANGUAGES = {"zh", "en", "ja", "ko", "auto"}
+    ALLOWED_LANGUAGES = {"zh", "zh-TW", "zh-CN", "en", "ja", "ko", "auto"}
     if language not in ALLOWED_LANGUAGES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1740,7 +1744,8 @@ async def create_batch_transcriptions(
                     "chunk_minutes": 10,
                     "diarize": diarize,
                     "max_speakers": max_speakers,
-                    "language": language
+                    "language": language,
+                    "ui_language": ui_language,
                 },
                 "status": "pending",
                 "stats": {
@@ -1872,7 +1877,8 @@ async def create_batch_transcriptions(
                         use_punctuation=use_punctuation,
                         punctuation_provider=punct_provider,
                         use_diarization=diarize,
-                        max_speakers=max_speakers
+                        max_speakers=max_speakers,
+                        ui_language=ui_language,
                     )
 
                 file_result["task_id"] = task_id
