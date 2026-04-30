@@ -12,6 +12,9 @@ pydub
 # MongoDB（Worker 直接寫入結果）
 pymongo
 
+# 中文繁簡轉換
+zhconv
+
 # LLM API（標點處理）
 openai
 google-generativeai
