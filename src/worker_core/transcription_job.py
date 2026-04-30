@@ -126,14 +126,20 @@ def process_task(message_body: dict) -> None:
                 diarization_future = executor.submit(
                     _run_diarization, diarization_pipeline, wav_path, max_speakers
                 )
+                # 等待兩個任務都結束（不在此處理異常，避免提前中斷）
                 for future in as_completed([transcription_future, diarization_future]):
-                    try:
-                        future.result()
-                    except Exception as e:
-                        print(f"⚠️ [平行] 任務異常: {e}")
+                    pass
 
+            # 轉錄失敗 → 整個任務失敗（無可用結果）
             full_text, segments, detected_language = transcription_future.result()
-            diarization_segments = diarization_future.result()
+
+            # Diarization 失敗 → 降級為純轉錄（與本地模式行為一致）
+            try:
+                diarization_segments = diarization_future.result()
+            except Exception as e:
+                print(f"⚠️ 說話者辨識失敗，使用純轉錄結果: {e}")
+                diarization_segments = None
+                update_progress(db, task_id, "語者辨識失敗，使用純轉錄結果", {"progress_percentage": 70})
 
             if diarization_segments and segments:
                 task = db.tasks.find_one({"_id": task_id})
