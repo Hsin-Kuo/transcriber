@@ -181,6 +181,9 @@ onMounted(async () => {
   try {
     const response = await axios.get(`${API_BASE}${NEW_ENDPOINTS.shared.get(route.params.token)}`)
     taskData.value = response.data
+    if (response.data.summary) {
+      summaryExpanded.value = true
+    }
   } catch (err) {
     if (err.response?.status === 404) {
       error.value = t('shared.notFound')

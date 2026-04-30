@@ -244,7 +244,7 @@ async def stripe_webhook(request: Request, db=Depends(get_database)):
         event = stripe_svc.construct_webhook_event(payload, sig_header)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid payload")
-    except stripe.error.SignatureVerificationError:
+    except stripe.SignatureVerificationError:
         raise HTTPException(status_code=400, detail="Invalid signature")
 
     user_repo = UserRepository(db)
