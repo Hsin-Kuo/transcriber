@@ -88,17 +88,16 @@ def process_task(message_body: dict) -> None:
     temp_dir = get_temp_dir()
 
     try:
-        # 1. 下載音檔
+        # 1. 下載音檔（副檔名 .original 不預設格式）
         update_progress(db, task_id, "正在下載音檔...", {"progress_percentage": 5})
-        audio_path = temp_dir / f"{task_id}.mp3"
+        audio_path = temp_dir / f"{task_id}.original"
         download_audio(task_id, audio_path, tier=user_tier)
         print(f"📥 已下載音檔: {audio_path} ({audio_path.stat().st_size / 1024 / 1024:.2f} MB)")
 
         # 2. 統一轉為 MP3
-        original_size = audio_path.stat().st_size
         update_progress(db, task_id, "正在轉換音檔格式...", {"progress_percentage": 10})
-        audio_path = convert_to_mp3(audio_path)
-        if audio_path.stat().st_size != original_size:
+        audio_path, transcoded = convert_to_mp3(audio_path)
+        if transcoded:
             update_progress(db, task_id, "正在上傳轉碼後的音檔...", {"progress_percentage": 15})
             s3_key = f"uploads/{user_tier}/{task_id}.mp3"
             boto3.client("s3", region_name=S3_REGION).upload_file(
