@@ -25,7 +25,7 @@
 </template>
 
 <script setup>
-import { ref, provide, computed } from 'vue'
+import { ref, provide, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import ElectricBorder from './components/shared/ElectricBorder.vue'
 import Navigation from './components/shared/Navigation.vue'
@@ -45,6 +45,19 @@ provide('showNotification', (options) => {
     return notificationToast.value.addNotification(options)
   }
 })
+
+function handleRateLimit() {
+  if (notificationToast.value) {
+    notificationToast.value.addNotification({
+      title: '請求太頻繁',
+      message: '操作過於頻繁，請稍後再試',
+      type: 'warning',
+    })
+  }
+}
+
+onMounted(() => window.addEventListener('api:rate-limited', handleRateLimit))
+onUnmounted(() => window.removeEventListener('api:rate-limited', handleRateLimit))
 </script>
 
 <style>

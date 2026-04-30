@@ -1,5 +1,6 @@
 import { ref, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
+import axios from 'axios'
 import api from '../../utils/api'
 import { NEW_ENDPOINTS } from '../../api/endpoints'
 
@@ -27,6 +28,16 @@ export function useTranscriptData() {
   const transcriptError = ref(null)
   const originalContent = ref('')
 
+  // 請求取消控制器
+  let loadAbortController = null
+
+  function cancelPendingRequests() {
+    if (loadAbortController) {
+      loadAbortController.abort()
+      loadAbortController = null
+    }
+  }
+
   /**
    * 載入逐字稿數據
    * @param {string} taskId - 任務 ID
@@ -43,13 +54,21 @@ export function useTranscriptData() {
     loadingTranscript.value = true
     transcriptError.value = null
 
+    // 取消上一次尚未完成的載入
+    cancelPendingRequests()
+    const controller = new AbortController()
+    loadAbortController = controller
+    const { signal } = controller
+
     try {
       // 獲取單一任務資訊
-      const taskResponse = await api.get(NEW_ENDPOINTS.tasks.get(taskId))
+      const taskResponse = await api.get(NEW_ENDPOINTS.tasks.get(taskId), { signal })
       const task = taskResponse.data
 
       if (!task) {
         transcriptError.value = t('transcriptData.taskNotFound')
+        loadingTranscript.value = false
+        loadAbortController = null
         return null
       }
 
@@ -94,9 +113,11 @@ export function useTranscriptData() {
       // 並行獲取逐字稿和 segments
       const [transcriptResponse, segmentsResponse] = await Promise.all([
         api.get(NEW_ENDPOINTS.transcriptions.download(taskId), {
-          responseType: 'text'
+          responseType: 'text',
+          signal,
         }),
-        api.get(NEW_ENDPOINTS.transcriptions.segments(taskId)).catch(err => {
+        api.get(NEW_ENDPOINTS.transcriptions.segments(taskId), { signal }).catch(err => {
+          if (axios.isCancel(err)) throw err
           console.log('無法獲取 segments:', err)
           return null
         })
@@ -122,12 +143,24 @@ export function useTranscriptData() {
       }
 
       loadingTranscript.value = false
+      loadAbortController = null
       return result
 
     } catch (error) {
+      if (axios.isCancel(error)) {
+        // 新的 loadTranscript 已接手時不動 loadingTranscript，避免蓋掉新的 loading 狀態
+        if (loadAbortController === controller) {
+          loadingTranscript.value = false
+        }
+        segments.value = []
+        speakerNames.value = {}
+        subtitleSettings.value = {}
+        return null
+      }
       console.error('載入逐字稿失敗:', error)
       transcriptError.value = t('transcriptData.loadTranscriptFailed')
       loadingTranscript.value = false
+      loadAbortController = null
       return null
     }
   }
@@ -339,6 +372,7 @@ export function useTranscriptData() {
     updateTaskName,
     updateSpeakerNames,
     updateSubtitleSettings,
-    updateTags
+    updateTags,
+    cancelPendingRequests,
   }
 }

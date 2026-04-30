@@ -603,7 +603,8 @@ const {
   updateTaskName,
   updateSpeakerNames,
   updateSubtitleSettings,
-  updateTags
+  updateTags,
+  cancelPendingRequests,
 } = useTranscriptData()
 
 // 動態更新頁面標題：任務名稱 - Sound Lite
@@ -2661,6 +2662,9 @@ onUnmounted(() => {
 
   // 清理音訊播放器資源（停止 token 自動刷新定時器）
   cleanupAudioPlayer()
+
+  // 取消所有尚未完成的 API 請求
+  cancelPendingRequests()
 })
 
 // 監聽路由參數變化

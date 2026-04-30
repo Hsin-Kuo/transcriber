@@ -39,9 +39,10 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 )
 
-// 響應攔截器: 處理 Token 過期
+// 響應攔截器: 處理 Token 過期與 Rate Limit
 let isRefreshing = false
 let refreshSubscribers = []
+let rateLimitNotifyTimer = null
 
 function subscribeTokenRefresh(callback) {
   refreshSubscribers.push(callback)
@@ -58,7 +59,7 @@ api.interceptors.response.use(
     const originalRequest = error.config
 
     // 如果是 401 錯誤且不是刷新 Token 請求
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if (error.response?.status === 401 && !originalRequest?._retry) {
       if (isRefreshing) {
         // 如果正在刷新,將請求加入隊列
         return new Promise((resolve) => {
@@ -102,6 +103,15 @@ api.interceptors.response.use(
         router.push('/login')
         return Promise.reject(refreshError)
       }
+    }
+
+    // 429 Rate Limit：debounce 避免同時多個請求失敗時重複通知
+    if (error.response?.status === 429) {
+      if (!rateLimitNotifyTimer) {
+        window.dispatchEvent(new CustomEvent('api:rate-limited'))
+        rateLimitNotifyTimer = setTimeout(() => { rateLimitNotifyTimer = null }, 3000)
+      }
+      return Promise.reject(error)
     }
 
     return Promise.reject(error)
