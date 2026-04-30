@@ -1,0 +1,255 @@
+"""
+轉錄任務主流程
+
+從 S3 下載音檔 → 格式轉換 → 平行執行 Whisper 轉錄 + Diarization
+→ 繁簡清洗 → 標點處理 → 結果寫入 MongoDB。
+"""
+
+import os
+import shutil
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Optional
+
+import boto3
+
+from src.utils.storage_service import download_audio
+from src.utils.time_utils import get_utc_timestamp
+from src.utils.text_utils import convert_segments_punctuation
+from src.utils.config_loader import get_temp_dir
+from src.worker_core.config import S3_REGION, S3_BUCKET
+from src.worker_core.db import get_db, update_task, update_progress
+from src.worker_core.model_cache import get_whisper_processor, get_diarization_pipeline
+from src.worker_core.audio_converter import convert_to_mp3, convert_to_wav
+
+
+def _resolve_punct_language(
+    language: Optional[str],
+    detected_language: Optional[str],
+    ui_language: Optional[str],
+) -> str:
+    """決定標點處理語言：明確指定繁/簡 > zh 時依 UI 語言 > 其他語言"""
+    if language in ("zh-TW", "zh-CN"):
+        return language
+    if detected_language == "zh":
+        return "zh-CN" if ui_language == "zh-CN" else "zh-TW"
+    return detected_language or language or "zh"
+
+
+def _run_transcription(whisper_processor, audio_path: str, language: str, use_chunking: bool):
+    print("🎤 [平行] 開始轉錄...")
+    if use_chunking:
+        result = whisper_processor.transcribe_in_chunks(audio_path, language=language)
+    else:
+        result = whisper_processor.transcribe(audio_path, language=language)
+    full_text, segments, detected_language = result
+    print(f"✅ [平行] 轉錄完成: {len(full_text) if full_text else 0} 字元")
+    return full_text, segments, detected_language
+
+
+def _run_diarization(diarization_pipeline, wav_path: Path, max_speakers: Optional[int]):
+    from src.services.utils.diarization_processor import DiarizationProcessor
+    print("🔊 [平行] 開始說話者辨識...")
+    processor = DiarizationProcessor(diarization_pipeline)
+    segments = processor.perform_diarization(wav_path, max_speakers=max_speakers)
+    if segments:
+        num_speakers = len(set(s["speaker"] for s in segments))
+        print(f"✅ [平行] 說話者辨識完成: {num_speakers} 位說話者")
+    else:
+        print("⚠️ [平行] 說話者辨識無結果")
+    return segments
+
+
+def process_task(message_body: dict) -> None:
+    """處理單個轉錄任務（由 SQS consumer 呼叫）"""
+    task_id = message_body["task_id"]
+    language = message_body.get("language")
+    use_chunking = message_body.get("use_chunking", True)
+    use_punctuation = message_body.get("use_punctuation", True)
+    punctuation_provider = message_body.get("punctuation_provider", "gemini")
+    use_diarization = message_body.get("use_diarization", False)
+    max_speakers = message_body.get("max_speakers")
+
+    db = get_db()
+
+    # 防止重複處理（Spot 中斷恢復後可能收到相同 SQS 訊息）
+    task_doc = db.tasks.find_one({"_id": task_id}, {"status": 1})
+    if task_doc and task_doc.get("status") == "completed":
+        print(f"⏭️ [Worker] 任務 {task_id} 已完成，跳過重複處理")
+        return
+
+    print(f"🎬 [Worker] 開始處理任務 {task_id}")
+    update_task(db, task_id, {"status": "processing", "progress": "Worker 開始處理..."})
+
+    task_doc = db.tasks.find_one({"_id": task_id})
+    user_tier = task_doc.get("user", {}).get("tier", "free") if task_doc else "free"
+    ui_language = task_doc.get("config", {}).get("ui_language") if task_doc else None
+
+    temp_dir = get_temp_dir()
+
+    try:
+        # 1. 下載音檔
+        update_progress(db, task_id, "正在下載音檔...", {"progress_percentage": 5})
+        audio_path = temp_dir / f"{task_id}.mp3"
+        download_audio(task_id, audio_path, tier=user_tier)
+        print(f"📥 已下載音檔: {audio_path} ({audio_path.stat().st_size / 1024 / 1024:.2f} MB)")
+
+        # 2. 統一轉為 MP3
+        original_size = audio_path.stat().st_size
+        update_progress(db, task_id, "正在轉換音檔格式...", {"progress_percentage": 10})
+        audio_path = convert_to_mp3(audio_path)
+        if audio_path.stat().st_size != original_size:
+            update_progress(db, task_id, "正在上傳轉碼後的音檔...", {"progress_percentage": 15})
+            s3_key = f"uploads/{user_tier}/{task_id}.mp3"
+            boto3.client("s3", region_name=S3_REGION).upload_file(
+                str(audio_path), S3_BUCKET, s3_key
+            )
+            print(f"☁️ 已上傳轉碼後的音檔到 S3: {s3_key}")
+
+        # 3. 取得模型（快取，只在首次任務載入）
+        update_progress(db, task_id, "正在準備模型...", {"progress_percentage": 20})
+        from src.services.utils.punctuation_processor import PunctuationProcessor
+
+        whisper_processor = get_whisper_processor()
+        diarization_pipeline = get_diarization_pipeline() if use_diarization else None
+
+        # 4. 平行執行轉錄 + 說話者辨識
+        full_text = segments = detected_language = diarization_segments = None
+
+        if use_diarization and diarization_pipeline:
+            update_progress(db, task_id, "正在轉錄音檔與說話者辨識（平行處理）...", {"progress_percentage": 30})
+            wav_path = convert_to_wav(audio_path, temp_dir / f"{task_id}.wav")
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                transcription_future = executor.submit(
+                    _run_transcription, whisper_processor, str(audio_path), language, use_chunking
+                )
+                diarization_future = executor.submit(
+                    _run_diarization, diarization_pipeline, wav_path, max_speakers
+                )
+                for future in as_completed([transcription_future, diarization_future]):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        print(f"⚠️ [平行] 任務異常: {e}")
+
+            full_text, segments, detected_language = transcription_future.result()
+            diarization_segments = diarization_future.result()
+
+            if diarization_segments and segments:
+                task = db.tasks.find_one({"_id": task_id})
+                task_type = task.get("task_type", "paragraph") if task else "paragraph"
+                num_speakers = len(set(s["speaker"] for s in diarization_segments))
+
+                if task_type == "subtitle":
+                    segments = whisper_processor._merge_speaker_to_segments(
+                        segments, diarization_segments
+                    )
+                else:
+                    full_text = whisper_processor._merge_transcription_with_diarization(
+                        segments, diarization_segments
+                    )
+
+                update_progress(db, task_id, "語者辨識完成", {
+                    "stats.diarization.num_speakers": num_speakers,
+                    "progress_percentage": 70,
+                })
+        else:
+            update_progress(db, task_id, "正在轉錄音檔...", {"progress_percentage": 30})
+            if use_chunking:
+                full_text, segments, detected_language = whisper_processor.transcribe_in_chunks(
+                    str(audio_path), language=language
+                )
+            else:
+                full_text, segments, detected_language = whisper_processor.transcribe(
+                    str(audio_path), language=language
+                )
+            print(f"✅ 轉錄完成: {len(full_text) if full_text else 0} 字元, 語言: {detected_language}")
+
+        if full_text is None:
+            raise ValueError("轉錄結果為空")
+
+        # 5. 中文繁簡清洗
+        punct_language = _resolve_punct_language(language, detected_language, ui_language)
+        if punct_language in ("zh-TW", "zh-CN"):
+            from src.services.utils.whisper_processor import _convert_chinese_script
+            full_text = _convert_chinese_script(full_text, punct_language)
+            segments = [
+                {**seg, "text": _convert_chinese_script(seg["text"], punct_language)}
+                for seg in segments
+            ]
+
+        # 6. 標點處理
+        punctuation_model = punctuation_token_usage = None
+        if use_punctuation:
+            update_progress(db, task_id, "正在添加標點符號...", {"progress_percentage": 80})
+            try:
+                punctuation_processor = PunctuationProcessor()
+                punctuated_text, punctuation_model, punctuation_token_usage = punctuation_processor.process(
+                    full_text, provider=punctuation_provider, language=punct_language,
+                )
+                full_text = punctuated_text
+                update_progress(db, task_id, "標點處理完成", {"progress_percentage": 90})
+            except Exception as e:
+                print(f"⚠️ 標點處理失敗: {e}")
+                update_progress(db, task_id, "標點處理失敗，使用原始文字", {"progress_percentage": 90})
+
+        # 7. Segment 標點轉換
+        converted_segments = convert_segments_punctuation(segments)
+
+        # 8. 儲存到 MongoDB
+        update_progress(db, task_id, "正在保存結果...", {"progress_percentage": 95})
+        now = get_utc_timestamp()
+        db.transcriptions.replace_one(
+            {"_id": task_id},
+            {"_id": task_id, "content": full_text, "text_length": len(full_text),
+             "created_at": now, "updated_at": now},
+            upsert=True,
+        )
+        if converted_segments:
+            db.segments.replace_one(
+                {"_id": task_id},
+                {"_id": task_id, "segments": converted_segments,
+                 "segment_count": len(converted_segments), "created_at": now, "updated_at": now},
+                upsert=True,
+            )
+
+        # 9. 更新音檔路徑
+        update_task(db, task_id, {
+            "result.audio_file": f"s3://{S3_BUCKET}/uploads/{user_tier}/{task_id}.mp3",
+            "result.audio_filename": f"{task_id}.mp3",
+        })
+
+        # 10. 標記完成
+        complete_updates = {
+            "status": "completed",
+            "progress": "轉錄完成",
+            "result.text_length": len(full_text),
+            "result.word_count": len(full_text.split()),
+            "config.language": detected_language or language,
+            "timestamps.completed_at": get_utc_timestamp(),
+        }
+        if punctuation_model:
+            complete_updates["models.punctuation"] = punctuation_model
+        if punctuation_token_usage:
+            complete_updates["stats.token_usage"] = {
+                "total": punctuation_token_usage.get("total", 0),
+                "prompt": punctuation_token_usage.get("prompt", 0),
+                "completion": punctuation_token_usage.get("completion", 0),
+                "model": punctuation_model or "unknown",
+            }
+        update_task(db, task_id, complete_updates)
+        print(f"✅ [Worker] 任務 {task_id} 完成！({len(full_text)} 字元)")
+
+    except Exception as e:
+        print(f"❌ [Worker] 任務 {task_id} 失敗: {e}")
+        import traceback
+        traceback.print_exc()
+        update_task(db, task_id, {
+            "status": "failed",
+            "error": {"message": str(e)},
+            "progress": f"處理失敗: {str(e)[:200]}",
+        })
+    finally:
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir)

@@ -44,13 +44,7 @@ from src.services.utils.diarization_processor import DiarizationProcessor
 from src.utils.audit_logger import init_audit_logger
 
 # 共享狀態
-from src.utils.shared_state import (
-    transcription_tasks,
-    task_cancelled,
-    task_temp_dirs,
-    task_diarization_processes,
-    tasks_lock
-)
+from src.utils.shared_state import store as task_state_store
 
 # 部署環境設定
 DEPLOY_ENV = os.getenv("DEPLOY_ENV", "local")
@@ -268,16 +262,9 @@ async def startup_event():
     init_audit_logger(audit_log_repo)
     print(f"✅ AuditLogger 初始化完成")
 
-    # 3. 初始化 TaskService（使用共享的全域字典）
+    # 3. 初始化 TaskService
     print(f"🔧 正在初始化 TaskService...")
-    task_service = tasks_router.init_task_service(
-        db,
-        memory_tasks=transcription_tasks,
-        cancelled_tasks=task_cancelled,
-        temp_dirs=task_temp_dirs,
-        diarization_processes=task_diarization_processes,
-        lock=tasks_lock
-    )
+    task_service = tasks_router.init_task_service(db, state_store=task_state_store)
     print(f"✅ TaskService 初始化完成")
 
     # 4. 清理異常中斷的任務

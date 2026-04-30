@@ -10,7 +10,6 @@ TaskService - 任務狀態管理服務
 
 from typing import Dict, Any, Optional, List
 from pathlib import Path
-from threading import Lock
 from datetime import datetime, timezone, timedelta
 import shutil
 import asyncio
@@ -19,7 +18,7 @@ import os
 
 from src.database.repositories.task_repo import TaskRepository
 from src.utils.time_utils import get_current_time, get_utc_timestamp
-from src.utils import shared_state
+from src.utils.shared_state import TaskStateStore
 
 try:
     import psutil
@@ -38,6 +37,7 @@ MEMORY_ONLY_FIELDS = {
     "chunks",  # 每個 chunk 的詳細狀態陣列（超大物件，頻繁更新）
     "total_chunks",  # 總分塊數（可從 chunks 長度計算）
     "completed_chunks",  # 已完成分塊數（可從 chunks 計算）
+    "processing_chunks",  # 正在處理中的 chunk 數量（用於進度計算）
     "chunks_created",  # 分塊是否已建立旗標
     "estimated_completion_time",  # 預估完成時間（執行期間的估算值）
 
@@ -80,30 +80,23 @@ class TaskService:
     def __init__(
         self,
         task_repo: TaskRepository,
-        memory_tasks: Dict[str, Any] = None,
-        cancelled_tasks: Dict[str, bool] = None,
-        temp_dirs: Dict[str, Path] = None,
-        diarization_processes: Dict[str, Any] = None,
-        lock: Lock = None
+        state_store: TaskStateStore = None,
     ):
         """初始化 TaskService
 
         Args:
             task_repo: TaskRepository 實例
-            memory_tasks: 共享的記憶體任務字典（可選，用於與舊代碼共享狀態）
-            cancelled_tasks: 共享的取消標記字典（可選）
-            temp_dirs: 共享的臨時目錄字典（可選）
-            diarization_processes: 共享的 diarization 進程字典（可選）
-            lock: 共享的線程鎖（可選）
+            state_store: TaskStateStore 實例（可選，未提供時建立新的）
         """
         self.task_repo = task_repo
+        self._store = state_store if state_store is not None else TaskStateStore()
 
-        # 使用共享的全域變數（如果提供），否則創建新的
-        self._memory_tasks = memory_tasks if memory_tasks is not None else {}
-        self._cancelled_tasks = cancelled_tasks if cancelled_tasks is not None else {}
-        self._temp_dirs = temp_dirs if temp_dirs is not None else {}
-        self._diarization_processes = diarization_processes if diarization_processes is not None else {}
-        self._lock = lock if lock is not None else Lock()
+        # 保留內部屬性別名，維持其餘方法不需改動
+        self._memory_tasks = self._store.tasks
+        self._cancelled_tasks = self._store.cancelled
+        self._temp_dirs = self._store.temp_dirs
+        self._diarization_processes = self._store.diarization_processes
+        self._lock = self._store.lock
 
     async def create_task(self, task_data: Dict[str, Any]) -> Dict[str, Any]:
         """建立新任務

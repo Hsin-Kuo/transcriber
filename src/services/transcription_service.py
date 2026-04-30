@@ -495,7 +495,7 @@ class TranscriptionService:
         try:
             # 使用與主應用相同的 MongoDB 配置
             mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
-            db_name = os.getenv("MONGODB_DB_NAME", "transcriber")
+            db_name = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
             client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
             db = client[db_name]
 
@@ -518,7 +518,7 @@ class TranscriptionService:
         try:
             # 創建同步的 MongoDB 客戶端，使用與主應用相同的配置
             mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
-            db_name = os.getenv("MONGODB_DB_NAME", "transcriber")
+            db_name = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
             client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
             db = client[db_name]
 
@@ -559,7 +559,7 @@ class TranscriptionService:
 
             # 連接 MongoDB（使用同步客戶端）
             mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
-            db_name = os.getenv("MONGODB_DB_NAME", "transcriber")
+            db_name = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
             client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
             db = client[db_name]
 
@@ -678,7 +678,7 @@ class TranscriptionService:
                             import os
 
                             mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
-                            db_name = os.getenv("MONGODB_DB_NAME", "transcriber")
+                            db_name = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
                             client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
                             db = client[db_name]
 
@@ -858,7 +858,7 @@ class TranscriptionService:
 
             # 連接數據庫
             mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
-            db_name = os.getenv("MONGODB_DB_NAME", "transcriber")
+            db_name = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
             client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
             db = client[db_name]
 

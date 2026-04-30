@@ -13,6 +13,7 @@ from ..database.mongodb import get_database
 from ..database.repositories.task_repo import TaskRepository
 from ..database.repositories.tag_repo import TagRepository
 from ..services.task_service import TaskService
+from ..utils.shared_state import TaskStateStore
 from ..services.tag_service import TagService
 from ..services.utils.async_utils import get_current_time
 from ..utils.storage_service import is_aws, delete_audio_by_path as storage_delete_audio_by_path, move_audio, extract_tier_from_path
@@ -270,33 +271,19 @@ async def get_tasks(
 _task_service_singleton: TaskService = None
 
 
-def init_task_service(
-    db,
-    memory_tasks=None,
-    cancelled_tasks=None,
-    temp_dirs=None,
-    diarization_processes=None,
-    lock=None
-):
+def init_task_service(db, state_store: TaskStateStore = None):
     """初始化全域 TaskService 單例
 
     Args:
         db: 資料庫實例
-        memory_tasks: 共享的記憶體任務字典（與 whisper_server.py 共享）
-        cancelled_tasks: 共享的取消標記字典
-        temp_dirs: 共享的臨時目錄字典
-        diarization_processes: 共享的 diarization 進程字典
-        lock: 共享的線程鎖
+        state_store: TaskStateStore 實例（未提供時使用模組級單例）
     """
     global _task_service_singleton
+    from ..utils.shared_state import store as _default_store
     task_repo = TaskRepository(db)
     _task_service_singleton = TaskService(
         task_repo,
-        memory_tasks=memory_tasks,
-        cancelled_tasks=cancelled_tasks,
-        temp_dirs=temp_dirs,
-        diarization_processes=diarization_processes,
-        lock=lock
+        state_store=state_store or _default_store,
     )
     return _task_service_singleton
 
