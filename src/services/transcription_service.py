@@ -682,22 +682,42 @@ class TranscriptionService:
                             client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
                             db = client[db_name]
 
+                            duration_minutes = audio_duration_seconds / 60
+
+                            # 計算方案額度 vs extra_quota 各扣多少
+                            user_doc = db.users.find_one({"_id": ObjectId(user_id)}, {
+                                "quota.max_duration_minutes": 1,
+                                "usage.duration_minutes": 1,
+                                "extra_quota.duration_minutes": 1,
+                            })
+                            from_plan = duration_minutes
+                            from_extra = 0.0
+                            if user_doc:
+                                plan_limit = (user_doc.get("quota") or {}).get("max_duration_minutes", 60)
+                                current_usage = (user_doc.get("usage") or {}).get("duration_minutes", 0)
+                                plan_remaining = max(0.0, plan_limit - current_usage)
+                                from_plan = min(plan_remaining, duration_minutes)
+                                from_extra = max(0.0, duration_minutes - from_plan)
+
+                            inc_fields = {
+                                "usage.transcriptions": 1,
+                                "usage.total_transcriptions": 1,
+                                "usage.total_duration_minutes": duration_minutes,
+                            }
+                            if from_plan > 0:
+                                inc_fields["usage.duration_minutes"] = from_plan
+                            if from_extra > 0:
+                                inc_fields["extra_quota.duration_minutes"] = -from_extra
+
                             db.users.update_one(
                                 {"_id": ObjectId(user_id)},
                                 {
-                                    "$inc": {
-                                        "usage.transcriptions": 1,
-                                        "usage.duration_minutes": audio_duration_seconds / 60,
-                                        "usage.total_transcriptions": 1,
-                                        "usage.total_duration_minutes": audio_duration_seconds / 60
-                                    },
-                                    "$set": {
-                                        "updated_at": get_utc_timestamp()
-                                    }
+                                    "$inc": inc_fields,
+                                    "$set": {"updated_at": get_utc_timestamp()}
                                 }
                             )
                             client.close()
-                            print(f"✅ 已扣除配額：用戶 {user_id}，時長 {audio_duration_seconds:.2f} 秒")
+                            print(f"✅ 已扣除配額：用戶 {user_id}，時長 {audio_duration_seconds:.2f} 秒（方案 {from_plan:.1f}min，額外額度 {from_extra:.1f}min）")
                     except Exception as quota_error:
                         print(f"⚠️ 扣除配額失敗：{quota_error}")
 

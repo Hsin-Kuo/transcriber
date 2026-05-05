@@ -160,7 +160,21 @@
       "downgradedSuccess": "Plan will downgrade at end of billing period",
       "checkoutSuccess": "Payment successful! Plan updated",
       "checkoutCanceled": "Payment canceled",
-      "error": "Operation failed, please try again"
+      "error": "Operation failed, please try again",
+      "ordersTitle": "Payment History",
+      "ordersLoading": "Loading...",
+      "ordersEmpty": "No payment records yet",
+      "ordersLoadMore": "Load more",
+      "orderStatusPaid": "Paid",
+      "orderStatusFailed": "Failed",
+      "orderTypeSubscription": "{tier} plan ({cycle})",
+      "orderTypeUpgrade": "Upgrade to {tier} ({cycle})",
+      "orderTypeDowngrade": "Downgrade to {tier} ({cycle})",
+      "orderTypeExtraQuota": "Extra quota ({items})",
+      "orderCycleMonthly": "monthly",
+      "orderCycleYearly": "yearly",
+      "orderExtraDuration": "+{n} min",
+      "orderExtraAi": "+{n} AI summaries"
     },
     "checkout": {
       "title": "Checkout",

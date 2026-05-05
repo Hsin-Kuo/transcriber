@@ -145,13 +145,30 @@ class UserRepository:
         )
         return result.modified_count > 0
 
-    async def get_by_stripe_customer_id(self, customer_id: str) -> Optional[Dict[str, Any]]:
-        """根據 Stripe Customer ID 獲取用戶"""
-        return await self.collection.find_one({"subscription.stripe_customer_id": customer_id})
-
     async def update_subscription(self, user_id: str, subscription_data: Dict[str, Any]) -> bool:
         """更新用戶訂閱資料"""
         return await self.update(user_id, {"subscription": subscription_data})
+
+    async def add_extra_quota(
+        self, user_id: str, duration_minutes: float = 0, ai_summaries: int = 0
+    ) -> bool:
+        """累加額外額度（不重置，可跨月累計）"""
+        inc: Dict[str, Any] = {}
+        if duration_minutes:
+            inc["extra_quota.duration_minutes"] = duration_minutes
+        if ai_summaries:
+            inc["extra_quota.ai_summaries"] = ai_summaries
+        if not inc:
+            return True
+        result = await self.collection.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$inc": inc, "$set": {"updated_at": get_utc_timestamp()}}
+        )
+        return result.modified_count > 0
+
+    async def update_invoice_info(self, user_id: str, invoice_info: Dict[str, Any]) -> bool:
+        """更新用戶發票資訊"""
+        return await self.update(user_id, {"invoice_info": invoice_info})
 
     async def count(self, filters: Dict[str, Any] = None) -> int:
         """計算用戶數量"""

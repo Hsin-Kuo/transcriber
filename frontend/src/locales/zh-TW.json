@@ -160,7 +160,21 @@
       "downgradedSuccess": "方案將於計費週期結束時降級",
       "checkoutSuccess": "付款成功！方案已更新",
       "checkoutCanceled": "付款已取消",
-      "error": "操作失敗，請稍後再試"
+      "error": "操作失敗，請稍後再試",
+      "ordersTitle": "付款紀錄",
+      "ordersLoading": "載入中...",
+      "ordersEmpty": "尚無付款紀錄",
+      "ordersLoadMore": "載入更多",
+      "orderStatusPaid": "已付款",
+      "orderStatusFailed": "失敗",
+      "orderTypeSubscription": "{tier} 方案（{cycle}）",
+      "orderTypeUpgrade": "升級至 {tier}（{cycle}）",
+      "orderTypeDowngrade": "降級至 {tier}（{cycle}）",
+      "orderTypeExtraQuota": "額外額度（{items}）",
+      "orderCycleMonthly": "月繳",
+      "orderCycleYearly": "年繳",
+      "orderExtraDuration": "+{n} 分鐘",
+      "orderExtraAi": "+{n} 次 AI 摘要"
     },
     "checkout": {
       "title": "結帳",

@@ -118,17 +118,6 @@
             {{ $t('userSettings.subscription.pendingDowngrade', { date: formatDate(authStore.subscription?.current_period_end), tier: authStore.subscription?.pending_plan_change?.tier?.toUpperCase() }) }}
           </div>
 
-          <div class="sub-actions">
-            <button v-if="authStore.subscription?.cancel_at_period_end" class="sub-btn sub-btn-primary" @click="handleReactivate">
-              {{ $t('userSettings.subscription.reactivate') }}
-            </button>
-            <button v-else class="sub-btn sub-btn-outline" @click="showCancelModal = true">
-              {{ $t('userSettings.subscription.cancelSubscription') }}
-            </button>
-            <button class="sub-btn sub-btn-outline" @click="openBillingPortal">
-              {{ $t('userSettings.subscription.manageBilling') }}
-            </button>
-          </div>
         </div>
       </div>
     </div>
@@ -200,6 +189,14 @@
         <!-- Google 操作訊息 -->
         <div v-if="googleError" class="google-message error">{{ googleError }}</div>
         <div v-if="googleSuccess" class="google-message success">{{ googleSuccess }}</div>
+
+        <!-- 管理帳單 -->
+        <div v-if="authStore.isAuthenticated" class="setting-item">
+          <span class="setting-label">{{ $t('userSettings.subscription.manageBilling') }}</span>
+          <button class="change-password-btn" @click="showBillingPanel = true">
+            {{ $t('userSettings.subscription.manageBilling') }}
+          </button>
+        </div>
 
         <!-- 刪除帳號 -->
         <div class="setting-item delete-account-item">
@@ -611,20 +608,8 @@
       </div>
     </div>
     <PlanPanel v-model="showPlanPanel" :current-tier="currentTier" @plan-changed="handlePlanChanged" />
+    <BillingPanel v-model="showBillingPanel" @cancelled="showToast($t('userSettings.subscription.cancelSuccess'))" />
 
-    <!-- 取消訂閱確認 Modal -->
-    <div v-if="showCancelModal" class="modal-overlay" @click.self="showCancelModal = false">
-      <div class="modal-content">
-        <h3 class="modal-title">{{ $t('userSettings.subscription.cancelConfirmTitle') }}</h3>
-        <p class="modal-message">{{ $t('userSettings.subscription.cancelConfirmMessage') }}</p>
-        <div class="modal-actions">
-          <button @click="showCancelModal = false" class="btn-cancel">{{ $t('userSettings.cancel') }}</button>
-          <button @click="confirmCancelSubscription" class="btn-confirm btn-danger" :disabled="cancelingSubscription">
-            {{ cancelingSubscription ? $t('userSettings.processing') : $t('userSettings.subscription.cancelConfirmBtn') }}
-          </button>
-        </div>
-      </div>
-    </div>
 
     <!-- Toast 提示 -->
     <Transition name="toast">
@@ -644,6 +629,7 @@ import api from '../utils/api'
 import { detectTimezone, detectTheme } from '../utils/defaults'
 import GoogleSignInButton from '../components/GoogleSignInButton.vue'
 import PlanPanel from '../components/PlanPanel.vue'
+import BillingPanel from '../components/BillingPanel.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -676,10 +662,9 @@ const newPasswordChecks = ref({
 
 // Plan panel
 const showPlanPanel = ref(false)
+const showBillingPanel = ref(false)
 
 // Subscription management
-const showCancelModal = ref(false)
-const cancelingSubscription = ref(false)
 const toastMsg = ref('')
 const toastType = ref('success')
 let toastTimer = null
@@ -692,43 +677,10 @@ function showToast(msg, type = 'success') {
 }
 
 function handlePlanChanged(event) {
-  if (event.action === 'cancel') {
-    showCancelModal.value = true
-  } else if (event.action === 'upgraded') {
+  if (event.action === 'upgraded') {
     showToast($t('userSettings.subscription.upgradedSuccess'))
   } else if (event.action === 'downgraded') {
     showToast($t('userSettings.subscription.downgradedSuccess'))
-  }
-}
-
-async function confirmCancelSubscription() {
-  cancelingSubscription.value = true
-  try {
-    await authStore.cancelSubscription()
-    showCancelModal.value = false
-    showToast($t('userSettings.subscription.cancelSuccess'))
-  } catch (err) {
-    showToast(err.response?.data?.detail || $t('userSettings.subscription.error'), 'error')
-  } finally {
-    cancelingSubscription.value = false
-  }
-}
-
-async function handleReactivate() {
-  try {
-    await authStore.reactivateSubscription()
-    showToast($t('userSettings.subscription.reactivateSuccess'))
-  } catch (err) {
-    showToast(err.response?.data?.detail || $t('userSettings.subscription.error'), 'error')
-  }
-}
-
-async function openBillingPortal() {
-  try {
-    const data = await authStore.getPortalUrl()
-    window.location.href = data.portal_url
-  } catch (err) {
-    showToast(err.response?.data?.detail || $t('userSettings.subscription.error'), 'error')
   }
 }
 
@@ -739,6 +691,7 @@ function formatDate(timestamp) {
     year: 'numeric', month: 'long', day: 'numeric'
   })
 }
+
 
 // 卡片展開狀態
 const securityExpanded = ref(false)
@@ -1612,6 +1565,7 @@ async function confirmDeleteAccount() {
   margin-top: 16px;
   padding-top: 16px;
   border-top: 1px solid var(--color-divider, rgba(163, 177, 198, 0.2));
+  width: 100%;
 }
 
 .sub-row {
@@ -1684,6 +1638,116 @@ async function confirmDeleteAccount() {
 
 .sub-btn-primary:hover {
   opacity: 0.9;
+}
+
+/* 付款紀錄 */
+.orders-section {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--color-divider, rgba(163, 177, 198, 0.2));
+}
+
+.orders-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--main-text-light);
+  margin: 0 0 12px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.orders-loading,
+.orders-empty {
+  font-size: 14px;
+  color: var(--main-text-light);
+  padding: 8px 0;
+}
+
+.orders-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.order-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-divider, rgba(163, 177, 198, 0.1));
+}
+
+.order-row:last-child {
+  border-bottom: none;
+}
+
+.order-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.order-date {
+  font-size: 12px;
+  color: var(--main-text-light);
+}
+
+.order-desc {
+  font-size: 14px;
+  color: var(--main-text);
+}
+
+.order-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.order-amount {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--main-text);
+}
+
+.order-status {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.status-paid {
+  background: rgba(40, 167, 69, 0.1);
+  color: var(--color-success, #28a745);
+}
+
+.status-failed {
+  background: rgba(220, 53, 69, 0.1);
+  color: var(--color-danger, #dc3545);
+}
+
+.orders-load-more {
+  margin-top: 12px;
+  padding: 7px 16px;
+  background: transparent;
+  border: 1px solid var(--color-divider, rgba(163, 177, 198, 0.3));
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--main-text-light);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+}
+
+.orders-load-more:hover:not(:disabled) {
+  border-color: var(--main-text-light);
+  color: var(--main-text);
+}
+
+.orders-load-more:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Toast notification */

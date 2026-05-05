@@ -58,8 +58,8 @@ async def generate_summary(
         )
         return result
 
-    # 生成成功，增加使用量
-    await QuotaManager.increment_ai_summary_usage(db, user_id)
+    # 生成成功，增加使用量（傳入 user 以便正確扣除 extra_quota）
+    await QuotaManager.increment_ai_summary_usage(db, user_id, user=full_user)
 
     await audit_logger.log_task_operation(
         request=request, action="summary_generate",

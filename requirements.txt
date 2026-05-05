@@ -21,3 +21,7 @@ google-auth
 # LLM API
 openai
 google-generativeai
+
+# Payments
+pycryptodome
+httpx

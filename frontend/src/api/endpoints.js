@@ -81,7 +81,9 @@ export const NEW_ENDPOINTS = {
     cancel: '/subscriptions/cancel',
     reactivate: '/subscriptions/reactivate',
     change: '/subscriptions/change',
-    portal: '/subscriptions/portal',
+    purchaseExtra: '/subscriptions/purchase-extra',
+    packages: '/subscriptions/packages',
+    orders: '/subscriptions/orders',
   },
 }
 

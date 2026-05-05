@@ -5,6 +5,7 @@ import TasksView from '../views/TasksView.vue'
 import UserSettingsView from '../views/UserSettingsView.vue'
 import TranscriptDetailView from '../views/TranscriptDetailView.vue'
 import CheckoutView from '../views/CheckoutView.vue'
+import PaymentReturnView from '../views/PaymentReturnView.vue'
 import LoginView from '../views/auth/LoginView.vue'
 import RegisterView from '../views/auth/RegisterView.vue'
 import VerifyEmailView from '../views/auth/VerifyEmailView.vue'
@@ -46,6 +47,16 @@ const routes = [
     component: CheckoutView,
     meta: {
       title: '結帳',
+      requiresAuth: true,
+      hideNav: true
+    }
+  },
+  {
+    path: '/payment/return',
+    name: 'paymentReturn',
+    component: PaymentReturnView,
+    meta: {
+      title: '付款結果',
       requiresAuth: true,
       hideNav: true
     }

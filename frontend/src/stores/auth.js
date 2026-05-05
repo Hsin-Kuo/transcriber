@@ -23,7 +23,7 @@ export const useAuthStore = defineStore('auth', () => {
   const preferences = computed(() => user.value?.preferences || {})
   const subscription = computed(() => user.value?.subscription || {})
   const hasActiveSubscription = computed(() =>
-    ['active', 'trialing'].includes(subscription.value?.status)
+    subscription.value?.status === 'active'
   )
 
   // 計算配額使用百分比
@@ -288,9 +288,12 @@ export const useAuthStore = defineStore('auth', () => {
 
   // ===== 訂閱相關 =====
 
-  async function createCheckoutSession(tier, billing) {
-    const response = await api.post('/subscriptions/checkout', { tier, billing })
-    return response.data
+  // extra_quota（分開顯示）
+  const extraQuota = computed(() => user.value?.extra_quota || { duration_minutes: 0, ai_summaries: 0 })
+
+  async function createCheckoutSession(tier, billing, invoiceData = {}) {
+    const response = await api.post('/subscriptions/checkout', { tier, billing, ...invoiceData })
+    return response.data  // { form, order_no }
   }
 
   async function cancelSubscription() {
@@ -301,19 +304,43 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function reactivateSubscription() {
     const response = await api.post('/subscriptions/reactivate')
-    await fetchCurrentUser()
-    return response.data
+    return response.data  // may return form if re-payment needed
   }
 
-  async function changePlan(tier, billing) {
-    const response = await api.post('/subscriptions/change', { tier, billing })
-    await fetchCurrentUser()
-    return response.data
+  async function changePlan(tier, billing, invoiceData = {}) {
+    const response = await api.post('/subscriptions/change', { tier, billing, ...invoiceData })
+    return response.data  // { form, order_no, action, ... }
   }
 
-  async function getPortalUrl() {
-    const response = await api.get('/subscriptions/portal')
-    return response.data
+  async function purchaseExtraQuota(packageId, invoiceData = {}) {
+    const response = await api.post('/subscriptions/purchase-extra', { package_id: packageId, ...invoiceData })
+    return response.data  // { form, order_no }
+  }
+
+  async function getPackages() {
+    const response = await api.get('/subscriptions/packages')
+    return response.data.packages
+  }
+
+  async function getOrders(skip = 0, limit = 6) {
+    const response = await api.get('/subscriptions/orders', { params: { skip, limit } })
+    return response.data  // { orders, has_more }
+  }
+
+  function submitNewebpayForm(formData) {
+    const form = document.createElement('form')
+    form.method = 'POST'
+    form.action = formData.gateway_url
+    Object.entries(formData).forEach(([key, value]) => {
+      if (key === 'gateway_url') return
+      const input = document.createElement('input')
+      input.type = 'hidden'
+      input.name = key
+      input.value = value
+      form.appendChild(input)
+    })
+    document.body.appendChild(form)
+    form.submit()
   }
 
   async function deleteAccount(password, confirmation) {
@@ -380,6 +407,7 @@ export const useAuthStore = defineStore('auth', () => {
     preferences,
     subscription,
     hasActiveSubscription,
+    extraQuota,
     // Actions
     register,
     login,
@@ -398,6 +426,9 @@ export const useAuthStore = defineStore('auth', () => {
     cancelSubscription,
     reactivateSubscription,
     changePlan,
-    getPortalUrl,
+    purchaseExtraQuota,
+    getPackages,
+    getOrders,
+    submitNewebpayForm,
   }
 })

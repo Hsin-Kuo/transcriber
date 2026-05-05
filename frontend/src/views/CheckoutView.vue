@@ -1,6 +1,5 @@
 <template>
   <div class="checkout-container">
-    <!-- Header -->
     <div class="checkout-header">
       <button class="back-btn" @click="$router.push('/settings')">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -12,7 +11,6 @@
     </div>
 
     <div class="checkout-content">
-      <!-- Order Summary -->
       <div class="summary-card">
         <h2>{{ $t('userSettings.checkout.orderSummary') }}</h2>
 
@@ -27,20 +25,50 @@
 
         <div class="summary-divider"></div>
 
-        <div class="summary-row">
-          <span class="summary-label">{{ $t('userSettings.checkout.subtotal') }}</span>
-          <span class="summary-value">${{ billing === 'yearly' ? (prices[plan] * 12).toFixed(2) : prices[plan].toFixed(2) }}</span>
-        </div>
-        <div v-if="billing === 'yearly'" class="summary-row discount-row">
-          <span class="summary-label">{{ $t('userSettings.checkout.yearlyDiscount') }}</span>
-          <span class="summary-value discount-value">-${{ prices[plan].toFixed(2) }}</span>
-        </div>
-
-        <div class="summary-divider"></div>
-
         <div class="summary-row total">
           <span class="summary-label">{{ $t('userSettings.checkout.total') }}</span>
-          <span class="summary-value">${{ totalPrice }}{{ billing === 'yearly' ? $t('userSettings.checkout.perYear') : $t('userSettings.checkout.perMonth') }}</span>
+          <span class="summary-value">NT${{ totalPrice }}{{ billing === 'yearly' ? $t('userSettings.checkout.perYear') : $t('userSettings.checkout.perMonth') }}</span>
+        </div>
+
+        <!-- 電子發票 -->
+        <div class="invoice-section">
+          <h3 class="invoice-title">電子發票</h3>
+          <div class="invoice-type-toggle">
+            <button
+              class="invoice-type-btn"
+              :class="{ active: invoiceType === 'personal' }"
+              @click="invoiceType = 'personal'"
+            >個人</button>
+            <button
+              class="invoice-type-btn"
+              :class="{ active: invoiceType === 'company' }"
+              @click="invoiceType = 'company'"
+            >公司</button>
+          </div>
+
+          <template v-if="invoiceType === 'personal'">
+            <div class="form-group">
+              <label>手機條碼載具（選填）</label>
+              <input v-model="carrierNum" type="text" placeholder="/XXXXXXX" class="form-input" />
+              <span class="form-hint">格式：/ 開頭，7 位英數字</span>
+            </div>
+          </template>
+
+          <template v-else>
+            <div class="form-group">
+              <label>統一編號</label>
+              <input v-model="companyTaxId" type="text" placeholder="12345678" class="form-input" maxlength="8" />
+            </div>
+            <div class="form-group">
+              <label>公司名稱</label>
+              <input v-model="companyName" type="text" placeholder="某某股份有限公司" class="form-input" />
+            </div>
+          </template>
+
+          <label class="save-label">
+            <input v-model="saveInvoice" type="checkbox" />
+            記住我的發票資訊
+          </label>
         </div>
 
         <button class="pay-btn" :disabled="paying" @click="handlePay">
@@ -58,7 +86,7 @@
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
             <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
           </svg>
-          {{ $t('userSettings.checkout.secure') }}
+          由藍新金流安全處理，訂閱後每月自動扣款
         </p>
       </div>
     </div>
@@ -81,39 +109,50 @@ const billing = ref(route.query.billing || 'monthly')
 const paying = ref(false)
 const errorMsg = ref(null)
 
-const prices = { free: 0, basic: 9.99, pro: 29.99 }
+const invoiceType = ref('personal')
+const carrierNum = ref('')
+const companyTaxId = ref('')
+const companyName = ref('')
+const saveInvoice = ref(true)
 
-const planLabel = computed(() => {
-  const labels = { free: 'Free', basic: 'Basic', pro: 'Pro' }
-  return labels[plan.value] || plan.value
-})
-
-const totalPrice = computed(() => {
-  const base = prices[plan.value] || 0
-  if (billing.value === 'yearly') {
-    return (Math.round(base * 11 * 100) / 100).toFixed(2)
+// 預填已儲存的發票資訊
+onMounted(() => {
+  if (plan.value === 'free') {
+    router.push('/settings')
+    return
   }
-  return base.toFixed(2)
+  const info = authStore.user?.invoice_info
+  if (info) {
+    invoiceType.value = info.type || 'personal'
+    carrierNum.value = info.carrier_num || ''
+    companyTaxId.value = info.company_tax_id || ''
+    companyName.value = info.company_name || ''
+  }
 })
+
+const prices = { basic_monthly: 299, basic_yearly: 3289, pro_monthly: 899, pro_yearly: 9889 }
+const planLabel = computed(() => ({ basic: 'Basic', pro: 'Pro' })[plan.value] || plan.value)
+const totalPrice = computed(() => prices[`${plan.value}_${billing.value}`] || 0)
 
 async function handlePay() {
   paying.value = true
   errorMsg.value = null
   try {
-    const result = await authStore.createCheckoutSession(plan.value, billing.value)
-    // 跳轉到 Stripe Checkout 頁面
-    window.location.href = result.checkout_url
+    const invoiceData = {
+      invoice_type: invoiceType.value,
+      carrier_type: invoiceType.value === 'personal' && carrierNum.value ? '1' : '',
+      carrier_num: invoiceType.value === 'personal' ? carrierNum.value : '',
+      company_tax_id: invoiceType.value === 'company' ? companyTaxId.value : '',
+      company_name: invoiceType.value === 'company' ? companyName.value : '',
+      save_invoice: saveInvoice.value,
+    }
+    const result = await authStore.createCheckoutSession(plan.value, billing.value, invoiceData)
+    authStore.submitNewebpayForm(result.form)
   } catch (err) {
     errorMsg.value = err.response?.data?.detail || $t('userSettings.checkout.error')
     paying.value = false
   }
 }
-
-onMounted(() => {
-  if (plan.value === 'free') {
-    router.push('/settings')
-  }
-})
 </script>
 
 <style scoped>
@@ -141,9 +180,7 @@ onMounted(() => {
   transition: color 0.2s ease;
 }
 
-.back-btn:hover {
-  color: var(--main-text);
-}
+.back-btn:hover { color: var(--main-text); }
 
 .checkout-header h1 {
   font-size: 1.5rem;
@@ -166,44 +203,18 @@ onMounted(() => {
   margin: 0 0 20px 0;
 }
 
-.summary-plan {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.plan-name {
-  font-weight: 700;
-  color: var(--main-primary);
-}
-
-.summary-row {
+.summary-plan, .summary-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 6px 0;
 }
 
-.summary-label {
-  font-size: 14px;
-  color: var(--main-text-light);
-}
+.summary-plan { margin-bottom: 4px; }
 
-.summary-value {
-  font-size: 14px;
-  color: var(--main-text);
-  font-weight: 500;
-}
-
-.discount-row .summary-label {
-  color: var(--color-success, #28a745);
-}
-
-.discount-value {
-  color: var(--color-success, #28a745) !important;
-  font-weight: 600 !important;
-}
+.summary-label { font-size: 14px; color: var(--main-text-light); }
+.summary-value { font-size: 14px; color: var(--main-text); font-weight: 500; }
+.plan-name { font-weight: 700; color: var(--main-primary); }
 
 .summary-row.total .summary-label,
 .summary-row.total .summary-value {
@@ -218,10 +229,93 @@ onMounted(() => {
   margin: 12px 0;
 }
 
+/* 發票區塊 */
+.invoice-section {
+  margin: 20px 0;
+  padding: 16px;
+  background: var(--color-bg, #f8f9fa);
+  border-radius: 8px;
+}
+
+.invoice-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--main-text);
+  margin: 0 0 12px 0;
+}
+
+.invoice-type-toggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.invoice-type-btn {
+  padding: 6px 16px;
+  border: 1px solid var(--color-divider, rgba(163, 177, 198, 0.3));
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  background: transparent;
+  color: var(--main-text-light);
+  transition: all 0.2s ease;
+}
+
+.invoice-type-btn.active {
+  background: var(--main-primary);
+  border-color: var(--main-primary);
+  color: white;
+}
+
+.form-group {
+  margin-bottom: 12px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 13px;
+  color: var(--main-text-light);
+  margin-bottom: 4px;
+}
+
+.form-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--color-divider, rgba(163, 177, 198, 0.3));
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--main-text);
+  background: var(--upload-bg, #fff);
+  box-sizing: border-box;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--main-primary);
+}
+
+.form-hint {
+  font-size: 11px;
+  color: var(--main-text-light);
+  margin-top: 3px;
+  display: block;
+}
+
+.save-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--main-text-light);
+  cursor: pointer;
+  margin-top: 8px;
+}
+
 .pay-btn {
   width: 100%;
   padding: 12px;
-  margin-top: 20px;
+  margin-top: 4px;
   background: var(--main-primary);
   color: white;
   border: none;
@@ -236,15 +330,8 @@ onMounted(() => {
   gap: 8px;
 }
 
-.pay-btn:hover:not(:disabled) {
-  opacity: 0.9;
-  transform: translateY(-1px);
-}
-
-.pay-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
+.pay-btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+.pay-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .error-msg {
   margin: 12px 0 0;
@@ -264,12 +351,7 @@ onMounted(() => {
 }
 
 @media (max-width: 768px) {
-  .checkout-container {
-    padding: 16px;
-  }
-
-  .checkout-header h1 {
-    font-size: 1.25rem;
-  }
+  .checkout-container { padding: 16px; }
+  .checkout-header h1 { font-size: 1.25rem; }
 }
 </style>
