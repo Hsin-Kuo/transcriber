@@ -56,3 +56,8 @@ Thumbs.db
 *.pid
 backend.log
 backend.pid
+
+# Claude Code（本機工具設定，不同裝置不共用）
+.agents/
+skills-lock.json
+.claude/settings.local.json

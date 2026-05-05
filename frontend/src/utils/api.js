@@ -4,8 +4,17 @@
 import axios from 'axios'
 import router from '../router'
 
-// 空字串表示使用相對路徑（適用於 Nginx 代理）
-const API_BASE = import.meta.env.VITE_API_URL ?? ''
+// 未設定 VITE_API_URL 時，自動沿用當前 hostname + port 8000
+// 支援 localhost、Tailscale IP、任意裝置直接存取
+function resolveApiBase() {
+  const envUrl = import.meta.env.VITE_API_URL
+  if (envUrl) return envUrl
+  if (typeof window === 'undefined') return ''
+  const { protocol, hostname } = window.location
+  return `${protocol}//${hostname}:8000`
+}
+
+const API_BASE = resolveApiBase()
 
 // 創建 axios 實例
 const api = axios.create({
