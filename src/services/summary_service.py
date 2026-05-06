@@ -3,6 +3,7 @@ SummaryService - AI 摘要服務
 職責：使用 Gemini API 生成逐字稿摘要
 """
 
+import asyncio
 import os
 import json
 import re
@@ -12,6 +13,19 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from ..database.repositories.summary_repo import SummaryRepository
 from ..database.repositories.task_repo import TaskRepository
+
+
+def _gemini_generate_sync(api_key: str, model_name: str, prompt: str):
+    """在 thread pool 內執行的同步 Gemini 呼叫。
+    configure 和 generate_content 在同一 thread 內完成，避免全域 api_key 被並發覆寫。
+    """
+    import google.generativeai as genai
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(model_name)
+    return model.generate_content(
+        [{"role": "user", "parts": [prompt]}],
+        generation_config={"temperature": 0.3}
+    )
 
 
 class SummaryService:
@@ -326,14 +340,11 @@ class SummaryService:
             try:
                 # 輪詢 API Key
                 api_key = api_keys[attempt % len(api_keys)]
-                genai.configure(api_key=api_key)
 
-                model = genai.GenerativeModel(current_model)
-
-                # 調用 API
-                resp = model.generate_content(
-                    [{"role": "user", "parts": [prompt]}],
-                    generation_config={"temperature": 0.3}
+                # configure + generate_content 在同一 thread 內執行，
+                # 避免阻塞 event loop，也避免全域 api_key 被並發請求覆寫
+                resp = await asyncio.to_thread(
+                    _gemini_generate_sync, api_key, current_model, prompt
                 )
 
                 result_text = (resp.text or "").strip()

@@ -182,9 +182,9 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { summaryService } from '../../api/services.js'
+import { summaryService, taskService } from '../../api/services.js'
 import { useAuthStore } from '../../stores/auth'
 
 const { t: $t } = useI18n()
@@ -227,6 +227,49 @@ const error = ref(null)
 const summary = ref(null)
 const summaryStatus = ref(props.initialSummaryStatus)
 const isCopied = ref(false)
+
+// Polling
+const pollingTimer = ref(null)
+const POLL_INTERVAL = 3000
+const POLL_MAX_ATTEMPTS = 40  // 最多等 2 分鐘
+
+function startPolling() {
+  if (pollingTimer.value) return
+  let attempts = 0
+  let consecutiveErrors = 0
+  pollingTimer.value = setInterval(async () => {
+    attempts++
+    try {
+      const task = await taskService.get(props.taskId)
+      consecutiveErrors = 0
+      const status = task.summary_status
+      if (status === 'completed') {
+        stopPolling()
+        await loadSummary()
+        authStore.fetchCurrentUser()
+        emit('summary-updated', { taskId: props.taskId, status: 'completed' })
+      } else if (status === 'failed') {
+        stopPolling()
+        summaryStatus.value = 'failed'
+        error.value = $t('aiSummary.generateError')
+      } else if (attempts >= POLL_MAX_ATTEMPTS) {
+        stopPolling()
+        summaryStatus.value = 'failed'
+        error.value = $t('aiSummary.generateError')
+      }
+    } catch {
+      consecutiveErrors++
+      if (consecutiveErrors >= 3) stopPolling()
+    }
+  }, POLL_INTERVAL)
+}
+
+function stopPolling() {
+  if (pollingTimer.value) {
+    clearInterval(pollingTimer.value)
+    pollingTimer.value = null
+  }
+}
 
 // AI 摘要配額
 const aiSummaryRemaining = computed(() => authStore.remainingQuota.aiSummaries ?? 0)
@@ -379,6 +422,7 @@ async function loadSummary() {
 // 生成摘要
 async function generateSummary() {
   if (!props.taskId || isLoading.value) return
+  stopPolling()
 
   try {
     isLoading.value = true
@@ -418,6 +462,7 @@ async function generateSummary() {
 watch(() => props.taskId, (newTaskId) => {
   if (newTaskId) {
     // 重置狀態
+    stopPolling()
     summary.value = null
     error.value = null
     summaryStatus.value = props.initialSummaryStatus
@@ -425,8 +470,9 @@ watch(() => props.taskId, (newTaskId) => {
     // 根據設定重新決定展開狀態
     isExpanded.value = getInitialExpandedState()
 
-    // 如果已展開，載入摘要
-    if (isExpanded.value) {
+    if (summaryStatus.value === 'processing') {
+      startPolling()
+    } else if (isExpanded.value) {
       loadSummary()
     }
   }
@@ -439,10 +485,15 @@ watch(() => props.initialSummaryStatus, (newStatus) => {
 
 // 初始載入
 onMounted(() => {
-  // 如果已展開或已有 completed 狀態，載入摘要
-  if (isExpanded.value || summaryStatus.value === 'completed') {
+  if (summaryStatus.value === 'processing') {
+    startPolling()
+  } else if (isExpanded.value || summaryStatus.value === 'completed') {
     loadSummary()
   }
+})
+
+onUnmounted(() => {
+  stopPolling()
 })
 </script>
 
