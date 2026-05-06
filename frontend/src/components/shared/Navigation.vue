@@ -196,8 +196,10 @@ watch(() => authStore.isAuthenticated, (isAuth) => {
   if (isAuth) {
     loadRecentTasks()
   } else {
-    // 登出時清空近期任務
     recentTasks.value = []
+    if (route.meta.requiresAuth) {
+      router.push({ name: 'login' })
+    }
   }
 })
 

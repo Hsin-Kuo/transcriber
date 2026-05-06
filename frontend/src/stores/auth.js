@@ -122,7 +122,6 @@ export const useAuthStore = defineStore('auth', () => {
       applyPreferences(response.data.preferences)
     } catch (err) {
       console.error('獲取用戶資訊失敗:', err)
-      TokenManager.clearTokens()
       user.value = null
     }
   }

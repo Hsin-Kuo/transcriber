@@ -53,12 +53,17 @@ let isRefreshing = false
 let refreshSubscribers = []
 let rateLimitNotifyTimer = null
 
-function subscribeTokenRefresh(callback) {
-  refreshSubscribers.push(callback)
+function subscribeTokenRefresh(resolve, reject) {
+  refreshSubscribers.push({ resolve, reject })
 }
 
 function onRefreshed(token) {
-  refreshSubscribers.forEach(callback => callback(token))
+  refreshSubscribers.forEach(({ resolve }) => resolve(token))
+  refreshSubscribers = []
+}
+
+function onRefreshFailed(error) {
+  refreshSubscribers.forEach(({ reject }) => reject(error))
   refreshSubscribers = []
 }
 
@@ -71,23 +76,31 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && !originalRequest?._retry) {
       if (isRefreshing) {
         // 如果正在刷新,將請求加入隊列
-        return new Promise((resolve) => {
-          subscribeTokenRefresh((token) => {
-            originalRequest.headers.Authorization = `Bearer ${token}`
-            resolve(api(originalRequest))
-          })
+        return new Promise((resolve, reject) => {
+          subscribeTokenRefresh(
+            (token) => {
+              originalRequest.headers.Authorization = `Bearer ${token}`
+              resolve(api(originalRequest))
+            },
+            (err) => reject(err)
+          )
         })
       }
 
       originalRequest._retry = true
       isRefreshing = true
 
-      try {
-        const refreshToken = TokenManager.getRefreshToken()
-        if (!refreshToken) {
-          throw new Error('No refresh token')
-        }
+      const refreshToken = TokenManager.getRefreshToken()
+      if (!refreshToken) {
+        isRefreshing = false
+        const noTokenError = new Error('No refresh token')
+        onRefreshFailed(noTokenError)
+        TokenManager.clearTokens()
+        router.push('/login')
+        return Promise.reject(noTokenError)
+      }
 
+      try {
         // 刷新 Token
         const response = await axios.post(`${API_BASE}/auth/refresh`, {
           refresh_token: refreshToken
@@ -106,10 +119,14 @@ api.interceptors.response.use(
         // 重試原請求
         return api(originalRequest)
       } catch (refreshError) {
-        // 刷新失敗,清除 Token 並跳轉登入頁
         isRefreshing = false
-        TokenManager.clearTokens()
-        router.push('/login')
+        onRefreshFailed(refreshError)
+        // 只有 refresh 端點明確拒絕（401/403）才代表 token 真的失效
+        // 網路錯誤或後端暫時不可用（5xx）不清 token，避免短暫故障造成登出
+        if (refreshError.response?.status === 401 || refreshError.response?.status === 403) {
+          TokenManager.clearTokens()
+          router.push('/login')
+        }
         return Promise.reject(refreshError)
       }
     }
