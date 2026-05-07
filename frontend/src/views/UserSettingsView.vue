@@ -222,14 +222,14 @@
         <!-- 語言 -->
         <div class="setting-item">
           <span class="setting-label">{{ $t('userSettings.language') }}</span>
-          <div class="custom-select" :class="{ open: languageDropdownOpen }">
+          <div ref="languageSelectRef" class="custom-select" :class="{ open: languageDropdownOpen }">
             <div class="select-trigger" @click="toggleLanguageDropdown">
               <span>{{ currentLanguageLabel }}</span>
               <svg class="select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="6 9 12 15 18 9"></polyline>
               </svg>
             </div>
-            <div class="select-dropdown">
+            <div class="select-dropdown" :style="languageDropdownOpen ? languageDropdownStyle : {}">
               <div
                 v-for="lang in availableLanguages"
                 :key="lang.code"
@@ -246,14 +246,14 @@
         <!-- 時區 -->
         <div class="setting-item">
           <span class="setting-label">{{ $t('userSettings.timezone') }}</span>
-          <div class="custom-select" :class="{ open: timezoneDropdownOpen }">
+          <div ref="timezoneSelectRef" class="custom-select" :class="{ open: timezoneDropdownOpen }">
             <div class="select-trigger" @click="toggleTimezoneDropdown">
               <span>{{ currentTimezoneLabel }}</span>
               <svg class="select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="6 9 12 15 18 9"></polyline>
               </svg>
             </div>
-            <div class="select-dropdown">
+            <div class="select-dropdown" :style="timezoneDropdownOpen ? timezoneDropdownStyle : {}">
               <div
                 v-for="tz in availableTimezones"
                 :key="tz.code"
@@ -295,14 +295,14 @@
         <!-- AI 摘要展開 -->
         <div class="setting-item">
           <span class="setting-label">{{ $t('userSettings.summaryExpand') }}</span>
-          <div class="custom-select" :class="{ open: summaryExpandDropdownOpen }">
+          <div ref="summarySelectRef" class="custom-select" :class="{ open: summaryExpandDropdownOpen }">
             <div class="select-trigger" @click="toggleSummaryExpandDropdown">
               <span>{{ currentSummaryExpandLabel }}</span>
               <svg class="select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="6 9 12 15 18 9"></polyline>
               </svg>
             </div>
-            <div class="select-dropdown">
+            <div class="select-dropdown" :style="summaryExpandDropdownOpen ? summaryDropdownStyle : {}">
               <div
                 class="select-option"
                 :class="{ active: summaryExpandMode === 'always-open' }"
@@ -751,13 +751,72 @@ const currentLanguage = ref(authStore.preferences.language || locale.value)
 
 // 可用時區列表
 const availableTimezones = [
-  { code: 'Asia/Taipei', name: 'UTC+8 台北' },
-  { code: 'Asia/Tokyo', name: 'UTC+9 東京' },
-  { code: 'Asia/Shanghai', name: 'UTC+8 上海' },
-  { code: 'Asia/Hong_Kong', name: 'UTC+8 香港' },
-  { code: 'America/New_York', name: 'UTC-5 紐約' },
-  { code: 'America/Los_Angeles', name: 'UTC-8 洛杉磯' },
-  { code: 'Europe/London', name: 'UTC+0 倫敦' }
+  { code: 'Pacific/Midway', name: 'UTC-11 Midway Island' },
+  { code: 'Pacific/Honolulu', name: 'UTC-10 Hawaii' },
+  { code: 'America/Anchorage', name: 'UTC-9 Alaska' },
+  { code: 'America/Los_Angeles', name: 'UTC-8 Los Angeles / Seattle' },
+  { code: 'America/Denver', name: 'UTC-7 Denver / Phoenix' },
+  { code: 'America/Chicago', name: 'UTC-6 Chicago / Dallas' },
+  { code: 'America/Mexico_City', name: 'UTC-6 Mexico City' },
+  { code: 'America/New_York', name: 'UTC-5 New York / Miami' },
+  { code: 'America/Toronto', name: 'UTC-5 Toronto' },
+  { code: 'America/Bogota', name: 'UTC-5 Bogota' },
+  { code: 'America/Caracas', name: 'UTC-4 Caracas' },
+  { code: 'America/Halifax', name: 'UTC-4 Halifax' },
+  { code: 'America/Manaus', name: 'UTC-4 Manaus' },
+  { code: 'America/Santiago', name: 'UTC-4 Santiago' },
+  { code: 'America/St_Johns', name: 'UTC-3:30 St. Johns' },
+  { code: 'America/Sao_Paulo', name: 'UTC-3 São Paulo' },
+  { code: 'America/Argentina/Buenos_Aires', name: 'UTC-3 Buenos Aires' },
+  { code: 'America/Godthab', name: 'UTC-3 Nuuk' },
+  { code: 'Atlantic/South_Georgia', name: 'UTC-2 South Georgia' },
+  { code: 'Atlantic/Azores', name: 'UTC-1 Azores' },
+  { code: 'Atlantic/Cape_Verde', name: 'UTC-1 Cape Verde' },
+  { code: 'Europe/London', name: 'UTC+0 London' },
+  { code: 'Europe/Lisbon', name: 'UTC+0 Lisbon' },
+  { code: 'Africa/Casablanca', name: 'UTC+0 Casablanca' },
+  { code: 'Europe/Paris', name: 'UTC+1 Paris / Berlin' },
+  { code: 'Europe/Rome', name: 'UTC+1 Rome / Madrid' },
+  { code: 'Africa/Lagos', name: 'UTC+1 Lagos' },
+  { code: 'Europe/Athens', name: 'UTC+2 Athens / Helsinki' },
+  { code: 'Africa/Cairo', name: 'UTC+2 Cairo' },
+  { code: 'Africa/Johannesburg', name: 'UTC+2 Johannesburg' },
+  { code: 'Europe/Istanbul', name: 'UTC+3 Istanbul' },
+  { code: 'Europe/Moscow', name: 'UTC+3 Moscow' },
+  { code: 'Asia/Riyadh', name: 'UTC+3 Riyadh' },
+  { code: 'Africa/Nairobi', name: 'UTC+3 Nairobi' },
+  { code: 'Asia/Tehran', name: 'UTC+3:30 Tehran' },
+  { code: 'Asia/Dubai', name: 'UTC+4 Dubai' },
+  { code: 'Asia/Baku', name: 'UTC+4 Baku' },
+  { code: 'Asia/Kabul', name: 'UTC+4:30 Kabul' },
+  { code: 'Asia/Karachi', name: 'UTC+5 Karachi' },
+  { code: 'Asia/Tashkent', name: 'UTC+5 Tashkent' },
+  { code: 'Asia/Kolkata', name: 'UTC+5:30 Mumbai / New Delhi' },
+  { code: 'Asia/Kathmandu', name: 'UTC+5:45 Kathmandu' },
+  { code: 'Asia/Dhaka', name: 'UTC+6 Dhaka' },
+  { code: 'Asia/Almaty', name: 'UTC+6 Almaty' },
+  { code: 'Asia/Rangoon', name: 'UTC+6:30 Yangon' },
+  { code: 'Asia/Bangkok', name: 'UTC+7 Bangkok / Hanoi' },
+  { code: 'Asia/Jakarta', name: 'UTC+7 Jakarta' },
+  { code: 'Asia/Taipei', name: 'UTC+8 Taipei' },
+  { code: 'Asia/Shanghai', name: 'UTC+8 Shanghai / Beijing' },
+  { code: 'Asia/Hong_Kong', name: 'UTC+8 Hong Kong' },
+  { code: 'Asia/Singapore', name: 'UTC+8 Singapore' },
+  { code: 'Asia/Kuala_Lumpur', name: 'UTC+8 Kuala Lumpur' },
+  { code: 'Australia/Perth', name: 'UTC+8 Perth' },
+  { code: 'Asia/Tokyo', name: 'UTC+9 Tokyo' },
+  { code: 'Asia/Seoul', name: 'UTC+9 Seoul' },
+  { code: 'Australia/Adelaide', name: 'UTC+9:30 Adelaide' },
+  { code: 'Australia/Darwin', name: 'UTC+9:30 Darwin' },
+  { code: 'Australia/Sydney', name: 'UTC+10 Sydney / Melbourne' },
+  { code: 'Australia/Brisbane', name: 'UTC+10 Brisbane' },
+  { code: 'Pacific/Guam', name: 'UTC+10 Guam' },
+  { code: 'Australia/Lord_Howe', name: 'UTC+10:30 Lord Howe Island' },
+  { code: 'Pacific/Noumea', name: 'UTC+11 New Caledonia' },
+  { code: 'Pacific/Auckland', name: 'UTC+12 Auckland' },
+  { code: 'Pacific/Fiji', name: 'UTC+12 Fiji' },
+  { code: 'Pacific/Tongatapu', name: 'UTC+13 Tonga' },
+  { code: 'Pacific/Apia', name: 'UTC+13 Samoa' },
 ]
 
 // 當前時區（優先 authStore → fallback localStorage → 偵測系統時區）
@@ -775,6 +834,25 @@ const summaryExpandDropdownOpen = ref(false)
 // 下拉選單狀態
 const languageDropdownOpen = ref(false)
 const timezoneDropdownOpen = ref(false)
+
+// 下拉選單 refs 與 fixed 定位 style
+const languageSelectRef = ref(null)
+const timezoneSelectRef = ref(null)
+const summarySelectRef = ref(null)
+const languageDropdownStyle = ref({})
+const timezoneDropdownStyle = ref({})
+const summaryDropdownStyle = ref({})
+
+function computeDropdownStyle(el) {
+  const rect = el.getBoundingClientRect()
+  return {
+    position: 'fixed',
+    top: (rect.bottom + 4) + 'px',
+    right: (window.innerWidth - rect.right) + 'px',
+    left: 'auto',
+    minWidth: rect.width + 'px',
+  }
+}
 
 // 當前選項的顯示文字
 const currentLanguageLabel = computed(() => {
@@ -801,18 +879,27 @@ function toggleLanguageDropdown() {
   languageDropdownOpen.value = !languageDropdownOpen.value
   timezoneDropdownOpen.value = false
   summaryExpandDropdownOpen.value = false
+  if (languageDropdownOpen.value && languageSelectRef.value) {
+    languageDropdownStyle.value = computeDropdownStyle(languageSelectRef.value)
+  }
 }
 
 function toggleTimezoneDropdown() {
   timezoneDropdownOpen.value = !timezoneDropdownOpen.value
   languageDropdownOpen.value = false
   summaryExpandDropdownOpen.value = false
+  if (timezoneDropdownOpen.value && timezoneSelectRef.value) {
+    timezoneDropdownStyle.value = computeDropdownStyle(timezoneSelectRef.value)
+  }
 }
 
 function toggleSummaryExpandDropdown() {
   summaryExpandDropdownOpen.value = !summaryExpandDropdownOpen.value
   languageDropdownOpen.value = false
   timezoneDropdownOpen.value = false
+  if (summaryExpandDropdownOpen.value && summarySelectRef.value) {
+    summaryDropdownStyle.value = computeDropdownStyle(summarySelectRef.value)
+  }
 }
 
 async function selectSummaryExpandMode(mode) {
@@ -2067,7 +2154,7 @@ async function confirmDeleteAccount() {
   opacity: 0;
   visibility: hidden;
   transform: translateY(-8px);
-  transition: all 0.2s ease;
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease;
   z-index: 100;
   overflow: hidden;
 }
@@ -2076,6 +2163,8 @@ async function confirmDeleteAccount() {
   opacity: 1;
   visibility: visible;
   transform: translateY(0);
+  max-height: 240px;
+  overflow-y: auto;
 }
 
 .select-option {

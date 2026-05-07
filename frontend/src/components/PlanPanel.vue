@@ -72,10 +72,6 @@
             </div>
             <div class="feature-item">
               <svg class="feature-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
-              <span>{{ $t('userSettings.planPanel.concurrentTasks', { n: plan.concurrent }) }}</span>
-            </div>
-            <div class="feature-item">
-              <svg class="feature-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
               <span>{{ plan.aiSummaries >= 999999
                 ? $t('userSettings.planPanel.unlimitedAiSummaries')
                 : $t('userSettings.planPanel.aiSummaries', { n: plan.aiSummaries }) }}</span>
@@ -104,11 +100,6 @@
               <svg v-if="plan.features.batch_operations" class="feature-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
               <svg v-else class="feature-icon disabled" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
               <span>{{ $t('userSettings.planPanel.batchOperations') }}</span>
-            </div>
-            <div class="feature-item" :class="{ disabled: !plan.features.priority_processing }">
-              <svg v-if="plan.features.priority_processing" class="feature-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
-              <svg v-else class="feature-icon disabled" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-              <span>{{ $t('userSettings.planPanel.priorityProcessing') }}</span>
             </div>
           </div>
         </div>

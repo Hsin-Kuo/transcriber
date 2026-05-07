@@ -37,28 +37,10 @@
       <div class="modal-body">
         <!-- 第一排：任務類型 + 檔案資訊 + 說話者辨識 + 標籤 -->
         <div class="confirm-row">
-          <!-- 任務類型 -->
-          <div class="modal-section task-type-section">
-            <label class="section-label">{{ $t('transcription.taskType') }}</label>
+          <!-- 左欄：檔案資訊 + 語言 + 說話者辨識 -->
+          <div class="confirm-col">
 
-            <div class="radio-group">
-              <label class="radio-item">
-                <input type="radio" name="taskType" value="paragraph" v-model="taskType" />
-                <span class="radio-label">{{ $t('transcription.paragraph') }}</span>
-              </label>
-              <label class="radio-item">
-                <input type="radio" name="taskType" value="subtitle" v-model="taskType" />
-                <span class="radio-label">{{ $t('transcription.subtitle') }}</span>
-              </label>
-            </div>
-
-            <div class="task-type-hint">
-              <span v-if="taskType === 'paragraph'" class="hint">{{ $t('transcription.paragraphHint') }}</span>
-              <span v-else class="hint">{{ $t('transcription.subtitleHint') }}</span>
-            </div>
-          </div>
-
-          <!-- 檔案資訊 -->
+          <!-- 檔案資訊（移至左欄） -->
           <div class="modal-section file-section">
             <label class="section-label">{{ $t('transcription.fileInfo') }}</label>
 
@@ -105,7 +87,7 @@
             </div>
           </div>
 
-          <!-- 語言選擇 -->
+          <!-- 語言選擇（移至左欄） -->
           <div class="modal-section language-section">
             <label class="section-label">語言</label>
             <select v-model="selectedLanguage" class="language-select">
@@ -119,7 +101,7 @@
             </select>
           </div>
 
-          <!-- 說話者辨識 -->
+          <!-- 說話者辨識（移至左欄） -->
           <div class="modal-section diarize-section">
             <label class="section-label">{{ $t('transcription.speakerDiarization') }}</label>
 
@@ -145,6 +127,32 @@
                 :placeholder="$t('transcription.autoDetect')"
                 class="number-input"
               />
+            </div>
+          </div>
+
+          </div><!-- end left col -->
+
+          <!-- 右欄：任務類型 + 標籤 -->
+          <div class="confirm-col">
+
+          <!-- 任務類型 -->
+          <div class="modal-section task-type-section">
+            <label class="section-label">{{ $t('transcription.taskType') }}</label>
+
+            <div class="radio-group">
+              <label class="radio-item">
+                <input type="radio" name="taskType" value="paragraph" v-model="taskType" />
+                <span class="radio-label">{{ $t('transcription.paragraph') }}</span>
+              </label>
+              <label class="radio-item">
+                <input type="radio" name="taskType" value="subtitle" v-model="taskType" />
+                <span class="radio-label">{{ $t('transcription.subtitle') }}</span>
+              </label>
+            </div>
+
+            <div class="task-type-hint">
+              <span v-if="taskType === 'paragraph'" class="hint">{{ $t('transcription.paragraphHint') }}</span>
+              <span v-else class="hint">{{ $t('transcription.subtitleHint') }}</span>
             </div>
           </div>
 
@@ -206,6 +214,8 @@
               </div>
             </div>
           </div>
+
+          </div><!-- end right col -->
         </div>
 
         <!-- 動作按鈕 -->
@@ -626,16 +636,22 @@ onUnmounted(() => {
 
 /* 確認區響應式排版 */
 .confirm-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
   gap: 20px;
   margin-bottom: 20px;
+  align-items: flex-start;
+}
+
+.confirm-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
 /* 移動版：垂直排列 */
 @media (max-width: 768px) {
   .confirm-row {
-    grid-template-columns: 1fr;
+    flex-direction: column;
     gap: 0;
   }
 
