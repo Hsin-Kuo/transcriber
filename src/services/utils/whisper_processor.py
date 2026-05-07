@@ -151,6 +151,7 @@ class WhisperProcessor:
         Returns:
             (完整文字, segments 列表, 偵測到的語言)
         """
+        audio_path = self._ensure_valid_audio(audio_path)
         segments_list, detected_language = self._transcribe_with_timestamps(
             audio_path, language
         )
@@ -178,15 +179,18 @@ class WhisperProcessor:
         Returns:
             (完整文字, segments 列表, 偵測到的語言)
         """
+        audio_path = self._ensure_valid_audio(audio_path)
         # 獲取音檔總長度
         total_duration_ms = self._get_audio_duration(audio_path)
         total_minutes = total_duration_ms / 1000 / 60
         print(f"📊 音檔總長度：{total_minutes:.1f} 分鐘")
 
-        # 如果音檔不長，直接轉錄
+        # 如果音檔不長，直接轉錄（audio_path 已 normalize，跳過重複 probe）
         if total_duration_ms <= chunk_duration_ms:
             print(f"📝 音檔長度在 {chunk_duration_ms/1000/60:.0f} 分鐘內，直接轉錄...")
-            return self.transcribe(audio_path, language)
+            segments_list, detected_language = self._transcribe_with_timestamps(audio_path, language)
+            full_text = " ".join(seg["text"] for seg in segments_list)
+            return full_text, segments_list, detected_language
 
         # 長音檔：智慧分段處理
         # 切分音檔（回傳 [(chunk_path, start_seconds), ...]）
@@ -263,6 +267,8 @@ class WhisperProcessor:
         """
         print(f"🚀 [並行轉錄] 開始並行轉錄流程（ProcessPoolExecutor）", flush=True)
 
+        audio_path = self._ensure_valid_audio(audio_path)
+
         # 1. 獲取音檔長度並分割
         total_duration_ms = self._get_audio_duration(audio_path)
         total_minutes = total_duration_ms / 1000 / 60
@@ -270,7 +276,10 @@ class WhisperProcessor:
 
         if total_duration_ms <= chunk_duration_ms:
             print(f"📝 音檔長度在 {chunk_duration_ms/1000/60:.0f} 分鐘內，直接轉錄...", flush=True)
-            return self.transcribe(audio_path, language)
+            # audio_path 已 normalize，跳過重複 probe
+            segments_list, detected_language = self._transcribe_with_timestamps(audio_path, language)
+            full_text = " ".join(seg["text"] for seg in segments_list)
+            return full_text, segments_list, detected_language
 
         # 智慧分段（回傳 [(chunk_path, start_seconds), ...]）
         chunk_entries = self._split_audio_into_chunks(audio_path, total_duration_ms, chunk_duration_ms)
@@ -435,6 +444,57 @@ class WhisperProcessor:
         return merged_text, segments_list, detected_language
 
     # ========== 私有輔助方法 ==========
+
+    def _ensure_valid_audio(self, audio_path: Path) -> Path:
+        """偵測真實音訊格式，若副檔名與實際格式不符則轉碼後回傳新路徑。
+
+        某些使用者把 M4A/AAC/MP4 改名為 .mp3 上傳，直接餵給 ffmpeg 會報
+        "Failed to find two consecutive MPEG audio frames"。
+        此函數用 ffprobe 偵測真實 codec，若與副檔名不符就轉成
+        副檔名對應的格式（例如 .mp3 → re-encode 成真正的 MP3）。
+        """
+        try:
+            result = subprocess.run(
+                ['ffprobe', '-v', 'quiet', '-print_format', 'json',
+                 '-show_streams', str(audio_path)],
+                capture_output=True, text=True, timeout=15
+            )
+            if result.returncode != 0:
+                return audio_path
+
+            probe = json.loads(result.stdout)
+            streams = probe.get('streams', [])
+            audio_streams = [s for s in streams if s.get('codec_type') == 'audio']
+            if not audio_streams:
+                return audio_path
+
+            actual_codec = audio_streams[0].get('codec_name', '').lower()
+            suffix = audio_path.suffix.lower()
+
+            # 副檔名 → 期望的 codec
+            expected = {'.mp3': 'mp3', '.m4a': 'aac', '.aac': 'aac',
+                        '.wav': 'pcm', '.flac': 'flac', '.ogg': 'vorbis',
+                        '.opus': 'opus'}
+            expected_codec = expected.get(suffix)
+            if expected_codec and actual_codec.startswith(expected_codec):
+                return audio_path  # 格式正確，不需轉換
+
+            print(f"⚠️  格式不符：副檔名={suffix}, 實際 codec={actual_codec}，重新轉碼…")
+            converted_path = audio_path.with_name(audio_path.stem + '_fixed' + suffix)
+            convert_result = subprocess.run(
+                ['ffmpeg', '-y', '-i', str(audio_path), str(converted_path)],
+                capture_output=True, timeout=120
+            )
+            if convert_result.returncode == 0:
+                print(f"✅  轉碼完成：{converted_path.name}")
+                return converted_path
+            else:
+                print(f"⚠️  轉碼失敗，使用原始檔案：{convert_result.stderr.decode()[-200:]}")
+                return audio_path
+
+        except Exception as e:
+            print(f"⚠️  _ensure_valid_audio 失敗，使用原始檔案：{e}")
+            return audio_path
 
     def _transcribe_with_timestamps(
         self,

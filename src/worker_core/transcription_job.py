@@ -38,10 +38,17 @@ def _resolve_punct_language(
 
 def _run_transcription(whisper_processor, audio_path: str, language: str, use_chunking: bool):
     print("🎤 [平行] 開始轉錄...")
-    if use_chunking:
-        result = whisper_processor.transcribe_in_chunks(audio_path, language=language)
-    else:
-        result = whisper_processor.transcribe(audio_path, language=language)
+    try:
+        if use_chunking:
+            result = whisper_processor.transcribe_in_chunks(audio_path, language=language)
+        else:
+            result = whisper_processor.transcribe(audio_path, language=language)
+    except Exception as e:
+        if not getattr(e, "error_code", None):
+            err = RuntimeError(f"Whisper 轉錄失敗: {e}")
+            err.error_code = "TRANSCRIPTION_FAILED"
+            raise err from e
+        raise
     full_text, segments, detected_language = result
     print(f"✅ [平行] 轉錄完成: {len(full_text) if full_text else 0} 字元")
     return full_text, segments, detected_language
@@ -161,14 +168,21 @@ def process_task(message_body: dict) -> None:
                 })
         else:
             update_progress(db, task_id, "正在轉錄音檔...", {"progress_percentage": 30})
-            if use_chunking:
-                full_text, segments, detected_language = whisper_processor.transcribe_in_chunks(
-                    str(audio_path), language=language
-                )
-            else:
-                full_text, segments, detected_language = whisper_processor.transcribe(
-                    str(audio_path), language=language
-                )
+            try:
+                if use_chunking:
+                    full_text, segments, detected_language = whisper_processor.transcribe_in_chunks(
+                        str(audio_path), language=language
+                    )
+                else:
+                    full_text, segments, detected_language = whisper_processor.transcribe(
+                        str(audio_path), language=language
+                    )
+            except Exception as e:
+                if not getattr(e, "error_code", None):
+                    err = RuntimeError(f"Whisper 轉錄失敗: {e}")
+                    err.error_code = "TRANSCRIPTION_FAILED"
+                    raise err from e
+                raise
             print(f"✅ 轉錄完成: {len(full_text) if full_text else 0} 字元, 語言: {detected_language}")
 
         if full_text is None:
@@ -250,9 +264,10 @@ def process_task(message_body: dict) -> None:
         print(f"❌ [Worker] 任務 {task_id} 失敗: {e}")
         import traceback
         traceback.print_exc()
+        error_code = getattr(e, "error_code", None) or "SYSTEM_ERROR"
         update_task(db, task_id, {
             "status": "failed",
-            "error": {"message": str(e)},
+            "error": {"code": error_code, "message": str(e)},
             "progress": f"處理失敗: {str(e)[:200]}",
         })
     finally:

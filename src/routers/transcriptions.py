@@ -712,7 +712,7 @@ async def create_transcription(
                         client, sync_db = _get_sync_db()
                         sync_db.tasks.update_one(
                             {"_id": _bg_task_id},
-                            {"$set": {"status": "failed", "error": {"message": f"音檔上傳失敗: {str(e)}"}}}
+                            {"$set": {"status": "failed", "error": {"code": "UPLOAD_FAILED", "message": f"音檔上傳失敗: {str(e)}"}}}
                         )
                         client.close()
                     except Exception as db_err:
@@ -1824,7 +1824,7 @@ async def create_batch_transcriptions(
                             client, sync_db = _get_sync_db()
                             sync_db.tasks.update_one(
                                 {"_id": bg_task_id},
-                                {"$set": {"status": "failed", "error": {"message": f"音檔上傳失敗: {str(e)}"}}}
+                                {"$set": {"status": "failed", "error": {"code": "UPLOAD_FAILED", "message": f"音檔上傳失敗: {str(e)}"}}}
                             )
                             client.close()
                         except Exception as db_err:

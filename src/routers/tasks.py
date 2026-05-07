@@ -463,9 +463,10 @@ def filter_task_for_list(task: Dict[str, Any], retention_days: int = 7) -> Dict[
             "audio_filename": audio_filename
         }
 
-    # error 信息（失敗時需要）
+    # error 信息（失敗時需要，只回傳 code 讓前端 i18n 翻譯）
     if task.get("error"):
-        filtered["error"] = task.get("error")
+        err = task["error"]
+        filtered["error"] = err.get("code", "SYSTEM_ERROR") if isinstance(err, dict) else "SYSTEM_ERROR"
 
     # cancelling 狀態（取消中時需要）
     if task.get("cancelling"):
@@ -792,7 +793,7 @@ async def cancel_task(
     # 5. 更新資料庫中的任務狀態為「已取消」
     await task_service.update_task_status(task_id, {
         "status": "cancelled",
-        "error": "用戶取消"
+        "error": {"code": "USER_CANCELLED", "message": "用戶取消"}
     })
 
     print(f"🛑 任務 {task_id} 已被標記為取消")

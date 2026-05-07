@@ -660,7 +660,7 @@ class TaskService:
                 update_data = {
                     "status": "failed",
                     "progress": "伺服器重啟，任務已中斷",
-                    "error": "任務執行期間伺服器重啟，任務已被標記為失敗",
+                    "error": {"code": "SERVER_RESTART", "message": "任務執行期間伺服器重啟，任務已被標記為失敗"},
                     "updated_at": current_time,
                     "completed_at": current_time,
                     "timestamps.updated_at": current_time,
@@ -862,7 +862,7 @@ class TaskService:
                             print(f"⚠️  任務 {task_id} 的臨時文件不存在，標記為失敗")
                             await self.task_repo.update(task_id, {
                                 "status": "failed",
-                                "error": "音檔文件已遺失",
+                                "error": {"code": "AUDIO_MISSING", "message": "音檔文件已遺失"},
                                 "updated_at": get_current_time()
                             })
                             continue
@@ -873,7 +873,7 @@ class TaskService:
                             print(f"⚠️  任務 {task_id} 找不到音檔文件")
                             await self.task_repo.update(task_id, {
                                 "status": "failed",
-                                "error": "音檔文件已遺失",
+                                "error": {"code": "AUDIO_MISSING", "message": "音檔文件已遺失"},
                                 "updated_at": get_current_time()
                             })
                             continue
@@ -903,7 +903,7 @@ class TaskService:
                             print(f"❌ 啟動任務 {task_id} 失敗: {e}")
                             await self.task_repo.update(task_id, {
                                 "status": "failed",
-                                "error": f"啟動失敗: {str(e)}",
+                                "error": {"code": "SYSTEM_ERROR", "message": f"啟動失敗: {str(e)}"},
                                 "updated_at": get_current_time()
                             })
 

@@ -21,15 +21,17 @@ def convert_to_mp3(audio_path: Path) -> tuple[Path, bool]:
     """
     mp3_path = audio_path.with_suffix(".mp3")
 
+    codec = ""
     try:
         result = subprocess.run(
             ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", str(audio_path)],
             capture_output=True, text=True, timeout=30,
         )
-        probe = json.loads(result.stdout)
-        codec = probe.get("streams", [{}])[0].get("codec_name", "")
+        if result.stdout:
+            probe = json.loads(result.stdout)
+            codec = probe.get("streams", [{}])[0].get("codec_name", "")
     except Exception:
-        codec = ""
+        pass  # codec 保持 ""，繼續嘗試 ffmpeg 轉碼
 
     # 已是 MP3 codec，只需重新命名（若副檔名不同）
     if codec == "mp3":
@@ -55,13 +57,12 @@ def convert_to_mp3(audio_path: Path) -> tuple[Path, bool]:
         print(f"✅ MP3 轉碼完成: {original_size:.1f} MB → {new_size:.1f} MB")
         return mp3_path, True
     except Exception as e:
-        print(f"⚠️ MP3 轉碼失敗: {e}，以原始格式繼續")
         if tmp_path.exists():
             tmp_path.unlink()
-        # 重新命名讓後續流程統一拿到 .mp3 路徑
-        if audio_path != mp3_path:
-            audio_path.rename(mp3_path)
-        return mp3_path, False
+        stderr = e.stderr.decode(errors="replace")[-300:] if hasattr(e, "stderr") and e.stderr else ""
+        err = RuntimeError(f"音檔格式轉換失敗，檔案可能損壞或受 DRM 保護。ffmpeg: {stderr}")
+        err.error_code = "INVALID_AUDIO"
+        raise err from e
 
 
 def convert_to_wav(audio_path: Path, wav_path: Path) -> Path:

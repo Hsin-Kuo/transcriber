@@ -70,8 +70,8 @@
           </div>
 
           <!-- 錯誤訊息 -->
-          <div v-if="task.status === 'failed' && task.error" class="task-error">
-            {{ task.error }}
+          <div v-if="task.status === 'failed'" class="task-error">
+            {{ $t(`taskErrors.${typeof task.error === 'object' ? task.error?.code : task.error}`, $t('taskErrors.SYSTEM_ERROR')) }}
           </div>
         </div>
 
