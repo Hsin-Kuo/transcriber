@@ -643,5 +643,13 @@
     "keyPoints": "Key Points",
     "contentSegments": "Content Segments",
     "actionItems": "Action Items"
+  },
+  "taskErrors": {
+    "INVALID_AUDIO": "Unable to process audio file. The file may be corrupted or DRM-protected.",
+    "TRANSCRIPTION_FAILED": "An error occurred during transcription. Please try again.",
+    "UPLOAD_FAILED": "Failed to save audio file. Please try again.",
+    "AUDIO_MISSING": "Audio file no longer exists. It may have expired and been removed.",
+    "SERVER_RESTART": "Task was interrupted by a server restart. Please re-upload your file.",
+    "SYSTEM_ERROR": "An unexpected error occurred. Please try again later or contact support."
   }
 }

@@ -643,5 +643,13 @@
     "keyPoints": "重點",
     "contentSegments": "內容段落",
     "actionItems": "待辦事項"
+  },
+  "taskErrors": {
+    "INVALID_AUDIO": "音檔無法辨識，請確認檔案是否損壞或受版權保護。",
+    "TRANSCRIPTION_FAILED": "轉錄過程發生錯誤，請稍後重試。",
+    "UPLOAD_FAILED": "音檔儲存失敗，請稍後重試。",
+    "AUDIO_MISSING": "音檔已不存在，可能已過期被系統清除。",
+    "SERVER_RESTART": "伺服器重啟導致任務中斷，請重新上傳。",
+    "SYSTEM_ERROR": "系統發生未知錯誤，請稍後重試或聯絡客服。"
   }
 }

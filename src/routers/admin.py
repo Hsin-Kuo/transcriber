@@ -609,7 +609,7 @@ async def get_task_detail(
             "started_at": task.get("timestamps", {}).get("started_at") or task.get("started_at"),
             "completed_at": task.get("timestamps", {}).get("completed_at") or task.get("completed_at")
         },
-        "error_message": task.get("error_message")
+        "error_message": task.get("error_message") or (task["error"].get("message") if isinstance(task.get("error"), dict) else task.get("error"))
     }
 
 
