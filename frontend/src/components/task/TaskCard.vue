@@ -79,7 +79,7 @@
         <div class="task-actions" @click.stop>
           <!-- 已完成任務的按鈕行 -->
           <div v-if="task.status === 'completed'" class="completed-actions-row">
-            <!-- Keep Audio 切換開關 -->
+            <!-- Keep Audio 切換開關（桌機 + 手機皆顯示） -->
             <div
               v-if="task.result?.audio_file || task.audio_file"
               class="keep-audio-toggle"
@@ -108,8 +108,8 @@
               </label>
             </div>
 
-            <!-- 雙聯按鈕組 -->
-            <div class="btn-group">
+            <!-- 桌機：雙聯按鈕組 -->
+            <div class="btn-group desktop-action">
               <button
                 class="btn btn-download btn-group-left btn-icon"
                 @click.stop="emit('download', task)"
@@ -134,6 +134,11 @@
                 </svg>
               </button>
             </div>
+
+            <!-- 手機：kebab 按鈕（dropdown 渲染於 .task-wrapper 層，避免 clip-path 裁切） -->
+            <div class="mobile-kebab-wrapper mobile-action">
+              <button class="btn-kebab" @click.stop="toggleMobileMenu($event)" :title="$t('taskList.moreActions')">⋮</button>
+            </div>
           </div>
 
           <!-- 進行中任務的取消按鈕 -->
@@ -148,26 +153,78 @@
             {{ task.cancelling ? $t('taskList.cancelling') : $t('taskList.cancel') }}
           </button>
 
-          <!-- 失敗或取消任務的刪除按鈕 -->
+          <!-- 桌機：失敗或取消任務的刪除按鈕 -->
           <button
             v-if="['failed', 'cancelled'].includes(task.status)"
-            class="btn btn-danger"
+            class="btn btn-danger desktop-action"
             @click="emit('delete', task.task_id)"
             :title="$t('taskList.deleteTask')"
           >
             {{ $t('taskList.deleteButtonText') }}
           </button>
+
+          <!-- 手機：失敗或取消任務的 kebab 按鈕 -->
+          <div v-if="['failed', 'cancelled'].includes(task.status)" class="mobile-kebab-wrapper mobile-action">
+            <button class="btn-kebab" @click.stop="toggleMobileMenu($event)" :title="$t('taskList.moreActions')">⋮</button>
+          </div>
         </div>
+
       </div>
     </div>
+
+    <!-- 手機：kebab dropdown（Teleport 到 body，backdrop 攔截所有外部點擊） -->
+    <Teleport to="body">
+      <template v-if="showMobileMenu">
+        <div class="mobile-menu-backdrop" @click="closeMobileMenu" />
+        <div class="mobile-dropdown" :style="menuStyle" @click.stop>
+          <button v-if="task.status === 'completed'" @click.stop="handleMobileDownload">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            {{ $t('taskList.downloadTranscript') }}
+          </button>
+          <button v-if="task.status === 'completed'" @click.stop="openTagSheet">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+              <line x1="7" y1="7" x2="7.01" y2="7"></line>
+            </svg>
+            {{ $t('taskList.editTags') }}
+          </button>
+          <button class="danger" @click.stop="handleMobileDelete">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+            {{ $t('taskList.deleteTask') }}
+          </button>
+        </div>
+      </template>
+    </Teleport>
+
+    <!-- 手機：標籤編輯 Bottom Sheet（Teleport 到 body，位置無關） -->
+    <BottomSheet v-model="showTagSheet" :title="$t('taskList.editTags')">
+      <div class="tag-sheet-body">
+        <TaskTagsSection
+          ref="tagSheetRef"
+          :task-id="task.task_id"
+          :tags="task.tags"
+          :all-tags="allTags"
+          :no-click-outside="true"
+          @tags-updated="handleTagsUpdated"
+        />
+      </div>
+    </BottomSheet>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTaskHelpers } from '../../composables/task/useTaskHelpers'
 import TaskTagsSection from './TaskTagsSection.vue'
+import BottomSheet from '../common/BottomSheet.vue'
 
 const { t: $t, locale } = useI18n()
 
@@ -196,7 +253,6 @@ function formatTimestamp(value) {
 }
 const {
   getStatusText,
-  getAudioDuration,
   getProgressWidth,
   isTaskExpanded
 } = useTaskHelpers($t)
@@ -239,6 +295,56 @@ const emit = defineEmits([
   'toggle-keep-audio',
   'tags-updated'
 ])
+
+// 手機 kebab 選單狀態
+const showMobileMenu = ref(false)
+const showTagSheet = ref(false)
+const tagSheetRef = ref(null)
+const menuStyle = ref({})
+
+// BottomSheet 開啟時自動進入編輯模式
+watch(showTagSheet, (val) => {
+  if (val) {
+    nextTick(() => tagSheetRef.value?.startEditing())
+  }
+})
+
+function toggleMobileMenu(event) {
+  if (showMobileMenu.value) {
+    showMobileMenu.value = false
+    return
+  }
+  const rect = event.currentTarget.getBoundingClientRect()
+  const spaceBelow = window.innerHeight - rect.bottom
+  // completed: 3 buttons ~130px, failed/cancelled: 1 button ~55px
+  const approxHeight = props.task.status === 'completed' ? 130 : 55
+  menuStyle.value = {
+    right: (window.innerWidth - rect.right) + 'px',
+    ...(spaceBelow >= approxHeight
+      ? { top: (rect.bottom + 4) + 'px' }
+      : { top: (rect.top - approxHeight - 4) + 'px' })
+  }
+  showMobileMenu.value = true
+}
+
+function closeMobileMenu() {
+  showMobileMenu.value = false
+}
+
+function openTagSheet() {
+  closeMobileMenu()
+  showTagSheet.value = true
+}
+
+function handleMobileDownload() {
+  closeMobileMenu()
+  emit('download', props.task)
+}
+
+function handleMobileDelete() {
+  closeMobileMenu()
+  emit('delete', props.task.task_id)
+}
 
 // Methods
 function handleCardClick() {
@@ -724,6 +830,74 @@ function getKeepAudioTooltip() {
   box-shadow: none !important;
 }
 
+/* 桌機/手機顯示切換 */
+.desktop-action { display: flex; }
+.mobile-action  { display: none; }
+
+.btn-kebab {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--nav-text);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.btn-kebab:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+/* 遮罩：攔截所有 dropdown 外的點擊 */
+.mobile-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 199;
+}
+
+.mobile-dropdown {
+  position: fixed;
+  z-index: 200;
+  min-width: 168px;
+  background: var(--upload-bg);
+  border: 1px solid rgba(var(--color-divider-rgb), 0.3);
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+}
+
+.mobile-dropdown button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 13px 16px;
+  background: transparent;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  color: var(--main-text);
+  text-align: left;
+}
+
+.mobile-dropdown button:not(:last-child) {
+  border-bottom: 1px solid rgba(var(--color-divider-rgb), 0.2);
+}
+
+.mobile-dropdown button:hover {
+  background: rgba(var(--color-divider-rgb), 0.08);
+}
+
+.mobile-dropdown button.danger {
+  color: var(--color-danger);
+}
+
 /* === 響應式設計 === */
 
 /* 平板以下 */
@@ -765,11 +939,10 @@ function getKeepAudioTooltip() {
     flex-shrink: 0;
   }
 
-  /* 隱藏音檔、下載、刪除按鈕 */
-  .keep-audio-toggle,
-  .btn-group {
-    display: none;
-  }
+  /* 手機：隱藏桌機按鈕，顯示 kebab */
+  .desktop-action { display: none; }
+  .mobile-action  { display: flex; }
+
 
   .btn {
     padding: 8px 12px;
@@ -893,5 +1066,20 @@ function getKeepAudioTooltip() {
     font-size: 11px;
     padding: 5px 8px;
   }
+}
+
+/* Bottom Sheet 標籤編輯區：撐滿全寬 */
+.tag-sheet-body {
+  width: 100%;
+}
+
+.tag-sheet-body :deep(.task-tags-section) {
+  display: flex;
+  width: 100%;
+}
+
+.tag-sheet-body :deep(.tag-edit-mode) {
+  width: 100%;
+  box-sizing: border-box;
 }
 </style>

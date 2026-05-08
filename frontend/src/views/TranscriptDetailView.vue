@@ -34,6 +34,7 @@
       @download="downloadTranscript"
       @delete-task="deleteTask"
       @share="handleShare"
+      @edit-tags="showTagSheet = true"
       @update:show-timecode-markers="showTimecodeMarkers = $event"
       @update:time-format="timeFormat = $event"
       @update:density-threshold="densityThreshold = $event"
@@ -533,6 +534,20 @@
         </div>
       </div>
     </Teleport>
+
+    <!-- 標籤編輯 BottomSheet -->
+    <BottomSheet v-model="showTagSheet" :title="$t('taskList.editTags')">
+      <div class="tag-sheet-body">
+        <TaskTagsSection
+          ref="tagSheetRef"
+          :task-id="currentTranscript.task_id"
+          :tags="currentTranscript.tags"
+          :all-tags="allTags"
+          :no-click-outside="true"
+          @tags-updated="handleTagsUpdated"
+        />
+      </div>
+    </BottomSheet>
   </div>
 </template>
 
@@ -549,6 +564,8 @@ import AudioPlayer from '../components/transcript/AudioPlayer.vue'
 import SubtitleTable from '../components/transcript/SubtitleTable.vue'
 import DownloadDialog from '../components/transcript/DownloadDialog.vue'
 import TaskInfoCard from '../components/transcript/TaskInfoCard.vue'
+import BottomSheet from '../components/common/BottomSheet.vue'
+import TaskTagsSection from '../components/task/TaskTagsSection.vue'
 import DisplaySettingsCard from '../components/transcript/DisplaySettingsCard.vue'
 import AISummary from '../components/transcript/AISummary.vue'
 import KeyboardShortcutsInfo from '../components/transcript/KeyboardShortcutsInfo.vue'
@@ -2587,6 +2604,16 @@ async function loadAllTags() {
   await fetchTagColors()
 }
 
+// 標籤編輯 BottomSheet
+const showTagSheet = ref(false)
+const tagSheetRef = ref(null)
+
+watch(showTagSheet, (val) => {
+  if (val) {
+    nextTick(() => tagSheetRef.value?.startEditing())
+  }
+})
+
 // 處理標籤更新
 async function handleTagsUpdated({ taskId, tags }) {
   const success = await updateTags(tags)
@@ -2714,6 +2741,19 @@ watch(displayMode, () => {
 </script>
 
 <style scoped>
+/* 標籤編輯 BottomSheet */
+.tag-sheet-body {
+  width: 100%;
+}
+.tag-sheet-body :deep(.task-tags-section) {
+  display: flex;
+  width: 100%;
+}
+.tag-sheet-body :deep(.tag-edit-mode) {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 /* Header 高度變數 */
 .transcript-detail-container {
   --header-height: 70px;

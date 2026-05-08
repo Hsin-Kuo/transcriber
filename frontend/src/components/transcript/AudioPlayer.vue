@@ -823,12 +823,6 @@ defineExpose({
     font-size: 0.75rem;
   }
 
-  .speed-btn-wrapper :deep(.speed-dropdown) {
-    bottom: auto;
-    top: auto;
-    right: 0;
-    margin-bottom: 0;
-  }
 }
 
 /* 小手機進一步調整 */

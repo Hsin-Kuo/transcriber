@@ -1,15 +1,19 @@
 <template>
-  <div class="speed-control" :class="popDirection">
-    <button class="speed-trigger-btn" :title="$t('audioPlayer.playbackSpeed', { rate: playbackRate })">
+  <div class="speed-control" :class="[popDirection, { 'is-open': showDropdown }]" @click.stop>
+    <button
+      class="speed-trigger-btn"
+      :title="$t('audioPlayer.playbackSpeed', { rate: playbackRate })"
+      @click.stop="toggleDropdown"
+    >
       <span class="speed-label">{{ playbackRate }}x</span>
     </button>
-    <div class="speed-dropdown">
+    <div class="speed-dropdown" @click.stop>
       <button
         v-for="rate in rates"
         :key="rate"
         class="speed-option"
         :class="{ active: playbackRate === rate }"
-        @click="$emit('set-playback-rate', rate)"
+        @click.stop="selectRate(rate)"
       >
         {{ rate }}x
       </button>
@@ -18,6 +22,7 @@
 </template>
 
 <script setup>
+import { ref, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const { t: $t } = useI18n()
@@ -34,9 +39,33 @@ defineProps({
   }
 })
 
-defineEmits(['set-playback-rate'])
+const emit = defineEmits(['set-playback-rate'])
 
 const rates = [0.5, 0.75, 1, 1.25, 1.5, 2]
+const showDropdown = ref(false)
+
+function toggleDropdown() {
+  showDropdown.value = !showDropdown.value
+  if (showDropdown.value) {
+    document.addEventListener('click', closeDropdown)
+  } else {
+    document.removeEventListener('click', closeDropdown)
+  }
+}
+
+function closeDropdown() {
+  showDropdown.value = false
+  document.removeEventListener('click', closeDropdown)
+}
+
+function selectRate(rate) {
+  emit('set-playback-rate', rate)
+  closeDropdown()
+}
+
+onUnmounted(() => {
+  document.removeEventListener('click', closeDropdown)
+})
 </script>
 
 <style scoped>
@@ -114,8 +143,7 @@ const rates = [0.5, 0.75, 1, 1.25, 1.5, 2]
   border-right-color: var(--main-bg);
 }
 
-.speed-control:hover .speed-dropdown,
-.speed-dropdown:hover {
+.speed-control.is-open .speed-dropdown {
   display: flex;
 }
 

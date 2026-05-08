@@ -305,6 +305,7 @@
     "tagsStats": "已加入 {common} • 可用 {candidate}",
     "expand": "展開",
     "collapse": "收合",
+    "moreActions": "更多操作",
     "editTags": "編輯標籤",
     "addTag": "新增標籤",
     "addTagButton": "+ 新增標籤",

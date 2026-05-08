@@ -178,6 +178,15 @@
             <span>{{ $t('shared.shareButton') }}</span>
           </button>
 
+          <!-- 編輯標籤 -->
+          <button class="action-btn" @click="handleEditTags">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+              <line x1="7" y1="7" x2="7.01" y2="7"></line>
+            </svg>
+            <span>{{ $t('taskList.editTags') }}</span>
+          </button>
+
           <!-- 刪除按鈕 -->
           <button class="action-btn" @click="handleDeleteTask">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -285,6 +294,7 @@ const emit = defineEmits([
   'download',
   'delete-task',
   'share',
+  'edit-tags',
   'update:showTimecodeMarkers',
   'update:timeFormat',
   'update:densityThreshold',
@@ -459,6 +469,12 @@ function handleDownload() {
 function handleShare() {
   showMoreOptions.value = false
   emit('share')
+}
+
+// 編輯標籤
+function handleEditTags() {
+  showMoreOptions.value = false
+  emit('edit-tags')
 }
 
 // 刪除任務

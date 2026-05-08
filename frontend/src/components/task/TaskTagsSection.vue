@@ -158,6 +158,10 @@ const props = defineProps({
   allTags: {
     type: Array,
     default: () => []
+  },
+  noClickOutside: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -202,7 +206,9 @@ function startEditing() {
   editingTags.value = props.tags ? [...props.tags] : []
   editingTagInput.value = ''
   nextTick(() => {
-    document.addEventListener('click', handleClickOutside, true)
+    if (!props.noClickOutside) {
+      document.addEventListener('click', handleClickOutside, true)
+    }
   })
 }
 
@@ -274,6 +280,8 @@ function cancelTagText() {
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside, true)
 })
+
+defineExpose({ startEditing })
 </script>
 
 <style scoped>
