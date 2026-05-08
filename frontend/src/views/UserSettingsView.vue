@@ -133,7 +133,7 @@
       <!-- 帳戶安全 -->
       <div class="card security-card" :class="{ expanded: securityExpanded }" @click="!securityExpanded && (securityExpanded = true)">
         <h2 class="card-toggle" @click.stop="securityExpanded = !securityExpanded">
-          <span class="card-title-left"><svg class="card-icon" :class="{ active: securityExpanded }" width="33" height="27" viewBox="0 0 28 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 10l16-8 10 8v12a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2z"></path></svg>{{ $t('userSettings.security') }}</span>
+          <span class="card-title-left"><span class="icon-slot"><svg class="card-icon" :class="{ active: securityExpanded }" width="33" height="27" viewBox="0 0 28 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 10l16-8 10 8v12a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2z"></path></svg></span>{{ $t('userSettings.security') }}</span>
           <svg class="toggle-arrow" :class="{ expanded: securityExpanded }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 9 12 15 18 9"></polyline>
           </svg>
@@ -218,7 +218,7 @@
       <!-- 介面設定 -->
       <div class="card interface-card" :class="{ expanded: preferencesExpanded }" @click="!preferencesExpanded && (preferencesExpanded = true)">
         <h2 class="card-toggle" @click.stop="preferencesExpanded = !preferencesExpanded">
-          <span class="card-title-left"><svg class="card-icon" :class="{ active: preferencesExpanded }" width="50" height="27" viewBox="0 0 28 24" preserveAspectRatio="none" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 10l16-8 10 8v12a2 2 0 0 1-2 2H11v-10H5v10H3a2 2 0 0 1-2-2z"></path></svg><svg class="card-icon-person" width="7" height="14" viewBox="0 0 10 20" fill="var(--main-text)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L.8 20H3l1.5-4h1l.8 4h1.8l-.1-5.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z"/></svg>{{ $t('userSettings.interface') }}</span>
+          <span class="card-title-left"><span class="icon-slot"><svg class="card-icon" :class="{ active: preferencesExpanded }" width="50" height="27" viewBox="0 0 28 24" preserveAspectRatio="none" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 10l16-8 10 8v12a2 2 0 0 1-2 2H11v-10H5v10H3a2 2 0 0 1-2-2z"></path></svg><svg class="card-icon-person" width="7" height="14" viewBox="0 0 10 20" fill="var(--main-text)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L.8 20H3l1.5-4h1l.8 4h1.8l-.1-5.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z"/></svg></span>{{ $t('userSettings.interface') }}</span>
           <svg class="toggle-arrow" :class="{ expanded: preferencesExpanded }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 9 12 15 18 9"></polyline>
           </svg>
@@ -340,7 +340,7 @@
       <!-- Support -->
       <div class="card support-card" :class="{ expanded: supportExpanded }" @click="!supportExpanded && (supportExpanded = true)">
         <h2 class="card-toggle" @click.stop="supportExpanded = !supportExpanded">
-          <span class="card-title-left"><svg class="card-icon" :class="{ active: supportExpanded }" width="22" height="27" viewBox="0 0 20 26" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l17 5v18H2a1 1 0 0 1-1-1z"/></svg><svg class="card-icon-person" width="7" height="12" viewBox="0 0 10 20" fill="var(--main-primary)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L2.2 20H4l.5-4h1l.3 2H7.8l-.2-3.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z"/></svg><svg class="card-icon-person card-icon-person-second" width="7" height="14" viewBox="0 0 10 20" fill="var(--main-primary)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L.8 20H3l1.5-4h1l.8 4h1.8l-.1-5.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z"/><path d="M2.4 7.5L-3 10v1.5L2.4 9z"/></svg>{{ $t('userSettings.support') }}</span>
+          <span class="card-title-left"><span class="icon-slot"><svg class="card-icon" :class="{ active: supportExpanded }" width="22" height="27" viewBox="0 0 20 26" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l17 5v18H2a1 1 0 0 1-1-1z"/></svg><svg class="card-icon-person" width="7" height="12" viewBox="0 0 10 20" fill="var(--main-primary)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L2.2 20H4l.5-4h1l.3 2H7.8l-.2-3.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z"/></svg><svg class="card-icon-person card-icon-person-second" width="7" height="14" viewBox="0 0 10 20" fill="var(--main-primary)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L.8 20H3l1.5-4h1l.8 4h1.8l-.1-5.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z"/><path d="M2.4 7.5L-3 10v1.5L2.4 9z"/></svg></span>{{ $t('userSettings.support') }}</span>
           <svg class="toggle-arrow" :class="{ expanded: supportExpanded }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 9 12 15 18 9"></polyline>
           </svg>
@@ -365,7 +365,7 @@
       <!-- Documents -->
       <div class="card documents-card" :class="{ expanded: documentsExpanded }" @click="!documentsExpanded && (documentsExpanded = true)">
         <h2 class="card-toggle" @click.stop="documentsExpanded = !documentsExpanded">
-          <span class="card-title-left"><svg class="card-icon" :class="{ active: documentsExpanded }" width="50" height="27" viewBox="0 0 28 24" preserveAspectRatio="none" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8L27 2V22a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2z M3 11h5v19H3z M20 8h7v10h-7z" fill-rule="evenodd"></path></svg>{{ $t('userSettings.documents') }}</span>
+          <span class="card-title-left"><span class="icon-slot"><svg class="card-icon" :class="{ active: documentsExpanded }" width="50" height="27" viewBox="0 0 28 24" preserveAspectRatio="none" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8L27 2V22a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2z M3 11h5v19H3z M20 8h7v10h-7z" fill-rule="evenodd"></path></svg></span>{{ $t('userSettings.documents') }}</span>
           <svg class="toggle-arrow" :class="{ expanded: documentsExpanded }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 9 12 15 18 9"></polyline>
           </svg>
@@ -386,7 +386,7 @@
       <!-- Team -->
       <div class="card team-card" :class="{ expanded: teamExpanded }" @click="!teamExpanded && (teamExpanded = true)">
         <h2 class="card-toggle" @click.stop="teamExpanded = !teamExpanded">
-          <span class="card-title-left"><svg class="card-icon-person card-icon-person-left" width="7" height="14" viewBox="0 0 10 20" fill="var(--main-text)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L.8 20H3l1.5-4h1l.8 4h1.8l-.1-5.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z"/></svg><svg class="card-icon-hands" width="6" height="6" viewBox="0 0 10 10" fill="none" stroke="var(--main-text)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 2 5 7 9 2"></polyline></svg><svg class="card-icon-person card-icon-person-left-second" width="7" height="14" viewBox="0 0 10 20" fill="var(--main-text)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L.8 20H3l1.5-4h1l.8 4h1.8l-.1-5.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z"/></svg><svg class="card-icon" :class="{ active: teamExpanded }" width="44" height="33" viewBox="0 0 28 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 3h16l10-1v20H18V12H2v10H1z"></path></svg>{{ $t('userSettings.team') }}</span>
+          <span class="card-title-left"><span class="icon-slot"><svg class="card-icon-person card-icon-person-left" width="7" height="14" viewBox="0 0 10 20" fill="var(--main-text)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L.8 20H3l1.5-4h1l.8 4h1.8l-.1-5.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z"/></svg><svg class="card-icon-hands" width="6" height="6" viewBox="0 0 10 10" fill="none" stroke="var(--main-text)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 2 5 7 9 2"></polyline></svg><svg class="card-icon-person card-icon-person-left-second" width="7" height="14" viewBox="0 0 10 20" fill="var(--main-text)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L.8 20H3l1.5-4h1l.8 4h1.8l-.1-5.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z"/></svg><svg class="card-icon" :class="{ active: teamExpanded }" width="44" height="33" viewBox="0 0 28 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 3h16l10-1v20H18V12H2v10H1z"></path></svg></span>{{ $t('userSettings.team') }}</span>
           <svg class="toggle-arrow" :class="{ expanded: teamExpanded }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 9 12 15 18 9"></polyline>
           </svg>
@@ -1975,8 +1975,18 @@ async function confirmDeleteAccount() {
   gap: 8px;
 }
 
+.icon-slot {
+  display: inline-flex;
+  width: 50px;
+  flex-shrink: 0;
+  gap: 8px;
+  align-items: center;
+  overflow: visible;
+}
+
 .card-icon {
   flex-shrink: 0;
+  width: 50px;
   color: var(--nav-active-bg);
   transition: color 0.3s ease;
 }
@@ -1993,17 +2003,6 @@ async function confirmDeleteAccount() {
   z-index: 1;
 }
 
-.card-icon-person-left {
-  margin-left: 0;
-  margin-right: -6px;
-  margin-top: 16px;
-}
-
-.card-icon-person-left-second {
-  margin-left: -3px;
-  margin-right: -32px;
-  margin-top: 16px;
-}
 
 .card-icon-hands {
   flex-shrink: 0;
@@ -2013,16 +2012,20 @@ async function confirmDeleteAccount() {
 }
 
 .interface-card .card-icon-person {
-
-  margin: 17px 10px -4px -22px;
+  margin: 17px 0 -4px -22px;
 }
 
 .card-icon-person-second {
   margin-left: -10px;
 }
 
+.support-card .card-icon-person:not(.card-icon-person-second) {
+  margin-left: -20px;
+}
+
 .team-card .card-icon {
   margin-top: -4px;
+  margin-left: -27px;
 }
 
 .team-card .card-icon-person-left,
@@ -2030,8 +2033,17 @@ async function confirmDeleteAccount() {
   margin-top: 12px;
 }
 
+.team-card .card-icon-person-left {
+  margin-left: 24px;
+}
+
+.team-card .card-icon-person-left-second {
+  margin-left: -11px;
+}
+
 .team-card .card-icon-hands {
   margin-top: 14px;
+  margin-left: -19px;
 }
 
 .card-subtitle {
@@ -2795,7 +2807,7 @@ async function confirmDeleteAccount() {
 
   /* 卡片內間距調整 */
   .user-info-card,
-  .interface-card {
+  .settings-grid .card {
     padding: 16px;
   }
 
