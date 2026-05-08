@@ -8,7 +8,6 @@ on:
 env:
   EC2_HOST: 3.112.209.96
   EC2_USER: ec2-user
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   deploy:
@@ -16,7 +15,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # ===== Backend 打包 =====
       - name: Package backend
@@ -38,7 +37,7 @@ jobs:
 
       # ===== Frontend 建置 =====
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: 'npm'
