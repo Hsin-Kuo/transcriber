@@ -207,6 +207,7 @@
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import TranscriptMetadata from './TranscriptMetadata.vue'
 import SearchReplacePopup from './SearchReplacePopup.vue'
+import { useClickOutside } from '../../composables/useClickOutside'
 
 const props = defineProps({
   taskDisplayName: {
@@ -320,6 +321,9 @@ const showSearchPopup = ref(false)
 const searchPopupRef = ref(null)
 const showSpeakerSettings = ref(false)
 
+useClickOutside(moreOptionsRef, () => { showMoreOptions.value = false })
+useClickOutside(speakerSettingsRef, () => { showSpeakerSettings.value = false })
+
 // 切換搜尋浮窗
 function toggleSearch() {
   if (showSearchPopup.value) {
@@ -371,16 +375,6 @@ function toggleSpeakerSettings() {
   if (showSpeakerSettings.value) {
     showSearchPopup.value = false
     showMoreOptions.value = false
-  }
-}
-
-// 點擊外部關閉選單（僅關閉更多選項和講者設定，搜尋浮窗需手動關閉）
-function handleClickOutside(event) {
-  if (moreOptionsRef.value && !moreOptionsRef.value.contains(event.target)) {
-    showMoreOptions.value = false
-  }
-  if (speakerSettingsRef.value && !speakerSettingsRef.value.contains(event.target)) {
-    showSpeakerSettings.value = false
   }
 }
 
@@ -494,13 +488,10 @@ defineExpose({
 })
 
 onMounted(() => {
-  document.addEventListener('click', handleClickOutside)
-  // 使用 capture: true 在捕獲階段監聽滾輪事件
   window.addEventListener('wheel', handleWheel, { capture: true, passive: true })
 })
 
 onUnmounted(() => {
-  document.removeEventListener('click', handleClickOutside)
   window.removeEventListener('wheel', handleWheel, { capture: true })
 })
 </script>

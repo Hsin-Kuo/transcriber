@@ -1,5 +1,5 @@
 <template>
-  <div class="speed-control" :class="[popDirection, { 'is-open': showDropdown }]" @click.stop>
+  <div ref="speedControlRef" class="speed-control" :class="[popDirection, { 'is-open': showDropdown }]" @click.stop>
     <button
       class="speed-trigger-btn"
       :title="$t('audioPlayer.playbackSpeed', { rate: playbackRate })"
@@ -22,8 +22,9 @@
 </template>
 
 <script setup>
-import { ref, onUnmounted } from 'vue'
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useClickOutside } from '../../composables/useClickOutside'
 
 const { t: $t } = useI18n()
 
@@ -43,29 +44,22 @@ const emit = defineEmits(['set-playback-rate'])
 
 const rates = [0.5, 0.75, 1, 1.25, 1.5, 2]
 const showDropdown = ref(false)
+const speedControlRef = ref(null)
+
+useClickOutside(speedControlRef, closeDropdown)
 
 function toggleDropdown() {
   showDropdown.value = !showDropdown.value
-  if (showDropdown.value) {
-    document.addEventListener('click', closeDropdown)
-  } else {
-    document.removeEventListener('click', closeDropdown)
-  }
 }
 
 function closeDropdown() {
   showDropdown.value = false
-  document.removeEventListener('click', closeDropdown)
 }
 
 function selectRate(rate) {
   emit('set-playback-rate', rate)
   closeDropdown()
 }
-
-onUnmounted(() => {
-  document.removeEventListener('click', closeDropdown)
-})
 </script>
 
 <style scoped>

@@ -628,9 +628,10 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { useClickOutside } from '../composables/useClickOutside'
 import { useI18n } from 'vue-i18n'
 import api from '../utils/api'
 import { detectTimezone, detectTheme } from '../utils/defaults'
@@ -855,6 +856,10 @@ const languageDropdownStyle = ref({})
 const timezoneDropdownStyle = ref({})
 const summaryDropdownStyle = ref({})
 
+useClickOutside(languageSelectRef, () => { languageDropdownOpen.value = false })
+useClickOutside(timezoneSelectRef, () => { timezoneDropdownOpen.value = false })
+useClickOutside(summarySelectRef, () => { summaryExpandDropdownOpen.value = false })
+
 function computeDropdownStyle(el) {
   const rect = el.getBoundingClientRect()
   return {
@@ -934,15 +939,6 @@ function selectTimezone(code) {
   timezoneDropdownOpen.value = false
 }
 
-// 點擊外部關閉下拉選單
-function handleClickOutside(event) {
-  if (!event.target.closest('.custom-select')) {
-    languageDropdownOpen.value = false
-    timezoneDropdownOpen.value = false
-    summaryExpandDropdownOpen.value = false
-  }
-}
-
 // 當 authStore preferences 更新時，同步本地 ref 和 localStorage
 watch(
   () => authStore.preferences,
@@ -970,8 +966,6 @@ watch(
 )
 
 onMounted(async () => {
-  document.addEventListener('click', handleClickOutside)
-
   // Handle checkout redirect
   const checkout = route.query.checkout
   if (checkout === 'success') {
@@ -1000,9 +994,6 @@ onMounted(async () => {
   }
 })
 
-onUnmounted(() => {
-  document.removeEventListener('click', handleClickOutside)
-})
 
 // 當前方案層級
 const currentTier = computed(() => authStore.quota?.tier || 'free')
