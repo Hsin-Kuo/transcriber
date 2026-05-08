@@ -29,6 +29,9 @@ python-dotenv
 python-jose[cryptography]
 passlib[bcrypt]
 
+# 藍新金流加密
+pycryptodome
+
 # Email 驗證
 email-validator
 
