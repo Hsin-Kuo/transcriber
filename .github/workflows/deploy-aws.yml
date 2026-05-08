@@ -46,7 +46,7 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         env:
-          VITE_API_URL: ""
+          VITE_API_URL: "https://soundlite.app"
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
         run: |
           echo "VITE_API_URL=" > .env.production
