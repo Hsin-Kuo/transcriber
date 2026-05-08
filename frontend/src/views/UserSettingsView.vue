@@ -5,8 +5,15 @@
       <!-- 顯示面板 -->
       <div class="user-display-panel">
         <span class="panel-label">{{ $t('userSettings.account') }}</span>
-        <div class="display-row">
+        <div class="display-row account-row">
           <span class="display-value">{{ authStore.user?.email || '---' }}</span>
+          <button class="logout-icon-btn" @click="handleLogout" :title="$t('navigation.logout')">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+              <polyline points="16 17 21 12 16 7"></polyline>
+              <line x1="21" y1="12" x2="9" y2="12"></line>
+            </svg>
+          </button>
         </div>
         <span class="panel-label">{{ $t('userSettings.language') }}</span>
         <div class="display-row">
@@ -669,6 +676,11 @@ const toastMsg = ref('')
 const toastType = ref('success')
 let toastTimer = null
 
+async function handleLogout() {
+  await authStore.logout()
+  router.push('/login')
+}
+
 function showToast(msg, type = 'success') {
   toastMsg.value = msg
   toastType.value = type
@@ -1321,6 +1333,36 @@ async function confirmDeleteAccount() {
   align-items: center;
   padding: 6px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.account-row {
+  justify-content: space-between;
+}
+
+.logout-icon-btn {
+  display: none;
+  background: transparent;
+  border: 1.5px solid #8b2020;
+  cursor: pointer;
+  color: #8b2020;
+  padding: 4px 6px;
+  border-radius: 8px;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.2s;
+  flex-shrink: 0;
+}
+
+@media (hover: hover) {
+  .logout-icon-btn:hover {
+    opacity: 0.75;
+  }
+}
+
+@media (max-width: 768px) {
+  .logout-icon-btn {
+    display: flex;
+  }
 }
 
 .user-display-panel .display-row:last-child {
