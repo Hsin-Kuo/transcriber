@@ -179,7 +179,7 @@
           </button>
 
           <!-- 編輯標籤 -->
-          <button class="action-btn" @click="handleEditTags">
+          <button class="action-btn mobile-only" @click="handleEditTags">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
               <line x1="7" y1="7" x2="7.01" y2="7"></line>
@@ -885,6 +885,16 @@ onUnmounted(() => {
   border-top: 1px solid rgba(163, 177, 198, 0.2);
   padding-top: 12px;
   margin-top: 4px;
+}
+
+.mobile-only {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .mobile-only {
+    display: flex;
+  }
 }
 
 .action-btn {

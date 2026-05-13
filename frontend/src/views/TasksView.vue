@@ -1,5 +1,20 @@
 <template>
   <div class="tasks-container">
+    <!-- 下拉重新整理指示器 -->
+    <div
+      class="ptr-indicator"
+      :class="{ refreshing: isRefreshing, animating: !isPulling }"
+      :style="{ transform: `translateY(${isRefreshing ? 0 : Math.min(pullDistance, 48) - 48}px)` }"
+    >
+      <svg v-if="!isRefreshing" class="ptr-arrow"
+        :style="{ transform: `rotate(${Math.min(180, (pullDistance / 40) * 180)}deg)` }"
+        viewBox="0 0 24 24" width="20" height="20" fill="none"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/>
+      </svg>
+      <div v-else class="ptr-spinner"></div>
+    </div>
+
     <!-- 任務列表 -->
     <TaskList
       :tasks="tasks"
@@ -36,6 +51,7 @@ import RulerPagination from '../components/common/RulerPagination.vue'
 import DownloadDialog from '../components/transcript/DownloadDialog.vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { usePullToRefresh } from '../composables/usePullToRefresh'
 
 // 新 API 服務層
 import { transcriptionService, taskService } from '../api/services.js'
@@ -88,6 +104,8 @@ const {
 
 // 初始化由 TaskListContainer 的 filter-change 事件觸發
 // 這確保篩選狀態恢復後才請求數據
+
+const { pullDistance, isPulling, isRefreshing } = usePullToRefresh(() => refreshTasks())
 
 // 刷新任務列表
 async function refreshTasks() {
@@ -510,6 +528,46 @@ onBeforeUnmount(() => {
   max-width: 900px;
   margin: 0 auto;
   padding: 0 var(--spacing-md, 16px);
+}
+
+.ptr-indicator {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--main-bg, #fff);
+  z-index: 200;
+  will-change: transform;
+}
+
+.ptr-indicator.animating {
+  transition: transform 0.3s ease;
+}
+
+@media (min-width: 769px) {
+  .ptr-indicator { display: none; }
+}
+
+.ptr-arrow {
+  color: var(--main-text-light);
+  transition: transform 0.2s ease;
+}
+
+.ptr-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--main-text-light);
+  border-top-color: var(--main-primary);
+  border-radius: 50%;
+  animation: ptr-spin 0.7s linear infinite;
+}
+
+@keyframes ptr-spin {
+  to { transform: rotate(360deg); }
 }
 
 .tasks-header {

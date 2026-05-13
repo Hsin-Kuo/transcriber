@@ -79,24 +79,24 @@
         <span class="plan-indicator-title">{{ $t('userSettings.plan') }}</span>
         <div class="plan-indicator">
           <div class="plan-indicator-pointer-track">
-            <svg class="plan-pointer" :class="'point-to-' + previewTier" viewBox="0 0 18 60" xmlns="http://www.w3.org/2000/svg">
+            <svg class="plan-pointer" :class="'point-to-' + currentTier" viewBox="0 0 18 60" xmlns="http://www.w3.org/2000/svg">
               <path d="M9,0 L16,18 Q18,22 18,26 L18,56 Q18,60 14,60 L4,60 Q0,60 0,56 L0,26 Q0,22 2,18 Z" fill="currentColor" />
             </svg>
           </div>
           <div class="plan-indicator-lines">
-            <div class="plan-indicator-item" :class="{ active: previewTier === 'free' }" @click="previewTier = 'free'">
+            <div class="plan-indicator-item" :class="{ active: currentTier === 'free' }">
               <span class="plan-arc-wrapper"><svg class="plan-arc plan-arc-long" viewBox="0 0 70 18"><path d="M0,18 Q14,7 28,7 L70,7" fill="none" stroke="currentColor" stroke-width="1"/></svg></span>
               <span class="plan-indicator-dot"></span><span class="plan-indicator-label">FREE</span>
             </div>
-            <div class="plan-indicator-item" :class="{ active: previewTier === 'basic' }" @click="previewTier = 'basic'">
+            <div class="plan-indicator-item" :class="{ active: currentTier === 'basic' }">
               <span class="plan-arc-wrapper"><svg class="plan-arc plan-arc-short" viewBox="0 0 50 14"><path d="M0,12 Q8,7 16,7 L50,7" fill="none" stroke="currentColor" stroke-width="1"/></svg></span>
               <span class="plan-indicator-dot"></span><span class="plan-indicator-label">BASIC</span>
             </div>
-            <div class="plan-indicator-item" :class="{ active: previewTier === 'pro' }" @click="previewTier = 'pro'">
+            <div class="plan-indicator-item" :class="{ active: currentTier === 'pro' }">
               <span class="plan-arc-wrapper"><svg class="plan-arc plan-arc-short" viewBox="0 0 50 14"><path d="M0,2 Q8,7 16,7 L50,7" fill="none" stroke="currentColor" stroke-width="1"/></svg></span>
               <span class="plan-indicator-dot"></span><span class="plan-indicator-label">PRO</span>
             </div>
-            <div class="plan-indicator-item" :class="{ active: previewTier === 'enterprise' }" @click="previewTier = 'enterprise'">
+            <div class="plan-indicator-item" :class="{ active: currentTier === 'enterprise' }">
               <span class="plan-arc-wrapper"><svg class="plan-arc plan-arc-long" viewBox="0 0 70 18"><path d="M0,0 Q14,11 28,11 L70,11" fill="none" stroke="currentColor" stroke-width="1"/></svg></span>
               <span class="plan-indicator-dot"></span><span class="plan-indicator-label">ENT</span>
             </div>
@@ -998,9 +998,6 @@ onMounted(async () => {
 // 當前方案層級
 const currentTier = computed(() => authStore.quota?.tier || 'free')
 
-// [測試用] 點擊切換指標，不影響後端
-const previewTier = ref(currentTier.value)
-
 // AI 摘要使用百分比
 const aiSummaryPercentage = computed(() => {
   const used = authStore.usage?.ai_summaries || 0
@@ -1567,7 +1564,7 @@ async function confirmDeleteAccount() {
   display: flex;
   align-items: center;
   gap: 0;
-  cursor: pointer; /* 測試用 */
+  cursor: default;
 }
 
 .plan-arc-wrapper {
