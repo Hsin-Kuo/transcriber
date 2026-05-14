@@ -1,10 +1,13 @@
 version: '3.8'
 
 services:
-  # MongoDB 資料庫
+  # MongoDB 資料庫（single-node replica set，啟用 transaction 支援）
+  # 注意：必須跑 replica set 才支援 multi-document transaction（額度預扣會用到）
+  # 連線字串需含 ?replicaSet=rs0&directConnection=true
   mongodb:
     image: mongo:7.0
     container_name: whisper-mongodb
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     ports:
       - "27020:27017"  # 使用 27020 避免端口衝突
     volumes:
@@ -12,11 +15,20 @@ services:
     environment:
       - MONGO_INITDB_DATABASE=whisper_transcriber
     restart: unless-stopped
+    # healthcheck 兼任「初始化 replica set」工作：第一次跑時 rs.initiate()，之後則 ping
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/whisper_transcriber --quiet
+      test: |
+        mongosh --quiet --eval "
+          try {
+            rs.status().ok ? 1 : (function(){ throw 'no-status' })();
+          } catch (e) {
+            rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'localhost:27017'}]}).ok;
+          }
+        "
       interval: 10s
-      timeout: 5s
-      retries: 5
+      timeout: 10s
+      retries: 10
+      start_period: 30s
 
   # 前端 Web 介面
   frontend:

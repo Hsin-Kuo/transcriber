@@ -15,6 +15,13 @@ from ..database.repositories.audit_log_repo import AuditLogRepository
 from ..models.quota import QuotaTier, QUOTA_TIERS
 from ..utils.time_utils import get_utc_timestamp
 from ..utils.audit_logger import log_admin_action
+import logging
+
+logger = logging.getLogger(__name__)
+
+# 單次調整額外額度的上限（避免 admin 手滑）
+MAX_EXTRA_QUOTA_DELTA_DURATION = 10000  # 分鐘
+MAX_EXTRA_QUOTA_DELTA_SUMMARIES = 1000  # 次
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -38,6 +45,13 @@ class UpdateUserQuotaRequest(BaseModel):
     """更新用戶配額請求"""
     tier: Optional[str] = None  # QuotaTier value
     custom: Optional[dict] = None  # 自訂配額（覆蓋預設）
+
+
+class AdjustExtraQuotaRequest(BaseModel):
+    """調整用戶額外額度請求（補償或扣除）"""
+    duration_minutes: float = 0  # 正數補償、負數扣除
+    ai_summaries: int = 0
+    reason: Optional[str] = None  # 操作原因（記錄於 audit log）
 
 
 class BatchDeleteTasksRequest(BaseModel):
@@ -171,6 +185,7 @@ async def get_user_detail(
         "has_password": user.get("password_hash") is not None,
         "quota": user.get("quota", {}),
         "usage": user.get("usage", {}),
+        "extra_quota": user.get("extra_quota", {}),
         "created_at": user.get("created_at"),
         "updated_at": user.get("updated_at"),
         "stats": {
@@ -410,6 +425,104 @@ async def reset_user_monthly_quota(
     return {
         "success": success,
         "message": "月配額使用量已重置"
+    }
+
+
+@router.post("/users/{user_id}/extra-quota")
+async def adjust_user_extra_quota(
+    user_id: str,
+    request: AdjustExtraQuotaRequest,
+    admin: dict = Depends(get_current_admin),
+    db = Depends(get_database)
+):
+    """調整用戶額外額度（補償或扣除，不影響每月配額）
+
+    使用原子操作保證扣除時不會變負；單次調整有最大值限制避免誤操作。
+    """
+    if not request.duration_minutes and not request.ai_summaries:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="duration_minutes 與 ai_summaries 不可同時為 0"
+        )
+
+    # 單次最大值檢查（防 admin 手滑）
+    if abs(request.duration_minutes) > MAX_EXTRA_QUOTA_DELTA_DURATION:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"單次轉錄時長調整不可超過 {MAX_EXTRA_QUOTA_DELTA_DURATION} 分鐘"
+        )
+    if abs(request.ai_summaries) > MAX_EXTRA_QUOTA_DELTA_SUMMARIES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"單次 AI 摘要調整不可超過 {MAX_EXTRA_QUOTA_DELTA_SUMMARIES} 次"
+        )
+
+    user_repo = UserRepository(db)
+    user = await user_repo.get_by_id(user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="用戶不存在"
+        )
+
+    # 原子調整：扣除時用 filter 確保餘額足夠，避免 race condition
+    updated_user = await user_repo.adjust_extra_quota_atomic(
+        user_id,
+        duration_minutes=request.duration_minutes,
+        ai_summaries=request.ai_summaries
+    )
+
+    if updated_user is None:
+        # filter 未中，代表餘額不足（可能是並發消耗造成的）
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="扣除失敗：餘額不足，請重新整理頁面確認當前餘額"
+        )
+
+    new_extra = updated_user.get("extra_quota", {})
+    new_duration = new_extra.get("duration_minutes", 0)
+    new_summaries = new_extra.get("ai_summaries", 0)
+    # 從 atomic 寫入結果反推「真正的 before」，避免使用可能 stale 的 pre-read
+    actual_before_duration = new_duration - request.duration_minutes
+    actual_before_summaries = new_summaries - request.ai_summaries
+
+    # audit log（失敗不影響主流程，但寫到 logger.error 讓 ops 可追蹤）
+    try:
+        await log_admin_action(
+            admin_id=str(admin["_id"]),
+            action="adjust_extra_quota",
+            resource_type="user",
+            resource_id=user_id,
+            details={
+                "email": user.get("email"),
+                "delta": {
+                    "duration_minutes": request.duration_minutes,
+                    "ai_summaries": request.ai_summaries
+                },
+                "before": {
+                    "duration_minutes": actual_before_duration,
+                    "ai_summaries": actual_before_summaries
+                },
+                "after": {
+                    "duration_minutes": new_duration,
+                    "ai_summaries": new_summaries
+                },
+                "reason": request.reason
+            }
+        )
+    except Exception as e:
+        logger.error(
+            f"audit log 寫入失敗（額度已調整）: admin={admin.get('_id')} "
+            f"user={user_id} delta_duration={request.duration_minutes} "
+            f"delta_summaries={request.ai_summaries} reason={request.reason} err={e}"
+        )
+
+    return {
+        "success": True,
+        "extra_quota": {
+            "duration_minutes": new_duration,
+            "ai_summaries": new_summaries
+        }
     }
 
 

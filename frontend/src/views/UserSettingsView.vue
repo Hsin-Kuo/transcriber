@@ -59,6 +59,9 @@
         <div class="display-bar">
           <span class="bar-fill" :style="{ width: (authStore.quotaPercentage?.duration || 0) + '%' }"></span>
         </div>
+        <div v-if="authStore.extraQuota?.duration_minutes > 0" class="extra-quota-text">
+          {{ $t('userSettings.extraDuration', { value: Math.round(authStore.extraQuota.duration_minutes) }) }}
+        </div>
 
         <!-- AI 摘要 -->
         <div class="usage-label-row">
@@ -67,6 +70,9 @@
         </div>
         <div class="display-bar">
           <span class="bar-fill" :style="{ width: aiSummaryPercentage + '%' }"></span>
+        </div>
+        <div v-if="authStore.extraQuota?.ai_summaries > 0" class="extra-quota-text">
+          {{ $t('userSettings.extraAiSummary', { value: authStore.extraQuota.ai_summaries }) }}
         </div>
       </div>
 
@@ -1397,6 +1403,15 @@ async function confirmDeleteAccount() {
 
 .user-display-panel .display-bar:last-child {
   margin-bottom: 0;
+}
+
+.user-display-panel .extra-quota-text {
+  font-family: 'VT323', monospace;
+  font-size: 12px;
+  color: #4caf50;
+  letter-spacing: 1.5px;
+  margin-top: 2px;
+  line-height: 1;
 }
 
 .user-display-panel .bar-fill {

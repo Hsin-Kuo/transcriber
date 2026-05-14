@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from fastapi import HTTPException, status
 
 from src.models.quota import QUOTA_TIERS, QuotaTier
-from src.utils.time_utils import timestamp_to_datetime
+from src.utils.time_utils import get_utc_timestamp, timestamp_to_datetime
 
 
 def _get_tier_default(user: dict, field: str, fallback):
@@ -72,73 +72,137 @@ class QuotaManager:
             )
 
     @staticmethod
-    async def check_ai_summary_quota(user: dict, db=None):
-        """檢查 AI 摘要配額（方案額度優先，不足時使用 extra_quota）"""
-        quota = user.get("quota", {})
-        usage = user.get("usage", {})
-        extra_quota = user.get("extra_quota", {})
+    def _ai_summary_plan_limit(user: dict) -> int:
+        """取得用戶的方案 AI 摘要上限（quota 未設定時 fallback 到 tier 預設）"""
+        quota = user.get("quota", {}) or {}
+        return quota.get("max_ai_summaries") or _get_tier_default(user, "max_ai_summaries", 3)
 
-        usage = await QuotaManager._reset_monthly_quota_if_needed(user, usage, db=db)
+    @staticmethod
+    async def reserve_ai_summary(db, user_id: str, user: dict = None):
+        """原子預扣 1 次 AI 摘要配額（防並發超扣 / 防被刷 Gemini 費用）
 
-        current_usage = usage.get("ai_summaries", 0)
-        plan_limit = quota.get("max_ai_summaries") or _get_tier_default(user, "max_ai_summaries", 3)
-        plan_remaining = max(0, plan_limit - current_usage)
-        extra_remaining = max(0, extra_quota.get("ai_summaries", 0))
-        total_available = plan_remaining + extra_remaining
+        方案B：只動 user doc 單一文件，用 $expr filter 做 atomic check-and-reserve，
+        不需要獨立 collection、transaction、retry（與轉錄的 reservation 機制不同）。
 
-        if total_available <= 0:
+        檢查條件（在 DB 端原子計算）：
+            usage.ai_summaries + reserved_ai_summaries + 1
+                <= plan_limit + extra_quota.ai_summaries
+        通過則 $inc reserved_ai_summaries；find_one_and_update 回 None 代表額度不足。
+
+        呼叫此方法成功後，務必接著呼叫：
+          - consume_ai_summary()  → Gemini 成功，預扣轉為實際使用量
+          - release_ai_summary()  → Gemini 失敗 / 例外，單純釋放預扣
+        """
+        from bson import ObjectId
+
+        # 先觸發月配額重置（與 ReservationRepository.reserve_transcription 一致）：
+        # 重置會把 usage.ai_summaries 歸零寫回 DB，下面的 $expr 才讀得到最新值。
+        if user is None:
+            user = await db.users.find_one({"_id": ObjectId(user_id)})
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="用戶不存在",
+            )
+        await QuotaManager._reset_monthly_quota_if_needed(user, user.get("usage", {}), db=db)
+
+        plan_limit = QuotaManager._ai_summary_plan_limit(user)
+
+        result = await db.users.find_one_and_update(
+            {
+                "_id": ObjectId(user_id),
+                "$expr": {
+                    "$lte": [
+                        {"$add": [
+                            {"$ifNull": ["$usage.ai_summaries", 0]},
+                            {"$ifNull": ["$reserved_ai_summaries", 0]},
+                            1,
+                        ]},
+                        {"$add": [
+                            plan_limit,
+                            {"$ifNull": ["$extra_quota.ai_summaries", 0]},
+                        ]},
+                    ]
+                },
+            },
+            {
+                "$inc": {"reserved_ai_summaries": 1},
+                "$set": {
+                    # 給背景清掃任務判斷孤兒用：記錄最近一次 reserve 的時間
+                    "reserved_ai_summaries_at": get_utc_timestamp(),
+                    "updated_at": datetime.utcnow(),
+                },
+            },
+        )
+        if result is None:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail={
-                    "message": f"AI 摘要次數不足（方案剩餘 {plan_remaining} 次，額外額度 {extra_remaining} 次）",
-                    "quota": {
-                        "plan_used": current_usage,
-                        "plan_limit": plan_limit,
-                        "plan_remaining": plan_remaining,
-                        "extra_remaining": extra_remaining,
-                        "type": "ai_summaries",
-                    }
+                    "message": "AI 摘要次數不足",
+                    "quota": {"type": "ai_summaries"},
                 }
             )
         return True
 
     @staticmethod
-    async def increment_ai_summary_usage(db, user_id: str, user: dict = None):
-        """增加 AI 摘要使用量（先扣方案額度，不足再扣 extra_quota）"""
+    async def consume_ai_summary(db, user_id: str, user: dict = None):
+        """將預扣轉為實際使用量（Gemini 成功後呼叫）
+
+        原子 pipeline：扣 reserved_ai_summaries 1，並依方案餘額把這 1 次分流到
+        usage.ai_summaries 或 extra_quota.ai_summaries。
+        """
         from bson import ObjectId
 
-        plan_limit = 0
-        current_usage = 0
-        if user:
-            quota = user.get("quota", {})
-            usage = user.get("usage", {})
-            plan_limit = quota.get("max_ai_summaries") or _get_tier_default(user, "max_ai_summaries", 3)
-            current_usage = usage.get("ai_summaries", 0)
+        plan_limit = QuotaManager._ai_summary_plan_limit(user) if user else 3
+        await db.users.update_one(
+            {"_id": ObjectId(user_id)},
+            build_ai_summary_consumption_pipeline(plan_limit, get_utc_timestamp()),
+        )
 
-        plan_remaining = max(0, plan_limit - current_usage)
+    @staticmethod
+    async def release_ai_summary(db, user_id: str):
+        """釋放預扣（Gemini 失敗 / 例外時呼叫），不影響使用量
 
-        if plan_remaining > 0:
-            await db.users.update_one(
-                {"_id": ObjectId(user_id)},
-                {
-                    "$inc": {
-                        "usage.ai_summaries": 1,
-                        "usage.total_ai_summaries": 1,
-                    },
-                    "$set": {"updated_at": datetime.utcnow()}
+        用 filter 條件確保 reserved_ai_summaries 不會被扣成負數。
+        """
+        from bson import ObjectId
+
+        await db.users.update_one(
+            {"_id": ObjectId(user_id), "reserved_ai_summaries": {"$gt": 0}},
+            {
+                "$inc": {"reserved_ai_summaries": -1},
+                "$set": {"updated_at": datetime.utcnow()},
+            },
+        )
+
+    @staticmethod
+    async def sweep_stale_ai_summary_reservations(db, grace_seconds: int = 1800) -> int:
+        """清掃孤兒 AI 摘要預扣（背景任務用）
+
+        AI 摘要的 reserve → consume/release 都在單一 HTTP 請求內同步完成，
+        一個請求不可能跑超過 grace_seconds（預設 30 分鐘）。因此
+        「reserved_ai_summaries > 0 且 reserved_ai_summaries_at 早於 cutoff」
+        必定是 process 在請求中途崩潰留下的孤兒，直接歸零釋放。
+
+        正常流程必定會 consume 或 release，不會留下殘留；只有崩潰才會。
+
+        Returns:
+            被修正的用戶數
+        """
+        cutoff = get_utc_timestamp() - grace_seconds
+        result = await db.users.update_many(
+            {
+                "reserved_ai_summaries": {"$gt": 0},
+                "reserved_ai_summaries_at": {"$lt": cutoff},
+            },
+            {
+                "$set": {
+                    "reserved_ai_summaries": 0,
+                    "updated_at": datetime.utcnow(),
                 }
-            )
-        else:
-            await db.users.update_one(
-                {"_id": ObjectId(user_id)},
-                {
-                    "$inc": {
-                        "usage.total_ai_summaries": 1,
-                        "extra_quota.ai_summaries": -1,
-                    },
-                    "$set": {"updated_at": datetime.utcnow()}
-                }
-            )
+            },
+        )
+        return result.modified_count
 
     @staticmethod
     async def _reset_monthly_quota_if_needed(user: dict, usage: dict, db=None) -> dict:
@@ -274,3 +338,147 @@ class QuotaManager:
                 }
             }
         )
+
+
+def build_transcription_consumption_pipeline(duration_minutes: float, now_ts: int) -> list:
+    """建立轉錄消耗的 MongoDB pipeline update
+
+    在 DB 端原子計算：
+      plan_remaining = max(0, quota.max_duration_minutes - usage.duration_minutes)
+      from_plan = min(plan_remaining, duration_minutes)
+      from_extra = min(duration_minutes - from_plan, extra_quota.duration_minutes)
+
+      usage.duration_minutes += from_plan
+      extra_quota.duration_minutes -= from_extra
+      usage.transcriptions += 1
+      usage.total_transcriptions += 1
+      usage.total_duration_minutes += duration_minutes  (永遠記實際時長)
+
+    保證 extra_quota.duration_minutes 永不為負（被 $min 與 $max 雙重保護）。
+    若 race 導致 plan + extra 不足，會「扣不完」（小幅免費），但不會破壞資料。
+
+    Args:
+        duration_minutes: 此次要扣的實際時長（分鐘）
+        now_ts: updated_at 時間戳
+
+    Returns:
+        MongoDB aggregation pipeline（list of stages），給 update_one 用
+    """
+    return [
+        # Stage 1: 算 plan_remaining
+        {"$set": {
+            "_plan_remaining": {
+                "$max": [
+                    0,
+                    {"$subtract": [
+                        {"$ifNull": ["$quota.max_duration_minutes", 60]},
+                        {"$ifNull": ["$usage.duration_minutes", 0]},
+                    ]},
+                ]
+            }
+        }},
+        # Stage 2: 算 from_plan
+        {"$set": {
+            "_from_plan": {"$min": ["$_plan_remaining", duration_minutes]}
+        }},
+        # Stage 3: 算 from_extra（被當下 extra 餘額 cap）
+        {"$set": {
+            "_from_extra": {
+                "$min": [
+                    {"$subtract": [duration_minutes, "$_from_plan"]},
+                    {"$ifNull": ["$extra_quota.duration_minutes", 0]},
+                ]
+            }
+        }},
+        # Stage 4: 套用扣款 + 累加統計
+        {"$set": {
+            "usage.duration_minutes": {
+                "$add": [{"$ifNull": ["$usage.duration_minutes", 0]}, "$_from_plan"]
+            },
+            "extra_quota.duration_minutes": {
+                "$subtract": [
+                    {"$ifNull": ["$extra_quota.duration_minutes", 0]},
+                    "$_from_extra",
+                ]
+            },
+            "usage.transcriptions": {
+                "$add": [{"$ifNull": ["$usage.transcriptions", 0]}, 1]
+            },
+            "usage.total_transcriptions": {
+                "$add": [{"$ifNull": ["$usage.total_transcriptions", 0]}, 1]
+            },
+            "usage.total_duration_minutes": {
+                "$add": [{"$ifNull": ["$usage.total_duration_minutes", 0]}, duration_minutes]
+            },
+            "updated_at": now_ts,
+        }},
+        # Stage 5: 清掉暫存欄位
+        {"$unset": ["_plan_remaining", "_from_plan", "_from_extra"]},
+    ]
+
+
+def build_ai_summary_consumption_pipeline(plan_limit: int, now_ts: int) -> list:
+    """建立 AI 摘要消耗的 MongoDB pipeline update（每次固定扣 1 次）
+
+    在 DB 端原子計算：
+      plan_remaining = max(0, plan_limit - usage.ai_summaries)
+      from_plan = min(plan_remaining, 1)   # 1 或 0
+      from_extra = 1 - from_plan
+
+      usage.ai_summaries += from_plan
+      usage.total_ai_summaries += 1
+      extra_quota.ai_summaries -= from_extra
+      reserved_ai_summaries = max(0, reserved_ai_summaries - 1)  # 把預扣轉成實際使用
+
+    與 build_transcription_consumption_pipeline 同樣的設計：方案額度優先，
+    不足才動 extra_quota，且 extra_quota 永不為負。
+
+    Args:
+        plan_limit: 用戶方案的 AI 摘要上限
+        now_ts: updated_at 時間戳
+
+    Returns:
+        MongoDB aggregation pipeline（list of stages），給 update_one 用
+    """
+    return [
+        # Stage 1: 算 plan_remaining
+        {"$set": {
+            "_plan_remaining": {
+                "$max": [
+                    0,
+                    {"$subtract": [
+                        plan_limit,
+                        {"$ifNull": ["$usage.ai_summaries", 0]},
+                    ]},
+                ]
+            }
+        }},
+        # Stage 2: 算 from_plan（1 或 0）
+        {"$set": {
+            "_from_plan": {"$min": ["$_plan_remaining", 1]}
+        }},
+        # Stage 3: 套用扣款 + 累加統計 + 釋放預扣
+        {"$set": {
+            "usage.ai_summaries": {
+                "$add": [{"$ifNull": ["$usage.ai_summaries", 0]}, "$_from_plan"]
+            },
+            "usage.total_ai_summaries": {
+                "$add": [{"$ifNull": ["$usage.total_ai_summaries", 0]}, 1]
+            },
+            "extra_quota.ai_summaries": {
+                "$subtract": [
+                    {"$ifNull": ["$extra_quota.ai_summaries", 0]},
+                    {"$subtract": [1, "$_from_plan"]},
+                ]
+            },
+            "reserved_ai_summaries": {
+                "$max": [
+                    0,
+                    {"$subtract": [{"$ifNull": ["$reserved_ai_summaries", 0]}, 1]},
+                ]
+            },
+            "updated_at": now_ts,
+        }},
+        # Stage 4: 清掉暫存欄位
+        {"$unset": ["_plan_remaining", "_from_plan"]},
+    ]

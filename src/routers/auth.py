@@ -588,6 +588,7 @@ async def get_current_user_info(
         is_active=full_user["is_active"],
         quota=quota_filtered,
         usage=usage_filtered,
+        extra_quota=full_user.get("extra_quota", {}),
         created_at=created_at,
         auth_providers=auth_providers,
         preferences=full_user.get("preferences", {}),

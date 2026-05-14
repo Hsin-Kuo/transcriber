@@ -95,6 +95,7 @@ class UserResponse(BaseModel):
     is_active: bool
     quota: dict
     usage: dict
+    extra_quota: dict = {}  # 額外購買的額度（不隨月份重置）
     created_at: int  # UTC Unix timestamp
     auth_providers: List[str] = []  # ["password", "google", "apple"]
     preferences: dict = {}

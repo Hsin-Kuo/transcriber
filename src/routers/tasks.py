@@ -798,6 +798,17 @@ async def cancel_task(
 
     print(f"🛑 任務 {task_id} 已被標記為取消")
 
+    # 6. 釋放預扣配額（idempotent）
+    try:
+        from ..database.repositories.reservation_repo import ReservationRepository
+        db = task_service.task_repo.db
+        reservation_repo = ReservationRepository(db)
+        released = await reservation_repo.release_by_task_id(task_id)
+        if released:
+            print(f"♻️  已釋放任務 {task_id} 的預扣配額")
+    except Exception as e:
+        print(f"⚠️ 釋放預扣失敗：{e}")
+
     # 記錄 audit log（取消任務）
     try:
         from ..utils.audit_logger import get_audit_logger

@@ -260,6 +260,49 @@ def process_task(message_body: dict) -> None:
         update_task(db, task_id, complete_updates)
         print(f"✅ [Worker] 任務 {task_id} 完成！({len(full_text)} 字元)")
 
+        # 扣除配額（兩步式：先刪預扣、再套用 pipeline）
+        #
+        # 設計決定：刻意不用 transaction 包覆這兩步，以節省每次扣款多一個 commit round-trip。
+        # 風險：若 step 2 失敗（極罕見的網路/DB 故障），預扣已刪、扣款未套用，會漏算一次。
+        # 監控：若觀察到下方 [QUOTA_LEAK] 標記出現，代表發生此 race，應視頻率決定是否補回 transaction。
+        from bson import ObjectId
+        from src.database.repositories.reservation_repo import consume_reservation_sync
+        from src.auth.quota import build_transcription_consumption_pipeline
+        from src.utils.time_utils import get_utc_timestamp
+
+        user_id = task_doc.get("user", {}).get("user_id") if task_doc else None
+        audio_duration_seconds = (task_doc.get("stats") or {}).get("audio_duration_seconds", 0) if task_doc else 0
+        if user_id and audio_duration_seconds > 0:
+            # Step 1：原子刪除預扣
+            try:
+                reservation = consume_reservation_sync(db, task_id)
+            except Exception as e:
+                print(f"⚠️ [Worker] 刪除預扣失敗（沒影響資料，會留下殘留預扣）：task={task_id} err={e}")
+                reservation = None
+
+            if reservation is None:
+                print(f"ℹ️  [Worker] 任務 {task_id} 無預扣記錄，跳過配額扣除")
+            else:
+                # Step 2：套用 pipeline 原子扣款
+                try:
+                    duration_minutes = audio_duration_seconds / 60
+                    pipeline = build_transcription_consumption_pipeline(
+                        duration_minutes=duration_minutes,
+                        now_ts=get_utc_timestamp(),
+                    )
+                    db.users.update_one({"_id": ObjectId(user_id)}, pipeline)
+                    print(f"✅ [Worker] 已扣除配額：用戶 {user_id}，時長 {audio_duration_seconds:.2f} 秒")
+                except Exception as e:
+                    # ⚠️ QUOTA_LEAK：預扣已刪、扣款未套用 = 漏算一次
+                    # 監控訊號：grep [QUOTA_LEAK] 出現次數，超過閾值告警
+                    print(
+                        f"⚠️ [QUOTA_LEAK] [Worker] 扣款失敗（漏算一次）："
+                        f"user_id={user_id} task_id={task_id} "
+                        f"duration_minutes={duration_minutes:.2f} "
+                        f"reservation_minutes={reservation.get('duration_minutes')} "
+                        f"err={e}"
+                    )
+
     except Exception as e:
         print(f"❌ [Worker] 任務 {task_id} 失敗: {e}")
         import traceback
@@ -270,6 +313,15 @@ def process_task(message_body: dict) -> None:
             "error": {"code": error_code, "message": str(e)},
             "progress": f"處理失敗: {str(e)[:200]}",
         })
+
+        # 釋放預扣（任務失敗）
+        try:
+            from src.database.repositories.reservation_repo import release_reservation_sync
+            released = release_reservation_sync(db, task_id)
+            if released:
+                print(f"♻️  [Worker] 已釋放任務 {task_id} 的預扣配額")
+        except Exception as release_err:
+            print(f"⚠️ [Worker] 釋放預扣失敗：{release_err}")
     finally:
         if temp_dir.exists():
             shutil.rmtree(temp_dir)

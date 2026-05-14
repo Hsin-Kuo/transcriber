@@ -37,6 +37,8 @@
     "transcriptions": "Transcriptions",
     "duration": "Duration",
     "aiSummary": "AI Summary",
+    "extraDuration": "+ {value} min extra quota",
+    "extraAiSummary": "+ {value} extra quota",
     "showPlan": "Show Plan",
     "upgrade": "Upgrade",
     "storage": "Storage",

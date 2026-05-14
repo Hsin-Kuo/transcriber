@@ -43,14 +43,20 @@ async def generate_summary(
     user_id = str(current_user["_id"])
     audit_logger = get_audit_logger()
 
-    # 檢查 AI 摘要配額
+    # 原子預扣 AI 摘要配額（防並發請求超扣 / 防被刷 Gemini 費用）
+    # 預扣成功後，無論結果如何都必須 consume（成功）或 release（失敗）
     user_repo = UserRepository(db)
     full_user = await user_repo.get_by_id(user_id)
-    await QuotaManager.check_ai_summary_quota(full_user, db=db)
+    await QuotaManager.reserve_ai_summary(db, user_id, user=full_user)
 
-    result = await summary_service.generate_summary(task_id, user_id, mode=mode)
+    try:
+        result = await summary_service.generate_summary(task_id, user_id, mode=mode)
+    except Exception:
+        await QuotaManager.release_ai_summary(db, user_id)
+        raise
 
     if result["status"] == "failed":
+        await QuotaManager.release_ai_summary(db, user_id)
         await audit_logger.log_task_operation(
             request=request, action="summary_generate_failed",
             user_id=user_id, task_id=task_id, status_code=200,
@@ -58,8 +64,8 @@ async def generate_summary(
         )
         return result
 
-    # 生成成功，增加使用量（傳入 user 以便正確扣除 extra_quota）
-    await QuotaManager.increment_ai_summary_usage(db, user_id, user=full_user)
+    # 生成成功，預扣轉為實際使用量（傳入 user 以便正確分流 plan / extra_quota）
+    await QuotaManager.consume_ai_summary(db, user_id, user=full_user)
 
     await audit_logger.log_task_operation(
         request=request, action="summary_generate",

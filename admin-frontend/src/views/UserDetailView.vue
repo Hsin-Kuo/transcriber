@@ -188,6 +188,21 @@
           <button @click="resetQuota" class="reset-btn">🔄 重置本月配額</button>
         </div>
 
+        <!-- 額外額度 -->
+        <div class="detail-card">
+          <h2>額外額度</h2>
+          <p class="card-hint">永不重置，可跨月累計（用於補償或購買）</p>
+          <div class="info-row">
+            <span class="label">額外轉錄時長：</span>
+            <span class="value">{{ (user.extra_quota?.duration_minutes || 0).toFixed(1) }} 分鐘</span>
+          </div>
+          <div class="info-row">
+            <span class="label">額外 AI 摘要：</span>
+            <span class="value">{{ user.extra_quota?.ai_summaries || 0 }} 次</span>
+          </div>
+          <button @click="openExtraQuotaModal" class="edit-btn">調整額外額度</button>
+        </div>
+
         <!-- 任務統計 -->
         <div class="detail-card">
           <h2>任務統計</h2>
@@ -282,6 +297,78 @@
       </div>
     </div>
 
+    <!-- 調整額外額度 Modal -->
+    <div v-if="showExtraQuotaModal" class="modal-overlay" @click.self="closeExtraQuotaModal">
+      <div class="modal">
+        <h3>調整額外額度</h3>
+        <div class="modal-body">
+          <p class="modal-user-email">用戶：{{ user.email }}</p>
+          <p class="card-hint">正數補償、負數扣除；不影響每月配額</p>
+
+          <div class="balance-preview">
+            <div class="balance-row">
+              <span class="balance-label">轉錄時長</span>
+              <span class="balance-current">目前 {{ (user.extra_quota?.duration_minutes || 0).toFixed(1) }} 分鐘</span>
+              <span class="balance-arrow">→</span>
+              <span class="balance-after" :class="{ invalid: previewDuration < 0 }">
+                {{ previewDuration.toFixed(1) }} 分鐘
+                <span v-if="previewDuration < 0">（不可為負）</span>
+              </span>
+            </div>
+            <div class="balance-row">
+              <span class="balance-label">AI 摘要</span>
+              <span class="balance-current">目前 {{ user.extra_quota?.ai_summaries || 0 }} 次</span>
+              <span class="balance-arrow">→</span>
+              <span class="balance-after" :class="{ invalid: previewSummaries < 0 }">
+                {{ previewSummaries }} 次
+                <span v-if="previewSummaries < 0">（不可為負）</span>
+              </span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>轉錄時長變動（分鐘）：</label>
+            <input
+              v-model.number="extraQuotaForm.duration_minutes"
+              type="number"
+              step="0.1"
+              placeholder="例如 60 或 -10"
+              class="form-input"
+            />
+          </div>
+          <div class="form-group">
+            <label>AI 摘要變動（次）：</label>
+            <input
+              v-model.number="extraQuotaForm.ai_summaries"
+              type="number"
+              step="1"
+              placeholder="例如 5 或 -1"
+              class="form-input"
+            />
+          </div>
+          <div class="form-group">
+            <label>原因 <span class="required">*</span>（記錄於 audit log）：</label>
+            <input
+              v-model="extraQuotaForm.reason"
+              type="text"
+              placeholder="例如：服務中斷補償（工單 #1234）"
+              class="form-input"
+              required
+            />
+          </div>
+          <p v-if="extraQuotaError" class="error-text">{{ extraQuotaError }}</p>
+        </div>
+        <div class="modal-footer">
+          <button @click="closeExtraQuotaModal" class="btn-cancel">取消</button>
+          <button
+            @click="adjustExtraQuota"
+            class="btn-confirm"
+            :disabled="previewDuration < 0 || previewSummaries < 0"
+          >確認</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 重設密碼 Modal -->
     <div v-if="showPasswordModal" class="modal-overlay" @click.self="closePasswordModal">
       <div class="modal">
@@ -321,7 +408,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '../utils/api'
 import AdminNav from '../components/shared/AdminNav.vue'
@@ -334,11 +421,31 @@ const error = ref(null)
 const showQuotaModal = ref(false)
 const showRoleModal = ref(false)
 const showPasswordModal = ref(false)
+const showExtraQuotaModal = ref(false)
 const isResettingPassword = ref(false)
 const passwordError = ref('')
+const extraQuotaError = ref('')
 
 const quotaForm = ref({
   tier: 'free'
+})
+
+const extraQuotaForm = ref({
+  duration_minutes: 0,
+  ai_summaries: 0,
+  reason: ''
+})
+
+const previewDuration = computed(() => {
+  const current = user.value?.extra_quota?.duration_minutes || 0
+  const delta = Number(extraQuotaForm.value.duration_minutes) || 0
+  return current + delta
+})
+
+const previewSummaries = computed(() => {
+  const current = user.value?.extra_quota?.ai_summaries || 0
+  const delta = Number(extraQuotaForm.value.ai_summaries) || 0
+  return current + delta
 })
 
 const passwordForm = ref({
@@ -412,6 +519,52 @@ async function resetQuota() {
     alert('配額已重置')
   } catch (err) {
     alert(err.response?.data?.detail || '重置失敗')
+  }
+}
+
+function openExtraQuotaModal() {
+  extraQuotaForm.value = { duration_minutes: 0, ai_summaries: 0, reason: '' }
+  extraQuotaError.value = ''
+  showExtraQuotaModal.value = true
+}
+
+function closeExtraQuotaModal() {
+  showExtraQuotaModal.value = false
+  extraQuotaError.value = ''
+}
+
+async function adjustExtraQuota() {
+  const duration = Number(extraQuotaForm.value.duration_minutes) || 0
+  const summaries = Number(extraQuotaForm.value.ai_summaries) || 0
+  const reason = (extraQuotaForm.value.reason || '').trim()
+
+  if (!duration && !summaries) {
+    extraQuotaError.value = '請填入要調整的數值'
+    return
+  }
+  if (!reason) {
+    extraQuotaError.value = '請填寫調整原因'
+    return
+  }
+  if (previewDuration.value < 0 || previewSummaries.value < 0) {
+    extraQuotaError.value = '調整後額度不可為負'
+    return
+  }
+
+  try {
+    const { data } = await api.post(
+      `/api/admin/users/${user.value.id}/extra-quota`,
+      {
+        duration_minutes: duration,
+        ai_summaries: summaries,
+        reason
+      }
+    )
+    user.value.extra_quota = data.extra_quota
+    closeExtraQuotaModal()
+    alert('額外額度已調整')
+  } catch (err) {
+    extraQuotaError.value = err.response?.data?.detail || '調整失敗'
   }
 }
 
@@ -879,6 +1032,73 @@ code {
 .form-input:focus {
   outline: none;
   border-color: var(--color-primary, #dd8448);
+}
+
+.card-hint {
+  font-size: 12px;
+  color: #888;
+  margin: -4px 0 12px 0;
+}
+
+.error-text {
+  color: #c63;
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+.required {
+  color: #c63;
+  margin-left: 2px;
+}
+
+.balance-preview {
+  background: rgba(163, 177, 198, 0.12);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 12px 0 16px;
+}
+
+.balance-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.balance-row + .balance-row {
+  border-top: 1px dashed rgba(163, 177, 198, 0.25);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+.balance-label {
+  font-weight: 600;
+  min-width: 70px;
+  color: #555;
+}
+
+.balance-current {
+  color: #777;
+}
+
+.balance-arrow {
+  color: #aaa;
+  font-weight: bold;
+}
+
+.balance-after {
+  font-weight: 600;
+  color: var(--color-primary, #dd8448);
+}
+
+.balance-after.invalid {
+  color: #c63;
+}
+
+.btn-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .modal-user-email {

@@ -63,8 +63,13 @@ docker-compose up -d
 
 ### 原生開發
 ```bash
-# MongoDB
-docker run -d --name mongo -p 27020:27017 mongo:7.0
+# MongoDB（single-node replica set，支援 transaction）
+docker run -d --name mongo -p 27020:27017 mongo:7.0 \
+  mongod --replSet rs0 --bind_ip_all
+# 第一次啟動需 init replica set：
+docker exec mongo mongosh --quiet --eval \
+  "rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'localhost:27017'}]})"
+# 連線字串需含 ?replicaSet=rs0&directConnection=true
 
 # 後端
 pip install -r requirements.txt

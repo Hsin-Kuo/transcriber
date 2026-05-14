@@ -253,6 +253,14 @@ async def startup_event():
         from src.database.repositories.order_repo import OrderRepository
         order_repo_init = OrderRepository(db)
         await order_repo_init.create_indexes()
+        # 建立 Reservations 索引（額度預扣）
+        from src.database.repositories.reservation_repo import ReservationRepository
+        reservation_repo_init = ReservationRepository(db)
+        await reservation_repo_init.create_indexes()
+        # 建立 Users 索引（AI 摘要預扣 partial index，供背景清掃用）
+        from src.database.repositories.user_repo import UserRepository
+        user_repo_init = UserRepository(db)
+        await user_repo_init.create_indexes()
         print(f"✅ 資料庫索引建立完成")
     except Exception as e:
         print(f"⚠️  索引建立失敗: {e}")
@@ -280,6 +288,10 @@ async def startup_event():
 
     # 5.1. 啟動定期孤立進程清理
     asyncio.create_task(task_service.periodic_orphaned_process_cleanup())
+
+    # 5.2. 啟動定期孤兒預扣清掃（轉錄 reservations + AI 摘要計數器）
+    from src.database.repositories.reservation_repo import periodic_reservation_cleanup
+    asyncio.create_task(periodic_reservation_cleanup(db))
 
     # 5.5. 啟動任務隊列處理器（在 TranscriptionService 初始化後）
     # 注意：這裡暫時先創建任務，稍後在 TranscriptionService 初始化後會實際啟動

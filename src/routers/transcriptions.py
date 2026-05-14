@@ -530,14 +530,17 @@ async def create_transcription(
                 detail="無法獲取用戶資訊"
             )
 
-        # 檢查轉錄配額
-        from src.auth.quota import QuotaManager
+        # 預扣轉錄配額（atomic check + reserve）
+        from src.database.repositories.reservation_repo import ReservationRepository
+        reservation_repo = ReservationRepository(db)
+        reservation_made = False
         try:
-            await QuotaManager.check_transcription_quota(
-                full_user_data,
-                audio_duration_seconds,
-                db=db
+            await reservation_repo.reserve_transcription(
+                user_id=str(current_user["_id"]),
+                task_id=task_id,
+                duration_minutes=audio_duration_seconds / 60,
             )
+            reservation_made = True
         except HTTPException as quota_error:
             # 清理臨時檔案
             shutil.rmtree(temp_dir)
@@ -821,11 +824,23 @@ async def create_transcription(
         # 清理臨時檔案
         if temp_dir.exists():
             shutil.rmtree(temp_dir)
+        # 釋放預扣（若已建立）
+        if locals().get("reservation_made"):
+            try:
+                await reservation_repo.release_by_task_id(task_id)
+            except Exception as release_err:
+                print(f"⚠️ 釋放預扣失敗：{release_err}")
         raise
     except Exception as e:
         # 清理臨時檔案
         if temp_dir.exists():
             shutil.rmtree(temp_dir)
+        # 釋放預扣（若已建立）
+        if locals().get("reservation_made"):
+            try:
+                await reservation_repo.release_by_task_id(task_id)
+            except Exception as release_err:
+                print(f"⚠️ 釋放預扣失敗：{release_err}")
         print(f"❌ 建立轉錄任務失敗：{e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1635,7 +1650,10 @@ async def create_batch_transcriptions(
     results = []
     created_count = 0
     failed_count = 0
-    batch_duration_seconds = 0  # 累計本批次已提交的音檔時長（用於配額檢查）
+
+    # 預扣 repository（每檔 atomic reserve）
+    from src.database.repositories.reservation_repo import ReservationRepository
+    reservation_repo = ReservationRepository(db)
 
     # 檢查當前處理中的任務數量（僅本地模式）
     processing_count = 0
@@ -1677,6 +1695,7 @@ async def create_batch_transcriptions(
         }
 
         temp_dir = None
+        task_id = None  # 預扣失敗時用來判斷是否需要釋放
         try:
             if chunked_meta is None and upload_file is None:
                 raise ValueError("upload_id 無效或尚未完成組裝")
@@ -1705,12 +1724,17 @@ async def create_batch_transcriptions(
             except Exception as e:
                 raise ValueError(f"無法讀取音檔資訊：{str(e)}")
 
-            # 檢查配額（加上本批次已提交的累計時長）
+            # 生成任務 ID（須先於預扣，因為預扣會記錄 task_id）
+            task_id = str(uuid.uuid4())
+            current_time = get_utc_timestamp()
+
+            # 預扣轉錄配額（atomic check + reserve）
+            # 若不足會 raise 429，被外層 except 捕捉並把此檔標記為失敗，繼續處理後面的檔案
             try:
-                await QuotaManager.check_transcription_quota(
-                    full_user_data,
-                    audio_duration_seconds + batch_duration_seconds,
-                    db=db
+                await reservation_repo.reserve_transcription(
+                    user_id=str(current_user["_id"]),
+                    task_id=task_id,
+                    duration_minutes=audio_duration_seconds / 60,
                 )
             except HTTPException as quota_error:
                 raise ValueError(quota_error.detail)
@@ -1719,10 +1743,6 @@ async def create_batch_transcriptions(
             override = file_overrides.get(str(idx), {})
             file_tags = override.get("tags", default_tags.copy())
             custom_name = override.get("customName", None)
-
-            # 生成任務 ID
-            task_id = str(uuid.uuid4())
-            current_time = get_utc_timestamp()
 
             # 創建任務資料
             task_data = {
@@ -1840,7 +1860,6 @@ async def create_batch_transcriptions(
                 file_result["task_id"] = task_id
                 file_result["status"] = "pending"
                 file_result["queue_position"] = created_count + 1
-                batch_duration_seconds += audio_duration_seconds
                 created_count += 1
                 print(f"☁️  批次任務 [{idx + 1}/{total_files}] {original_filename} -> {task_id} (SQS)")
             else:
@@ -1884,7 +1903,6 @@ async def create_batch_transcriptions(
                 file_result["task_id"] = task_id
                 file_result["status"] = "pending" if should_queue else "processing"
                 file_result["queue_position"] = queue_position
-                batch_duration_seconds += audio_duration_seconds
                 created_count += 1
 
                 print(f"✅ 批次任務 [{idx + 1}/{total_files}] {original_filename} -> {task_id}")
@@ -1897,6 +1915,13 @@ async def create_batch_transcriptions(
             # 清理臨時目錄
             if temp_dir and temp_dir.exists():
                 shutil.rmtree(temp_dir)
+
+            # 釋放可能已建立的預扣（idempotent，若無預扣則無動作）
+            if task_id:
+                try:
+                    await reservation_repo.release_by_task_id(task_id)
+                except Exception as release_err:
+                    print(f"⚠️ 釋放預扣失敗：{release_err}")
 
             print(f"❌ 批次任務 [{idx + 1}/{total_files}] {display_name} 失敗: {e}")
 

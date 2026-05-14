@@ -13,6 +13,16 @@ class UserRepository:
         self.db = db
         self.collection = db.users
 
+    async def create_indexes(self):
+        """建立索引"""
+        # Partial index：只索引「正在預扣 AI 摘要」的用戶（平常幾乎是空集合），
+        # 讓 sweep_stale_ai_summary_reservations 的背景掃描不需要全表掃 users。
+        await self.collection.create_index(
+            [("reserved_ai_summaries", 1)],
+            partialFilterExpression={"reserved_ai_summaries": {"$gt": 0}},
+        )
+        print("✅ 用戶索引已建立")
+
     async def create(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
         """建立新用戶"""
         result = await self.collection.insert_one(user_data)
@@ -165,6 +175,39 @@ class UserRepository:
             {"$inc": inc, "$set": {"updated_at": get_utc_timestamp()}}
         )
         return result.modified_count > 0
+
+    async def adjust_extra_quota_atomic(
+        self, user_id: str, duration_minutes: float = 0, ai_summaries: int = 0
+    ) -> Optional[Dict[str, Any]]:
+        """原子調整額外額度，扣除時保證不會變負
+
+        正數累加、負數扣除；負數時用 filter 條件確保餘額足夠。
+        回傳更新後的 document（含 extra_quota），或 None 表示餘額不足。
+        """
+        inc: Dict[str, Any] = {}
+        filter_conditions: Dict[str, Any] = {"_id": ObjectId(user_id)}
+
+        if duration_minutes:
+            inc["extra_quota.duration_minutes"] = duration_minutes
+            if duration_minutes < 0:
+                filter_conditions["extra_quota.duration_minutes"] = {
+                    "$gte": abs(duration_minutes)
+                }
+        if ai_summaries:
+            inc["extra_quota.ai_summaries"] = ai_summaries
+            if ai_summaries < 0:
+                filter_conditions["extra_quota.ai_summaries"] = {
+                    "$gte": abs(ai_summaries)
+                }
+
+        if not inc:
+            return await self.get_by_id(user_id)
+
+        return await self.collection.find_one_and_update(
+            filter_conditions,
+            {"$inc": inc, "$set": {"updated_at": get_utc_timestamp()}},
+            return_document=True
+        )
 
     async def update_invoice_info(self, user_id: str, invoice_info: Dict[str, Any]) -> bool:
         """更新用戶發票資訊"""

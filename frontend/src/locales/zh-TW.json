@@ -37,6 +37,8 @@
     "transcriptions": "轉錄次數",
     "duration": "轉錄時長",
     "aiSummary": "AI 摘要",
+    "extraDuration": "+ {value} min 額外額度",
+    "extraAiSummary": "+ {value} 個額外額度",
     "showPlan": "檢視方案",
     "upgrade": "升級",
     "storage": "儲存空間",

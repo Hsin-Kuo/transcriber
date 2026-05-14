@@ -667,59 +667,62 @@ class TranscriptionService:
                 else:
                     user_id = task.get("user_id")
 
-                # 扣除配額
+                # 扣除配額（兩步式：先刪預扣、再套用 pipeline）
+                #
+                # 設計決定：刻意不用 transaction 包覆這兩步，以節省每次扣款多一個 commit round-trip。
+                # 風險：若 step 2 失敗（極罕見的網路/DB 故障），預扣已刪、扣款未套用，會漏算一次。
+                # 監控：若觀察到下方 [QUOTA_LEAK] 標記出現，代表發生此 race，應視頻率決定是否補回 transaction。
+                # 完整論證見 src/database/repositories/reservation_repo.py 註解。
                 if user_id:
-                    try:
-                        audio_duration_seconds = task.get("stats", {}).get("audio_duration_seconds", 0)
-                        if audio_duration_seconds > 0:
-                            # 使用同步方式更新配額
-                            from pymongo import MongoClient
-                            from bson import ObjectId
-                            import os
+                    audio_duration_seconds = task.get("stats", {}).get("audio_duration_seconds", 0)
+                    if audio_duration_seconds > 0:
+                        from pymongo import MongoClient
+                        from bson import ObjectId
+                        import os
+                        from src.database.repositories.reservation_repo import consume_reservation_sync
+                        from src.auth.quota import build_transcription_consumption_pipeline
 
-                            mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
-                            db_name = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
-                            client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
-                            db = client[db_name]
+                        mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
+                        db_name = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
+                        client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+                        db = client[db_name]
 
-                            duration_minutes = audio_duration_seconds / 60
+                        duration_minutes = audio_duration_seconds / 60
 
-                            # 計算方案額度 vs extra_quota 各扣多少
-                            user_doc = db.users.find_one({"_id": ObjectId(user_id)}, {
-                                "quota.max_duration_minutes": 1,
-                                "usage.duration_minutes": 1,
-                                "extra_quota.duration_minutes": 1,
-                            })
-                            from_plan = duration_minutes
-                            from_extra = 0.0
-                            if user_doc:
-                                plan_limit = (user_doc.get("quota") or {}).get("max_duration_minutes", 60)
-                                current_usage = (user_doc.get("usage") or {}).get("duration_minutes", 0)
-                                plan_remaining = max(0.0, plan_limit - current_usage)
-                                from_plan = min(plan_remaining, duration_minutes)
-                                from_extra = max(0.0, duration_minutes - from_plan)
+                        # Step 1：原子刪除預扣（findOneAndDelete）
+                        try:
+                            reservation = consume_reservation_sync(db, task_id)
+                        except Exception as e:
+                            print(f"⚠️ 刪除預扣失敗（沒影響資料，會留下殘留預扣）：task={task_id} err={e}")
+                            reservation = None
 
-                            inc_fields = {
-                                "usage.transcriptions": 1,
-                                "usage.total_transcriptions": 1,
-                                "usage.total_duration_minutes": duration_minutes,
-                            }
-                            if from_plan > 0:
-                                inc_fields["usage.duration_minutes"] = from_plan
-                            if from_extra > 0:
-                                inc_fields["extra_quota.duration_minutes"] = -from_extra
-
-                            db.users.update_one(
-                                {"_id": ObjectId(user_id)},
-                                {
-                                    "$inc": inc_fields,
-                                    "$set": {"updated_at": get_utc_timestamp()}
-                                }
-                            )
+                        if reservation is None:
+                            print(f"ℹ️  任務 {task_id} 無預扣記錄，跳過配額扣除（可能是舊任務或重複完成通知）")
                             client.close()
-                            print(f"✅ 已扣除配額：用戶 {user_id}，時長 {audio_duration_seconds:.2f} 秒（方案 {from_plan:.1f}min，額外額度 {from_extra:.1f}min）")
-                    except Exception as quota_error:
-                        print(f"⚠️ 扣除配額失敗：{quota_error}")
+                        else:
+                            # Step 2：套用 pipeline 原子計算 plan/extra 分流並扣款
+                            try:
+                                pipeline = build_transcription_consumption_pipeline(
+                                    duration_minutes=duration_minutes,
+                                    now_ts=get_utc_timestamp(),
+                                )
+                                db.users.update_one(
+                                    {"_id": ObjectId(user_id)},
+                                    pipeline,
+                                )
+                                print(f"✅ 已扣除配額：用戶 {user_id}，時長 {audio_duration_seconds:.2f} 秒（pipeline 自動分流 plan/extra）")
+                            except Exception as e:
+                                # ⚠️ QUOTA_LEAK：預扣已刪、扣款未套用 = 用戶這次轉錄沒扣到額度
+                                # 此 log 是監控訊號，可在告警系統設規則：grep [QUOTA_LEAK] 出現次數
+                                print(
+                                    f"⚠️ [QUOTA_LEAK] 扣款失敗（漏算一次）："
+                                    f"user_id={user_id} task_id={task_id} "
+                                    f"duration_minutes={duration_minutes:.2f} "
+                                    f"reservation_minutes={reservation.get('duration_minutes')} "
+                                    f"err={e}"
+                                )
+                            finally:
+                                client.close()
 
                     # Audit log 保持異步（較不重要，失敗也沒關係）
                     try:
@@ -772,6 +775,22 @@ class TranscriptionService:
 
         if not success:
             print(f"❌ [CRITICAL] 無法將任務 {task_id} 標記為失敗！請檢查 MongoDB 連接")
+
+        # 釋放預扣配額（idempotent，若已被消耗或釋放則無動作）
+        try:
+            from pymongo import MongoClient
+            import os
+            from src.database.repositories.reservation_repo import release_reservation_sync
+
+            mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
+            db_name = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
+            client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+            released = release_reservation_sync(client[db_name], task_id)
+            client.close()
+            if released:
+                print(f"♻️  已釋放任務 {task_id} 的預扣配額")
+        except Exception as release_error:
+            print(f"⚠️ 釋放預扣失敗：{release_error}")
 
         # 記錄 audit log（轉錄失敗）- 詳細記錄
         try:
