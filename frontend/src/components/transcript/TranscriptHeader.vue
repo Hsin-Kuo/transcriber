@@ -887,12 +887,12 @@ onUnmounted(() => {
   margin-top: 4px;
 }
 
-.mobile-only {
+.action-btn.mobile-only {
   display: none;
 }
 
 @media (max-width: 768px) {
-  .mobile-only {
+  .action-btn.mobile-only {
     display: flex;
   }
 }
