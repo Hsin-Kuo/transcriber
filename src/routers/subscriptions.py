@@ -889,7 +889,7 @@ async def _reset_monthly_usage(db, user_id: str, now: datetime):
                 "usage.duration_minutes": 0,
                 "usage.ai_summaries": 0,
                 "usage.last_reset": now,
-                "updated_at": now,
+                "updated_at": get_utc_timestamp(),
             }
         }
     )

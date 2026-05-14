@@ -130,7 +130,7 @@ class QuotaManager:
                 "$set": {
                     # 給背景清掃任務判斷孤兒用：記錄最近一次 reserve 的時間
                     "reserved_ai_summaries_at": get_utc_timestamp(),
-                    "updated_at": datetime.utcnow(),
+                    "updated_at": get_utc_timestamp(),
                 },
             },
         )
@@ -171,7 +171,7 @@ class QuotaManager:
             {"_id": ObjectId(user_id), "reserved_ai_summaries": {"$gt": 0}},
             {
                 "$inc": {"reserved_ai_summaries": -1},
-                "$set": {"updated_at": datetime.utcnow()},
+                "$set": {"updated_at": get_utc_timestamp()},
             },
         )
 
@@ -198,7 +198,7 @@ class QuotaManager:
             {
                 "$set": {
                     "reserved_ai_summaries": 0,
-                    "updated_at": datetime.utcnow(),
+                    "updated_at": get_utc_timestamp(),
                 }
             },
         )
@@ -284,7 +284,7 @@ class QuotaManager:
                                 "usage.duration_minutes": 0,
                                 "usage.ai_summaries": 0,
                                 "usage.last_reset": now,
-                                "updated_at": now,
+                                "updated_at": get_utc_timestamp(),
                             }
                         }
                     )
@@ -315,7 +315,7 @@ class QuotaManager:
                     "subscription.status": "expired",
                     "subscription.updated_at": now.timestamp(),
                     "quota": free_quota,
-                    "updated_at": now,
+                    "updated_at": get_utc_timestamp(),
                 }
             }
         )
@@ -334,7 +334,7 @@ class QuotaManager:
                     "usage.duration_minutes": 0,
                     "usage.ai_summaries": 0,
                     "usage.last_reset": datetime.utcnow(),
-                    "updated_at": datetime.utcnow(),
+                    "updated_at": get_utc_timestamp(),
                 }
             }
         )
