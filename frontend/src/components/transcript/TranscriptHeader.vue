@@ -166,6 +166,18 @@
             <span>{{ $t('transcriptDetail.download') }}</span>
           </button>
 
+          <!-- 複製文字 -->
+          <button class="action-btn" :class="{ copied: isCopied }" @click="handleCopyText">
+            <svg v-if="isCopied" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            <span>{{ isCopied ? $t('transcriptDetail.copied') : $t('transcriptDetail.copyText') }}</span>
+          </button>
+
           <!-- 分享按鈕 -->
           <button class="action-btn" @click="handleShare">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -231,6 +243,10 @@ const props = defineProps({
   displayMode: {
     type: String,
     default: 'paragraph'
+  },
+  copyableText: {
+    type: String,
+    default: ''
   },
   showTimecodeMarkers: {
     type: Boolean,
@@ -320,6 +336,7 @@ const showMoreOptions = ref(false)
 const showSearchPopup = ref(false)
 const searchPopupRef = ref(null)
 const showSpeakerSettings = ref(false)
+const isCopied = ref(false)
 
 useClickOutside(moreOptionsRef, () => { showMoreOptions.value = false })
 useClickOutside(speakerSettingsRef, () => { showSpeakerSettings.value = false })
@@ -457,6 +474,32 @@ function closeSpeakerSettings() {
 function handleDownload() {
   showMoreOptions.value = false
   emit('download')
+}
+
+// 複製文字（複製成功後不關閉選單，按鈕顯示「已複製」約 2 秒）
+async function handleCopyText() {
+  const text = props.copyableText
+  if (!text) return
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+    }
+    isCopied.value = true
+    setTimeout(() => {
+      isCopied.value = false
+    }, 2000)
+  } catch (err) {
+    console.error('複製失敗:', err)
+  }
 }
 
 // 分享
@@ -916,6 +959,15 @@ onUnmounted(() => {
 .action-btn:hover {
   background: rgba(163, 177, 198, 0.15);
   color: var(--main-primary);
+}
+
+.action-btn.copied {
+  color: var(--color-success);
+}
+
+.action-btn.copied:hover {
+  background: rgba(34, 197, 94, 0.08);
+  color: var(--color-success);
 }
 
 .action-btn svg {

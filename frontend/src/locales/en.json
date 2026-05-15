@@ -397,6 +397,8 @@
     "save": "Save",
     "cancel": "Cancel",
     "download": "Download",
+    "copyText": "Copy text",
+    "copied": "Copied",
     "delete": "Delete",
     "viewMode": "View Mode",
     "paragraph": "Paragraph",

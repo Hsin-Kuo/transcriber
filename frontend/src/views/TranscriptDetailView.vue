@@ -11,6 +11,7 @@
       :is-editing-title="isEditingTitle"
       :editing-task-name="editingTaskName"
       :display-mode="displayMode"
+      :copyable-text="copyableText"
       :show-timecode-markers="showTimecodeMarkers"
       :time-format="timeFormat"
       :density-threshold="densityThreshold"
@@ -721,6 +722,17 @@ const {
   finishEditing,
   handleBeforeUnload
 } = useTranscriptEditor(currentTranscript, originalContent, displayMode, groupedSegments, convertTableToPlainText)
+
+// kebab「複製文字」用：純文字，不含時間碼與講者標籤
+const copyableText = computed(() => {
+  if (displayMode.value === 'paragraph') {
+    return currentTranscript.value?.content || ''
+  }
+  return groupedSegments.value
+    .map(group => group.combinedText.trim())
+    .filter(Boolean)
+    .join('\n\n')
+})
 
 // ========== 搜尋/取代功能 ==========
 const searchText = ref('')

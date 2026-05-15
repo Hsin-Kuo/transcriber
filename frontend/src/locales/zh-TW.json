@@ -397,6 +397,8 @@
     "save": "儲存",
     "cancel": "取消",
     "download": "下載",
+    "copyText": "複製文字",
+    "copied": "已複製",
     "delete": "刪除",
     "viewMode": "檢視模式",
     "paragraph": "段落",
