@@ -611,7 +611,6 @@
     "highlights": "Highlights",
     "summary": "Summary",
     "keywords": "Keywords",
-    "model": "Model",
     "type": "Type",
     "loadError": "Failed to load summary, please try again later",
     "generateError": "Failed to generate summary, please try again later",

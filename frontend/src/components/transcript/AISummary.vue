@@ -145,13 +145,6 @@
           </div>
         </div>
 
-        <!-- 元數據 -->
-        <div class="metadata">
-          <span class="metadata-item">
-            {{ $t('aiSummary.model') }}: {{ summary.metadata.model }}
-          </span>
-        </div>
-
         <!-- 重新生成按鈕 -->
         <div class="regenerate-row">
           <button class="regenerate-btn" @click="generateSummary" :disabled="isLoading || !hasAiSummaryQuota">
@@ -499,8 +492,16 @@ onUnmounted(() => {
 
 <style scoped>
 .ai-summary-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 80vh;
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   margin-bottom: 8px;
+}
+
+.ai-summary-card > .summary-header {
+  flex-shrink: 0;
 }
 
 .summary-header {
@@ -566,7 +567,8 @@ onUnmounted(() => {
 
 .summary-content {
   padding: 0 16px 12px;
-  max-height: 80vh;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -832,19 +834,6 @@ onUnmounted(() => {
   opacity: 0.7;
 }
 
-/* 元數據 */
-.metadata {
-  display: flex;
-  justify-content: flex-end;
-  padding-top: 8px;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.metadata-item {
-  font-size: 11px;
-  color: var(--main-text-light);
-}
-
 /* 重新生成按鈕 */
 .regenerate-btn {
   display: flex;
@@ -949,10 +938,6 @@ onUnmounted(() => {
 [data-theme="dark"] .action-item {
   background: rgba(255, 255, 255, 0.05);
   border-color: rgba(255, 255, 255, 0.1);
-}
-
-[data-theme="dark"] .metadata {
-  border-top-color: rgba(255, 255, 255, 0.1);
 }
 
 [data-theme="dark"] .copy-btn {
