@@ -14,6 +14,7 @@ zhconv
 fastapi
 uvicorn[standard]
 python-multipart
+motor
 
 # Google OAuth
 google-auth

@@ -11,9 +11,6 @@ pydub
 
 # MongoDB（Worker 直接寫入結果）
 pymongo
-# motor 與 fastapi 為 reservation_repo 模組頂層 import 所需（worker 走 sync path 不會實際呼叫 async/HTTP 部分）
-motor
-fastapi
 
 # 中文繁簡轉換
 zhconv
