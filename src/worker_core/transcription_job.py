@@ -268,7 +268,6 @@ def process_task(message_body: dict) -> None:
         from bson import ObjectId
         from src.database.repositories.reservation_repo import consume_reservation_sync
         from src.auth.quota import build_transcription_consumption_pipeline
-        from src.utils.time_utils import get_utc_timestamp
 
         user_id = task_doc.get("user", {}).get("user_id") if task_doc else None
         audio_duration_seconds = (task_doc.get("stats") or {}).get("audio_duration_seconds", 0) if task_doc else 0
