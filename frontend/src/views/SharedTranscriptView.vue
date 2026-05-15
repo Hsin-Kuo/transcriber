@@ -77,7 +77,7 @@
         <div v-show="summaryExpanded" class="summary-body">
           <!-- Meta -->
           <div v-if="taskData.summary.content.meta" class="summary-meta">
-            <span class="summary-type-badge">{{ taskData.summary.content.meta.type }}</span>
+            <span class="summary-type-badge">{{ getTypeLabel(taskData.summary.content.meta.type) }}</span>
             <span v-if="taskData.summary.content.meta.detected_topic" class="summary-topic">
               {{ taskData.summary.content.meta.detected_topic }}
             </span>
@@ -160,7 +160,7 @@ import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import { NEW_ENDPOINTS } from '../api/endpoints'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const route = useRoute()
 
 const loading = ref(true)
@@ -198,7 +198,7 @@ onMounted(async () => {
 function formatDate(dateStr) {
   if (!dateStr) return ''
   const d = new Date(dateStr)
-  return d.toLocaleDateString(undefined, {
+  return d.toLocaleDateString(locale.value, {
     year: 'numeric', month: 'short', day: 'numeric',
     hour: '2-digit', minute: '2-digit'
   })
@@ -216,6 +216,16 @@ function seekTo(time) {
     audioEl.value.currentTime = time
     audioEl.value.play()
   }
+}
+
+function getTypeLabel(type) {
+  const labels = {
+    'Meeting': t('aiSummary.typeMeeting'),
+    'Lecture': t('aiSummary.typeLecture'),
+    'Interview': t('aiSummary.typeInterview'),
+    'General': t('aiSummary.typeGeneral')
+  }
+  return labels[type] || type
 }
 </script>
 

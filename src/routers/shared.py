@@ -121,8 +121,22 @@ async def get_shared_task(
     if segment_doc:
         segments = segment_doc.get("segments", [])
 
-    # 判斷音檔是否可用
+    # 判斷音檔是否可用（與 tasks.py 詳情頁邏輯一致：套用擁有者 tier 的保留天數，過期則視為無音檔）
     has_audio = bool(result_info.get("audio_file"))
+    if has_audio:
+        from .tasks import _is_audio_expired
+        from ..database.repositories.user_repo import UserRepository
+        from ..models.quota import QUOTA_TIERS, QuotaTier
+        owner_id = task.get("user", {}).get("user_id")
+        retention_days = 7
+        if owner_id:
+            user_repo = UserRepository(db)
+            owner = await user_repo.get_by_id(owner_id)
+            owner_tier = owner.get("quota", {}).get("tier", "free") if owner else "free"
+            tier_config = QUOTA_TIERS.get(QuotaTier(owner_tier), QUOTA_TIERS[QuotaTier.FREE])
+            retention_days = tier_config.get("audio_retention_days", 7)
+        if _is_audio_expired(task, retention_days):
+            has_audio = False
 
     # 序列化日期（timestamps 儲存為 Unix epoch 秒數）
     created_at = task.get("timestamps", {}).get("completed_at") or task.get("timestamps", {}).get("created_at")
