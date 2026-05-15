@@ -36,6 +36,7 @@
           type="text"
           class="filter-tag-input"
           v-model="editingTagText"
+          :size="computeInputSize(editingTagText)"
           @blur="finishEditingTag"
           @keyup.enter="finishEditingTag"
           @keyup.esc="cancelEditingTag"
@@ -61,15 +62,30 @@
           {{ tag }}
         </button>
 
-        <!-- 編輯模式：顏色選擇器按鈕 -->
+        <!-- 編輯模式：編輯中的 tag 顯示顏色選擇器；其他 tag 顯示垃圾桶 -->
         <div v-if="isEditing" class="tag-color-picker-wrapper">
           <button
+            v-if="editingTag === tag"
             :ref="el => setColorPickerButtonRef(tag, el)"
             class="btn-color-picker"
             :title="$t('taskList.setTagColor', { tag })"
             :style="{ backgroundColor: getTagColor(tag) }"
+            @mousedown.prevent
             @click="handleToggleColorPicker(tag)"
           ></button>
+          <button
+            v-else
+            class="btn-delete-tag"
+            :title="$t('taskList.deleteTag', { tag })"
+            @click="handleDeleteTag(tag)"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              <line x1="10" y1="11" x2="10" y2="17"></line>
+              <line x1="14" y1="11" x2="14" y2="17"></line>
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -95,7 +111,9 @@
           @click="saveEditing"
           :title="$t('taskList.save')"
         >
-          ✓
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
         </button>
 
         <!-- 清除篩選按鈕 -->
@@ -130,7 +148,7 @@ import { useTaskTags } from '../../composables/task/useTaskTags'
 import ColorPickerPopup from './ColorPickerPopup.vue'
 
 const { t: $t } = useI18n()
-const { getTagColor, updateTagColorLocal, saveTagColor, renameTag, saveTagOrder, getTagIds, tagsData, fetchTagColors } = useTaskTags($t)
+const { getTagColor, updateTagColorLocal, saveTagColor, renameTag, deleteTag, saveTagOrder, getTagIds, tagsData, fetchTagColors } = useTaskTags($t)
 
 // Props
 const props = defineProps({
@@ -435,6 +453,44 @@ function handleToggleColorPicker(tag) {
   }
 }
 
+// 計算 input size：CJK 字元佔約 2 倍寬，加 3 字 buffer，上限 30 英文字寬
+function computeInputSize(text) {
+  const cjkMatches = text.match(/[　-〿぀-ゟ゠-ヿ一-鿿＀-￯]/g)
+  const cjkCount = cjkMatches ? cjkMatches.length : 0
+  const effective = text.length + cjkCount + 3
+  return Math.min(Math.max(effective, 5), 30)
+}
+
+// 刪除標籤
+async function handleDeleteTag(tag) {
+  if (!confirm($t('taskList.deleteTagConfirm', { tag }))) {
+    return
+  }
+
+  try {
+    await deleteTag(tag)
+  } catch (error) {
+    alert($t('taskList.errorDeleteTagFull', { message: error.response?.data?.detail || error.message }))
+    return
+  }
+
+  // 清除該 tag 在前端各 state 的痕跡（保留其他 tag 的暫存變更）
+  if (editingTagOrder.value.includes(tag)) {
+    editingTagOrder.value = editingTagOrder.value.filter(t => t !== tag)
+  }
+  if (props.selectedTags.includes(tag)) {
+    emit('update:selectedTags', props.selectedTags.filter(t => t !== tag))
+  }
+  if (tag in pendingColorChanges.value) {
+    const next = { ...pendingColorChanges.value }
+    delete next[tag]
+    pendingColorChanges.value = next
+  }
+
+  console.log('✅ ' + $t('taskList.successDeleteTag', { tag }))
+  emit('refresh')
+}
+
 function handleColorSelected({ tag, color }) {
   // 只更新本地狀態，不立即保存到後端
   updateTagColorLocal(tag, color)
@@ -504,13 +560,14 @@ function handleColorSelected({ tag, color }) {
 }
 
 .filter-tag-input {
-  padding: 6px 14px;
+  padding: 6px 10px;
   font-size: 13px;
   font-weight: 500;
   border: 2px solid var(--color-secondary);
   border-radius: 12px;
   outline: none;
-  min-width: 100px;
+  min-width: 40px;
+  width: auto;
   transition: all 0.2s;
 }
 
@@ -566,6 +623,32 @@ function handleColorSelected({ tag, color }) {
   transform: scale(1.15);
 }
 
+.btn-delete-tag {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(var(--color-danger-rgb), 0.7);
+  transition: all 0.2s;
+}
+
+.btn-delete-tag:hover {
+  background: rgba(var(--color-danger-rgb), 0.12);
+  color: var(--color-danger);
+  transform: scale(1.1);
+}
+
+.btn-delete-tag svg {
+  width: 14px;
+  height: 14px;
+}
+
 .filter-header-actions {
   display: flex;
   gap: 8px;
@@ -600,8 +683,6 @@ function handleColorSelected({ tag, color }) {
   background: rgba(var(--color-success-rgb), 0.15);
   border-color: rgba(var(--color-success-rgb), 0.3);
   color: var(--color-success-light);
-  font-size: 16px;
-  font-weight: 600;
 }
 
 .btn-save-filter:hover {
@@ -637,9 +718,9 @@ function handleColorSelected({ tag, color }) {
   }
 
   .filter-tag-input {
-    padding: 4px 10px;
+    padding: 4px 8px;
     font-size: var(--font-size-sm);
-    min-width: 80px;
+    min-width: 36px;
   }
 
   .drag-handle svg {
@@ -650,6 +731,16 @@ function handleColorSelected({ tag, color }) {
   .btn-color-picker {
     width: 14px;
     height: 14px;
+  }
+
+  .btn-delete-tag {
+    width: 18px;
+    height: 18px;
+  }
+
+  .btn-delete-tag svg {
+    width: 12px;
+    height: 12px;
   }
 
   .filter-header-actions {
@@ -664,6 +755,7 @@ function handleColorSelected({ tag, color }) {
   }
 
   .btn-edit-filter svg,
+  .btn-save-filter svg,
   .btn-clear-filter svg {
     width: 12px;
     height: 12px;
@@ -695,9 +787,9 @@ function handleColorSelected({ tag, color }) {
   }
 
   .filter-tag-input {
-    padding: 3px 8px;
+    padding: 3px 6px;
     font-size: var(--font-size-sm);
-    min-width: 60px;
+    min-width: 30px;
     border-width: 1.5px;
   }
 
@@ -719,6 +811,16 @@ function handleColorSelected({ tag, color }) {
     height: 12px;
   }
 
+  .btn-delete-tag {
+    width: 16px;
+    height: 16px;
+  }
+
+  .btn-delete-tag svg {
+    width: 10px;
+    height: 10px;
+  }
+
   .filter-header-actions {
     gap: 4px;
   }
@@ -731,13 +833,10 @@ function handleColorSelected({ tag, color }) {
   }
 
   .btn-edit-filter svg,
+  .btn-save-filter svg,
   .btn-clear-filter svg {
     width: 10px;
     height: 10px;
-  }
-
-  .btn-save-filter {
-    font-size: 14px;
   }
 }
 </style>

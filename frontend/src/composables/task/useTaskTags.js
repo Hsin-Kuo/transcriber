@@ -215,6 +215,52 @@ export function useTaskTags($t) {
   }
 
   /**
+   * 刪除標籤
+   *
+   * 後端會以 update_many + $pull 從所有任務移除該標籤（cascade delete）。
+   * 成功後 local 移除共享狀態中該 tag 的痕跡，不重新 fetch tagColors，
+   * 以保留其他 tag 的 pendingColorChanges 等暫存變更。
+   *
+   * @param {string} tagName - 要刪除的標籤名稱
+   * @returns {Promise<boolean>} 是否成功刪除
+   */
+  async function deleteTag(tagName) {
+    let tagObj = tagsData.value.find(t => t.name === tagName)
+
+    // 若 tag 尚未在 tags collection（純由 task.tags 推導），先建立才能走 cascade delete
+    if (!tagObj) {
+      const response = await api.post('/tags', {
+        name: tagName,
+        color: getTagColor(tagName)
+      })
+      tagObj = response.data
+    }
+
+    const tagId = tagObj.tag_id || tagObj._id
+    await api.delete(`/tags/${tagId}`)
+    _removeTagFromLocalState(tagName)
+    return true
+  }
+
+  /**
+   * 從共享狀態移除指定標籤的所有痕跡（local only）
+   * @param {string} tagName
+   */
+  function _removeTagFromLocalState(tagName) {
+    tagsData.value = tagsData.value.filter(t => t.name !== tagName)
+
+    if (tagColors.value[tagName]) {
+      const next = { ...tagColors.value }
+      delete next[tagName]
+      tagColors.value = next
+    }
+
+    if (customTagOrder.value.includes(tagName)) {
+      customTagOrder.value = customTagOrder.value.filter(t => t !== tagName)
+    }
+  }
+
+  /**
    * 重命名標籤（更新所有使用該標籤的任務）
    * @param {string} oldTag - 舊標籤名稱
    * @param {string} newTag - 新標籤名稱
@@ -309,6 +355,7 @@ export function useTaskTags($t) {
     updateTagColorLocal,
     saveTagColor,
     renameTag,
+    deleteTag,
     getTagColor,
     getTagIds,
 

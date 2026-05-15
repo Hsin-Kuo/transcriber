@@ -179,7 +179,7 @@ class TagService:
         await self._remove_tag_from_all_tasks(user_id, tag_name)
 
         # 刪除標籤
-        success = await self.tag_repo.delete(tag_id)
+        success = await self.tag_repo.delete(tag_id, user_id)
         return success
 
     async def update_tag_order(
@@ -318,46 +318,13 @@ class TagService:
         old_name: str,
         new_name: str
     ) -> None:
-        """重命名所有任務中的標籤
-
-        Args:
-            user_id: 用戶 ID
-            old_name: 舊標籤名稱
-            new_name: 新標籤名稱
-        """
-        # 獲取所有包含此標籤的任務
-        tasks = await self.task_repo.find_by_tag(user_id, old_name)
-
-        for task in tasks:
-            task_id = str(task.get("_id") or task.get("task_id"))
-            current_tags = task.get("tags", [])
-
-            # 替換標籤名稱
-            new_tags = [new_name if tag == old_name else tag for tag in current_tags]
-
-            # 更新任務
-            await self.task_repo.update(task_id, {"tags": new_tags})
+        """重命名所有任務中的標籤（單次原子操作）"""
+        await self.task_repo.rename_tag_in_all_user_tasks(user_id, old_name, new_name)
 
     async def _remove_tag_from_all_tasks(
         self,
         user_id: str,
         tag_name: str
     ) -> None:
-        """從所有任務中移除指定標籤
-
-        Args:
-            user_id: 用戶 ID
-            tag_name: 標籤名稱
-        """
-        # 獲取所有包含此標籤的任務
-        tasks = await self.task_repo.find_by_tag(user_id, tag_name)
-
-        for task in tasks:
-            task_id = str(task.get("_id") or task.get("task_id"))
-            current_tags = task.get("tags", [])
-
-            # 移除標籤
-            new_tags = [tag for tag in current_tags if tag != tag_name]
-
-            # 更新任務
-            await self.task_repo.update(task_id, {"tags": new_tags})
+        """從所有任務中移除指定標籤（單次原子操作）"""
+        await self.task_repo.remove_tag_from_all_user_tasks(user_id, tag_name)

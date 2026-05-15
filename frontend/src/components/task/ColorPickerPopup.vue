@@ -32,6 +32,7 @@
           :key="color"
           class="preset-color-btn"
           :style="{ backgroundColor: color }"
+          @mousedown.prevent
           @click="selectColor(color)"
           :title="color"
         ></button>

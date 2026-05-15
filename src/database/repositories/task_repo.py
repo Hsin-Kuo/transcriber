@@ -519,6 +519,89 @@ class TaskRepository:
 
         return tasks
 
+    async def remove_tag_from_all_user_tasks(self, user_id: str, tag_name: str) -> int:
+        """從用戶所有任務中移除指定標籤（單次原子操作）
+
+        使用 $pull 一次性從所有符合條件的 task.tags 陣列移除該值，
+        相較於 find 後逐筆 update，避免 N+1 查詢且具原子性。
+
+        Args:
+            user_id: 用戶 ID
+            tag_name: 要移除的標籤名稱
+
+        Returns:
+            被更新的任務數量
+        """
+        now = get_utc_timestamp()
+        result = await self.collection.update_many(
+            {
+                "tags": tag_name,
+                "$or": [
+                    {"user.user_id": user_id},  # 巢狀格式
+                    {"user_id": user_id}  # 扁平格式（向後兼容）
+                ]
+            },
+            {
+                "$pull": {"tags": tag_name},
+                "$set": {
+                    "updated_at": now,
+                    "timestamps.updated_at": now
+                }
+            }
+        )
+        return result.modified_count
+
+    async def rename_tag_in_all_user_tasks(
+        self,
+        user_id: str,
+        old_name: str,
+        new_name: str
+    ) -> int:
+        """重新命名用戶所有任務中的指定標籤（單次原子操作）
+
+        使用 aggregation pipeline 在 update_many 內單步完成：
+        過濾掉 old_name，再用 $setUnion 加入 new_name（自動去重）。
+        需要 MongoDB 4.2+。
+
+        Args:
+            user_id: 用戶 ID
+            old_name: 舊標籤名稱
+            new_name: 新標籤名稱
+
+        Returns:
+            被更新的任務數量
+        """
+        now = get_utc_timestamp()
+        result = await self.collection.update_many(
+            {
+                "tags": old_name,
+                "$or": [
+                    {"user.user_id": user_id},
+                    {"user_id": user_id}
+                ]
+            },
+            [
+                {
+                    "$set": {
+                        "tags": {
+                            "$setUnion": [
+                                {
+                                    "$filter": {
+                                        "input": "$tags",
+                                        "cond": {"$ne": ["$$this", old_name]}
+                                    }
+                                },
+                                [new_name]
+                            ]
+                        },
+                        "updated_at": now,
+                        "timestamps.updated_at": now
+                    }
+                }
+            ]
+        )
+        return result.modified_count
+
     async def clear_audio_files_except_kept(self, user_id: str) -> int:
         """清除未勾選保留的音檔記錄"""
         now = get_utc_timestamp()
