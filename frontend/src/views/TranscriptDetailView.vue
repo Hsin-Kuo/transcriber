@@ -338,27 +338,24 @@
             <div v-if="isReplacing" class="transcript-display replacing-state">
               <span class="replacing-indicator">{{ $t('transcriptDetail.replacing') || '正在替換...' }}</span>
             </div>
-            <!-- 編輯模式：保留 segment 標記的 contenteditable -->
+            <!-- 編輯模式：純文字 contenteditable;segment 視覺層由 CSS Highlight 與 overlay 提供 -->
             <div
               v-else-if="isEditing"
               class="transcript-display editing"
+              :class="{ 'alt-segment-hover': hoverChipVisible }"
               contenteditable="true"
               :key="`transcript-editing-${contentVersion}`"
               ref="textareaRef"
+              v-text="currentTranscript.content"
               @keydown="handleContentEditableKeyDown"
               @paste="handlePaste"
-            ><template v-for="(part, index) in getContentPartsForEditing()" :key="`edit-${index}`"><span v-if="!part.isMarker">{{ part.text }}</span><span
-                v-else
-                class="segment-text"
-                :class="{ 'clickable': isAltPressed && currentTranscript.hasAudio }"
-                :data-segment-index="part.segmentIndex"
-                :data-start-time="part.start"
-                @click="handleTextClick(part.start, $event)"
-              >{{ part.text }}<span
-                  v-if="isAltPressed"
-                  class="text-timecode-tooltip"
-                  contenteditable="false"
-                >{{ formatTime(part.start) }}</span></span></template></div>
+              @input="segOffsets.handleInput($event.currentTarget)"
+              @compositionstart="segOffsets.handleCompositionStart()"
+              @compositionend="segOffsets.handleCompositionEnd($event.currentTarget)"
+              @mousemove="handleEditorMouseMove"
+              @mousedown="handleEditorClickInEditing"
+              @scroll="hideHoverChip"
+            ></div>
             <!-- 非編輯模式：使用 v-for 渲染高亮和標記 -->
             <div
               v-else
@@ -405,6 +402,13 @@
                 </span>
               </template>
             </div>
+            <!-- Alt hover timecode chip (只在編輯模式 + Alt 按住 + hover 到 segment 時顯示) -->
+            <div
+              v-show="isEditing && hoverChipVisible"
+              ref="hoverChipRef"
+              class="segment-hover-chip"
+              :style="hoverChipStyle"
+            >{{ hoverChipTime }}</div>
           </div>
 
           <!-- 字幕模式：表格組件 -->
@@ -583,6 +587,14 @@ import { useAudioPlayer } from '../composables/transcript/useAudioPlayer'
 import { useSubtitleMode } from '../composables/transcript/useSubtitleMode'
 import { useTranscriptEditor } from '../composables/transcript/useTranscriptEditor'
 import { useSegmentMarkers } from '../composables/transcript/useSegmentMarkers'
+import {
+  applyAnchorRule,
+  buildCharIndexMap,
+  caretToCharOffset,
+  charOffsetToRange,
+  extractText,
+  useSegmentEditingOffsets,
+} from '../composables/transcript/useSegmentEditingOffsets'
 import { useKeyboardShortcuts } from '../composables/transcript/useKeyboardShortcuts'
 import { useTranscriptDownload } from '../composables/transcript/useTranscriptDownload'
 import { useTaskTags } from '../composables/task/useTaskTags'
@@ -749,7 +761,7 @@ const hasUnsavedChanges = computed(() => {
   if (displayMode.value === 'paragraph') {
     // 段落模式：從 contenteditable div 提取實際內容並比較
     if (!textareaRef.value) return false
-    const currentContent = extractTextContent(textareaRef.value)
+    const currentContent = extractText(textareaRef.value)
     return currentContent !== originalContent.value
   } else if (displayMode.value === 'subtitle') {
     // 字幕模式：比較表格內容
@@ -767,6 +779,9 @@ const {
   generateSegmentMarkers,
   formatTime
 } = useSegmentMarkers()
+
+// 編輯期 segment offset 追蹤（純文字編輯模式下的 segment 對應）
+const segOffsets = useSegmentEditingOffsets()
 
 // 控制是否顯示 timecode 標記
 const showTimecodeMarkers = ref(false)
@@ -816,6 +831,17 @@ const contentVersion = ref(0)
 
 // 是否正在執行替換（用於暫時卸載 contenteditable 避免 Vue DOM 同步問題）
 const isReplacing = ref(false)
+
+// isReplacing 由 true → false 時,代表搜尋取代完成、editing div 剛重新掛載,需要重新初始化 segOffsets
+watch(isReplacing, (newVal, oldVal) => {
+  if (oldVal === true && newVal === false && isEditing.value && displayMode.value === 'paragraph') {
+    nextTick(() => {
+      if (textareaRef.value) {
+        segOffsets.initEditing(textareaRef.value, segmentMarkers.value)
+      }
+    })
+  }
+})
 
 // 保存編輯前的 segments 狀態（用於取消編輯時恢復）
 const originalSegments = ref([])
@@ -980,6 +1006,15 @@ function handleStartEditing() {
   // 調用原始的 startEditing
   startEditing()
 
+  // 段落模式：初始化編輯期 segment offset 追蹤（等 contenteditable 掛載）
+  if (displayMode.value === 'paragraph') {
+    nextTick(() => {
+      if (textareaRef.value) {
+        segOffsets.initEditing(textareaRef.value, segmentMarkers.value)
+      }
+    })
+  }
+
   // 恢復滾動位置
   if (displayMode.value === 'paragraph' && savedScrollTop > 0) {
     const timerId = setTimeout(() => {
@@ -1019,6 +1054,9 @@ function handleCancelEditing() {
     // 清空備份
     originalSegments.value = []
   }
+
+  // 清空編輯期 segment offset 追蹤
+  segOffsets.resetEditing()
 
   // 調用原始的 cancelEditing
   cancelEditing()
@@ -1066,34 +1104,33 @@ async function saveEditing() {
   }
 
   if (displayMode.value === 'paragraph') {
-    // 從 contenteditable div 中提取純文字內容和 segment 文字
+    // 從 contenteditable div 提取純文字 + 用 editSegmentRanges 切出每段新文字
     if (textareaRef.value) {
-      const { fullText, segmentTexts } = extractTextContentWithSegments(textareaRef.value)
+      const { fullText, updatedSegments, hasChanges: segOffsetsHasChanges } =
+        segOffsets.extractForSave(textareaRef.value, segments.value)
       contentToSave = fullText
-
-      // 更新到 currentTranscript
       currentTranscript.value.content = contentToSave
 
-      // 如果有 segments 資料，直接從 DOM 提取的 segment 文字來更新
-      if (segments.value && segments.value.length > 0 && segmentTexts.length > 0) {
-        const updatedSegments = segments.value.map((seg) => ({ ...seg }))
-        let hasChanges = false
-
-        // 使用從 DOM 直接提取的 segment 文字來更新
-        segmentTexts.forEach(({ segmentIndex, text }) => {
-          if (segmentIndex >= 0 && segmentIndex < updatedSegments.length) {
-            const originalText = updatedSegments[segmentIndex].text?.trim() || ''
-            if (text !== originalText) {
-              updatedSegments[segmentIndex].text = text
-              hasChanges = true
-              console.log(`✏️ Segment ${segmentIndex} 已修改: "${originalText}" → "${text}"`)
-            }
+      // segOffsets 內部只比對 slice 跟當下 segments.value;若搜尋取代已經先把
+      // segments.value 改過,內部會偵測不到變更。額外跟編輯前快照比對,確保
+      // 取代後馬上存檔也能正確把 segments 送到後端。
+      let hasChanges = segOffsetsHasChanges
+      if (
+        !hasChanges &&
+        originalSegments.value.length > 0 &&
+        originalSegments.value.length === segments.value.length
+      ) {
+        for (let i = 0; i < segments.value.length; i++) {
+          const a = (segments.value[i].text ?? '').trim()
+          const b = (originalSegments.value[i]?.text ?? '').trim()
+          if (a !== b) {
+            hasChanges = true
+            break
           }
-        })
-
-        if (hasChanges) {
-          segmentsToSave = updatedSegments
         }
+      }
+      if (hasChanges) {
+        segmentsToSave = updatedSegments
       }
     } else {
       contentToSave = currentTranscript.value.content
@@ -1116,6 +1153,9 @@ async function saveEditing() {
 
     // 清空 segments 備份
     originalSegments.value = []
+
+    // 清空編輯期 segment offset 追蹤
+    segOffsets.resetEditing()
 
     // 恢復 timecode markers 狀態
     if (displayMode.value === 'paragraph') {
@@ -1419,294 +1459,6 @@ function copyShareLink() {
   })
 }
 
-// 從 contenteditable div 中提取純文字內容（排除標記元素）
-function extractTextContent(element) {
-  // 克隆元素以避免修改原始 DOM，防止 Vue 更新時出錯
-  const clone = element.cloneNode(true)
-
-  let text = ''
-
-  function traverseNode(node) {
-    // 跳過 segment-marker 元素及其內容
-    if (node.classList && node.classList.contains('segment-marker')) {
-      return
-    }
-
-    // 跳過 text-timecode-tooltip 元素（Alt 模式的 tooltip）
-    if (node.classList && node.classList.contains('text-timecode-tooltip')) {
-      return
-    }
-
-    // 處理文字節點
-    if (node.nodeType === Node.TEXT_NODE) {
-      text += node.textContent
-      return
-    }
-
-    // 處理 <br> 標籤
-    if (node.nodeName === 'BR') {
-      text += '\n'
-      return
-    }
-
-    // 處理塊級元素（div）- 在前面添加換行（如果不是第一個元素）
-    if (node.nodeName === 'DIV' && text.length > 0 && !text.endsWith('\n')) {
-      text += '\n'
-    }
-
-    // 遞歸處理子節點（使用 Array.from 避免 NodeList 被修改）
-    const children = Array.from(node.childNodes)
-    for (let child of children) {
-      traverseNode(child)
-    }
-
-    // 處理塊級元素（div）- 在後面添加換行（如果內容不為空且不是只有 br）
-    if (node.nodeName === 'DIV' && node.childNodes.length > 0) {
-      // 檢查 div 是否只包含 <br>
-      const hasOnlyBr = node.childNodes.length === 1 && node.childNodes[0].nodeName === 'BR'
-      if (!hasOnlyBr && !text.endsWith('\n')) {
-        text += '\n'
-      }
-    }
-  }
-
-  // 從克隆的根元素開始遍歷
-  const children = Array.from(clone.childNodes)
-  for (let child of children) {
-    traverseNode(child)
-  }
-
-  // 移除零寬度空格（用於修復中文輸入）
-  return text.replace(/\u200B/g, '')
-}
-
-/**
- * 找出兩段文字之間的編輯區域
- * @param {string} oldText - 原始文字
- * @param {string} newText - 新文字
- * @returns {Object} 編輯區域資訊
- */
-function findEditRegion(oldText, newText) {
-  // 找出從頭開始第一個不同的位置
-  let startDiff = 0
-  while (startDiff < oldText.length && startDiff < newText.length &&
-         oldText[startDiff] === newText[startDiff]) {
-    startDiff++
-  }
-
-  // 找出從尾部開始第一個不同的位置
-  let endDiffOld = oldText.length
-  let endDiffNew = newText.length
-  while (endDiffOld > startDiff && endDiffNew > startDiff &&
-         oldText[endDiffOld - 1] === newText[endDiffNew - 1]) {
-    endDiffOld--
-    endDiffNew--
-  }
-
-  return {
-    startDiff,              // 編輯開始位置
-    oldEndDiff: endDiffOld, // 原始文字的編輯結束位置
-    newEndDiff: endDiffNew  // 新文字的編輯結束位置
-  }
-}
-
-/**
- * 使用文字差異比對來更新 segments
- * @param {string} oldText - 原始文字
- * @param {string} newText - 新文字
- * @param {Array} segments - 原始 segments
- * @param {Array} markers - segment 標記（包含位置資訊）
- * @returns {Array|null} 更新後的 segments，如果沒有變更則返回 null
- */
-function updateSegmentsFromTextDiff(oldText, newText, segments, markers) {
-  if (oldText === newText) {
-    return null // 沒有變更
-  }
-
-  const edit = findEditRegion(oldText, newText)
-  const lengthDelta = newText.length - oldText.length
-
-  // 按位置排序標記
-  const sortedMarkers = [...markers].sort((a, b) => a.textStartIndex - b.textStartIndex)
-
-  const updatedSegments = segments.map((seg) => ({ ...seg }))
-  let hasChanges = false
-
-  sortedMarkers.forEach((marker) => {
-    const segIndex = marker.segmentIndex
-    if (segIndex < 0 || segIndex >= updatedSegments.length) return
-
-    let newStartIndex = marker.textStartIndex
-    let newEndIndex = marker.textEndIndex
-
-    if (marker.textEndIndex <= edit.startDiff) {
-      // segment 完全在編輯區域之前，不受影響
-      return
-    } else if (marker.textStartIndex >= edit.oldEndDiff) {
-      // segment 完全在編輯區域之後，需要調整位置
-      newStartIndex += lengthDelta
-      newEndIndex += lengthDelta
-    } else {
-      // segment 與編輯區域重疊，需要重新計算
-      if (marker.textStartIndex < edit.startDiff) {
-        // segment 開始在編輯區域之前
-        if (marker.textEndIndex <= edit.oldEndDiff) {
-          // segment 結束在編輯區域內
-          newEndIndex = edit.newEndDiff
-        } else {
-          // segment 跨越整個編輯區域
-          newEndIndex += lengthDelta
-        }
-      } else {
-        // segment 開始在編輯區域內
-        if (marker.textEndIndex <= edit.oldEndDiff) {
-          // segment 完全在編輯區域內
-          newStartIndex = edit.startDiff
-          newEndIndex = edit.newEndDiff
-        } else {
-          // segment 結束在編輯區域之後
-          newStartIndex = edit.newEndDiff
-          newEndIndex = marker.textEndIndex + lengthDelta
-        }
-      }
-    }
-
-    // 確保索引有效
-    newStartIndex = Math.max(0, Math.min(newStartIndex, newText.length))
-    newEndIndex = Math.max(newStartIndex, Math.min(newEndIndex, newText.length))
-
-    // 提取新文字
-    const newSegText = newText.substring(newStartIndex, newEndIndex).trim()
-    const originalText = updatedSegments[segIndex].text.trim()
-
-    if (newSegText !== originalText) {
-      updatedSegments[segIndex].text = newSegText
-      hasChanges = true
-      console.log(`✏️ Segment ${segIndex} 已修改: "${originalText}" → "${newSegText}"`)
-    }
-  })
-
-  return hasChanges ? updatedSegments : null
-}
-
-/**
- * 從 contenteditable 元素提取文字內容，並記錄每段文字對應的 segment
- * @param {HTMLElement} element - contenteditable 元素
- * @returns {Object} { fullText: string, segmentTexts: Array<{segmentIndex: number, text: string}> }
- */
-function extractTextContentWithSegments(element) {
-  if (!element) {
-    return { fullText: '', segmentTexts: [] }
-  }
-
-  const clone = element.cloneNode(true)
-  let fullText = ''
-  const segmentTexts = []
-
-  /**
-   * 從節點中提取純文字（用於 segment 內部）
-   */
-  function extractTextFromNode(node) {
-    let text = ''
-
-    // 跳過 segment-marker 和 tooltip 元素
-    if (node.classList && (node.classList.contains('segment-marker') || node.classList.contains('text-timecode-tooltip'))) {
-      return ''
-    }
-
-    if (node.nodeType === Node.TEXT_NODE) {
-      return node.textContent
-    }
-
-    if (node.nodeName === 'BR') {
-      return '\n'
-    }
-
-    // 遞歸處理子節點
-    const children = Array.from(node.childNodes)
-    for (let child of children) {
-      text += extractTextFromNode(child)
-    }
-
-    return text
-  }
-
-  function traverseNode(node) {
-    // 跳過 segment-marker 元素及其內容
-    if (node.classList && node.classList.contains('segment-marker')) {
-      return
-    }
-
-    // 跳過 text-timecode-tooltip 元素
-    if (node.classList && node.classList.contains('text-timecode-tooltip')) {
-      return
-    }
-
-    // 檢查是否是帶有 data-segment-index 的節點
-    if (node.nodeType === Node.ELEMENT_NODE && node.hasAttribute && node.hasAttribute('data-segment-index')) {
-      const segmentIndex = parseInt(node.getAttribute('data-segment-index'), 10)
-      // 直接提取這個 segment span 內的所有文字
-      const segmentText = extractTextFromNode(node)
-
-      fullText += segmentText
-
-      if (segmentText) {
-        segmentTexts.push({
-          segmentIndex: segmentIndex,
-          text: segmentText
-        })
-      }
-      // 已處理完這個 segment，不需要再遞歸
-      return
-    }
-
-    // 處理文字節點
-    if (node.nodeType === Node.TEXT_NODE) {
-      fullText += node.textContent
-      return
-    }
-
-    // 處理 <br> 標籤
-    if (node.nodeName === 'BR') {
-      fullText += '\n'
-      return
-    }
-
-    // 處理塊級元素（div）
-    if (node.nodeName === 'DIV' && fullText.length > 0 && !fullText.endsWith('\n')) {
-      fullText += '\n'
-    }
-
-    // 遞歸處理子節點
-    const children = Array.from(node.childNodes)
-    for (let child of children) {
-      traverseNode(child)
-    }
-
-    // 塊級元素結束時的換行處理
-    if (node.nodeName === 'DIV' && node.childNodes.length > 0) {
-      const hasOnlyBr = node.childNodes.length === 1 && node.childNodes[0].nodeName === 'BR'
-      if (!hasOnlyBr && !fullText.endsWith('\n')) {
-        fullText += '\n'
-      }
-    }
-  }
-
-  // 遍歷所有子節點
-  const children = Array.from(clone.childNodes)
-  for (let child of children) {
-    traverseNode(child)
-  }
-
-  // 移除零寬度空格
-  fullText = fullText.replace(/\u200B/g, '')
-  segmentTexts.forEach(seg => {
-    seg.text = seg.text.replace(/\u200B/g, '').trim()
-  })
-
-  return { fullText, segmentTexts }
-}
-
 // ========== 搜尋功能處理 ==========
 
 // 執行搜尋
@@ -1783,7 +1535,7 @@ function handleSearch(text) {
 function getSearchableContent() {
   if (displayMode.value === 'paragraph') {
     if (textareaRef.value) {
-      return extractTextContent(textareaRef.value)
+      return extractText(textareaRef.value)
     }
     return currentTranscript.value.content || ''
   } else if (displayMode.value === 'subtitle') {
@@ -1801,120 +1553,27 @@ function getSearchableContent() {
 
 // 使用 CSS Custom Highlight API 應用搜尋高亮（編輯模式專用）
 function applySearchHighlightsWithCSS() {
-  // 檢查瀏覽器是否支援 CSS Custom Highlight API
-  if (!CSS.highlights) {
-    return
-  }
+  if (!CSS.highlights) return
 
-  // 清除之前的高亮
   CSS.highlights.delete('search-highlight')
   CSS.highlights.delete('search-highlight-current')
 
-  if (!textareaRef.value || searchMatches.value.length === 0) {
-    return
-  }
+  if (!textareaRef.value || searchMatches.value.length === 0) return
 
+  const map = buildCharIndexMap(textareaRef.value)
   const ranges = []
   const currentRanges = []
 
-  // 遍歷 contenteditable 元素中的文字節點，建立字符位置映射
-  // 邏輯需與 extractTextContent 保持一致
-  const textNodes = []
-  let charIndex = 0
-  let lastCharWasNewline = false
-
-  function collectTextNodes(node) {
-    // 跳過 segment-marker 和 tooltip 元素
-    if (node.classList && (node.classList.contains('segment-marker') || node.classList.contains('text-timecode-tooltip'))) {
-      return
-    }
-
-    if (node.nodeType === Node.TEXT_NODE) {
-      const text = node.textContent || ''
-      if (text.length > 0) {
-        // 移除零寬度空格，與 extractTextContent 保持一致
-        const cleanText = text.replace(/\u200B/g, '')
-        if (cleanText.length > 0) {
-          textNodes.push({
-            node,
-            start: charIndex,
-            end: charIndex + cleanText.length,
-            // 記錄原始文字長度，用於計算偏移
-            originalLength: text.length,
-            cleanLength: cleanText.length
-          })
-          charIndex += cleanText.length
-          lastCharWasNewline = cleanText.endsWith('\n')
-        }
-      }
-    } else if (node.nodeType === Node.ELEMENT_NODE) {
-      // 處理 BR 標籤作為換行
-      if (node.nodeName === 'BR') {
-        charIndex += 1
-        lastCharWasNewline = true
-        return
-      }
-
-      // 處理 DIV - 在前面添加換行（與 extractTextContent 一致）
-      if (node.nodeName === 'DIV' && charIndex > 0 && !lastCharWasNewline) {
-        charIndex += 1
-        lastCharWasNewline = true
-      }
-
-      // 遞歸處理子節點
-      for (const child of node.childNodes) {
-        collectTextNodes(child)
-      }
-
-      // 處理 DIV - 在後面添加換行（與 extractTextContent 一致）
-      if (node.nodeName === 'DIV' && node.childNodes.length > 0) {
-        const hasOnlyBr = node.childNodes.length === 1 && node.childNodes[0].nodeName === 'BR'
-        if (!hasOnlyBr && !lastCharWasNewline) {
-          charIndex += 1
-          lastCharWasNewline = true
-        }
-      }
-    }
-  }
-
-  // 從根元素的子節點開始遍歷
-  for (const child of textareaRef.value.childNodes) {
-    collectTextNodes(child)
-  }
-
-  // 為每個匹配項創建 Range
   searchMatches.value.forEach((match, matchIndex) => {
-    const matchStart = match.start
-    const matchEnd = match.end
-
-    // 找到匹配開始和結束位置對應的文字節點
-    for (const textNode of textNodes) {
-      // 檢查這個文字節點是否與匹配範圍重疊
-      if (textNode.end <= matchStart || textNode.start >= matchEnd) {
-        continue
-      }
-
-      // 計算在這個文字節點中的範圍
-      const rangeStart = Math.max(0, matchStart - textNode.start)
-      const rangeEnd = Math.min(textNode.node.textContent.length, matchEnd - textNode.start)
-
-      try {
-        const range = new Range()
-        range.setStart(textNode.node, rangeStart)
-        range.setEnd(textNode.node, rangeEnd)
-
-        if (matchIndex === currentMatchIndex.value) {
-          currentRanges.push(range)
-        } else {
-          ranges.push(range)
-        }
-      } catch (e) {
-        // 忽略無效的範圍
-      }
+    const range = charOffsetToRange(map, match.start, match.end)
+    if (!range) return
+    if (matchIndex === currentMatchIndex.value) {
+      currentRanges.push(range)
+    } else {
+      ranges.push(range)
     }
   })
 
-  // 註冊高亮
   if (ranges.length > 0) {
     CSS.highlights.set('search-highlight', new Highlight(...ranges))
   }
@@ -1922,6 +1581,166 @@ function applySearchHighlightsWithCSS() {
     CSS.highlights.set('search-highlight-current', new Highlight(...currentRanges))
   }
 }
+
+// ========== A+ 編輯模式 Alt 視覺層 ==========
+
+// Hover chip 狀態
+const hoverChipRef = ref(null)
+const hoverChipVisible = ref(false)
+const hoverChipTime = ref('')
+const hoverChipStyle = ref({ left: '0px', top: '0px' })
+let segmentHighlightRafId = null
+let hoverChipRafId = null
+let pendingMouseEvent = null
+
+function rebuildSegmentHighlight() {
+  segmentHighlightRafId = null
+  if (!window.CSS || !CSS.highlights) return
+  if (!textareaRef.value) return
+
+  // 只在 Alt 按住 + 編輯 + 段落模式時才顯示
+  const shouldShow =
+    isAltPressed.value &&
+    isEditing.value &&
+    displayMode.value === 'paragraph' &&
+    segOffsets.editSegmentRanges.value.length > 0
+  if (!shouldShow) {
+    CSS.highlights.delete('segment-highlight')
+    return
+  }
+
+  const map = buildCharIndexMap(textareaRef.value)
+  const ranges = []
+  for (const r of segOffsets.editSegmentRanges.value) {
+    const range = charOffsetToRange(map, r.charStart, r.charEnd)
+    if (range) ranges.push(range)
+  }
+  if (ranges.length > 0) {
+    CSS.highlights.set('segment-highlight', new Highlight(...ranges))
+  } else {
+    CSS.highlights.delete('segment-highlight')
+  }
+}
+
+function scheduleSegmentHighlightRebuild() {
+  if (segmentHighlightRafId !== null) return
+  segmentHighlightRafId = requestAnimationFrame(rebuildSegmentHighlight)
+}
+
+function clearSegmentHighlight() {
+  if (segmentHighlightRafId !== null) {
+    cancelAnimationFrame(segmentHighlightRafId)
+    segmentHighlightRafId = null
+  }
+  if (window.CSS && CSS.highlights) {
+    CSS.highlights.delete('segment-highlight')
+  }
+}
+
+// 命中測試:給定 client 座標,回傳該位置對應的 segment range(或 null)
+function hitTestSegmentAt(clientX, clientY) {
+  if (!textareaRef.value) return null
+  let caret = null
+  if (document.caretPositionFromPoint) {
+    caret = document.caretPositionFromPoint(clientX, clientY)
+    if (caret) caret = { node: caret.offsetNode, offset: caret.offset }
+  } else if (document.caretRangeFromPoint) {
+    const range = document.caretRangeFromPoint(clientX, clientY)
+    if (range) caret = { node: range.startContainer, offset: range.startOffset }
+  }
+  if (!caret || !caret.node) return null
+
+  const map = buildCharIndexMap(textareaRef.value)
+  const charOffset = caretToCharOffset(map, caret.node, caret.offset)
+  if (charOffset == null) return null
+
+  for (const r of segOffsets.editSegmentRanges.value) {
+    if (charOffset >= r.charStart && charOffset < r.charEnd) return r
+  }
+  return null
+}
+
+function hideHoverChip() {
+  hoverChipVisible.value = false
+}
+
+function updateHoverChipFromEvent(e) {
+  hoverChipRafId = null
+  if (!isAltPressed.value || !isEditing.value) {
+    hideHoverChip()
+    return
+  }
+  const hit = hitTestSegmentAt(e.clientX, e.clientY)
+  if (!hit) {
+    hideHoverChip()
+    return
+  }
+  const wrapper = textareaRef.value?.parentElement
+  if (!wrapper) {
+    hideHoverChip()
+    return
+  }
+  const map = buildCharIndexMap(textareaRef.value)
+  const segRange = charOffsetToRange(map, hit.charStart, hit.charEnd)
+  if (!segRange) {
+    hideHoverChip()
+    return
+  }
+  // 多行 segment 用 getClientRects() 取得每行各自的 rect,挑游標所在那一行
+  const rects = Array.from(segRange.getClientRects())
+  if (rects.length === 0) {
+    hideHoverChip()
+    return
+  }
+  const lineRect =
+    rects.find((r) => e.clientY >= r.top && e.clientY <= r.bottom) || rects[0]
+  const wrapperRect = wrapper.getBoundingClientRect()
+  hoverChipTime.value = formatTime(hit.start)
+  // chip 水平對齊游標,垂直貼在該行的上方,避免多行段時漂到無關位置
+  hoverChipStyle.value = {
+    left: `${e.clientX - wrapperRect.left}px`,
+    top: `${lineRect.top - wrapperRect.top}px`,
+  }
+  hoverChipVisible.value = true
+}
+
+function handleEditorMouseMove(e) {
+  if (!isAltPressed.value) return
+  pendingMouseEvent = { clientX: e.clientX, clientY: e.clientY }
+  if (hoverChipRafId !== null) return
+  hoverChipRafId = requestAnimationFrame(() => {
+    if (pendingMouseEvent) updateHoverChipFromEvent(pendingMouseEvent)
+  })
+}
+
+function handleEditorClickInEditing(e) {
+  // 只處理左鍵 + Alt,且有音檔時
+  if (e.button !== 0 || !e.altKey || !currentTranscript.value.hasAudio) return
+  const hit = hitTestSegmentAt(e.clientX, e.clientY)
+  if (!hit) return
+  e.preventDefault()
+  seekToTime(hit.start)
+}
+
+// 監聽 Alt / 編輯狀態 / segment ranges 變化,同步視覺層
+// 注意:不用 deep —— editSegmentRanges 永遠是 reassign 整個陣列,
+// 非 deep watch 就能偵測到變化,避免每次 deep walk 上百個物件的成本
+watch(
+  [
+    isAltPressed,
+    isEditing,
+    () => displayMode.value,
+    () => segOffsets.editSegmentRanges.value,
+  ],
+  () => {
+    if (isAltPressed.value && isEditing.value && displayMode.value === 'paragraph') {
+      scheduleSegmentHighlightRebuild()
+    } else {
+      clearSegmentHighlight()
+      hideHoverChip()
+    }
+  }
+)
 
 // 跳到上一個匹配項
 function goToPreviousMatch() {
@@ -2058,13 +1877,38 @@ function handleReplaceCurrent(newReplaceText) {
     // 段落模式
     let content = currentTranscript.value.content || ''
     if (textareaRef.value) {
-      content = extractTextContent(textareaRef.value)
+      content = extractText(textareaRef.value)
     }
 
     // 取代當前匹配
     const before = content.substring(0, match.start)
     const after = content.substring(match.end)
     const replacedContent = before + newReplaceText + after
+
+    // 用 A+ 錨點規則同步更新 segments.value 的文字,
+    // 這樣後續 generateSegmentMarkers 才能在新內容裡比對到被取代的那段。
+    // 用 editSegmentRanges(即時狀態)而非 segmentMarkers(編輯開始時的快照),
+    // 否則「先打字、再取代」會以舊位置算偏移,造成段邊緣的編輯字消失。
+    const from = match.start
+    const to = match.end
+    const newLen = newReplaceText.length
+    segments.value = segments.value.map((seg, idx) => {
+      const range = segOffsets.editSegmentRanges.value.find(
+        (r) => r.segmentIndex === idx
+      )
+      if (!range) return seg
+      const adjusted = applyAnchorRule(
+        range.charStart,
+        range.charEnd,
+        from,
+        to,
+        newLen
+      )
+      if (!adjusted || adjusted.charEnd <= adjusted.charStart) {
+        return { ...seg, text: '' }
+      }
+      return { ...seg, text: replacedContent.slice(adjusted.charStart, adjusted.charEnd) }
+    })
 
     // 更新內容
     updateContentAfterReplace(replacedContent)
@@ -2144,7 +1988,7 @@ function handleReplaceAllNew(newReplaceText) {
     // 段落模式
     let content = currentTranscript.value.content || ''
     if (textareaRef.value) {
-      content = extractTextContent(textareaRef.value)
+      content = extractText(textareaRef.value)
     }
 
     // 跳脫正則表達式特殊字元
@@ -2156,8 +2000,19 @@ function handleReplaceAllNew(newReplaceText) {
     const regex = new RegExp(escapedText, flags)
     const replacedContent = content.replace(regex, newReplaceText)
 
-    // 更新內容（傳入 regex 讓 marker 同步更新 segment 文字）
-    updateContentAfterReplace(replacedContent, regex, newReplaceText)
+    // 用 editSegmentRanges 切出當下打字後的每段文字,套 regex 後寫回 segments.value。
+    // 用即時 slice 而非 segments.value 的舊文字,可保留段邊緣已被吸收的打字。
+    segments.value = segments.value.map((seg, idx) => {
+      const range = segOffsets.editSegmentRanges.value.find(
+        (r) => r.segmentIndex === idx
+      )
+      if (!range) return seg
+      const currentText = content.slice(range.charStart, range.charEnd)
+      return { ...seg, text: currentText.replace(regex, newReplaceText) }
+    })
+
+    // 更新內容
+    updateContentAfterReplace(replacedContent)
 
     // 清空搜尋結果
     searchMatches.value = []
@@ -2184,7 +2039,8 @@ function handleReplaceAllNew(newReplaceText) {
 }
 
 // 更新內容（取代後）
-function updateContentAfterReplace(replacedContent, replaceAllRegex = null, replaceAllText = '') {
+// segments.value 由呼叫者預先用 editSegmentRanges 算出正確的新文字後再呼叫此函式
+function updateContentAfterReplace(replacedContent) {
   // 保存滾動位置
   let savedScrollTop = 0
   if (textareaRef.value) {
@@ -2204,17 +2060,10 @@ function updateContentAfterReplace(replacedContent, replaceAllRegex = null, repl
   contentVersion.value++
 
   // 重新生成標記
+  // segments.value 由呼叫者(handleReplaceCurrent / handleReplaceAllNew)在進到這裡之前
+  // 已用 editSegmentRanges 即時 slice 算過正確的新文字,這裡只需用當下 segments.value 重產 marker
   if (segments.value && currentTranscript.value.content) {
-    if (replaceAllRegex) {
-      // 全部取代時，segment 文字也套用同樣替換，才能在新 content 裡找到正確位置
-      const updatedSegments = segments.value.map(seg => ({
-        ...seg,
-        text: seg.text ? seg.text.replace(replaceAllRegex, replaceAllText) : seg.text
-      }))
-      generateSegmentMarkers(updatedSegments, currentTranscript.value.content)
-    } else {
-      generateSegmentMarkers(segments.value, currentTranscript.value.content)
-    }
+    generateSegmentMarkers(segments.value, currentTranscript.value.content)
   }
 
   // 使用 setTimeout 給 Vue 足夠時間完成 DOM 清理，避免 insertBefore 錯誤
@@ -2278,11 +2127,6 @@ function getContentParts() {
   }
 
   return parts
-}
-
-// 編輯模式專用：將文字內容分割成帶有 segment 標記的片段（不含搜尋高亮）
-function getContentPartsForEditing() {
-  return getContentParts()
 }
 
 // 將文字內容分割成帶有標記和搜尋高亮的片段
@@ -2670,6 +2514,22 @@ onUnmounted(() => {
   // 標記組件已卸載，防止異步操作更新狀態
   isMounted = false
 
+  // 取消 A+ 視覺層的 rAF 排程,並清掉 CSS Custom Highlight 註冊
+  // (CSS.highlights 是 global registry,不清會殘留 Range 物件指向已卸載的 DOM 節點)
+  if (segmentHighlightRafId !== null) {
+    cancelAnimationFrame(segmentHighlightRafId)
+    segmentHighlightRafId = null
+  }
+  if (hoverChipRafId !== null) {
+    cancelAnimationFrame(hoverChipRafId)
+    hoverChipRafId = null
+  }
+  if (window.CSS && CSS.highlights) {
+    CSS.highlights.delete('segment-highlight')
+    CSS.highlights.delete('search-highlight')
+    CSS.highlights.delete('search-highlight-current')
+  }
+
   // 清除講者名稱自動儲存計時器
   if (speakerNamesSaveTimer) {
     clearTimeout(speakerNamesSaveTimer)
@@ -2903,23 +2763,6 @@ watch(displayMode, () => {
   transition: background-color 0.2s ease;
 }
 
-/* 編輯模式下的 segment 文字（保留 data-segment-index 用於儲存時對應） */
-.segment-text {
-  display: inline;
-  position: relative;
-}
-
-/* 編輯模式下 Alt 鍵按下時的可點擊樣式 */
-.segment-text.clickable {
-  background-color: rgba(196, 140, 226, 0.175);
-  cursor: pointer;
-  border-radius: 3px;
-}
-
-.segment-text.clickable:hover {
-  background-color: rgba(163, 177, 198, 0.25);
-}
-
 /* Alt 鍵按下時的可點擊文字樣式 */
 .text-part.clickable {
   background-color: rgba(229, 179, 133, 0.25);
@@ -2952,6 +2795,43 @@ watch(displayMode, () => {
   background-color: rgba(255, 152, 0, 0.6);
 }
 
+/* A+ 編輯模式 Alt segment 高亮 */
+::highlight(segment-highlight) {
+  background-color: rgba(196, 140, 226, 0.175);
+}
+
+/* A+ Alt + hover 到 segment 時,游標改為 pointer */
+.transcript-display.editing.alt-segment-hover,
+.transcript-display.editing.alt-segment-hover * {
+  cursor: pointer !important;
+}
+
+/* A+ 編輯模式 Alt hover timecode chip */
+.segment-hover-chip {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 4px));
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.85);
+  color: white;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 1000;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.segment-hover-chip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top-color: rgba(0, 0, 0, 0.85);
+}
+
 /* 文字部分的 Timecode Tooltip */
 .text-timecode-tooltip {
   position: absolute;
@@ -2972,8 +2852,7 @@ watch(displayMode, () => {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
-.text-part.clickable:hover .text-timecode-tooltip,
-.segment-text.clickable:hover .text-timecode-tooltip {
+.text-part.clickable:hover .text-timecode-tooltip {
   opacity: 1;
 }
 
