@@ -1,9 +1,8 @@
 """
-全局狀態管理
-職責：提供運行時任務狀態追蹤的全局變數
+執行時任務資源容器（記憶體，不持久化）。
 
-TaskStateStore 封裝四個 dict + lock，讓呼叫端不需要直接操作全域變數，
-也方便在測試中替換為 mock 實例。
+進度狀態已搬到 src.services.progress_store.ProgressStore。
+這裡剩下的是 orchestration 用的資源：取消標記、臨時目錄、diarization 子進程。
 """
 
 from threading import Lock
@@ -12,16 +11,13 @@ from typing import Any, Dict, Optional
 
 
 class TaskStateStore:
-    """執行時任務狀態的容器（記憶體，不持久化）
+    """執行時任務資源的容器。
 
     所有寫入操作需持有 lock，外部可透過 `with store.lock:` 使用。
     """
 
     def __init__(self) -> None:
         self.lock = Lock()
-
-        # 任務的完整狀態（包含進度、chunks 等運行時資訊）
-        self.tasks: Dict[str, Any] = {}
 
         # 任務的臨時目錄路徑
         self.temp_dirs: Dict[str, Path] = {}
@@ -31,29 +27,6 @@ class TaskStateStore:
 
         # 任務的 Diarization 子進程
         self.diarization_processes: Dict[str, Any] = {}
-
-    # ---- tasks ----
-
-    def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
-        return self.tasks.get(task_id)
-
-    def set_task(self, task_id: str, data: Dict[str, Any]) -> None:
-        with self.lock:
-            self.tasks[task_id] = data
-
-    def update_task(self, task_id: str, updates: Dict[str, Any]) -> None:
-        with self.lock:
-            if task_id in self.tasks:
-                self.tasks[task_id].update(updates)
-            else:
-                self.tasks[task_id] = updates
-
-    def delete_task(self, task_id: str) -> None:
-        with self.lock:
-            self.tasks.pop(task_id, None)
-
-    def has_task(self, task_id: str) -> bool:
-        return task_id in self.tasks
 
     # ---- cancelled ----
 

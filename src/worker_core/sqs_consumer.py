@@ -29,9 +29,11 @@ from src.worker_core.config import (
     SQS_VISIBILITY_TIMEOUT_SECONDS,
     SPOT_CHECK_INTERVAL_SECONDS,
 )
+from src.worker_core.db import get_db
 from src.worker_core.model_cache import get_whisper_processor, get_diarization_pipeline
 from src.worker_core.spot_monitor import run_spot_monitor, shutdown_instance
 from src.worker_core.transcription_job import process_task
+from src.services.progress_store import MongoProgressStore
 import src.worker_core.state as state
 
 
@@ -89,6 +91,9 @@ def main() -> None:
     get_whisper_processor()
     get_diarization_pipeline()
 
+    # 建 ProgressStore（共用同一份 pymongo 連線）
+    progress_store = MongoProgressStore(get_db().task_progress)
+
     idle_start = None
     idle_threshold = AUTO_SHUTDOWN_IDLE_MINUTES * 60
 
@@ -127,7 +132,7 @@ def main() -> None:
                 state.current_task_id = body.get("task_id")
                 state.current_receipt_handle = receipt_handle
 
-                process_task(body)
+                process_task(body, progress_store=progress_store)
 
                 state.current_task_id = None
                 state.current_receipt_handle = None

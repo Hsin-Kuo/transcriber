@@ -18,6 +18,7 @@ from ..database.repositories.task_repo import TaskRepository
 from ..database.repositories.tag_repo import TagRepository
 from ..services.task_service import TaskService
 from ..services.transcription_service import TranscriptionService
+from ..services.progress_store import Phase
 from ..services.tag_service import TagService
 from ..services.utils.whisper_processor import WhisperProcessor
 from ..services.utils.punctuation_processor import PunctuationProcessor
@@ -77,15 +78,17 @@ _transcription_service: Optional[TranscriptionService] = None
 def init_transcription_service(
     whisper_model,
     task_service: TaskService,
+    progress_store,
     model_name: str = "medium",
     diarization_pipeline=None,
-    executor=None
+    executor=None,
 ):
     """初始化全域 TranscriptionService 單例
 
     Args:
         whisper_model: Whisper 模型實例
         task_service: TaskService 實例
+        progress_store: ProgressStore（應與 task_service 共用同一個實例）
         model_name: 模型名稱（用於 ProcessPoolExecutor 中重新載入模型）
         diarization_pipeline: Diarization pipeline（可選）
         executor: 線程池執行器（可選）
@@ -103,7 +106,8 @@ def init_transcription_service(
         whisper_processor=_whisper_processor,
         punctuation_processor=_punctuation_processor,
         diarization_processor=_diarization_processor,
-        executor=executor
+        executor=executor,
+        progress_store=progress_store,
     )
 
     return _transcription_service
@@ -728,11 +732,10 @@ async def create_transcription(
             asyncio.create_task(_upload_to_s3_and_notify())
         else:
             # ===== 本地模式：現有行為 =====
-            # 初始化記憶體狀態（確保 SSE 能立即讀取到正確狀態）
-            transcription_service.task_service.update_memory_state(task_id, {
-                "status": "pending",
-                "progress": "等待處理中..."
-            })
+            # 初始化進度（讓 SSE 立即看到「等待處理中」）
+            transcription_service.task_service.progress_store.set_phase(
+                task_id, Phase.PREPARATION, 0.0, message="等待處理中..."
+            )
 
             # 記錄臨時目錄
             transcription_service.task_service.set_temp_dir(task_id, temp_dir)
@@ -748,10 +751,9 @@ async def create_transcription(
                     "status": "processing"
                     # updated_at 由 task_repo.update() 自動設置
                 })
-                transcription_service.task_service.update_memory_state(task_id, {
-                    "status": "processing",
-                    "progress": "準備開始轉錄..."
-                })
+                transcription_service.task_service.progress_store.set_phase(
+                    task_id, Phase.PREPARATION, 0.0, message="準備開始轉錄..."
+                )
 
                 await transcription_service.start_transcription(
                     task_id=task_id,
@@ -1864,11 +1866,10 @@ async def create_batch_transcriptions(
                 print(f"☁️  批次任務 [{idx + 1}/{total_files}] {original_filename} -> {task_id} (SQS)")
             else:
                 # ===== 本地模式：現有行為 =====
-                # 初始化記憶體狀態
-                transcription_service.task_service.update_memory_state(task_id, {
-                    "status": "pending",
-                    "progress": "等待處理中..."
-                })
+                # 初始化進度
+                transcription_service.task_service.progress_store.set_phase(
+                    task_id, Phase.PREPARATION, 0.0, message="等待處理中..."
+                )
 
                 # 記錄臨時目錄
                 transcription_service.task_service.set_temp_dir(task_id, temp_dir)
@@ -1883,10 +1884,9 @@ async def create_batch_transcriptions(
                     language_code = None if language == "auto" else language
 
                     await task_repo.update(task_id, {"status": "processing"})
-                    transcription_service.task_service.update_memory_state(task_id, {
-                        "status": "processing",
-                        "progress": "準備開始轉錄..."
-                    })
+                    transcription_service.task_service.progress_store.set_phase(
+                        task_id, Phase.PREPARATION, 0.0, message="準備開始轉錄..."
+                    )
 
                     await transcription_service.start_transcription(
                         task_id=task_id,

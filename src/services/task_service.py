@@ -19,6 +19,7 @@ import os
 from src.database.repositories.task_repo import TaskRepository
 from src.utils.time_utils import get_current_time, get_utc_timestamp
 from src.utils.shared_state import TaskStateStore
+from src.services.progress_store import Phase, ProgressStore
 
 try:
     import psutil
@@ -27,129 +28,69 @@ except ImportError:
     PSUTIL_AVAILABLE = False
     print("⚠️ psutil 未安裝，孤立進程清理功能不可用")
 
-# 定義只需存在記憶體中的欄位（執行期間才有用，完成後無意義）
-MEMORY_ONLY_FIELDS = {
-    # 即時進度資訊
-    "progress",  # 進度文字描述（如 "正在轉錄 chunk 3/10..."）
-    "progress_percentage",  # 進度百分比（可從狀態即時計算）
-
-    # 分塊執行細節
-    "chunks",  # 每個 chunk 的詳細狀態陣列（超大物件，頻繁更新）
-    "total_chunks",  # 總分塊數（可從 chunks 長度計算）
-    "completed_chunks",  # 已完成分塊數（可從 chunks 計算）
-    "processing_chunks",  # 正在處理中的 chunk 數量（用於進度計算）
-    "chunks_created",  # 分塊是否已建立旗標
-    "estimated_completion_time",  # 預估完成時間（執行期間的估算值）
-
-    # 標點符號處理中間狀態
-    "punctuation_started",  # 標點處理是否已開始
-    "punctuation_current_chunk",  # 當前處理的標點段數
-    "punctuation_total_chunks",  # 標點處理總段數
-    "punctuation_completed",  # 標點處理是否完成
-
-    # 說話者辨識中間狀態
-    "diarization_started",  # 說話者辨識是否已開始
-    "diarization_completed",  # 說話者辨識是否完成
-    "diarization_status",  # 說話者辨識即時狀態
-
-    # 其他中間處理旗標
-    "audio_converted",  # 音檔是否已轉換
-}
-
-# 進度階段權重（固定分配，總和 100%）
-PROGRESS_WEIGHTS = {
-    "audio_conversion": 5.0,      # 音訊轉檔：5%
-    "audio_chunking": 5.0,        # 音訊切分：5%（僅分段模式）
-    "transcription": 77.0,        # 轉錄：77%（分段模式）或 82%（非分段模式）
-    "punctuation": 13.0,          # 加標點：13%
-}
-
 # 時區設定 (UTC+8 台北時間)
 TZ_UTC8 = timezone(timedelta(hours=8))
 
 
 class TaskService:
-    """任務狀態管理服務
-
-    封裝全域狀態並提供任務管理的業務邏輯
-
-    注意：在漸進式重構期間，此服務使用與 whisper_server.py 共享的全域字典，
-    以確保新舊代碼能夠看到相同的狀態。
-    """
+    """任務狀態管理服務 — DB CRUD + ProgressStore 進度 + 取消/temp/diarization process 資源管理"""
 
     def __init__(
         self,
         task_repo: TaskRepository,
+        progress_store: ProgressStore,
         state_store: TaskStateStore = None,
     ):
         """初始化 TaskService
 
         Args:
             task_repo: TaskRepository 實例
-            state_store: TaskStateStore 實例（可選，未提供時建立新的）
+            progress_store: ProgressStore（進度寫入/讀出的單一介面）
+            state_store: TaskStateStore 實例（持有取消標記/臨時目錄/diarization 進程；未提供時建立新的）
         """
         self.task_repo = task_repo
+        self.progress_store = progress_store
         self._store = state_store if state_store is not None else TaskStateStore()
 
-        # 保留內部屬性別名，維持其餘方法不需改動
-        self._memory_tasks = self._store.tasks
+        # orchestration 用資源（不是 progress；保留在 _store）
         self._cancelled_tasks = self._store.cancelled
         self._temp_dirs = self._store.temp_dirs
         self._diarization_processes = self._store.diarization_processes
         self._lock = self._store.lock
 
     async def create_task(self, task_data: Dict[str, Any]) -> Dict[str, Any]:
-        """建立新任務
-
-        Args:
-            task_data: 任務資料
-
-        Returns:
-            建立的任務資料（含 task_id）
-        """
-        # 在資料庫中建立任務
+        """建立新任務"""
         task = await self.task_repo.create(task_data)
-
-        # 初始化記憶體狀態
         task_id = str(task["task_id"])
-        with self._lock:
-            self._memory_tasks[task_id] = {
-                "progress": "初始化中...",
-                "progress_percentage": 0.0,
-            }
-
+        self.progress_store.set_phase(
+            task_id, Phase.PREPARATION, 0.0, message="初始化中..."
+        )
         return task
 
     async def get_task(self, task_id: str, user_id: str = None) -> Optional[Dict[str, Any]]:
-        """獲取任務（合併 DB + 記憶體狀態）
-
-        Args:
-            task_id: 任務 ID
-            user_id: 用戶 ID（用於權限驗證）
-
-        Returns:
-            任務資料（DB + 記憶體狀態合併），如果不存在或無權限則返回 None
-        """
-        # 從資料庫獲取任務
+        """獲取任務（DB 內容 + ProgressStore snapshot 合併）"""
         task = await self.task_repo.get_by_id(task_id)
-
         if not task:
             return None
 
-        # 權限驗證：檢查 user_id
         if user_id:
             task_user_id = self._get_task_user_id(task)
             if task_user_id != user_id:
                 return None
 
-        # 合併記憶體狀態
-        with self._lock:
-            if task_id in self._memory_tasks:
-                memory_state = self._memory_tasks[task_id]
-                task.update(memory_state)
-
-                # 計算進度百分比
-                task["progress_percentage"] = self._calculate_progress_percentage(task)
+        # 包 run_in_executor 避免 MongoProgressStore 的 pymongo 阻塞 event loop。
+        # InMemoryProgressStore 的 dict lookup 走同條路 overhead 可忽略。
+        loop = asyncio.get_event_loop()
+        snapshot = await loop.run_in_executor(
+            None, self.progress_store.get, task_id
+        )
+        if snapshot is not None:
+            if snapshot.message:
+                task["progress"] = snapshot.message
+            task["progress_percentage"] = snapshot.overall_percentage
+            task["phase"] = snapshot.phase.value
+            if snapshot.details:
+                task.update(snapshot.details)
 
         return task
 
@@ -157,41 +98,11 @@ class TaskService:
         self,
         task_id: str,
         updates: Dict[str, Any],
-        memory_only: bool = False
     ) -> bool:
-        """更新任務狀態（區分記憶體/DB 欄位）
-
-        Args:
-            task_id: 任務 ID
-            updates: 要更新的欄位
-            memory_only: 是否僅更新記憶體狀態（不寫入 DB）
-
-        Returns:
-            是否更新成功
-        """
-        # 分離記憶體欄位和 DB 欄位
-        memory_updates = {}
-        db_updates = {}
-
-        for key, value in updates.items():
-            if key in MEMORY_ONLY_FIELDS:
-                memory_updates[key] = value
-            else:
-                db_updates[key] = value
-
-        # 更新記憶體狀態
-        if memory_updates:
-            with self._lock:
-                if task_id not in self._memory_tasks:
-                    self._memory_tasks[task_id] = {}
-                self._memory_tasks[task_id].update(memory_updates)
-
-        # 更新資料庫（如果有 DB 欄位且非僅記憶體模式）
-        if db_updates and not memory_only:
-            success = await self.task_repo.update(task_id, db_updates)
-            return success
-
-        return True
+        """更新任務的 DB 欄位（進度欄位請走 progress_store.set_phase）"""
+        if not updates:
+            return True
+        return await self.task_repo.update(task_id, updates)
 
     def cancel_task(self, task_id: str) -> None:
         """取消任務（設置取消標記）
@@ -238,29 +149,15 @@ class TaskService:
         return success
 
     def cleanup_task_memory(self, task_id: str) -> None:
-        """清理任務的記憶體狀態
+        """清理任務的執行期資源（progress snapshot、取消標記、臨時目錄、diarization 進程）"""
+        self.progress_store.clear(task_id)
 
-        Args:
-            task_id: 任務 ID
-        """
         with self._lock:
-            # 清理記憶體任務狀態
-            if task_id in self._memory_tasks:
-                del self._memory_tasks[task_id]
-
-            # 清理取消標記
-            if task_id in self._cancelled_tasks:
-                del self._cancelled_tasks[task_id]
-
-            # 清理臨時目錄
-            if task_id in self._temp_dirs:
-                temp_dir = self._temp_dirs[task_id]
+            self._cancelled_tasks.pop(task_id, None)
+            temp_dir = self._temp_dirs.pop(task_id, None)
+            if temp_dir is not None:
                 self._cleanup_temp_dir(temp_dir)
-                del self._temp_dirs[task_id]
-
-            # 清理 diarization 進程
-            if task_id in self._diarization_processes:
-                del self._diarization_processes[task_id]
+            self._diarization_processes.pop(task_id, None)
 
     def set_temp_dir(self, task_id: str, temp_dir: Path) -> None:
         """設置任務的臨時目錄
@@ -305,30 +202,6 @@ class TaskService:
         """
         with self._lock:
             return self._diarization_processes.get(task_id)
-
-    def get_memory_state(self, task_id: str) -> Dict[str, Any]:
-        """獲取任務的記憶體狀態
-
-        Args:
-            task_id: 任務 ID
-
-        Returns:
-            記憶體狀態字典
-        """
-        with self._lock:
-            return self._memory_tasks.get(task_id, {}).copy()
-
-    def update_memory_state(self, task_id: str, updates: Dict[str, Any]) -> None:
-        """更新任務的記憶體狀態
-
-        Args:
-            task_id: 任務 ID
-            updates: 要更新的欄位
-        """
-        with self._lock:
-            if task_id not in self._memory_tasks:
-                self._memory_tasks[task_id] = {}
-            self._memory_tasks[task_id].update(updates)
 
     # ========== 業務邏輯方法 ==========
 
@@ -478,91 +351,6 @@ class TaskService:
         # 嘗試扁平格式
         return str(task.get("user_id", ""))
 
-    def _calculate_progress_percentage(self, task_data: Dict[str, Any]) -> float:
-        """根據任務狀態動態計算進度百分比
-
-        Args:
-            task_data: 任務資料（含記憶體狀態）
-
-        Returns:
-            進度百分比（0-100）
-        """
-        # 如果任務已完成，直接返回 100%
-        if task_data.get("status") == "completed":
-            return 100.0
-
-        progress = 0.0
-
-        # 判斷是否為分段模式：優先檢查 total_chunks，其次檢查 chunks 陣列，最後檢查配置
-        total_chunks = task_data.get("total_chunks", 0)
-        completed_chunks_count = task_data.get("completed_chunks", 0)
-        processing_chunks_count = task_data.get("processing_chunks", 0)
-        chunks = task_data.get("chunks", [])
-
-        # 分段模式判斷：
-        # 1. 有 total_chunks 或 chunks 陣列不為空
-        # 2. 或者配置中啟用了分段模式（config.chunk_audio = true）
-        config = task_data.get("config", {})
-        chunk_audio = config.get("chunk_audio", False)
-        is_chunked = total_chunks > 0 or len(chunks) > 0 or chunk_audio
-
-        # 1. 音訊轉檔完成：5%
-        if task_data.get("audio_converted", False):
-            progress += PROGRESS_WEIGHTS["audio_conversion"]
-
-        # 2. 轉錄階段
-        if is_chunked:
-            # 分段模式：audio_chunking(5%) + transcription(77%)
-
-            # 音訊切分完成（分段模式特有階段）
-            # 當開始轉錄時（有 completed_chunks 或 chunks 資訊），代表切分已完成
-            if completed_chunks_count > 0 or len(chunks) > 0 or task_data.get("chunks_created", False):
-                progress += PROGRESS_WEIGHTS["audio_chunking"]
-
-            # 根據實際 chunks 數量分配轉錄進度
-            if total_chunks > 0:
-                # 使用 total_chunks 和 completed_chunks 計算（新的分段模式）
-                chunk_weight = PROGRESS_WEIGHTS["transcription"] / total_chunks
-                # 已完成的 chunk 貢獻 100% 的權重
-                progress += completed_chunks_count * chunk_weight
-                # 正在處理中的 chunk 貢獻 50% 的權重
-                progress += processing_chunks_count * (chunk_weight * 0.5)
-            elif len(chunks) > 0:
-                # 使用 chunks 陣列計算（舊的分段模式，如果有的話）
-                num_chunks = len(chunks)
-                completed_chunks = sum(1 for c in chunks if c.get("status") == "completed")
-                processing_chunks = sum(1 for c in chunks if c.get("status") == "processing")
-
-                chunk_weight = PROGRESS_WEIGHTS["transcription"] / num_chunks
-                progress += completed_chunks * chunk_weight
-                progress += processing_chunks * (chunk_weight * 0.5)
-            elif task_data.get("audio_converted", False):
-                # 分段模式但還沒有 chunk 資訊（轉錄剛開始）
-                # 給予音訊切分階段的完成進度 + 轉錄開始的初始進度
-                progress += PROGRESS_WEIGHTS["audio_chunking"]
-                # 轉錄剛開始，給予 10% 的轉錄進度
-                progress += PROGRESS_WEIGHTS["transcription"] * 0.1
-        else:
-            # 非分段模式：transcription(82%) = audio_chunking(5%) + transcription(77%)
-            # 簡單判斷：如果已經開始標點，說明轉錄完成
-            if task_data.get("punctuation_started", False) or task_data.get("punctuation_completed", False):
-                progress += PROGRESS_WEIGHTS["audio_chunking"] + PROGRESS_WEIGHTS["transcription"]
-            elif task_data.get("audio_converted", False):
-                # 轉錄中，給予 50% 的轉錄進度
-                progress += (PROGRESS_WEIGHTS["audio_chunking"] + PROGRESS_WEIGHTS["transcription"]) * 0.5
-
-        # 3. 標點處理：13%
-        if task_data.get("punctuation_completed", False):
-            progress += PROGRESS_WEIGHTS["punctuation"]
-        elif task_data.get("punctuation_started", False):
-            # 標點處理中，根據段數計算進度
-            punct_current = task_data.get("punctuation_current_chunk", 0)
-            punct_total = task_data.get("punctuation_total_chunks", 1)
-            punct_progress = (punct_current / punct_total) * PROGRESS_WEIGHTS["punctuation"]
-            progress += punct_progress
-
-        return min(progress, 100.0)
-
     def _cleanup_temp_dir(self, temp_dir: Path) -> None:
         """清理臨時目錄
 
@@ -602,16 +390,9 @@ class TaskService:
 
                 # 清理不在進行中列表的記憶體資料
                 with self._lock:
-                    # 清理 transcription_tasks
-                    orphaned_tasks = [tid for tid in self._memory_tasks.keys() if tid not in active_task_ids]
-                    for tid in orphaned_tasks:
-                        self._memory_tasks.pop(tid, None)
-                        print(f"  🗑️  清理孤立任務記憶體: {tid}")
-
-                    # 清理其他字典
-                    for tid in list(self._temp_dirs.keys()):
-                        if tid not in active_task_ids:
-                            self._temp_dirs.pop(tid, None)
+                    orphaned_temp_dirs = [tid for tid in self._temp_dirs if tid not in active_task_ids]
+                    for tid in orphaned_temp_dirs:
+                        self._temp_dirs.pop(tid, None)
 
                     for tid in list(self._cancelled_tasks.keys()):
                         if tid not in active_task_ids:
@@ -624,8 +405,8 @@ class TaskService:
                 # 強制垃圾回收
                 gc.collect()
 
-                if orphaned_tasks:
-                    print(f"✅ 記憶體清理完成，清除 {len(orphaned_tasks)} 個孤立任務")
+                if orphaned_temp_dirs:
+                    print(f"✅ 記憶體清理完成，清除 {len(orphaned_temp_dirs)} 個孤立臨時目錄")
                 else:
                     print("✅ 記憶體清理完成，無孤立資料")
 

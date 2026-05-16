@@ -271,11 +271,12 @@ async def get_tasks(
 _task_service_singleton: TaskService = None
 
 
-def init_task_service(db, state_store: TaskStateStore = None):
+def init_task_service(db, progress_store, state_store: TaskStateStore = None):
     """初始化全域 TaskService 單例
 
     Args:
         db: 資料庫實例
+        progress_store: ProgressStore 實例（進度的單一介面）
         state_store: TaskStateStore 實例（未提供時使用模組級單例）
     """
     global _task_service_singleton
@@ -283,6 +284,7 @@ def init_task_service(db, state_store: TaskStateStore = None):
     task_repo = TaskRepository(db)
     _task_service_singleton = TaskService(
         task_repo,
+        progress_store=progress_store,
         state_store=state_store or _default_store,
     )
     return _task_service_singleton
@@ -637,9 +639,7 @@ async def task_status_events(
         SSE 事件流
     """
     async def event_generator():
-        """生成 SSE 事件流"""
-        # AWS 模式下 Worker 更新 MongoDB，Web Server 輪詢 DB；
-        # 本地模式使用 in-memory state
+        """生成 SSE 事件流（兩種部署模式統一走 task_service.get_task → ProgressStore）"""
         poll_interval = 2 if is_aws() else 1
 
         try:
@@ -656,17 +656,7 @@ async def task_status_events(
             heartbeat_counter = 0
 
             while True:
-                if is_aws():
-                    # AWS 模式：直接從 MongoDB 讀取（Worker 寫入 DB）
-                    task_data = await task_service.task_repo.get_by_id(task_id)
-                    if task_data:
-                        # 驗證用戶權限
-                        task_user_id = task_data.get("user", {}).get("user_id")
-                        if task_user_id != str(current_user["_id"]):
-                            task_data = None
-                else:
-                    # 本地模式：使用 in-memory state（現有行為）
-                    task_data = await task_service.get_task(task_id, str(current_user["_id"]))
+                task_data = await task_service.get_task(task_id, str(current_user["_id"]))
 
                 if not task_data:
                     yield f"event: error\ndata: {json.dumps({'error': '任務不存在'})}\n\n"

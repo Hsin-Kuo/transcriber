@@ -16,6 +16,7 @@ import json
 from datetime import datetime, timezone, timedelta
 
 from .task_service import TaskService
+from .progress_store import Phase, ProgressStore
 from .utils.whisper_processor import WhisperProcessor
 from .utils.punctuation_processor import PunctuationProcessor
 from .utils.diarization_processor import DiarizationProcessor
@@ -49,8 +50,9 @@ class TranscriptionService:
         task_service: TaskService,
         whisper_processor: WhisperProcessor,
         punctuation_processor: PunctuationProcessor,
+        progress_store: ProgressStore,
         diarization_processor: Optional[DiarizationProcessor] = None,
-        executor: Optional[ThreadPoolExecutor] = None
+        executor: Optional[ThreadPoolExecutor] = None,
     ):
         """初始化 TranscriptionService
 
@@ -58,6 +60,7 @@ class TranscriptionService:
             task_service: TaskService 實例
             whisper_processor: WhisperProcessor 實例
             punctuation_processor: PunctuationProcessor 實例
+            progress_store: ProgressStore，所有進度寫入經由此介面
             diarization_processor: DiarizationProcessor 實例（可選）
             executor: 線程池執行器（可選）
         """
@@ -66,6 +69,7 @@ class TranscriptionService:
         self.punctuation = punctuation_processor
         self.diarization = diarization_processor
         self.executor = executor or ThreadPoolExecutor(max_workers=3)
+        self.progress_store = progress_store
 
     async def start_transcription(
         self,
@@ -149,15 +153,24 @@ class TranscriptionService:
         print(f"🔧 [_process_transcription] 音檔是否存在: {audio_file_path.exists()}")
 
         try:
-            # 更新任務狀態為 processing
-            self.task_service.update_memory_state(task_id, {"status": "processing"})
-
             # 1. 音訊轉換（轉為 MP3 格式，用於轉錄和保存）
             print(f"🔄 [_process_transcription] 開始轉換音檔為 MP3 格式")
-            self._update_progress(task_id, "正在轉換音檔格式...", {"audio_converted": False})
+            self._update_progress(
+                task_id,
+                Phase.PREPARATION,
+                0.3,
+                message="正在轉換音檔格式...",
+                details={"audio_converted": False},
+            )
             mp3_path = self._convert_audio_to_mp3(audio_file_path)
             print(f"✅ [_process_transcription] 音檔轉換完成: {mp3_path}")
-            self._update_progress(task_id, "音檔轉換完成", {"audio_converted": True})
+            self._update_progress(
+                task_id,
+                Phase.PREPARATION,
+                0.8,
+                message="音檔轉換完成",
+                details={"audio_converted": True},
+            )
 
             # 檢查是否已取消
             if self._is_cancelled(task_id):
@@ -179,9 +192,13 @@ class TranscriptionService:
 
             if use_diarization and self.diarization:
                 # 並行模式：同時執行轉錄和說話者辨識
-                self._update_progress(task_id, "正在並行執行轉錄和說話者辨識...", {
-                    "diarization_started": True
-                })
+                self._update_progress(
+                    task_id,
+                    Phase.TRANSCRIPTION,
+                    0.0,
+                    message="正在並行執行轉錄和說話者辨識...",
+                    details={"diarization_started": True},
+                )
 
                 with ThreadPoolExecutor(max_workers=2) as parallel_executor:
                     # 提交轉錄任務
@@ -261,15 +278,22 @@ class TranscriptionService:
 
                         full_text = merged_text
 
-                    self._update_progress(task_id, "語者辨識完成", {
-                        "diarization_completed": True,
-                        "num_speakers": num_speakers
-                    })
+                    self._update_progress(
+                        task_id,
+                        Phase.TRANSCRIPTION,
+                        1.0,
+                        message="語者辨識完成",
+                        details={"diarization_completed": True, "num_speakers": num_speakers},
+                    )
                 else:
                     print(f"⚠️ [合併] 無法合併：diarization_segments={diarization_segments is not None}, segments={segments is not None}")
-                    self._update_progress(task_id, "語者辨識失敗，使用原始文字", {
-                        "diarization_failed": True
-                    })
+                    self._update_progress(
+                        task_id,
+                        Phase.TRANSCRIPTION,
+                        1.0,
+                        message="語者辨識失敗，使用原始文字",
+                        details={"diarization_failed": True},
+                    )
             else:
                 # 只執行轉錄（無說話者辨識）
                 print(f"🎤 [_process_transcription] 開始 Whisper 轉錄 (chunking={use_chunking})")
@@ -312,9 +336,13 @@ class TranscriptionService:
             punctuation_model = None
             punctuation_token_usage = None
             if use_punctuation:
-                self._update_progress(task_id, "正在添加標點符號...", {
-                    "punctuation_started": True
-                })
+                self._update_progress(
+                    task_id,
+                    Phase.PUNCTUATION,
+                    0.0,
+                    message="正在添加標點符號...",
+                    details={"punctuation_started": True},
+                )
 
                 try:
                     punctuated_text, punctuation_model, punctuation_token_usage = self.punctuation.process(
@@ -326,10 +354,16 @@ class TranscriptionService:
                         )
                     )
 
-                    self._update_progress(task_id, "標點處理完成", {
-                        "punctuation_completed": True,
-                        "punctuation_model": punctuation_model
-                    })
+                    self._update_progress(
+                        task_id,
+                        Phase.PUNCTUATION,
+                        1.0,
+                        message="標點處理完成",
+                        details={
+                            "punctuation_completed": True,
+                            "punctuation_model": punctuation_model,
+                        },
+                    )
 
                     final_text = punctuated_text
                 except Exception as punct_error:
@@ -337,10 +371,16 @@ class TranscriptionService:
                     print(f"   將使用原始轉錄文字（無標點）繼續完成任務")
                     # 使用原始文字繼續，不中斷整個轉錄流程
                     final_text = full_text
-                    self._update_progress(task_id, f"標點處理失敗（{str(punct_error)[:100]}），使用原始文字", {
-                        "punctuation_failed": True,
-                        "punctuation_error": str(punct_error)[:200]
-                    })
+                    self._update_progress(
+                        task_id,
+                        Phase.PUNCTUATION,
+                        1.0,
+                        message=f"標點處理失敗（{str(punct_error)[:100]}），使用原始文字",
+                        details={
+                            "punctuation_failed": True,
+                            "punctuation_error": str(punct_error)[:200],
+                        },
+                    )
             else:
                 final_text = full_text
 
@@ -423,68 +463,71 @@ class TranscriptionService:
     def _update_progress(
         self,
         task_id: str,
-        progress_text: str,
-        extra_fields: Optional[Dict[str, Any]] = None
+        phase: Phase,
+        phase_progress: float,
+        message: str = "",
+        details: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """更新任務進度
+        """更新任務進度。
 
         Args:
             task_id: 任務 ID
-            progress_text: 進度文字
-            extra_fields: 額外欄位
+            phase: 流程階段
+            phase_progress: 階段內部進度 0.0~1.0
+            message: 顯示給使用者的進度文字
+            details: 結構化補充欄位（如 chunks/total_chunks/diarization_*）
         """
-        updates = {"progress": progress_text}
-        if extra_fields:
-            updates.update(extra_fields)
-
-        print(f"📡 [SSE] 更新進度: {progress_text}", flush=True)
-        self.task_service.update_memory_state(task_id, updates)
+        print(
+            f"📡 [SSE] {phase.value}@{phase_progress:.0%}: {message}",
+            flush=True,
+        )
+        self.progress_store.set_phase(
+            task_id, phase, phase_progress, message=message, details=details
+        )
 
     def _update_chunk_progress(
         self,
         task_id: str,
         completed_chunks: int,
         total_chunks: int,
-        processing_chunks: int = 0
+        processing_chunks: int = 0,
     ) -> None:
-        """更新分段轉錄進度
-
-        Args:
-            task_id: 任務 ID
-            completed_chunks: 已完成的 chunk 數量
-            total_chunks: 總 chunk 數
-            processing_chunks: 正在處理中的 chunk 數量
-        """
+        """更新分段轉錄進度（屬於 TRANSCRIPTION phase 內部）"""
+        denom = max(1, total_chunks)
+        # 處理中的 chunk 算半個完成
+        phase_progress = (completed_chunks + 0.5 * processing_chunks) / denom
+        # 留 0.01 給後續的合併/收尾步驟
+        phase_progress = min(0.99, phase_progress)
         self._update_progress(
             task_id,
-            f"並行轉錄中（已完成 {completed_chunks}/{total_chunks} 段）...",
-            {
+            Phase.TRANSCRIPTION,
+            phase_progress,
+            message=f"並行轉錄中（已完成 {completed_chunks}/{total_chunks} 段）...",
+            details={
                 "total_chunks": total_chunks,
                 "completed_chunks": completed_chunks,
-                "processing_chunks": processing_chunks
-            }
+                "processing_chunks": processing_chunks,
+            },
         )
 
     def _update_punctuation_progress(
         self,
         task_id: str,
         chunk_idx: int,
-        total_chunks: int
+        total_chunks: int,
     ) -> None:
-        """更新標點處理進度
-
-        Args:
-            task_id: 任務 ID
-            chunk_idx: 當前段落索引
-            total_chunks: 總段落數
-        """
+        """更新標點處理進度（屬於 PUNCTUATION phase 內部）"""
+        denom = max(1, total_chunks)
+        phase_progress = min(0.99, chunk_idx / denom)
         self._update_progress(
             task_id,
-            f"正在添加標點（第 {chunk_idx}/{total_chunks} 段）...",
-            {
+            Phase.PUNCTUATION,
+            phase_progress,
+            message=f"正在添加標點（第 {chunk_idx}/{total_chunks} 段）...",
+            details={
                 "punctuation_current_chunk": chunk_idx,
-                "punctuation_total_chunks": total_chunks
-            }
+                "punctuation_total_chunks": total_chunks,
+            },
         )
 
     def _get_task_sync(self, task_id: str) -> Optional[dict]:
@@ -1113,7 +1156,12 @@ class TranscriptionService:
             (full_text, segments, detected_language)
         """
         if use_chunking:
-            self._update_progress(task_id, "正在並行分段轉錄音檔（多進程）...")
+            self._update_progress(
+                task_id,
+                Phase.TRANSCRIPTION,
+                0.0,
+                message="正在並行分段轉錄音檔（多進程）...",
+            )
             full_text, segments, detected_language = self.whisper.transcribe_in_chunks_parallel(
                 mp3_path,
                 language=language,
@@ -1124,7 +1172,12 @@ class TranscriptionService:
                 cancel_check=lambda: self._is_cancelled(task_id)
             )
         else:
-            self._update_progress(task_id, "正在轉錄音檔...")
+            self._update_progress(
+                task_id,
+                Phase.TRANSCRIPTION,
+                0.0,
+                message="正在轉錄音檔...",
+            )
             full_text, segments, detected_language = self.whisper.transcribe(
                 mp3_path,
                 language=language
@@ -1147,10 +1200,10 @@ class TranscriptionService:
         Returns:
             diarization_segments 或 None（失敗時）
         """
+        # 注意：此函式跑在 ThreadPoolExecutor 的另一個 thread，跟轉錄並行。
+        # 進度由 _process_transcription 在合併段落後統一更新（避免兩個 thread
+        # 同時寫 TRANSCRIPTION phase 導致 phase_progress 被互相覆蓋）。
         try:
-            self._update_progress(task_id, "正在進行說話者辨識...", {
-                "diarization_started": True
-            })
             print(f"🔊 [並行] 開始說話者辨識")
             print(f"🔊 [並行] max_speakers 參數: {max_speakers}")
 
@@ -1163,8 +1216,4 @@ class TranscriptionService:
 
         except Exception as diarize_error:
             print(f"⚠️ [並行] 說話者辨識失敗：{diarize_error}")
-            self._update_progress(task_id, f"語者辨識失敗（{str(diarize_error)[:100]}）", {
-                "diarization_failed": True,
-                "diarization_error": str(diarize_error)[:200]
-            })
             return None

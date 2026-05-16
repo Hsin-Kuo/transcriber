@@ -27,10 +27,3 @@ def get_db():
 def update_task(db, task_id: str, updates: dict) -> None:
     updates["updated_at"] = get_utc_timestamp()
     db.tasks.update_one({"_id": task_id}, {"$set": updates})
-
-
-def update_progress(db, task_id: str, progress: str, extra: Optional[dict] = None) -> None:
-    updates = {"progress": progress}
-    if extra:
-        updates.update(extra)
-    update_task(db, task_id, updates)

@@ -45,6 +45,7 @@ from src.utils.audit_logger import init_audit_logger
 
 # 共享狀態
 from src.utils.shared_state import store as task_state_store
+from src.services.progress_store import InMemoryProgressStore, MongoProgressStore
 
 # 部署環境設定
 DEPLOY_ENV = os.getenv("DEPLOY_ENV", "local")
@@ -274,9 +275,22 @@ async def startup_event():
     init_audit_logger(audit_log_repo)
     print(f"✅ AuditLogger 初始化完成")
 
-    # 3. 初始化 TaskService
+    # 3. 初始化 ProgressStore
+    # Local 模式：InMemory adapter（同進程的 TranscriptionService 寫，TaskService.get_task 讀）
+    # AWS 模式：Mongo adapter（GPU Worker 寫 task_progress collection，Web Server 在這裡讀）
+    if DEPLOY_ENV == "aws":
+        from src.worker_core.db import get_db as _get_sync_db
+        progress_store = MongoProgressStore(_get_sync_db().task_progress)
+        print(f"🔧 ProgressStore: MongoProgressStore (AWS mode, task_progress collection)")
+    else:
+        progress_store = InMemoryProgressStore()
+        print(f"🔧 ProgressStore: InMemoryProgressStore (local mode)")
+
+    # 3.1. 初始化 TaskService
     print(f"🔧 正在初始化 TaskService...")
-    task_service = tasks_router.init_task_service(db, state_store=task_state_store)
+    task_service = tasks_router.init_task_service(
+        db, state_store=task_state_store, progress_store=progress_store
+    )
     print(f"✅ TaskService 初始化完成")
 
     # 4. 清理異常中斷的任務
@@ -335,7 +349,8 @@ async def startup_event():
             task_service=task_service,
             model_name=current_model_name,  # 傳遞模型名稱供 ProcessPoolExecutor 使用
             diarization_pipeline=diarization_pipeline,
-            executor=executor
+            executor=executor,
+            progress_store=progress_store,
         )
         print(f"✅ TranscriptionService 初始化完成")
 
