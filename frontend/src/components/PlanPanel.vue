@@ -205,7 +205,7 @@ const plans = [
     audioRetention: 3,
     keepAudio: 0,
     features: {
-      speaker_diarization: false,
+      speaker_diarization: true,
       punctuation: true,
       batch_operations: false,
       priority_processing: false

@@ -3336,8 +3336,8 @@ watch(displayMode, () => {
 .mobile-drawer-toggle {
   display: none;
   position: fixed;
-  bottom: calc(70px + env(safe-area-inset-bottom, 0px));
-  right: 16px;
+  bottom: calc(90px + env(safe-area-inset-bottom, 0px));
+  right: calc(16px + env(safe-area-inset-right, 0px));
   width: 56px;
   height: 56px;
   border-radius: 50%;
@@ -3486,8 +3486,8 @@ watch(displayMode, () => {
   .mobile-drawer-toggle {
     width: 48px;
     height: 48px;
-    bottom: calc(56px + env(safe-area-inset-bottom, 0px));
-    right: 12px;
+    bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+    right: calc(12px + env(safe-area-inset-right, 0px));
   }
 
   .mobile-drawer-toggle svg {
