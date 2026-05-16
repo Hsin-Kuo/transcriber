@@ -75,6 +75,7 @@ export function useTranscriptData() {
       // 初始化當前逐字稿
       currentTranscript.value = {
         task_id: task.task_id,
+        status: task.status,
         filename: task.file?.filename || task.filename,
         custom_name: task.custom_name,
         created_at: task.timestamps?.completed_at || task.timestamps?.created_at,  // Header 用（完成時間）

@@ -12,6 +12,7 @@
       :editing-task-name="editingTaskName"
       :display-mode="displayMode"
       :copyable-text="copyableText"
+      :is-content-ready="currentTranscript.status === 'completed'"
       :show-timecode-markers="showTimecodeMarkers"
       :time-format="timeFormat"
       :density-threshold="densityThreshold"
@@ -317,6 +318,7 @@
           :task-id="currentTranscript.task_id"
           :initial-summary-status="currentTranscript.summary_status"
           :display-mode="displayMode"
+          :is-content-ready="currentTranscript.status === 'completed'"
           @summary-updated="handleSummaryUpdated"
         />
 

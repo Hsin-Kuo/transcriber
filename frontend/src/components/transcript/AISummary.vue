@@ -48,7 +48,7 @@
       <!-- 錯誤狀態 -->
       <div v-else-if="error" class="error-state">
         <span class="error-message">{{ error }}</span>
-        <button class="retry-btn" @click="generateSummary">
+        <button class="retry-btn" @click="generateSummary" :disabled="!isContentReady">
           {{ $t('aiSummary.retry') }}
         </button>
       </div>
@@ -147,7 +147,7 @@
 
         <!-- 重新生成按鈕 -->
         <div class="regenerate-row">
-          <button class="regenerate-btn" @click="generateSummary" :disabled="isLoading || !hasAiSummaryQuota">
+          <button class="regenerate-btn" @click="generateSummary" :disabled="isLoading || !hasAiSummaryQuota || !isContentReady">
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
             </svg>
@@ -160,7 +160,7 @@
 
       <!-- 尚未生成 -->
       <div v-else class="empty-state">
-        <button class="generate-btn" @click="generateSummary" :disabled="isLoading || !hasAiSummaryQuota">
+        <button class="generate-btn" @click="generateSummary" :disabled="isLoading || !hasAiSummaryQuota || !isContentReady">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
             <path d="M17 4a2 2 0 0 0 2 2a2 2 0 0 0 -2 2a2 2 0 0 0 -2 -2a2 2 0 0 0 2 -2" />
@@ -196,6 +196,10 @@ const props = defineProps({
   displayMode: {
     type: String,
     default: 'paragraph'
+  },
+  isContentReady: {
+    type: Boolean,
+    default: true
   }
 })
 

@@ -227,15 +227,16 @@ watch([selectedTaskType, selectedFilterTags], emitFilterChange, { deep: true })
 const allTags = ref([])
 
 const sortedTasks = computed(() => {
-  // 後端已經處理了 task_type 和 tags 篩選
-  // 這裡只需要對前端顯示的任務進行排序
-  let filtered = [...props.tasks]
-
-  // 依狀態排序
-  return filtered.sort((a, b) => {
-    const statusOrder = { processing: 0, pending: 1, completed: 2, failed: 3 }
-    return statusOrder[a.status] - statusOrder[b.status]
-  })
+  // 後端已經處理了 task_type 和 tags 篩選，且預設按 created_at desc 排序。
+  // 這裡把任務分三層：processing 最上、pending 第二，
+  // 其餘狀態（completed / failed / cancelled）維持後端原本的時間順序。
+  // Array.sort 在 ES2019+ 是穩定排序，同 priority 的內部順序不會被打亂。
+  const priority = (status) => {
+    if (status === 'processing') return 0
+    if (status === 'pending') return 1
+    return 2
+  }
+  return [...props.tasks].sort((a, b) => priority(a.status) - priority(b.status))
 })
 
 // Methods - Batch Mode

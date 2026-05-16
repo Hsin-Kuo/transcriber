@@ -100,11 +100,12 @@ async def get_recent_tasks(
     Returns:
         精簡的任務列表（僅包含 task_id, display_name, created_at）
     """
-    # 從資料庫獲取最近的任務
+    # 從資料庫獲取最近的任務（排除終止狀態：nav 只顯示可用任務）
     tasks = await task_service.task_repo.find_by_user(
         str(current_user["_id"]),
         skip=0,
         limit=limit,
+        status_nin=["failed", "cancelled"],
         include_deleted=False
     )
 
