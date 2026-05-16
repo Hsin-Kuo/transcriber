@@ -24,6 +24,20 @@ from src.worker_core.model_cache import get_whisper_processor, get_diarization_p
 from src.worker_core.audio_converter import convert_to_mp3, convert_to_wav
 
 
+# Cancel 信號跨進程靠 DB status：Web Server cancel endpoint 寫 status="canceling/cancelled"，
+# Worker 在 segment / punctuation chunk callback 內 poll 並 raise 此 exception 中斷迭代。
+class TaskCancelled(Exception):
+    pass
+
+
+_CANCEL_STATUSES = {"canceling", "cancelled"}
+
+
+def _is_task_cancelled(db, task_id: str) -> bool:
+    doc = db.tasks.find_one({"_id": task_id}, {"status": 1})
+    return bool(doc and doc.get("status") in _CANCEL_STATUSES)
+
+
 def _resolve_punct_language(
     language: Optional[str],
     detected_language: Optional[str],
@@ -91,9 +105,11 @@ def process_task(message_body: dict, progress_store: ProgressStore) -> None:
     db = get_db()
 
     # 防止重複處理（Spot 中斷恢復後可能收到相同 SQS 訊息）
+    # 也包含「在 SQS 排隊期間被使用者取消」的情境 — 直接跳過
     task_doc = db.tasks.find_one({"_id": task_id}, {"status": 1})
-    if task_doc and task_doc.get("status") == "completed":
-        print(f"⏭️ [Worker] 任務 {task_id} 已完成，跳過重複處理")
+    if task_doc and task_doc.get("status") in ("completed", *_CANCEL_STATUSES):
+        print(f"⏭️ [Worker] 任務 {task_id} 狀態 {task_doc.get('status')}，跳過處理")
+        progress_store.clear(task_id)
         return
 
     print(f"🎬 [Worker] 開始處理任務 {task_id}")
@@ -139,8 +155,11 @@ def process_task(message_body: dict, progress_store: ProgressStore) -> None:
         full_text = segments = detected_language = diarization_segments = None
 
         # 進度回報 callback：whisper 每完成一個 segment 就推進 TRANSCRIPTION phase。
+        # 順便檢查使用者是否已取消 — 是的話 raise 中斷 segment 迭代。
         # phase_progress 上限 0.99 留給後續的合併/收尾步驟。
-        def _on_transcription_segment(elapsed_s, total_s, _tid=task_id):
+        def _on_transcription_segment(elapsed_s, total_s, _tid=task_id, _db=db):
+            if _is_task_cancelled(_db, _tid):
+                raise TaskCancelled(f"task {_tid} cancelled during transcription")
             if total_s <= 0:
                 return
             pp = min(0.99, elapsed_s / total_s)
@@ -261,7 +280,9 @@ def process_task(message_body: dict, progress_store: ProgressStore) -> None:
                 details={"punctuation_started": True},
             )
 
-            def _on_punctuation_chunk(i, n, _tid=task_id):
+            def _on_punctuation_chunk(i, n, _tid=task_id, _db=db):
+                if _is_task_cancelled(_db, _tid):
+                    raise TaskCancelled(f"task {_tid} cancelled during punctuation")
                 if n <= 0:
                     return
                 pp = min(0.99, i / n)
@@ -381,6 +402,21 @@ def process_task(message_body: dict, progress_store: ProgressStore) -> None:
                         f"reservation_minutes={reservation.get('duration_minutes')} "
                         f"err={e}"
                     )
+
+    except TaskCancelled as e:
+        # 使用者已經透過 Web Server cancel endpoint 把 DB status 設為 cancelled，
+        # Web Server 也已釋放預扣。Worker 這邊：
+        # - 不要再 update_task 寫 status（會覆蓋 cancelled）
+        # - 清掉 progress_store snapshot 讓 SSE 立刻收尾
+        # - reservation release 是 idempotent，保險再呼叫一次
+        # - 正常 return（讓 sqs_consumer 把訊息刪掉，不重發）
+        print(f"🛑 [Worker] 任務 {task_id} 被使用者取消，中止處理: {e}")
+        progress_store.clear(task_id)
+        try:
+            from src.database.repositories.reservation_repo import release_reservation_sync
+            release_reservation_sync(db, task_id)
+        except Exception as release_err:
+            print(f"⚠️ [Worker] 釋放預扣失敗（cancel path）：{release_err}")
 
     except Exception as e:
         print(f"❌ [Worker] 任務 {task_id} 失敗: {e}")
