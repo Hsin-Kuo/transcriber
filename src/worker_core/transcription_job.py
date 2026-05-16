@@ -37,13 +37,23 @@ def _resolve_punct_language(
     return detected_language or language or "zh"
 
 
-def _run_transcription(whisper_processor, audio_path: str, language: str, use_chunking: bool):
+def _run_transcription(
+    whisper_processor,
+    audio_path: str,
+    language: str,
+    use_chunking: bool,
+    progress_callback=None,
+):
     print("🎤 [平行] 開始轉錄...")
     try:
         if use_chunking:
-            result = whisper_processor.transcribe_in_chunks(audio_path, language=language)
+            result = whisper_processor.transcribe_in_chunks(
+                audio_path, language=language, progress_callback=progress_callback,
+            )
         else:
-            result = whisper_processor.transcribe(audio_path, language=language)
+            result = whisper_processor.transcribe(
+                audio_path, language=language, progress_callback=progress_callback,
+            )
     except Exception as e:
         if not getattr(e, "error_code", None):
             err = RuntimeError(f"Whisper 轉錄失敗: {e}")
@@ -128,6 +138,19 @@ def process_task(message_body: dict, progress_store: ProgressStore) -> None:
         # 4. 平行執行轉錄 + 說話者辨識
         full_text = segments = detected_language = diarization_segments = None
 
+        # 進度回報 callback：whisper 每完成一個 segment 就推進 TRANSCRIPTION phase。
+        # phase_progress 上限 0.99 留給後續的合併/收尾步驟。
+        def _on_transcription_segment(elapsed_s, total_s, _tid=task_id):
+            if total_s <= 0:
+                return
+            pp = min(0.99, elapsed_s / total_s)
+            progress_store.set_phase(
+                _tid,
+                Phase.TRANSCRIPTION,
+                pp,
+                message=f"轉錄中（{int(elapsed_s)}s / {int(total_s)}s）...",
+            )
+
         if use_diarization and diarization_pipeline:
             progress_store.set_phase(
                 task_id,
@@ -140,7 +163,12 @@ def process_task(message_body: dict, progress_store: ProgressStore) -> None:
 
             with ThreadPoolExecutor(max_workers=2) as executor:
                 transcription_future = executor.submit(
-                    _run_transcription, whisper_processor, str(audio_path), language, use_chunking
+                    _run_transcription,
+                    whisper_processor,
+                    str(audio_path),
+                    language,
+                    use_chunking,
+                    _on_transcription_segment,
                 )
                 diarization_future = executor.submit(
                     _run_diarization, diarization_pipeline, wav_path, max_speakers
@@ -196,11 +224,13 @@ def process_task(message_body: dict, progress_store: ProgressStore) -> None:
             try:
                 if use_chunking:
                     full_text, segments, detected_language = whisper_processor.transcribe_in_chunks(
-                        str(audio_path), language=language
+                        str(audio_path), language=language,
+                        progress_callback=_on_transcription_segment,
                     )
                 else:
                     full_text, segments, detected_language = whisper_processor.transcribe(
-                        str(audio_path), language=language
+                        str(audio_path), language=language,
+                        progress_callback=_on_transcription_segment,
                     )
             except Exception as e:
                 if not getattr(e, "error_code", None):
@@ -230,10 +260,24 @@ def process_task(message_body: dict, progress_store: ProgressStore) -> None:
                 task_id, Phase.PUNCTUATION, 0.0, message="正在添加標點符號...",
                 details={"punctuation_started": True},
             )
+
+            def _on_punctuation_chunk(i, n, _tid=task_id):
+                if n <= 0:
+                    return
+                pp = min(0.99, i / n)
+                progress_store.set_phase(
+                    _tid,
+                    Phase.PUNCTUATION,
+                    pp,
+                    message=f"添加標點（{i}/{n} 段）...",
+                    details={"punctuation_current_chunk": i, "punctuation_total_chunks": n},
+                )
+
             try:
                 punctuation_processor = PunctuationProcessor()
                 punctuated_text, punctuation_model, punctuation_token_usage = punctuation_processor.process(
                     full_text, provider=punctuation_provider, language=punct_language,
+                    progress_callback=_on_punctuation_chunk,
                 )
                 full_text = punctuated_text
                 progress_store.set_phase(
