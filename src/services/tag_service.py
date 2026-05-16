@@ -37,26 +37,17 @@ class TagService:
         color: Optional[str] = None,
         description: Optional[str] = None
     ) -> Dict[str, Any]:
-        """建立新標籤
+        """建立標籤（idempotent：已存在則回傳既有那筆，不再 raise）。
 
-        Args:
-            user_id: 用戶 ID
-            name: 標籤名稱
-            color: 顏色（可選）
-            description: 描述（可選）
-
-        Returns:
-            建立的標籤資料
-
-        Raises:
-            ValueError: 標籤已存在
+        改 idempotent 的理由：呼叫者的意圖永遠是「確保這個標籤存在」 —
+        系統會自動在 PUT /tasks/.../tags 等地方建標籤，跟前端手動建立會 race，
+        此時「已存在」不該對使用者是錯誤。內部 caller 早已 try/except 忽略
+        ValueError，這裡 explicit 把那個語義反映到介面上。
         """
-        # 檢查標籤是否已存在
         existing_tag = await self.tag_repo.get_by_name(user_id, name)
         if existing_tag:
-            raise ValueError(f"標籤 '{name}' 已存在")
+            return existing_tag
 
-        # 建立標籤
         tag = await self.tag_repo.create(user_id, name, color, description)
         return tag
 

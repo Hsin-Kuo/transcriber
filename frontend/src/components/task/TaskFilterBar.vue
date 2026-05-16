@@ -250,22 +250,28 @@ function startEditing() {
 }
 
 async function saveEditing() {
+  // 三段分開 catch，讓錯誤訊息對得上實際失敗的步驟
+  const errors = []
+
+  // 步驟 1：補建缺少的標籤
   try {
-    // 檢查是否有標籤不存在於 tags repository，如果有則先創建
     const existingTagNames = new Set(tagsData.value.map(t => t.name))
     const missingTags = editingTagOrder.value.filter(tag => !existingTagNames.has(tag))
 
     if (missingTags.length > 0) {
       console.log('🏷️ 發現缺少的標籤，正在創建:', missingTags)
-      // 創建缺少的標籤（使用 saveTagColor 會自動創建）
       for (const tagName of missingTags) {
         await saveTagColor(tagName, getTagColor(tagName))
       }
-      // 重新獲取標籤數據
       await fetchTagColors()
     }
+  } catch (error) {
+    console.error('❌ 建立標籤失敗:', error)
+    errors.push({ step: 'create', error })
+  }
 
-    // 保存標籤順序到後端
+  // 步驟 2：保存順序
+  try {
     const tagIds = getTagIds(editingTagOrder.value)
     console.log('🔍 保存順序 - 標籤名稱:', editingTagOrder.value)
     console.log('🔍 保存順序 - 標籤 ID:', tagIds)
@@ -275,8 +281,13 @@ async function saveEditing() {
     } else {
       console.warn('⚠️ 沒有有效的標籤 ID 可保存')
     }
+  } catch (error) {
+    console.error('❌ 保存標籤順序失敗:', error)
+    errors.push({ step: 'order', error })
+  }
 
-    // 保存所有待保存的顏色更改
+  // 步驟 3：保存待儲存的顏色
+  try {
     const colorChangePromises = Object.entries(pendingColorChanges.value).map(
       ([tag, color]) => saveTagColor(tag, color)
     )
@@ -284,15 +295,21 @@ async function saveEditing() {
       await Promise.all(colorChangePromises)
       console.log('✅ 已保存', colorChangePromises.length, '個標籤顏色')
     }
-
-    emit('update:customTagOrder', [...editingTagOrder.value])
-    emit('tags-reordered')
   } catch (error) {
-    console.error('❌ 保存標籤順序失敗:', error)
-    alert($t('taskList.errorSaveTagOrderFull', { message: error.message }))
+    console.error('❌ 保存標籤顏色失敗:', error)
+    errors.push({ step: 'color', error })
   }
 
-  // 清空待保存的顏色更改
+  if (errors.length > 0) {
+    const stepLabels = { create: '建立標籤', order: '保存順序', color: '保存顏色' }
+    const failedSteps = errors.map(e => stepLabels[e.step]).join('、')
+    const firstMessage = errors[0].error?.message || String(errors[0].error)
+    alert(`部分標籤編輯操作失敗（${failedSteps}）：${firstMessage}`)
+  } else {
+    emit('update:customTagOrder', [...editingTagOrder.value])
+    emit('tags-reordered')
+  }
+
   pendingColorChanges.value = {}
   emit('update:isEditing', false)
   showColorPicker.value = false
