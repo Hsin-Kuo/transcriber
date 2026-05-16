@@ -128,6 +128,15 @@ const needsVerification = ref(false)
 const resendLoading = ref(false)
 const resendSuccess = ref(false)
 
+// 防 open redirect：只接受 / 開頭的 internal path，
+// 拒絕 protocol-relative (//) 或 windows path (/\\) 形式的外站跳轉
+function safeRedirect(raw) {
+  if (typeof raw !== 'string' || raw.length === 0) return '/'
+  if (!raw.startsWith('/')) return '/'
+  if (raw.startsWith('//') || raw.startsWith('/\\')) return '/'
+  return raw
+}
+
 async function handleLogin() {
   loading.value = true
   error.value = ''
@@ -138,7 +147,7 @@ async function handleLogin() {
 
   if (result.success) {
     // 登入成功，跳轉到原頁面或首頁
-    const redirect = router.currentRoute.value.query.redirect || '/'
+    const redirect = safeRedirect(router.currentRoute.value.query.redirect)
     router.push(redirect)
   } else {
     error.value = result.error
@@ -192,7 +201,7 @@ async function handleGoogleSuccess(credential) {
   const result = await authStore.googleLogin(credential)
 
   if (result.success) {
-    const redirect = router.currentRoute.value.query.redirect || '/'
+    const redirect = safeRedirect(router.currentRoute.value.query.redirect)
     router.push(redirect)
   } else {
     error.value = result.error
