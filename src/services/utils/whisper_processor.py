@@ -41,6 +41,37 @@ def _convert_chinese_script(text: str, language: Optional[str]) -> str:
     return text
 
 
+def _collapse_repeated_segments(segments: List[Dict], max_repeat: int = 2) -> List[Dict]:
+    """壓縮連續完全相同 text 的 segments，避免 Whisper 幻覺觸發下游 LLM 重複迴圈。
+
+    保留前 max_repeat 個，最後一個的 end 延伸到原 run 末尾以保留正確時長。
+    """
+    if not segments:
+        return segments
+
+    result: List[Dict] = []
+    i = 0
+    while i < len(segments):
+        current_text = segments[i]["text"].strip()
+        j = i + 1
+        while j < len(segments) and segments[j]["text"].strip() == current_text:
+            j += 1
+
+        run_length = j - i
+        if run_length <= max_repeat:
+            result.extend(segments[i:j])
+        else:
+            kept = [dict(seg) for seg in segments[i:i + max_repeat]]
+            kept[-1]["end"] = segments[j - 1]["end"]
+            result.extend(kept)
+            print(
+                f"⚠️ 偵測到 segment 重複幻覺：「{current_text}」x {run_length}，壓縮為 x {max_repeat}",
+                flush=True,
+            )
+        i = j
+    return result
+
+
 def transcribe_chunk_worker(
     chunk_path: str,
     model_name: str,
@@ -87,26 +118,33 @@ def transcribe_chunk_worker(
 
     print(f"[Worker {chunk_idx}] 開始轉錄", flush=True)
 
+    normalized_lang = _normalize_language(language)
     segments_list, info = model.transcribe(
         chunk_path,
-        language=_normalize_language(language),
+        language=normalized_lang,
         beam_size=5,
         vad_filter=True,
-        vad_parameters=dict(min_silence_duration_ms=500)
+        vad_parameters=dict(min_silence_duration_ms=1000),
+        condition_on_previous_text=False,
+        repetition_penalty=1.1,
+        no_repeat_ngram_size=3,
+        word_timestamps=True,
+        hallucination_silence_threshold=2.0,
+        initial_prompt="以下是繁體中文的逐字稿。" if normalized_lang == "zh" else None,
     )
 
     # 收集結果（字型轉換由呼叫端的清洗步驟統一處理）
     segments = []
-    text_parts = []
     for segment in segments_list:
         segments.append({
             "start": segment.start,
             "end": segment.end,
             "text": segment.text
         })
-        text_parts.append(segment.text)
 
-    full_text = " ".join(text_parts)
+    # 壓縮重複幻覺，再從壓縮後的 segments 重建 full_text
+    segments = _collapse_repeated_segments(segments)
+    full_text = " ".join(seg["text"] for seg in segments)
     detected_language = info.language
 
     print(f"[Worker {chunk_idx}] 轉錄完成，文字長度: {len(full_text)}", flush=True)
@@ -520,12 +558,19 @@ class WhisperProcessor:
 
         segments_list = []
         print(f"⏳ [_transcribe_with_timestamps] 調用 model.transcribe()...")
+        normalized_lang = _normalize_language(language)
         segments, info = self.model.transcribe(
             str(audio_path),
-            language=_normalize_language(language),
+            language=normalized_lang,
             beam_size=5,
             vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=500),
+            vad_parameters=dict(min_silence_duration_ms=1000),
+            condition_on_previous_text=False,
+            repetition_penalty=1.1,
+            no_repeat_ngram_size=3,
+            word_timestamps=True,
+            hallucination_silence_threshold=2.0,
+            initial_prompt="以下是繁體中文的逐字稿。" if normalized_lang == "zh" else None,
         )
         print(f"✅ [_transcribe_with_timestamps] model.transcribe() 完成！")
 
@@ -547,6 +592,7 @@ class WhisperProcessor:
                     # 進度回報不該打斷轉錄本身
                     print(f"⚠️ progress_callback 失敗（忽略）：{cb_err}")
 
+        segments_list = _collapse_repeated_segments(segments_list)
         return segments_list, detected_language
 
     def _get_audio_duration(self, audio_path: Path) -> int:
