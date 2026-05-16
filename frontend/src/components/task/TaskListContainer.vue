@@ -1,5 +1,5 @@
 <template>
-  <div class="task-list" :class="[`task-type-${selectedTaskType}`, { 'batch-edit-active': isBatchEditMode }]">
+  <div class="task-list" :class="[`task-type-${selectedTaskType}`, { 'batch-edit-active': isBatchEditMode, 'has-pagination': totalPages > 0 }]">
     <!-- 篩選列 -->
     <TaskFilterBar
       :all-tags="allTags"
@@ -473,28 +473,10 @@ onMounted(() => {
   z-index: 5;
 }
 
-/* empty-state 根據任務類型設置背景色，在頁籤之上、.tasks 之下 */
-.task-list.task-type-all :deep(.empty-state) {
-  background-color: var(--upload-bg);
-  border-radius: 8px;
-  position: relative;
-  z-index: 3;
-}
-
-.task-list.task-type-paragraph :deep(.empty-state) {
-  background-color: var(--color-teal-light);
-  border-radius: 8px;
-  position: relative;
-  z-index: 3;
-}
-
-.task-list.task-type-subtitle :deep(.empty-state) {
-  background-color: var(--color-teal);
-  border-radius: 8px;
-  position: relative;
-  z-index: 3;
-}
-
+/* empty-state 統一使用 --upload-bg，在頁籤之上、.tasks 之下 */
+.task-list.task-type-all :deep(.empty-state),
+.task-list.task-type-paragraph :deep(.empty-state),
+.task-list.task-type-subtitle :deep(.empty-state),
 .task-list.task-type-has_audio :deep(.empty-state) {
   background-color: var(--upload-bg);
   border-radius: 8px;
@@ -522,7 +504,7 @@ onMounted(() => {
   margin-top: 20px;
   padding-left: 0px;
   position: relative;
-  z-index: 1;
+  z-index: 101;
 }
 
 /* 分頁控制容器 */
@@ -649,6 +631,11 @@ onMounted(() => {
 
 /* 平板以下 (768px) */
 @media (max-width: 768px) {
+  /* 為浮動的分頁列預留底部空間，避免遮住最後一筆任務 */
+  .task-list.has-pagination {
+    padding-bottom: 80px;
+  }
+
   /* 任務類型頁籤換行排列 */
   .task-type-tabs {
     flex-wrap: wrap;
@@ -688,6 +675,10 @@ onMounted(() => {
 
 /* 小手機 (480px) */
 @media (max-width: 480px) {
+  .task-list.has-pagination {
+    padding-bottom: 72px;
+  }
+
   .task-type-tabs {
     gap: 4px;
     margin-top: 8px;
