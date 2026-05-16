@@ -414,30 +414,59 @@ class TaskService:
                 print(f"⚠️  定期記憶體清理失敗: {e}")
 
     async def cleanup_orphaned_tasks(self) -> None:
-        """清理異常中斷的任務（程式重啟時執行）
+        """清理異常中斷的任務（Web Server 啟動時執行）
 
-        將所有處於 pending 或 processing 狀態的任務標記為失敗
+        AWS 模式下 Web Server 跟 GPU Worker 是不同進程不同機器，
+        Web Server 重啟（例如 deploy 時）不該影響 Worker 正在跑的任務。
+        以前一律標 failed 的做法會誤殺 active task，導致「Worker 跑完寫
+        status=completed 但 error 欄位殘留 SERVER_RESTART」的詭異狀態。
+
+        改用 task_progress collection 的 updated_at 當 Worker liveness signal：
+        active Worker 每幾秒會更新 task_progress。如果 task 對應的
+        task_progress 在最近 5 分鐘內有寫入 → Worker 還活著，跳過；
+        否則才標 failed（適用 Worker crash / Spot 中斷後沒接手的情境）。
         """
+        from datetime import datetime, timedelta
         try:
-            # 查找所有處於 pending 或 processing 狀態的任務
-            # 記憶體優化：限制數量並只查詢需要的欄位
             orphaned_tasks = await self.task_repo.collection.find(
                 {"status": {"$in": ["pending", "processing"]}},
-                {"_id": 1, "task_id": 1, "status": 1, "timestamps": 1}  # 只查詢需要的欄位
-            ).limit(50).to_list(length=50)  # 限制最多 50 個
+                {"_id": 1, "task_id": 1, "status": 1, "timestamps": 1}
+            ).limit(50).to_list(length=50)
 
             if not orphaned_tasks:
                 print("✅ 沒有發現異常中斷的任務")
                 return
 
-            print(f"⚠️  發現 {len(orphaned_tasks)} 個異常中斷的任務，正在清理...")
+            # MongoProgressStore 寫入 updated_at=datetime.now(timezone.utc)，
+            # BSON 儲存後讀出是 naive UTC，用 utcnow() 比較。
+            liveness_threshold = datetime.utcnow() - timedelta(minutes=5)
+            progress_coll = self.task_repo.collection.database.task_progress
 
-            # 將這些任務標記為失敗
-            current_time = get_current_time()
+            truly_orphaned = []
+            alive_task_ids = []
             for task in orphaned_tasks:
+                tp = await progress_coll.find_one(
+                    {"_id": task["_id"]},
+                    {"updated_at": 1}
+                )
+                if tp and tp.get("updated_at") and tp["updated_at"] > liveness_threshold:
+                    alive_task_ids.append(task.get("task_id"))
+                else:
+                    truly_orphaned.append(task)
+
+            if alive_task_ids:
+                print(f"ℹ️  跳過 {len(alive_task_ids)} 個 Worker 仍在處理的任務: {alive_task_ids[:5]}")
+
+            if not truly_orphaned:
+                print("✅ 沒有真正異常中斷的任務")
+                return
+
+            print(f"⚠️  發現 {len(truly_orphaned)} 個異常中斷的任務，正在清理...")
+
+            current_time = get_current_time()
+            for task in truly_orphaned:
                 task_id = task.get("task_id", "unknown")
 
-                # 更新任務狀態（同步更新根層級和巢狀結構的時間戳）
                 update_data = {
                     "status": "failed",
                     "progress": "伺服器重啟，任務已中斷",
@@ -454,7 +483,7 @@ class TaskService:
                 )
                 print(f"   ✓ 任務 {task_id} 已標記為失敗")
 
-            print(f"✅ 清理完成，共處理 {len(orphaned_tasks)} 個任務")
+            print(f"✅ 清理完成，共處理 {len(truly_orphaned)} 個任務")
 
         except Exception as e:
             print(f"⚠️  清理孤立任務失敗: {e}")

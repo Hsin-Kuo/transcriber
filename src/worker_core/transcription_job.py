@@ -357,7 +357,9 @@ def process_task(message_body: dict, progress_store: ProgressStore) -> None:
                 "completion": punctuation_token_usage.get("completion", 0),
                 "model": punctuation_model or "unknown",
             }
-        update_task(db, task_id, complete_updates)
+        # 順便 unset error：如果 Web Server cleanup_orphaned_tasks 在 Worker
+        # 跑到一半時誤標 SERVER_RESTART error，這裡完成後要把那個殘留清掉。
+        update_task(db, task_id, complete_updates, unset_fields=["error"])
         progress_store.clear(task_id)
         print(f"✅ [Worker] 任務 {task_id} 完成！({len(full_text)} 字元)")
 
