@@ -6,7 +6,9 @@
     "dev": "vite",
     "dev:tailscale": "vite --mode tailscale --port 3005",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "type-check": "vue-tsc --noEmit"
   },
   "dependencies": {
     "@sentry/vue": "^10.53.1",
@@ -20,7 +22,14 @@
     "wavesurfer.js": "^7.12.7"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@vitejs/plugin-vue": "^6.0.7",
-    "vite": "^8.0.13"
+    "@vue/tsconfig": "^0.9.1",
+    "eslint": "^9.39.4",
+    "eslint-plugin-vue": "^9.33.0",
+    "globals": "^17.6.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.13",
+    "vue-tsc": "^2.2.12"
   }
 }

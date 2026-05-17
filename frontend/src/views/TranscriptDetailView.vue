@@ -53,7 +53,8 @@
     />
 
     <!-- 雙欄佈局 -->
-    <div class="transcript-layout"
+    <div
+class="transcript-layout"
          :style="{ '--left-panel-width': isEffectivelyCollapsed ? '62px' : '280px' }">
       <!-- 移動端底部抽屜切換按鈕 -->
       <button
@@ -217,26 +218,26 @@
               <!-- 播放/暫停按鈕 -->
               <button class="collapsed-icon-btn" @click="togglePlayPause" :title="isPlaying ? $t('audioPlayer.pause') : $t('audioPlayer.play')">
                 <svg v-if="!isPlaying" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M8 5v14l11-7z"/>
+                  <path d="M8 5v14l11-7z" />
                 </svg>
                 <svg v-else width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+                  <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
                 </svg>
               </button>
 
               <!-- 倒退 10s -->
               <button class="collapsed-icon-btn" @click="skipBackward" :title="$t('audioPlayer.rewind10s')">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                  <path d="M3 3v5h5"/>
+                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                  <path d="M3 3v5h5" />
                 </svg>
               </button>
 
               <!-- 快進 10s -->
               <button class="collapsed-icon-btn" @click="skipForward" :title="$t('audioPlayer.fastForward10s')">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
-                  <path d="M21 3v5h-5"/>
+                  <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+                  <path d="M21 3v5h-5" />
                 </svg>
               </button>
 
@@ -259,9 +260,9 @@
         >
           <div class="audio-expired-icon-wrapper">
             <svg class="audio-expired-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <circle cx="12" cy="12" r="10"/>
-              <line x1="12" y1="8" x2="12" y2="12"/>
-              <line x1="12" y1="16" x2="12.01" y2="16"/>
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
             <div class="audio-expired-tooltip">
               {{ $t('audioPlayer.audioExpiredTooltip', { days: currentTranscript.audioRetentionDays }) }}
@@ -379,7 +380,7 @@
                     @click="handleMarkerClick(part.start)"
                   >
                     <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor">
-                      <path d="M 4 6 L 1 2 L 7 2 Z"/>
+                      <path d="M 4 6 L 1 2 L 7 2 Z" />
                     </svg>
                     <span class="timecode-tooltip">
                       {{ formatTime(part.start) }}
@@ -440,9 +441,9 @@
       class="mobile-audio-player mobile-audio-expired-info"
     >
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-        <circle cx="12" cy="12" r="10"/>
-        <line x1="12" y1="8" x2="12" y2="12"/>
-        <line x1="12" y1="16" x2="12.01" y2="16"/>
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="12" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
       </svg>
       <span>{{ $t('audioPlayer.audioExpiredTitle') }}</span>
     </div>

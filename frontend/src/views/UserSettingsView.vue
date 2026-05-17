@@ -78,10 +78,10 @@
 
       <!-- 方案指標 -->
       <div class="plan-indicator-wrapper">
-        <svg class="corner-screw corner-tl" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="0.8"/><rect x="4" y="9" width="12" height="2" rx="0.5" fill="currentColor"/></svg>
-        <svg class="corner-screw corner-tr" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="0.8"/><rect x="4" y="9" width="12" height="2" rx="0.5" fill="currentColor"/></svg>
-        <svg class="corner-screw corner-bl" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="0.8"/><rect x="4" y="9" width="12" height="2" rx="0.5" fill="currentColor"/></svg>
-        <svg class="corner-screw corner-br" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="0.8"/><rect x="4" y="9" width="12" height="2" rx="0.5" fill="currentColor"/></svg>
+        <svg class="corner-screw corner-tl" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="0.8" /><rect x="4" y="9" width="12" height="2" rx="0.5" fill="currentColor" /></svg>
+        <svg class="corner-screw corner-tr" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="0.8" /><rect x="4" y="9" width="12" height="2" rx="0.5" fill="currentColor" /></svg>
+        <svg class="corner-screw corner-bl" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="0.8" /><rect x="4" y="9" width="12" height="2" rx="0.5" fill="currentColor" /></svg>
+        <svg class="corner-screw corner-br" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="0.8" /><rect x="4" y="9" width="12" height="2" rx="0.5" fill="currentColor" /></svg>
         <span class="plan-indicator-title">{{ $t('userSettings.plan') }}</span>
         <div class="plan-indicator">
           <div class="plan-indicator-pointer-track">
@@ -91,26 +91,26 @@
           </div>
           <div class="plan-indicator-lines">
             <div class="plan-indicator-item" :class="{ active: currentTier === 'free' }">
-              <span class="plan-arc-wrapper"><svg class="plan-arc plan-arc-long" viewBox="0 0 70 18"><path d="M0,18 Q14,7 28,7 L70,7" fill="none" stroke="currentColor" stroke-width="1"/></svg></span>
+              <span class="plan-arc-wrapper"><svg class="plan-arc plan-arc-long" viewBox="0 0 70 18"><path d="M0,18 Q14,7 28,7 L70,7" fill="none" stroke="currentColor" stroke-width="1" /></svg></span>
               <span class="plan-indicator-dot"></span><span class="plan-indicator-label">FREE</span>
             </div>
             <div class="plan-indicator-item" :class="{ active: currentTier === 'basic' }">
-              <span class="plan-arc-wrapper"><svg class="plan-arc plan-arc-short" viewBox="0 0 50 14"><path d="M0,12 Q8,7 16,7 L50,7" fill="none" stroke="currentColor" stroke-width="1"/></svg></span>
+              <span class="plan-arc-wrapper"><svg class="plan-arc plan-arc-short" viewBox="0 0 50 14"><path d="M0,12 Q8,7 16,7 L50,7" fill="none" stroke="currentColor" stroke-width="1" /></svg></span>
               <span class="plan-indicator-dot"></span><span class="plan-indicator-label">BASIC</span>
             </div>
             <div class="plan-indicator-item" :class="{ active: currentTier === 'pro' }">
-              <span class="plan-arc-wrapper"><svg class="plan-arc plan-arc-short" viewBox="0 0 50 14"><path d="M0,2 Q8,7 16,7 L50,7" fill="none" stroke="currentColor" stroke-width="1"/></svg></span>
+              <span class="plan-arc-wrapper"><svg class="plan-arc plan-arc-short" viewBox="0 0 50 14"><path d="M0,2 Q8,7 16,7 L50,7" fill="none" stroke="currentColor" stroke-width="1" /></svg></span>
               <span class="plan-indicator-dot"></span><span class="plan-indicator-label">PRO</span>
             </div>
             <div class="plan-indicator-item" :class="{ active: currentTier === 'enterprise' }">
-              <span class="plan-arc-wrapper"><svg class="plan-arc plan-arc-long" viewBox="0 0 70 18"><path d="M0,0 Q14,11 28,11 L70,11" fill="none" stroke="currentColor" stroke-width="1"/></svg></span>
+              <span class="plan-arc-wrapper"><svg class="plan-arc plan-arc-long" viewBox="0 0 70 18"><path d="M0,0 Q14,11 28,11 L70,11" fill="none" stroke="currentColor" stroke-width="1" /></svg></span>
               <span class="plan-indicator-dot"></span><span class="plan-indicator-label">ENT</span>
             </div>
           </div>
         </div>
         <div class="plan-indicator-actions">
           <button class="plan-btn plan-btn-outline" @click="showPlanPanel = true">{{ $t('userSettings.showPlan') }}</button>
-          <button class="plan-btn plan-btn-primary" @click="showPlanPanel = true"><svg class="plan-btn-icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M8,1 A7,7 0 1,0 8,15 A7,7 0 1,0 8,1 Z M8,6.5 A1.5,1.5 0 1,1 8,9.5 A1.5,1.5 0 1,1 8,6.5 Z M7.5,1 L8.5,1 L8.5,5.5 L7.5,5.5 Z" fill="currentColor" fill-rule="evenodd"/></svg>{{ $t('userSettings.upgrade') }}</button>
+          <button class="plan-btn plan-btn-primary" @click="showPlanPanel = true"><svg class="plan-btn-icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M8,1 A7,7 0 1,0 8,15 A7,7 0 1,0 8,1 Z M8,6.5 A1.5,1.5 0 1,1 8,9.5 A1.5,1.5 0 1,1 8,6.5 Z M7.5,1 L8.5,1 L8.5,5.5 L7.5,5.5 Z" fill="currentColor" fill-rule="evenodd" /></svg>{{ $t('userSettings.upgrade') }}</button>
         </div>
 
         <!-- Subscription management (only for paid users) -->
@@ -224,7 +224,7 @@
       <!-- 介面設定 -->
       <div class="card interface-card" :class="{ expanded: preferencesExpanded }" @click="!preferencesExpanded && (preferencesExpanded = true)">
         <h2 class="card-toggle" @click.stop="preferencesExpanded = !preferencesExpanded">
-          <span class="card-title-left"><span class="icon-slot"><svg class="card-icon" :class="{ active: preferencesExpanded }" width="50" height="27" viewBox="0 0 28 24" preserveAspectRatio="none" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 10l16-8 10 8v12a2 2 0 0 1-2 2H11v-10H5v10H3a2 2 0 0 1-2-2z"></path></svg><svg class="card-icon-person" width="7" height="14" viewBox="0 0 10 20" fill="var(--main-text)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L.8 20H3l1.5-4h1l.8 4h1.8l-.1-5.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z"/></svg></span>{{ $t('userSettings.interface') }}</span>
+          <span class="card-title-left"><span class="icon-slot"><svg class="card-icon" :class="{ active: preferencesExpanded }" width="50" height="27" viewBox="0 0 28 24" preserveAspectRatio="none" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 10l16-8 10 8v12a2 2 0 0 1-2 2H11v-10H5v10H3a2 2 0 0 1-2-2z"></path></svg><svg class="card-icon-person" width="7" height="14" viewBox="0 0 10 20" fill="var(--main-text)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L.8 20H3l1.5-4h1l.8 4h1.8l-.1-5.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z" /></svg></span>{{ $t('userSettings.interface') }}</span>
           <svg class="toggle-arrow" :class="{ expanded: preferencesExpanded }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 9 12 15 18 9"></polyline>
           </svg>
@@ -346,7 +346,7 @@
       <!-- Support -->
       <div class="card support-card" :class="{ expanded: supportExpanded }" @click="!supportExpanded && (supportExpanded = true)">
         <h2 class="card-toggle" @click.stop="supportExpanded = !supportExpanded">
-          <span class="card-title-left"><span class="icon-slot"><svg class="card-icon" :class="{ active: supportExpanded }" width="22" height="27" viewBox="0 0 20 26" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l17 5v18H2a1 1 0 0 1-1-1z"/></svg><svg class="card-icon-person" width="7" height="12" viewBox="0 0 10 20" fill="var(--main-primary)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L2.2 20H4l.5-4h1l.3 2H7.8l-.2-3.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z"/></svg><svg class="card-icon-person card-icon-person-second" width="7" height="14" viewBox="0 0 10 20" fill="var(--main-primary)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L.8 20H3l1.5-4h1l.8 4h1.8l-.1-5.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z"/><path d="M2.4 7.5L-3 10v1.5L2.4 9z"/></svg></span>{{ $t('userSettings.support') }}</span>
+          <span class="card-title-left"><span class="icon-slot"><svg class="card-icon" :class="{ active: supportExpanded }" width="22" height="27" viewBox="0 0 20 26" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l17 5v18H2a1 1 0 0 1-1-1z" /></svg><svg class="card-icon-person" width="7" height="12" viewBox="0 0 10 20" fill="var(--main-primary)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L2.2 20H4l.5-4h1l.3 2H7.8l-.2-3.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z" /></svg><svg class="card-icon-person card-icon-person-second" width="7" height="14" viewBox="0 0 10 20" fill="var(--main-primary)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L.8 20H3l1.5-4h1l.8 4h1.8l-.1-5.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z" /><path d="M2.4 7.5L-3 10v1.5L2.4 9z" /></svg></span>{{ $t('userSettings.support') }}</span>
           <svg class="toggle-arrow" :class="{ expanded: supportExpanded }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 9 12 15 18 9"></polyline>
           </svg>
@@ -392,7 +392,7 @@
       <!-- Team -->
       <div class="card team-card" :class="{ expanded: teamExpanded }" @click="!teamExpanded && (teamExpanded = true)">
         <h2 class="card-toggle" @click.stop="teamExpanded = !teamExpanded">
-          <span class="card-title-left"><span class="icon-slot"><svg class="card-icon-person card-icon-person-left" width="7" height="14" viewBox="0 0 10 20" fill="var(--main-text)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L.8 20H3l1.5-4h1l.8 4h1.8l-.1-5.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z"/></svg><svg class="card-icon-hands" width="6" height="6" viewBox="0 0 10 10" fill="none" stroke="var(--main-text)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 2 5 7 9 2"></polyline></svg><svg class="card-icon-person card-icon-person-left-second" width="7" height="14" viewBox="0 0 10 20" fill="var(--main-text)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L.8 20H3l1.5-4h1l.8 4h1.8l-.1-5.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z"/></svg><svg class="card-icon" :class="{ active: teamExpanded }" width="44" height="33" viewBox="0 0 28 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 3h16l10-1v20H18V12H2v10H1z"></path></svg></span>{{ $t('userSettings.team') }}</span>
+          <span class="card-title-left"><span class="icon-slot"><svg class="card-icon-person card-icon-person-left" width="7" height="14" viewBox="0 0 10 20" fill="var(--main-text)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L.8 20H3l1.5-4h1l.8 4h1.8l-.1-5.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z" /></svg><svg class="card-icon-hands" width="6" height="6" viewBox="0 0 10 10" fill="none" stroke="var(--main-text)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 2 5 7 9 2"></polyline></svg><svg class="card-icon-person card-icon-person-left-second" width="7" height="14" viewBox="0 0 10 20" fill="var(--main-text)" stroke="none"><path d="M5 1a2.5 2.5 0 0 0-1.8 4.2c-.5.3-.8.8-.8 1.3v2.5l-1 5v.5L.8 20H3l1.5-4h1l.8 4h1.8l-.1-5.5v-.5l-1-5V6.5c0-.5-.3-1-.8-1.3A2.5 2.5 0 0 0 5 1z" /></svg><svg class="card-icon" :class="{ active: teamExpanded }" width="44" height="33" viewBox="0 0 28 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 3h16l10-1v20H18V12H2v10H1z"></path></svg></span>{{ $t('userSettings.team') }}</span>
           <svg class="toggle-arrow" :class="{ expanded: teamExpanded }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 9 12 15 18 9"></polyline>
           </svg>

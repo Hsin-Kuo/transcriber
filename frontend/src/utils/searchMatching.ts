@@ -9,26 +9,33 @@
  * 在這收成單一 buildSearchRegex。
  */
 
+export interface SearchOptions {
+  matchCase?: boolean
+  matchWholeWord?: boolean
+}
+
+export interface SearchMatch {
+  start: number
+  end: number
+  text: string
+}
+
 /**
  * 跳脫正則表達式特殊字元。
- *
- * @param {string} text 原始字串
- * @returns {string} 已 escape 的字串，可安全嵌入 RegExp
  */
-export function escapeRegExp(text) {
+export function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 /**
  * 依使用者選項建構搜尋用的 RegExp。
  *
- * @param {string} text 搜尋字串
- * @param {object} options
- * @param {boolean} [options.matchCase=false] 是否區分大小寫
- * @param {boolean} [options.matchWholeWord=false] 是否全字匹配
- * @returns {RegExp|null} 構造失敗（空字串 / 無效 regex）回 null
+ * @returns 構造失敗（空字串 / 無效 regex）回 null
  */
-export function buildSearchRegex(text, { matchCase = false, matchWholeWord = false } = {}) {
+export function buildSearchRegex(
+  text: string,
+  { matchCase = false, matchWholeWord = false }: SearchOptions = {},
+): RegExp | null {
   if (!text) return null
   try {
     let pattern = escapeRegExp(text)
@@ -45,15 +52,13 @@ export function buildSearchRegex(text, { matchCase = false, matchWholeWord = fal
 /**
  * 在內容中找出所有匹配位置。
  *
- * @param {string} content 要搜尋的內容
- * @param {RegExp} regex 必須帶 g flag（caller 用 buildSearchRegex 即可）
- * @returns {Array<{ start: number, end: number, text: string }>}
- *   未匹配或 regex 為 null 時回空陣列
+ * @param regex 必須帶 g flag（caller 用 buildSearchRegex 即可）
+ * @returns 未匹配或 regex 為 null 時回空陣列
  */
-export function findAllMatches(content, regex) {
+export function findAllMatches(content: string, regex: RegExp | null): SearchMatch[] {
   if (!regex || !content) return []
-  const matches = []
-  let match
+  const matches: SearchMatch[] = []
+  let match: RegExpExecArray | null
   // 重置 lastIndex 避免共用 regex 時 state pollution
   regex.lastIndex = 0
   while ((match = regex.exec(content)) !== null) {

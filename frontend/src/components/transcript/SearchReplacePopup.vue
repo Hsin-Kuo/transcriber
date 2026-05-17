@@ -4,8 +4,8 @@
     <div class="search-row">
       <div class="search-input-wrapper">
         <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="11" cy="11" r="8"/>
-          <path d="M21 21l-4.35-4.35"/>
+          <circle cx="11" cy="11" r="8" />
+          <path d="M21 21l-4.35-4.35" />
         </svg>
         <input
           ref="searchInputRef"
@@ -35,9 +35,9 @@
             @click="toggleMatchWholeWord"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-              <rect x="1" y="5" width="2" height="14" rx="1"/>
+              <rect x="1" y="5" width="2" height="14" rx="1" />
               <text x="4.5" y="17" font-size="14" font-weight="semi-bold" font-family="system-ui, sans-serif">ab</text>
-              <rect x="22" y="5" width="2" height="14" rx="1"/>
+              <rect x="22" y="5" width="2" height="14" rx="1" />
             </svg>
             <span class="option-tooltip">{{ $t('searchReplace.matchWholeWord') }}</span>
           </button>
@@ -59,7 +59,7 @@
           :title="$t('searchReplace.previous')"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="18 15 12 9 6 15"/>
+            <polyline points="18 15 12 9 6 15" />
           </svg>
         </button>
         <button
@@ -69,7 +69,7 @@
           :title="$t('searchReplace.next')"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="6 9 12 15 18 9"/>
+            <polyline points="6 9 12 15 18 9" />
           </svg>
         </button>
       </div>
@@ -77,8 +77,8 @@
       <!-- 關閉按鈕 -->
       <button class="close-btn" @click="$emit('close')" :title="$t('searchReplace.close')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="18" y1="6" x2="6" y2="18"/>
-          <line x1="6" y1="6" x2="18" y2="18"/>
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
         </svg>
       </button>
     </div>
@@ -87,10 +87,10 @@
     <div v-if="isEditing" class="replace-row">
       <div class="replace-input-wrapper">
         <svg class="replace-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M17 1l4 4-4 4"/>
-          <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
-          <path d="M7 23l-4-4 4-4"/>
-          <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+          <path d="M17 1l4 4-4 4" />
+          <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+          <path d="M7 23l-4-4 4-4" />
+          <path d="M21 13v2a4 4 0 0 1-4 4H3" />
         </svg>
         <input
           v-model="localReplaceText"

@@ -4,14 +4,14 @@
       <div class="login-header">
         <div class="brand-icon">
           <svg width="48" height="48" viewBox="0 0 28 28">
-            <rect x="0" y="0" width="28" height="28" rx="4" fill="currentColor"/>
-            <circle cx="14" cy="14" r="2" fill="#f4ecd5"/>
-            <circle cx="14" cy="9" r="1.5" fill="#f4ecd5"/>
-            <circle cx="18.3" cy="11.5" r="1.5" fill="#f4ecd5"/>
-            <circle cx="18.3" cy="16.5" r="1.5" fill="#f4ecd5"/>
-            <circle cx="14" cy="19" r="1.5" fill="#f4ecd5"/>
-            <circle cx="9.7" cy="16.5" r="1.5" fill="#f4ecd5"/>
-            <circle cx="9.7" cy="11.5" r="1.5" fill="#f4ecd5"/>
+            <rect x="0" y="0" width="28" height="28" rx="4" fill="currentColor" />
+            <circle cx="14" cy="14" r="2" fill="#f4ecd5" />
+            <circle cx="14" cy="9" r="1.5" fill="#f4ecd5" />
+            <circle cx="18.3" cy="11.5" r="1.5" fill="#f4ecd5" />
+            <circle cx="18.3" cy="16.5" r="1.5" fill="#f4ecd5" />
+            <circle cx="14" cy="19" r="1.5" fill="#f4ecd5" />
+            <circle cx="9.7" cy="16.5" r="1.5" fill="#f4ecd5" />
+            <circle cx="9.7" cy="11.5" r="1.5" fill="#f4ecd5" />
           </svg>
         </div>
         <h1 class="login-title">管理後台</h1>
@@ -46,9 +46,9 @@
 
         <div v-if="error" class="error-alert">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <line x1="12" y1="8" x2="12" y2="12"/>
-            <line x1="12" y1="16" x2="12.01" y2="16"/>
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
           </svg>
           {{ error }}
         </div>

@@ -6,11 +6,12 @@
       :class="{ refreshing: isRefreshing, animating: !isPulling }"
       :style="{ transform: `translateY(${isRefreshing ? 0 : Math.min(pullDistance, 48) - 48}px)` }"
     >
-      <svg v-if="!isRefreshing" class="ptr-arrow"
+      <svg
+v-if="!isRefreshing" class="ptr-arrow"
         :style="{ transform: `rotate(${Math.min(180, (pullDistance / 40) * 180)}deg)` }"
         viewBox="0 0 24 24" width="20" height="20" fill="none"
         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/>
+        <line x1="12" y1="5" x2="12" y2="19" /><polyline points="19 12 12 19 5 12" />
       </svg>
       <div v-else class="ptr-spinner"></div>
     </div>

@@ -2,18 +2,18 @@
   <div class="keyboard-shortcuts-info" :class="popDirection">
     <button class="shortcuts-trigger-btn" :title="$t('audioPlayer.keyboardShortcuts')">
       <svg width="32" height="24" viewBox="0 0 48 36" fill="currentColor">
-        <circle cx="9" cy="8" r="2.5" fill="currentColor"/>
-        <circle cx="19" cy="8" r="2.5" fill="currentColor"/>
-        <circle cx="29" cy="8" r="2.5" fill="currentColor"/>
-        <circle cx="39" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
-        <circle cx="9" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
-        <circle cx="19" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
-        <circle cx="29" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
-        <circle cx="39" cy="18" r="2.5" fill="currentColor"/>
-        <circle cx="9" cy="28" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
-        <circle cx="19" cy="28" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
-        <circle cx="29" cy="28" r="2" fill="none" stroke="currentColor" stroke-width="1"/>
-        <circle cx="39" cy="28" r="2.5" fill="currentColor"/>
+        <circle cx="9" cy="8" r="2.5" fill="currentColor" />
+        <circle cx="19" cy="8" r="2.5" fill="currentColor" />
+        <circle cx="29" cy="8" r="2.5" fill="currentColor" />
+        <circle cx="39" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1" />
+        <circle cx="9" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1" />
+        <circle cx="19" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1" />
+        <circle cx="29" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1" />
+        <circle cx="39" cy="18" r="2.5" fill="currentColor" />
+        <circle cx="9" cy="28" r="2" fill="none" stroke="currentColor" stroke-width="1" />
+        <circle cx="19" cy="28" r="2" fill="none" stroke="currentColor" stroke-width="1" />
+        <circle cx="29" cy="28" r="2" fill="none" stroke="currentColor" stroke-width="1" />
+        <circle cx="39" cy="28" r="2.5" fill="currentColor" />
       </svg>
     </button>
     <div class="shortcuts-tooltip">

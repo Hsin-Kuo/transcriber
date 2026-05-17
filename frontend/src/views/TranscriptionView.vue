@@ -164,8 +164,7 @@
                 <input
                   type="text"
                   v-model="tagInput"
-                  @keydown.enter.prevent="addTag"
-                  @keydown.comma.prevent="addTag"
+                  @keydown="onTagKeydown"
                   :placeholder="$t('transcription.tagPlaceholder')"
                   class="text-input"
                 />
@@ -348,6 +347,14 @@ function addTag() {
     selectedTags.value.push(tag)
   }
   tagInput.value = ''
+}
+
+function onTagKeydown(e) {
+  // Vue 的 .comma 修飾符不存在；Enter / 逗號都觸發新增 tag
+  if (e.key === 'Enter' || e.key === ',') {
+    e.preventDefault()
+    addTag()
+  }
 }
 
 function addQuickTag(tag) {

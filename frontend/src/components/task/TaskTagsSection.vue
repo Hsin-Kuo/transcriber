@@ -8,8 +8,7 @@
         <input
           type="text"
           v-model="editingTagInput"
-          @keydown.enter.prevent="addTag"
-          @keydown.comma.prevent="addTag"
+          @keydown="onTagKeydown"
           :placeholder="$t('taskList.tagInputPlaceholder')"
           class="tag-input-inline"
         />
@@ -230,6 +229,14 @@ function addTag() {
     emitUpdate()
   } else if (editingTags.value.includes(tag)) {
     editingTagInput.value = ''
+  }
+}
+
+function onTagKeydown(e) {
+  // Vue 的 .comma 修飾符不存在；Enter / 逗號都觸發新增 tag
+  if (e.key === 'Enter' || e.key === ',') {
+    e.preventDefault()
+    addTag()
   }
 }
 

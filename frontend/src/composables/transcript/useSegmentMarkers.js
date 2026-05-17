@@ -52,8 +52,8 @@ export function useSegmentMarkers() {
         // 更新搜尋位置
         lastSearchIndex = foundIndex + text.length
       } else {
-        // 如果沒找到，下一個segment從上一次成功的位置重新開始搜尋
-        lastSearchIndex = lastSearchIndex
+        // 如果沒找到，下一個 segment 從上一次成功的位置重新開始搜尋
+        // （顯式保留 lastSearchIndex 不變——原本的 self-assign 被 eslint 抓到）
       }
     })
 

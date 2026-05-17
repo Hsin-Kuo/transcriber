@@ -3,14 +3,14 @@
     <div class="nav-brand">
       <div class="brand-icon">
         <svg width="28" height="28" viewBox="0 0 28 28">
-          <rect x="0" y="0" width="28" height="28" rx="4" fill="currentColor"/>
-          <circle cx="14" cy="14" r="2" fill="#f4ecd5"/>
-          <circle cx="14" cy="9" r="1.5" fill="#f4ecd5"/>
-          <circle cx="18.3" cy="11.5" r="1.5" fill="#f4ecd5"/>
-          <circle cx="18.3" cy="16.5" r="1.5" fill="#f4ecd5"/>
-          <circle cx="14" cy="19" r="1.5" fill="#f4ecd5"/>
-          <circle cx="9.7" cy="16.5" r="1.5" fill="#f4ecd5"/>
-          <circle cx="9.7" cy="11.5" r="1.5" fill="#f4ecd5"/>
+          <rect x="0" y="0" width="28" height="28" rx="4" fill="currentColor" />
+          <circle cx="14" cy="14" r="2" fill="#f4ecd5" />
+          <circle cx="14" cy="9" r="1.5" fill="#f4ecd5" />
+          <circle cx="18.3" cy="11.5" r="1.5" fill="#f4ecd5" />
+          <circle cx="18.3" cy="16.5" r="1.5" fill="#f4ecd5" />
+          <circle cx="14" cy="19" r="1.5" fill="#f4ecd5" />
+          <circle cx="9.7" cy="16.5" r="1.5" fill="#f4ecd5" />
+          <circle cx="9.7" cy="11.5" r="1.5" fill="#f4ecd5" />
         </svg>
       </div>
       <span class="brand-text">Admin</span>
@@ -19,36 +19,36 @@
     <div class="nav-links">
       <router-link to="/" class="nav-link" exact-active-class="active">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M3 3v18h18"/>
-          <path d="M18 17V9"/>
-          <path d="M13 17V5"/>
-          <path d="M8 17v-3"/>
+          <path d="M3 3v18h18" />
+          <path d="M18 17V9" />
+          <path d="M13 17V5" />
+          <path d="M8 17v-3" />
         </svg>
         <span>系統統計</span>
       </router-link>
       <router-link to="/users" class="nav-link" exact-active-class="active">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-          <circle cx="9" cy="7" r="4"/>
-          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-          <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+          <circle cx="9" cy="7" r="4" />
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
         </svg>
         <span>用戶管理</span>
       </router-link>
       <router-link to="/tasks" class="nav-link" exact-active-class="active">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M9 11l3 3L22 4"/>
-          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+          <path d="M9 11l3 3L22 4" />
+          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
         </svg>
         <span>任務管理</span>
       </router-link>
       <router-link to="/audit-logs" class="nav-link" exact-active-class="active">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-          <polyline points="14 2 14 8 20 8"/>
-          <line x1="16" y1="13" x2="8" y2="13"/>
-          <line x1="16" y1="17" x2="8" y2="17"/>
-          <polyline points="10 9 9 9 8 9"/>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="16" y1="13" x2="8" y2="13" />
+          <line x1="16" y1="17" x2="8" y2="17" />
+          <polyline points="10 9 9 9 8 9" />
         </svg>
         <span>操作記錄</span>
       </router-link>
@@ -61,9 +61,9 @@
       </div>
       <button @click="handleLogout" class="logout-btn" :disabled="loggingOut">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-          <polyline points="16 17 21 12 16 7"/>
-          <line x1="21" y1="12" x2="9" y2="12"/>
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+          <polyline points="16 17 21 12 16 7" />
+          <line x1="21" y1="12" x2="9" y2="12" />
         </svg>
         <span>{{ loggingOut ? '登出中...' : '登出' }}</span>
       </button>
