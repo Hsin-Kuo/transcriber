@@ -12,6 +12,7 @@ from ..auth.dependencies import get_current_user
 from ..database.mongodb import get_database
 from ..database.repositories.user_repo import UserRepository
 from ..database.repositories.order_repo import OrderRepository
+from ..database.repositories.processed_webhook_repo import ProcessedWebhookRepository
 from ..models.quota import QuotaTier, QUOTA_TIERS, is_upgrade
 from ..utils.newebpay_service import get_newebpay_service, NewebpayService
 from ..utils.time_utils import get_utc_timestamp
@@ -603,6 +604,22 @@ async def period_notify(request: Request, db=Depends(get_database)):
 
     print(f"📩 定期定額 Notify: {merchant_order_no} status={notify_status} first={is_first_payment}", flush=True)
 
+    # 冪等性：每期授權的 natural_id = order + already_times，重複到達直接略過
+    # 避免重發 Notify 造成重複授信、period_end 多滾一期等問題
+    webhook_repo = ProcessedWebhookRepository(db)
+    natural_id = f"{merchant_order_no}:{already_times if already_times is not None else 'init'}"
+    if not await webhook_repo.claim(
+        provider="newebpay-period",
+        natural_id=natural_id,
+        metadata={
+            "status": notify_status,
+            "period_no": period_no,
+            "trade_no": trade_no,
+        },
+    ):
+        print(f"♻️ Notify 已處理過，略過：{natural_id}", flush=True)
+        return {"status": "ok"}
+
     order_repo = OrderRepository(db)
     order = await order_repo.get_by_order_no(merchant_order_no)
     if not order:
@@ -803,6 +820,16 @@ async def mpg_notify(request: Request, db=Depends(get_database)):
     trade_no = data.get("TradeNo", "")
 
     print(f"📩 MPG Notify: {merchant_order_no} status={result}", flush=True)
+
+    # 冪等性：一次性付款 natural_id 就是訂單號
+    webhook_repo = ProcessedWebhookRepository(db)
+    if not await webhook_repo.claim(
+        provider="newebpay-mpg",
+        natural_id=merchant_order_no,
+        metadata={"status": result, "trade_no": trade_no},
+    ):
+        print(f"♻️ MPG Notify 已處理過，略過：{merchant_order_no}", flush=True)
+        return {"status": "ok"}
 
     order_repo = OrderRepository(db)
     order = await order_repo.get_by_order_no(merchant_order_no)

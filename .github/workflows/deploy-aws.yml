@@ -92,17 +92,27 @@ jobs:
           ssh-keyscan -H ${{ env.EC2_HOST }} >> ~/.ssh/known_hosts
 
       - name: Upload packages to EC2
+        env:
+          SHA: ${{ github.sha }}
         run: |
-          scp -i ~/.ssh/transcriber-key.pem backend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/
-          scp -i ~/.ssh/transcriber-key.pem frontend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/
-          scp -i ~/.ssh/transcriber-key.pem admin-frontend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/
+          scp -i ~/.ssh/transcriber-key.pem backend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/backend-${SHA}.tar.gz
+          scp -i ~/.ssh/transcriber-key.pem frontend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/frontend-${SHA}.tar.gz
+          scp -i ~/.ssh/transcriber-key.pem admin-frontend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/admin-frontend-${SHA}.tar.gz
 
       - name: Deploy backend
+        env:
+          SHA: ${{ github.sha }}
         run: |
-          ssh -i ~/.ssh/transcriber-key.pem ${{ env.EC2_USER }}@${{ env.EC2_HOST }} << 'ENDSSH'
-          echo "=== Deploying Backend ==="
+          ssh -i ~/.ssh/transcriber-key.pem ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "SHA=${SHA} bash -s" << 'ENDSSH'
+          set -e
+          echo "=== Deploying Backend [${SHA}] ==="
+          # 保留釋出檔到 releases/，供 rollback.sh 使用
+          sudo mkdir -p /opt/transcriber/releases
+          sudo mv /tmp/backend-${SHA}.tar.gz /opt/transcriber/releases/
+          sudo chown ec2-user:ec2-user /opt/transcriber/releases/backend-${SHA}.tar.gz
+
           cd /opt/transcriber
-          tar -xzf /tmp/backend.tar.gz
+          tar -xzf /opt/transcriber/releases/backend-${SHA}.tar.gz
 
           python3.11 -m pip install --user -r requirements-web.txt -q
 
@@ -112,33 +122,58 @@ jobs:
           sudo nginx -t && sudo systemctl reload nginx
 
           sudo systemctl restart transcriber
-          echo "=== Backend deployed ==="
+
+          # 安裝/更新 rollback 腳本到固定位置（即使本次部署壞掉，rollback 仍可用）
+          sudo install -m 0755 /opt/transcriber/deploy/rollback.sh /usr/local/bin/transcriber-rollback
+
+          # 紀錄當前版本，清理舊釋出（保留最近 5 個 backend/frontend/admin-frontend）
+          echo "${SHA}" | sudo tee /opt/transcriber/releases/CURRENT > /dev/null
+          for prefix in backend frontend admin-frontend; do
+            ls -1t /opt/transcriber/releases/${prefix}-*.tar.gz 2>/dev/null | tail -n +6 | xargs -r sudo rm -f
+          done
+          echo "=== Backend deployed [${SHA}] ==="
           ENDSSH
 
       - name: Deploy frontend
+        env:
+          SHA: ${{ github.sha }}
         run: |
-          ssh -i ~/.ssh/transcriber-key.pem ${{ env.EC2_USER }}@${{ env.EC2_HOST }} << 'ENDSSH'
-          echo "=== Deploying Frontend ==="
+          ssh -i ~/.ssh/transcriber-key.pem ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "SHA=${SHA} bash -s" << 'ENDSSH'
+          set -e
+          echo "=== Deploying Frontend [${SHA}] ==="
+          sudo mkdir -p /opt/transcriber/releases
+          sudo mv /tmp/frontend-${SHA}.tar.gz /opt/transcriber/releases/
+          sudo chown ec2-user:ec2-user /opt/transcriber/releases/frontend-${SHA}.tar.gz
+
           cd /tmp
-          tar -xzf frontend.tar.gz
+          tar -xzf /opt/transcriber/releases/frontend-${SHA}.tar.gz
           sudo mkdir -p /var/www/transcriber
           sudo rm -rf /var/www/transcriber/*
           sudo cp -r dist/* /var/www/transcriber/
           sudo chown -R nginx:nginx /var/www/transcriber
-          echo "=== Frontend deployed ==="
+          rm -rf /tmp/dist
+          echo "=== Frontend deployed [${SHA}] ==="
           ENDSSH
 
       - name: Deploy admin-frontend
+        env:
+          SHA: ${{ github.sha }}
         run: |
-          ssh -i ~/.ssh/transcriber-key.pem ${{ env.EC2_USER }}@${{ env.EC2_HOST }} << 'ENDSSH'
-          echo "=== Deploying Admin Frontend ==="
+          ssh -i ~/.ssh/transcriber-key.pem ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "SHA=${SHA} bash -s" << 'ENDSSH'
+          set -e
+          echo "=== Deploying Admin Frontend [${SHA}] ==="
+          sudo mkdir -p /opt/transcriber/releases
+          sudo mv /tmp/admin-frontend-${SHA}.tar.gz /opt/transcriber/releases/
+          sudo chown ec2-user:ec2-user /opt/transcriber/releases/admin-frontend-${SHA}.tar.gz
+
           cd /tmp
-          tar -xzf admin-frontend.tar.gz
+          tar -xzf /opt/transcriber/releases/admin-frontend-${SHA}.tar.gz
           sudo mkdir -p /var/www/admin
           sudo rm -rf /var/www/admin/*
           sudo cp -r dist/* /var/www/admin/
           sudo chown -R nginx:nginx /var/www/admin
-          echo "=== Admin Frontend deployed ==="
+          rm -rf /tmp/dist
+          echo "=== Admin Frontend deployed [${SHA}] ==="
           ENDSSH
 
       - name: Verify deployment

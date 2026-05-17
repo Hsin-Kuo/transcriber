@@ -266,6 +266,10 @@ async def startup_event():
         from src.database.repositories.user_repo import UserRepository
         user_repo_init = UserRepository(db)
         await user_repo_init.create_indexes()
+        # 建立 processed_webhooks 索引（webhook 冪等性 + TTL 90 天清理）
+        from src.database.repositories.processed_webhook_repo import ProcessedWebhookRepository
+        processed_webhook_repo_init = ProcessedWebhookRepository(db)
+        await processed_webhook_repo_init.create_indexes()
         print(f"✅ 資料庫索引建立完成")
     except Exception as e:
         print(f"⚠️  索引建立失敗: {e}")
@@ -412,15 +416,63 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """健康檢查端點"""
-    return {
-        "status": "healthy",
+    """健康檢查端點：實際 ping DB，degraded 時回 503 讓 LB / CloudWatch 抓得到"""
+    db_status = "unknown"
+    db_error = None
+    try:
+        # 強制走連線：用 1 秒 timeout，避免拖垮整個 health probe
+        client = MongoDB.client
+        if client is None:
+            db_status = "disconnected"
+        else:
+            await asyncio.wait_for(client.admin.command("ping"), timeout=1.0)
+            db_status = "connected"
+    except asyncio.TimeoutError:
+        db_status = "timeout"
+        db_error = "ping > 1s"
+    except Exception as e:
+        db_status = "error"
+        db_error = str(e)[:200]
+
+    healthy = db_status == "connected"
+    body = {
+        "status": "healthy" if healthy else "degraded",
         "deploy_env": DEPLOY_ENV,
         "app_role": APP_ROLE,
         "whisper_model": current_model_name,
         "diarization_available": diarization_pipeline is not None,
-        "database": "connected" if MongoDB.get_db() is not None else "disconnected"
+        "database": db_status,
     }
+    if db_error:
+        body["database_error"] = db_error
+    if not healthy:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=body)
+    return body
+
+
+@app.get("/readiness")
+async def readiness_check():
+    """就緒檢查：DB ok 且（若需載入模型）model 已載入。給 LB / k8s readiness probe 用"""
+    # DB 必須可 ping
+    try:
+        client = MongoDB.client
+        if client is None:
+            raise RuntimeError("client is None")
+        await asyncio.wait_for(client.admin.command("ping"), timeout=1.0)
+    except Exception as e:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"ready": False, "reason": f"database not ready: {str(e)[:200]}"},
+        )
+
+    # 需要載入模型的角色（local 或 worker）必須 model 就緒
+    if SHOULD_LOAD_MODELS and whisper_model is None:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"ready": False, "reason": "whisper model not loaded"},
+        )
+
+    return {"ready": True, "deploy_env": DEPLOY_ENV, "app_role": APP_ROLE}
 
 
 # ========== 主程序入口 ==========
