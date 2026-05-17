@@ -55,3 +55,15 @@ class ProcessedWebhookRepository:
             return True
         except DuplicateKeyError:
             return False
+
+    async def release(self, provider: str, natural_id: str) -> None:
+        """釋放 claim（claim 後處理失敗時呼叫）。
+
+        刪掉 claim 記錄讓 webhook 重發時能重新處理；失敗會送 Sentry 但
+        不會 raise（避免在錯誤處理路徑上再炸一次）。
+        """
+        key = self.make_key(provider, natural_id)
+        try:
+            await self.collection.delete_one({"_id": key})
+        except Exception as e:
+            print(f"⚠️ release claim failed for {key}: {e}", flush=True)

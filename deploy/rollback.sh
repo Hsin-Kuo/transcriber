@@ -86,7 +86,9 @@ echo "✅ Backend 已回滾"
 # Frontend
 tmp_dir=$(mktemp -d)
 tar -xzf "${RELEASES_DIR}/frontend-${ROLLBACK_SHA}.tar.gz" -C "$tmp_dir"
-rm -rf "${WEB_ROOT:?}"/*
+mkdir -p "$WEB_ROOT"
+# 第一次部署時 web root 可能不存在，用 find 清較安全（rm -rf empty/* 會 set -e 退出）
+find "$WEB_ROOT" -mindepth 1 -delete 2>/dev/null || true
 cp -r "${tmp_dir}/dist/"* "${WEB_ROOT}/"
 chown -R nginx:nginx "$WEB_ROOT"
 rm -rf "$tmp_dir"
@@ -95,7 +97,8 @@ echo "✅ Frontend 已回滾"
 # Admin
 tmp_dir=$(mktemp -d)
 tar -xzf "${RELEASES_DIR}/admin-frontend-${ROLLBACK_SHA}.tar.gz" -C "$tmp_dir"
-rm -rf "${ADMIN_ROOT:?}"/*
+mkdir -p "$ADMIN_ROOT"
+find "$ADMIN_ROOT" -mindepth 1 -delete 2>/dev/null || true
 cp -r "${tmp_dir}/dist/"* "${ADMIN_ROOT}/"
 chown -R nginx:nginx "$ADMIN_ROOT"
 rm -rf "$tmp_dir"

@@ -620,47 +620,68 @@ async def period_notify(request: Request, db=Depends(get_database)):
         print(f"♻️ Notify 已處理過，略過：{natural_id}", flush=True)
         return {"status": "ok"}
 
-    order_repo = OrderRepository(db)
-    order = await order_repo.get_by_order_no(merchant_order_no)
-    if not order:
-        print(f"⚠️ 找不到訂單 {merchant_order_no}", flush=True)
+    # 已 claim → 進入處理。若中途失敗：釋放 claim + 送 Sentry，讓藍新重發能重做
+    try:
+        order_repo = OrderRepository(db)
+        order = await order_repo.get_by_order_no(merchant_order_no)
+        if not order:
+            print(f"⚠️ 找不到訂單 {merchant_order_no}", flush=True)
+            return {"status": "ok"}
+
+        # 冪等性保護：首次付款若 order 已是 paid，直接跳過避免重複處理
+        if is_first_payment and order.get("status") == "paid":
+            print(f"ℹ️ 訂單 {merchant_order_no} 已處理，略過重複 Notify", flush=True)
+            return {"status": "ok"}
+
+        user_repo = UserRepository(db)
+        user_id = order["user_id"]
+
+        if notify_status == "SUCCESS":
+            await order_repo.update_by_order_no(merchant_order_no, {
+                "period_no": period_no,
+                "auth_times": already_times or 1,
+                "newebpay_trade_no": trade_no,
+            })
+
+            order_type = order.get("type", "subscription")
+
+            if order_type in ("subscription", "upgrade_subscription"):
+                await _handle_subscription_paid(
+                    db, user_repo, order_repo, order, user_id,
+                    period_no, is_first_payment, trade_no
+                )
+            elif order_type == "downgrade_subscription":
+                await _handle_downgrade_paid(
+                    db, user_repo, order_repo, order, user_id,
+                    period_no, is_first_payment
+                )
+
+        else:
+            await order_repo.update_by_order_no(merchant_order_no, {"status": "failed"})
+            if not is_first_payment:
+                # 續扣失敗（非首次付款）→ 立即降為 free
+                await _handle_payment_failed(db, user_repo, user_id)
+
         return {"status": "ok"}
-
-    # 冪等性保護：首次付款若 order 已是 paid，直接跳過避免重複處理
-    if is_first_payment and order.get("status") == "paid":
-        print(f"ℹ️ 訂單 {merchant_order_no} 已處理，略過重複 Notify", flush=True)
-        return {"status": "ok"}
-
-    user_repo = UserRepository(db)
-    user_id = order["user_id"]
-
-    if notify_status == "SUCCESS":
-        await order_repo.update_by_order_no(merchant_order_no, {
-            "period_no": period_no,
-            "auth_times": already_times or 1,
-            "newebpay_trade_no": trade_no,
-        })
-
-        order_type = order.get("type", "subscription")
-
-        if order_type in ("subscription", "upgrade_subscription"):
-            await _handle_subscription_paid(
-                db, user_repo, order_repo, order, user_id,
-                period_no, is_first_payment, trade_no
-            )
-        elif order_type == "downgrade_subscription":
-            await _handle_downgrade_paid(
-                db, user_repo, order_repo, order, user_id,
-                period_no, is_first_payment
-            )
-
-    else:
-        await order_repo.update_by_order_no(merchant_order_no, {"status": "failed"})
-        if not is_first_payment:
-            # 續扣失敗（非首次付款）→ 立即降為 free
-            await _handle_payment_failed(db, user_repo, user_id)
-
-    return {"status": "ok"}
+    except Exception as e:
+        # 處理失敗：釋放 claim 讓藍新下次重發能重做；送 Sentry 警示需人工檢查
+        await webhook_repo.release(provider="newebpay-period", natural_id=natural_id)
+        print(f"❌ Period notify 處理失敗 {natural_id}: {e}", flush=True)
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("webhook.provider", "newebpay-period")
+                scope.set_tag("webhook.order_no", merchant_order_no)
+                scope.set_context("webhook", {
+                    "natural_id": natural_id,
+                    "status": notify_status,
+                    "is_first_payment": is_first_payment,
+                })
+                sentry_sdk.capture_exception(e)
+        except ImportError:
+            pass
+        # 回 500 讓藍新重試
+        raise
 
 
 async def _handle_subscription_paid(
@@ -831,35 +852,48 @@ async def mpg_notify(request: Request, db=Depends(get_database)):
         print(f"♻️ MPG Notify 已處理過，略過：{merchant_order_no}", flush=True)
         return {"status": "ok"}
 
-    order_repo = OrderRepository(db)
-    order = await order_repo.get_by_order_no(merchant_order_no)
-    if not order:
-        print(f"⚠️ 找不到訂單 {merchant_order_no}", flush=True)
+    try:
+        order_repo = OrderRepository(db)
+        order = await order_repo.get_by_order_no(merchant_order_no)
+        if not order:
+            print(f"⚠️ 找不到訂單 {merchant_order_no}", flush=True)
+            return {"status": "ok"}
+
+        # 冪等性保護
+        if order.get("status") == "paid":
+            print(f"ℹ️ 訂單 {merchant_order_no} 已處理，略過重複 Notify", flush=True)
+            return {"status": "ok"}
+
+        user_repo = UserRepository(db)
+        user_id = order["user_id"]
+
+        if result == "SUCCESS":
+            extra_dur = order.get("extra_duration_minutes", 0)
+            extra_ai = order.get("extra_ai_summaries", 0)
+            await user_repo.add_extra_quota(user_id, extra_dur, extra_ai)
+            await order_repo.update_by_order_no(merchant_order_no, {
+                "status": "paid",
+                "newebpay_trade_no": trade_no,
+                "paid_at": datetime.utcnow().timestamp(),
+            })
+            print(f"✅ 用戶 {user_id} 購買額外額度：+{extra_dur}分鐘 +{extra_ai}摘要", flush=True)
+        else:
+            await order_repo.update_by_order_no(merchant_order_no, {"status": "failed"})
+            print(f"⚠️ 用戶 {user_id} 額外額度購買失敗", flush=True)
+
         return {"status": "ok"}
-
-    # 冪等性保護
-    if order.get("status") == "paid":
-        print(f"ℹ️ 訂單 {merchant_order_no} 已處理，略過重複 Notify", flush=True)
-        return {"status": "ok"}
-
-    user_repo = UserRepository(db)
-    user_id = order["user_id"]
-
-    if result == "SUCCESS":
-        extra_dur = order.get("extra_duration_minutes", 0)
-        extra_ai = order.get("extra_ai_summaries", 0)
-        await user_repo.add_extra_quota(user_id, extra_dur, extra_ai)
-        await order_repo.update_by_order_no(merchant_order_no, {
-            "status": "paid",
-            "newebpay_trade_no": trade_no,
-            "paid_at": datetime.utcnow().timestamp(),
-        })
-        print(f"✅ 用戶 {user_id} 購買額外額度：+{extra_dur}分鐘 +{extra_ai}摘要", flush=True)
-    else:
-        await order_repo.update_by_order_no(merchant_order_no, {"status": "failed"})
-        print(f"⚠️ 用戶 {user_id} 額外額度購買失敗", flush=True)
-
-    return {"status": "ok"}
+    except Exception as e:
+        await webhook_repo.release(provider="newebpay-mpg", natural_id=merchant_order_no)
+        print(f"❌ MPG notify 處理失敗 {merchant_order_no}: {e}", flush=True)
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("webhook.provider", "newebpay-mpg")
+                scope.set_tag("webhook.order_no", merchant_order_no)
+                sentry_sdk.capture_exception(e)
+        except ImportError:
+            pass
+        raise
 
 
 # ── Return URL ────────────────────────────────────────────────────────────────

@@ -33,6 +33,9 @@ def setup_logging() -> None:
     log_level = getattr(logging, log_level_name, logging.INFO)
 
     # 底層 stdlib logging：讓 uvicorn / 其他 lib 的 log 也走 stdout
+    # force=True 會清掉先前 handler；前提是本函式在 main.py 所有 import 之前呼叫，
+    # 確保 sentry FastApiIntegration（之後才 init）能正確 attach 到我們重設的 handler。
+    # 順序：setup_logging → init_sentry → import routers/services
     logging.basicConfig(
         format="%(message)s",
         stream=sys.stdout,
