@@ -550,6 +550,7 @@ import api from '../utils/api'
 import { NEW_ENDPOINTS } from '../api/endpoints'
 
 // Composables
+import { useDisplayPreferences } from '../composables/transcript/useDisplayPreferences'
 import { useTranscriptData } from '../composables/transcript/useTranscriptData'
 import { useAudioPlayer } from '../composables/transcript/useAudioPlayer'
 import { useSubtitleMode } from '../composables/transcript/useSubtitleMode'
@@ -577,15 +578,19 @@ const authStore = useAuthStore()
 const audioPlayerRef = ref(null)
 const headerRef = ref(null)
 
-// 移動端底部抽屜狀態
-const isMobileDrawerOpen = ref(false)
-
-// 是否為移動端（用於保護收合功能不影響移動端）
-const isMobileView = ref(window.innerWidth <= 768)
-const handleResize = () => { isMobileView.value = window.innerWidth <= 768 }
-
-// 面板是否實際處於收合狀態（移動端永遠展開）
-const isEffectivelyCollapsed = computed(() => isLeftPanelCollapsed.value && !isMobileView.value)
+// 顯示偏好 + 面板版面（同步邏輯封裝在 composable 內）
+const {
+  isLeftPanelCollapsed,
+  isMobileDrawerOpen,
+  isMobileView,
+  isEffectivelyCollapsed,
+  isDarkMode,
+  contentFontSize,
+  contentFontWeight,
+  contentFontFamily,
+  showTimecodeMarkers,
+  savedTimecodeMarkersState,
+} = useDisplayPreferences()
 
 // ========== 數據管理 ==========
 const {
@@ -750,34 +755,6 @@ const {
 
 // 編輯期 segment offset 追蹤（純文字編輯模式下的 segment 對應）
 const segOffsets = useSegmentEditingOffsets()
-
-// 控制是否顯示 timecode 標記
-const showTimecodeMarkers = ref(false)
-
-// 顯示設定
-const isDarkMode = ref(document.documentElement.getAttribute('data-theme') === 'dark')
-const contentFontSize = ref(16)
-const contentFontWeight = ref(400)
-const contentFontFamily = ref('sans-serif')
-
-// 左側面板收合狀態
-const isLeftPanelCollapsed = ref(localStorage.getItem('leftPanelCollapsed') === 'true')
-watch(isLeftPanelCollapsed, (v) => localStorage.setItem('leftPanelCollapsed', String(v)))
-
-// 監聽暗色模式變化，切換全局主題並儲存偏好
-watch(isDarkMode, (dark) => {
-  const theme = dark ? 'dark' : 'light'
-  if (dark) {
-    document.documentElement.setAttribute('data-theme', 'dark')
-  } else {
-    document.documentElement.removeAttribute('data-theme')
-  }
-  localStorage.setItem('theme', theme)
-  authStore.updatePreferences({ theme })
-})
-
-// 保存編輯前的 timecode markers 狀態
-const savedTimecodeMarkersState = ref(true)
 
 // 控制 Alt 鍵狀態（用於點擊句子跳轉）
 const isAltPressed = ref(false)
@@ -2425,7 +2402,7 @@ onMounted(() => {
   window.addEventListener('keydown', handleKeyDown)
   window.addEventListener('keyup', handleKeyUp)
   window.addEventListener('blur', handleBlur)
-  window.addEventListener('resize', handleResize)
+  // resize listener: 由 useDisplayPreferences() 內部 onMounted 註冊
 
   loadTranscript(route.params.taskId)
   loadAllTags()
@@ -2483,7 +2460,7 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown)
   window.removeEventListener('keyup', handleKeyUp)
   window.removeEventListener('blur', handleBlur)
-  window.removeEventListener('resize', handleResize)
+  // resize listener: 由 useDisplayPreferences() 內部 onUnmounted 移除
 
   document.body.classList.remove('editing-transcript')
   document.body.classList.remove('transcript-detail-page')
