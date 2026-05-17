@@ -3,7 +3,7 @@
 """
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from pydantic import BaseModel, EmailStr
 from bson import ObjectId
 
@@ -15,6 +15,7 @@ from ..database.repositories.audit_log_repo import AuditLogRepository
 from ..models.quota import QuotaTier, QUOTA_TIERS
 from ..utils.time_utils import get_utc_timestamp
 from ..utils.audit_logger import log_admin_action
+from ..utils.email_service import get_email_service
 import logging
 
 logger = logging.getLogger(__name__)
@@ -200,7 +201,8 @@ async def get_user_detail(
 @router.put("/users/{user_id}/status")
 async def update_user_status(
     user_id: str,
-    request: UpdateUserStatusRequest,
+    body: UpdateUserStatusRequest,
+    http_request: Request,
     admin: dict = Depends(get_current_admin),
     db = Depends(get_database)
 ):
@@ -214,18 +216,16 @@ async def update_user_status(
             detail="用戶不存在"
         )
 
-    # 不能停用自己
     if str(admin["_id"]) == user_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="不能停用自己的帳號"
         )
 
-    success = await user_repo.update(user_id, {"is_active": request.is_active})
+    success = await user_repo.update(user_id, {"is_active": body.is_active})
 
     if success:
-        # 記錄操作（包含變更前後對比）
-        action = "enable_user" if request.is_active else "disable_user"
+        action = "enable_user" if body.is_active else "disable_user"
         await log_admin_action(
             admin_id=str(admin["_id"]),
             action=action,
@@ -234,25 +234,39 @@ async def update_user_status(
             details={
                 "email": user.get("email"),
                 "before": {"is_active": user.get("is_active", True)},
-                "after": {"is_active": request.is_active}
-            }
+                "after": {"is_active": body.is_active}
+            },
+            request=http_request,
         )
+
+        # 帳號停用通知（啟用不擾，停用才寄）
+        if not body.is_active and user.get("email"):
+            try:
+                await get_email_service().send_admin_action_notification(
+                    to_email=user["email"],
+                    action_label="帳號已被停用",
+                    admin_email=admin.get("email", "unknown"),
+                    details_lines=["停用後將無法登入及使用任何功能。"],
+                )
+            except Exception as e:
+                logger.warning(f"send notification failed: {e}")
 
     return {
         "success": success,
-        "message": f"用戶已{'啟用' if request.is_active else '停用'}"
+        "message": f"用戶已{'啟用' if body.is_active else '停用'}"
     }
 
 
 @router.put("/users/{user_id}/role")
 async def update_user_role(
     user_id: str,
-    request: UpdateUserRoleRequest,
+    body: UpdateUserRoleRequest,
+    http_request: Request,
     admin: dict = Depends(get_current_admin),
     db = Depends(get_database)
 ):
     """修改用戶角色（管理員）"""
-    if request.role not in ["user", "admin"]:
+    if body.role not in ["user", "admin"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="角色只能是 'user' 或 'admin'"
@@ -267,17 +281,16 @@ async def update_user_role(
             detail="用戶不存在"
         )
 
-    # 不能修改自己的角色
     if str(admin["_id"]) == user_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="不能修改自己的角色"
         )
 
-    success = await user_repo.update(user_id, {"role": request.role})
+    old_role = user.get("role", "user")
+    success = await user_repo.update(user_id, {"role": body.role})
 
     if success:
-        # 記錄操作（包含變更前後對比）
         await log_admin_action(
             admin_id=str(admin["_id"]),
             action="change_role",
@@ -285,21 +298,34 @@ async def update_user_role(
             resource_id=user_id,
             details={
                 "email": user.get("email"),
-                "before": {"role": user.get("role", "user")},
-                "after": {"role": request.role}
-            }
+                "before": {"role": old_role},
+                "after": {"role": body.role}
+            },
+            request=http_request,
         )
+
+        if user.get("email") and old_role != body.role:
+            try:
+                await get_email_service().send_admin_action_notification(
+                    to_email=user["email"],
+                    action_label=f"角色已變更：{old_role} → {body.role}",
+                    admin_email=admin.get("email", "unknown"),
+                    details_lines=[f"原本角色：{old_role}", f"新角色：{body.role}"],
+                )
+            except Exception as e:
+                logger.warning(f"send notification failed: {e}")
 
     return {
         "success": success,
-        "message": f"用戶角色已更新為 {request.role}"
+        "message": f"用戶角色已更新為 {body.role}"
     }
 
 
 @router.put("/users/{user_id}/quota")
 async def update_user_quota(
     user_id: str,
-    request: UpdateUserQuotaRequest,
+    body: UpdateUserQuotaRequest,
+    http_request: Request,
     admin: dict = Depends(get_current_admin),
     db = Depends(get_database)
 ):
@@ -315,13 +341,12 @@ async def update_user_quota(
 
     current_quota = user.get("quota", {})
 
-    if request.tier:
-        # 使用預設等級配額
+    if body.tier:
         try:
-            tier_enum = QuotaTier(request.tier)
+            tier_enum = QuotaTier(body.tier)
             tier_quota = QUOTA_TIERS[tier_enum]
             new_quota = {
-                "tier": request.tier,
+                "tier": body.tier,
                 "max_transcriptions": tier_quota["max_transcriptions"],
                 "max_duration_minutes": tier_quota["max_duration_minutes"],
                 "max_concurrent_tasks": tier_quota["max_concurrent_tasks"],
@@ -333,21 +358,21 @@ async def update_user_quota(
         except (ValueError, KeyError):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"無效的配額等級: {request.tier}"
+                detail=f"無效的配額等級: {body.tier}"
             )
-    elif request.custom:
-        # 自訂配額（合併現有配額）
-        new_quota = {**current_quota, **request.custom}
+    elif body.custom:
+        new_quota = {**current_quota, **body.custom}
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="請提供 tier 或 custom 配額設定"
         )
 
+    old_tier = current_quota.get("tier")
+    new_tier = new_quota.get("tier")
     success = await user_repo.update_quota(user_id, new_quota)
 
     if success:
-        # 記錄操作（包含變更前後對比）
         await log_admin_action(
             admin_id=str(admin["_id"]),
             action="update_quota",
@@ -356,15 +381,28 @@ async def update_user_quota(
             details={
                 "email": user.get("email"),
                 "before": {
-                    "tier": current_quota.get("tier"),
+                    "tier": old_tier,
                     "max_duration_minutes": current_quota.get("max_duration_minutes")
                 },
                 "after": {
-                    "tier": new_quota.get("tier"),
+                    "tier": new_tier,
                     "max_duration_minutes": new_quota.get("max_duration_minutes")
                 }
-            }
+            },
+            request=http_request,
         )
+
+        # 只在 tier 改變（不論升降）時通知；單純調整 custom 數字不擾
+        if user.get("email") and old_tier and new_tier and old_tier != new_tier:
+            try:
+                await get_email_service().send_admin_action_notification(
+                    to_email=user["email"],
+                    action_label=f"方案變更：{old_tier} → {new_tier}",
+                    admin_email=admin.get("email", "unknown"),
+                    details_lines=["新方案配額已即時生效。"],
+                )
+            except Exception as e:
+                logger.warning(f"send notification failed: {e}")
 
     return {
         "success": success,
@@ -529,7 +567,8 @@ async def adjust_user_extra_quota(
 @router.post("/users/{user_id}/reset-password")
 async def reset_user_password(
     user_id: str,
-    request: ResetPasswordRequest,
+    body: ResetPasswordRequest,
+    http_request: Request,
     admin: dict = Depends(get_current_admin),
     db = Depends(get_database)
 ):
@@ -543,17 +582,13 @@ async def reset_user_password(
             detail="用戶不存在"
         )
 
-    # 驗證密碼長度
-    if len(request.new_password) < 8:
+    if len(body.new_password) < 8:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="密碼長度至少需要 8 個字元"
         )
 
-    # 加密新密碼
-    hashed_password = hash_password(request.new_password)
-
-    # 更新密碼
+    hashed_password = hash_password(body.new_password)
     success = await user_repo.update(user_id, {"password_hash": hashed_password})
 
     if success:
@@ -562,8 +597,24 @@ async def reset_user_password(
             action="reset_password",
             resource_type="user",
             resource_id=user_id,
-            details={"email": user.get("email")}
+            details={"email": user.get("email")},
+            request=http_request,
         )
+
+        # 密碼被 admin 重設一定要通知，使用者才能察覺異常
+        if user.get("email"):
+            try:
+                await get_email_service().send_admin_action_notification(
+                    to_email=user["email"],
+                    action_label="密碼已被重設",
+                    admin_email=admin.get("email", "unknown"),
+                    details_lines=[
+                        "請使用新密碼登入。",
+                        "若此操作非您預期（例如沒請 admin 協助），請立即聯繫並更改密碼。",
+                    ],
+                )
+            except Exception as e:
+                logger.warning(f"send notification failed: {e}")
 
     return {
         "success": success,

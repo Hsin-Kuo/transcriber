@@ -304,9 +304,10 @@ async def log_admin_action(
     action: str,
     resource_type: str,
     resource_id: Optional[str] = None,
-    details: Optional[Dict[str, Any]] = None
+    details: Optional[Dict[str, Any]] = None,
+    request: Optional[Any] = None,  # fastapi.Request，避免循環 import 不指定型別
 ):
-    """記錄管理員操作（便捷函數，不需要 Request 對象）
+    """記錄管理員操作（便捷函數）。
 
     Args:
         admin_id: 管理員用戶 ID
@@ -314,6 +315,8 @@ async def log_admin_action(
         resource_type: 資源類型 (user, task, etc.)
         resource_id: 資源 ID
         details: 操作詳情
+        request: 可選的 fastapi Request；若提供則記錄真實 IP 與 user-agent，
+            而非舊版預設的 "admin-panel" / "AdminPanel"
     """
     if _audit_logger is None:
         print(f"⚠️  AuditLogger 尚未初始化，跳過記錄: {action}")
@@ -321,20 +324,32 @@ async def log_admin_action(
 
     message = f"{action} on {resource_type}"
     if details:
-        # 只保留關鍵資訊
         if "email" in details:
             message += f" ({details['email']})"
+
+    # 從 request 抽 IP（信 X-Forwarded-For 第一段，否則 client.host）/ user-agent
+    ip_address = "admin-panel"
+    user_agent = "AdminPanel"
+    if request is not None:
+        try:
+            xff = request.headers.get("X-Forwarded-For", "")
+            ip_address = xff.split(",")[0].strip() if xff else (
+                request.client.host if request.client else "unknown"
+            )
+            user_agent = request.headers.get("User-Agent", "")[:255] or "unknown"
+        except Exception:
+            pass
 
     await _audit_logger.repo.log(
         user_id=admin_id,
         log_type="admin",
         action=action,
-        ip_address="admin-panel",
+        ip_address=ip_address,
         path=f"/api/admin/{resource_type}s/{resource_id or 'batch'}",
         method="ADMIN",
         status_code=200,
         resource_id=resource_id,
         response_message=message,
         request_body=details,
-        user_agent="AdminPanel"
+        user_agent=user_agent,
     )
