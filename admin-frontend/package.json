@@ -8,6 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@sentry/vue": "^8.0.0",
     "axios": "^1.6.0",
     "pinia": "^3.0.4",
     "vue": "^3.4.0",

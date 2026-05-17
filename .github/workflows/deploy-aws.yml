@@ -49,8 +49,15 @@ jobs:
           VITE_API_URL: "https://soundlite.app"
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
         run: |
-          echo "VITE_API_URL=" > .env.production
-          echo "VITE_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}" >> .env.production
+          # 寫入 .env.production（會覆寫 repo 內的同名檔，所有需要的變數都要列出）
+          cat > .env.production <<EOF
+          VITE_API_URL=
+          VITE_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+          VITE_SENTRY_DSN=${{ secrets.VITE_SENTRY_DSN }}
+          VITE_SENTRY_ENVIRONMENT=production
+          VITE_SENTRY_TRACES_SAMPLE_RATE=0.1
+          VITE_SENTRY_RELEASE=${{ github.sha }}
+          EOF
           npm ci
           npm run build
 
@@ -62,6 +69,13 @@ jobs:
       - name: Build admin-frontend
         working-directory: admin-frontend
         run: |
+          # admin-frontend/.env.production 在 .gitignore，由 CI 從 secrets 產生
+          cat > .env.production <<EOF
+          VITE_SENTRY_DSN=${{ secrets.VITE_SENTRY_DSN_ADMIN }}
+          VITE_SENTRY_ENVIRONMENT=production-admin
+          VITE_SENTRY_TRACES_SAMPLE_RATE=0.1
+          VITE_SENTRY_RELEASE=${{ github.sha }}
+          EOF
           npm ci
           npm run build
 

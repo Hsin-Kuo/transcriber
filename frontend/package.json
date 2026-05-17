@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@sentry/vue": "^8.0.0",
     "axios": "^1.6.0",
     "pdfmake": "^0.3.3",
     "pinia": "^3.0.4",

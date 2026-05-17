@@ -26,3 +26,6 @@ google-generativeai
 # Payments
 pycryptodome
 httpx
+
+# Error tracking
+sentry-sdk[fastapi]

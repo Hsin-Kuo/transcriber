@@ -18,6 +18,10 @@ from dotenv import load_dotenv
 # 載入環境變數
 load_dotenv()
 
+# Sentry 必須在其他模組 import 之前初始化才能完整 hook 例外
+from src.utils.sentry_init import init_sentry
+init_sentry(component="server")
+
 # 資料庫和 Repositories
 from src.database.mongodb import MongoDB
 from src.database.repositories.task_repo import TaskRepository
