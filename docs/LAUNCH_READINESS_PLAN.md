@@ -24,14 +24,11 @@
 
 ## 🔴 Blocker 清單
 
-### B1. 建立 staging 環境
-- [ ] 開新 MongoDB Atlas cluster（M2，含 point-in-time recovery）
-- [ ] 建立獨立 SQS queue（`transcriber-tasks-staging`）
-- [ ] 建立獨立 S3 bucket（`transcriber-files-staging-*`）
-- [ ] 開 t3.micro EC2，部署 staging stack
-- [ ] CI 改成：`main` → staging（自動）；`release/*` → production（手動 approve）
-- [ ] Nginx 配 `staging.soundlite.app`（Cloudflare DNS + cert）
-- **預算**：~$15/月
+### B1. 建立 staging 環境 ⏳（規劃完成，待實作）
+- 詳細計畫見 **[STAGING_PLAN.md](./STAGING_PLAN.md)**
+- 已決策：共用 prod GPU、Atlas M2、main→staging 自動+aws→prod 手動、新開 t3.micro
+- 待你決定何時開始實作（Phase 1 需 AWS console 操作 + 部分 cli）
+- **預算**：~$17/月（staging 全部）+ $9/月（prod 升 M2，後續）
 
 ### B2. CI lint/test gate + 補核心測試 ✅（基礎）
 - [x] `pyproject.toml` 集中 ruff + pytest 設定
