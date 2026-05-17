@@ -57,6 +57,13 @@ _Avoid_: GPU server、Processor（後者是 pipeline 內部的元件名稱）。
 Web Server 把新建 Task 移交給 Worker 的動作。AWS 模式下含三件事：上傳音檔到 S3 → 簽 HMAC SQS 訊息 → 送進 `transcriber-tasks` queue；任一步失敗就把 Task 標 failed。`local` 模式下不適用（任務直接走 in-process executor）。封裝在 `src/services/worker_dispatch.py`。
 _Avoid_: handoff、enqueue（這兩個只是 dispatch 內部的子步驟）。
 
+**TranscriptionOrchestrator**:
+單次 transcription run 的 Phase 狀態機 + 取消 + 終態（completed / failed）協調者。持有 processors（whisper / punctuation / diarization）與 progress_store，不持有 Task 業務狀態。run() 從 PREPARATION 跑到 PUNCTUATION，期間透過 check_cancelled() poll DB；遇取消拋 `TranscriptionCancelled`、遇例外走 `_mark_failed`、成功走 `_mark_completed`（含 quota consume + audit log）。封裝在 `src/services/transcription_orchestrator.py`。
+_Avoid_: pipeline（暗示 declarative DAG）、runner（過泛）、TranscriptionRun（容易誤以為是 Task 本身）。
+
+**TranscriptionCancelled**:
+Orchestrator 內 check_cancelled() 偵測到 Task status 已被使用者透過 cancel endpoint 設成 canceling/cancelled 時拋出。Top-level except 統一處理 cleanup 但**不**覆蓋 status（避免覆掉 cancel endpoint 寫的 cancelled）。跟 Worker 端 `src/worker_core/transcription_job.TaskCancelled` 同 pattern——兩個 process 各有一個 exception，因為跨 process 不能共用 class。
+
 ## Relationships
 
 - 一個 **Task** 經過三個 **Phase**（PREPARATION → TRANSCRIPTION → PUNCTUATION），完成後產出一份 **Transcription**。
