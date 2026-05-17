@@ -9,6 +9,10 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 
 from ..auth.dependencies import get_current_user
+from ..services.utils.audio_validator import (
+    validate_filename_extension,
+    validate_magic_bytes,
+)
 from ..utils.config_loader import get_temp_dir
 
 router = APIRouter(prefix="/uploads", tags=["Uploads"])
@@ -35,6 +39,8 @@ async def init_upload(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "檔案大小無效")
     if total_size > MAX_UPLOAD_SIZE:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "檔案超過 500MB 上限")
+
+    validate_filename_extension(filename)
 
     total_chunks = (total_size + CHUNK_SIZE - 1) // CHUNK_SIZE
     upload_id = str(uuid.uuid4())
@@ -118,6 +124,17 @@ async def complete_upload(
             chunk_path = meta["temp_dir"] / f"chunk_{i:04d}"
             out.write(chunk_path.read_bytes())
             chunk_path.unlink()  # 刪除 chunk 釋放空間
+
+    # 組裝完成後驗證 magic bytes（防止上傳偽造副檔名的非音檔）
+    try:
+        validate_magic_bytes(assembled_path)
+    except HTTPException:
+        # 驗證失敗：清理已組裝檔案與整個 upload，讓使用者重傳
+        if assembled_path.exists():
+            assembled_path.unlink()
+        shutil.rmtree(meta["temp_dir"], ignore_errors=True)
+        _active_uploads.pop(upload_id, None)
+        raise
 
     meta["assembled_path"] = assembled_path
     meta["completed"] = True

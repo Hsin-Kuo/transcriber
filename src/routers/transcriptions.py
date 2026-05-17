@@ -20,6 +20,10 @@ from ..services.task_service import TaskService
 from ..services.transcription_service import TranscriptionService
 from ..services.progress_store import Phase
 from ..services.tag_service import TagService
+from ..services.utils.audio_validator import (
+    validate_filename_extension,
+    validate_magic_bytes,
+)
 from ..services.utils.whisper_processor import WhisperProcessor
 from ..services.utils.punctuation_processor import PunctuationProcessor
 from ..services.utils.diarization_processor import DiarizationProcessor
@@ -339,6 +343,12 @@ async def create_transcription(
                 detail="檔案總大小超過限制（最大500MB）"
             )
 
+    # 直接上傳（非 chunked）：先驗證每個檔的副檔名屬於白名單
+    # chunked / merge_chunked 在 uploads.py init_upload 已驗證
+    if uploaded_files:
+        for upload_file in uploaded_files:
+            validate_filename_extension(upload_file.filename)
+
     # 驗證任務類型
     if task_type not in ["paragraph", "subtitle"]:
         raise HTTPException(
@@ -459,6 +469,11 @@ async def create_transcription(
                     content = await upload_file.read()
                     f.write(content)
 
+                try:
+                    validate_magic_bytes(temp_path)
+                except HTTPException:
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    raise
                 saved_files.append(temp_path)
                 print(f"  📁 {idx + 1}. {upload_file.filename}")
 
@@ -502,6 +517,12 @@ async def create_transcription(
             with temp_audio.open("wb") as f:
                 content = await upload_file.read()
                 f.write(content)
+
+            try:
+                validate_magic_bytes(temp_audio)
+            except HTTPException:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                raise
 
             original_filename = upload_file.filename
             print(f"📁 收到檔案：{upload_file.filename} ({len(content) / 1024 / 1024:.2f} MB)")
@@ -1703,12 +1724,13 @@ async def create_batch_transcriptions(
                 raise ValueError("upload_id 無效或尚未完成組裝")
 
             if chunked_meta:
-                # 分片上傳模式
+                # 分片上傳模式（uploads.py 已驗副檔名與 magic bytes）
                 temp_dir = chunked_meta["temp_dir"]
                 temp_audio = chunked_meta["assembled_path"]
                 original_filename = chunked_meta["filename"]
             else:
                 # 直接上傳模式
+                validate_filename_extension(upload_file.filename)
                 temp_dir = get_temp_dir()
                 file_suffix = Path(upload_file.filename).suffix
                 temp_audio = temp_dir / f"input{file_suffix}"
@@ -1716,6 +1738,7 @@ async def create_batch_transcriptions(
                 content = await upload_file.read()
                 with temp_audio.open("wb") as f:
                     f.write(content)
+                validate_magic_bytes(temp_audio)
                 original_filename = upload_file.filename
 
             # 獲取音檔資訊

@@ -9,6 +9,25 @@ from ..utils.config_loader import get_parameter
 MONGODB_URL = get_parameter("/transcriber/mongodb-url", fallback_env="MONGODB_URL", default="mongodb://localhost:27017")
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
 
+# 不安全 TLS 參數黑名單（生產環境若出現代表 MITM 風險被開啟）
+_INSECURE_TLS_PARAMS = (
+    "tlsinsecure=true",
+    "tlsallowinvalidcertificates=true",
+    "tlsallowinvalidhostnames=true",
+    "ssl_cert_reqs=cert_none",
+)
+
+
+def _validate_mongodb_url(url: str) -> None:
+    """拒絕含不安全 TLS 參數的連線字串"""
+    url_lower = url.lower()
+    for bad in _INSECURE_TLS_PARAMS:
+        if bad in url_lower:
+            raise RuntimeError(
+                f"MONGODB_URL 含不安全 TLS 參數 '{bad}'，拒絕啟動。\n"
+                f"生產環境必須驗證憑證以防中間人攻擊。"
+            )
+
 
 class MongoDB:
     """MongoDB 連接管理器"""
@@ -18,19 +37,26 @@ class MongoDB:
     async def connect(cls):
         """啟動時連接 MongoDB"""
         try:
-            # 添加連接參數以提高可靠性
+            _validate_mongodb_url(MONGODB_URL)
             # 注意：MongoDB Atlas 使用副本集，不能用 directConnection=True
             is_atlas = "mongodb.net" in MONGODB_URL or "mongodb+srv" in MONGODB_URL
+            # Atlas 強制 TLS 並驗證憑證；本地 docker mongo 不啟用 TLS
+            tls_opts = (
+                {"tls": True, "tlsAllowInvalidCertificates": False}
+                if is_atlas
+                else {}
+            )
             cls.client = AsyncIOMotorClient(
                 MONGODB_URL,
                 serverSelectionTimeoutMS=5000,
                 connectTimeoutMS=5000,
                 socketTimeoutMS=5000,
-                **({"directConnection": True} if not is_atlas else {})
+                **({"directConnection": True} if not is_atlas else {}),
+                **tls_opts,
             )
             # 測試連接
             await cls.client.admin.command('ping')
-            print(f"✅ 已連接到 MongoDB: {MONGODB_DB_NAME}", flush=True)
+            print(f"✅ 已連接到 MongoDB: {MONGODB_DB_NAME} (tls={is_atlas})", flush=True)
         except Exception as e:
             print(f"❌ MongoDB 連接失敗: {e}", flush=True)
             raise
