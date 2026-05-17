@@ -74,8 +74,10 @@
 - [x] 新增 `/readiness`：DB ok + model 載完才回 200
 - [x] Worker startup / 每完成任務 / 60 秒背景 keep-alive 寫 `worker_heartbeats`
 - [x] worker_id 自動偵測（env > EC2 IMDSv2 > hostname）
-- [ ] **手動**：CloudWatch alarm（5 分鐘無 heartbeat → SNS）
-- [ ] **手動**：EC2 StatusCheckFailed auto-recovery action
+- [x] CloudWatch alarm（SQS oldest message age > 10 分鐘 → SNS）— 等價覆蓋 worker 卡住
+- [x] Route53 health check + alarm（`/health` 連續失敗 → SNS）
+- [x] EC2 StatusCheckFailed auto-recovery（早已就位）
+- 詳細狀態見 **[MONITORING_SETUP.md](./MONITORING_SETUP.md)**
 
 ### B7. Rollback 機制 ✅
 - 檔案：`.github/workflows/deploy-aws.yml`、`deploy/rollback.sh`
