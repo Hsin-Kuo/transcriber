@@ -20,6 +20,7 @@ from .progress_store import Phase, ProgressStore
 from .utils.whisper_processor import WhisperProcessor
 from .utils.punctuation_processor import PunctuationProcessor
 from .utils.diarization_processor import DiarizationProcessor
+from src.database.sync_client import get_sync_db
 from src.utils.time_utils import get_utc_timestamp
 from src.utils.text_utils import convert_segments_punctuation
 
@@ -532,19 +533,8 @@ class TranscriptionService:
 
     def _get_task_sync(self, task_id: str) -> Optional[dict]:
         """同步獲取任務（避免 event loop 衝突）"""
-        from pymongo import MongoClient
-        import os
-
         try:
-            # 使用與主應用相同的 MongoDB 配置
-            mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
-            db_name = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
-            client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
-            db = client[db_name]
-
-            task = db.tasks.find_one({"_id": task_id})
-            client.close()
-            return task
+            return get_sync_db().tasks.find_one({"_id": task_id})
         except Exception as e:
             print(f"⚠️ 同步獲取任務失敗：{e}")
             return None
@@ -555,27 +545,13 @@ class TranscriptionService:
         Returns:
             bool: 是否更新成功
         """
-        from pymongo import MongoClient
-        import os
-
         try:
-            # 創建同步的 MongoDB 客戶端，使用與主應用相同的配置
-            mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
-            db_name = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
-            client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
-            db = client[db_name]
-
-            # 添加 updated_at (UTC timestamp)
             updates["updated_at"] = get_utc_timestamp()
-
-            # 執行更新
-            result = db.tasks.update_one(
+            result = get_sync_db().tasks.update_one(
                 {"_id": task_id},
                 {"$set": updates}
             )
-
             print(f"✅ 同步更新任務 {task_id}，修改了 {result.modified_count} 條記錄")
-            client.close()
             return result.modified_count > 0
         except Exception as e:
             print(f"❌ [CRITICAL] 同步更新任務失敗：{e}")
@@ -597,14 +573,7 @@ class TranscriptionService:
             segments: Segments 陣列（可選）
         """
         try:
-            from pymongo import MongoClient
-            import os
-
-            # 連接 MongoDB（使用同步客戶端）
-            mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
-            db_name = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
-            client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
-            db = client[db_name]
+            db = get_sync_db()
 
             # 1. 保存轉錄文本到 transcriptions collection
             now = get_utc_timestamp()
@@ -640,8 +609,6 @@ class TranscriptionService:
                     upsert=True
                 )
                 print(f"✅ 已保存 segments 到 MongoDB (task_id: {task_id}, 數量: {len(segments)})")
-
-            client.close()
 
         except Exception as e:
             print(f"⚠️ 保存轉錄結果到 MongoDB 失敗：{e}")
@@ -719,17 +686,11 @@ class TranscriptionService:
                 if user_id:
                     audio_duration_seconds = task.get("stats", {}).get("audio_duration_seconds", 0)
                     if audio_duration_seconds > 0:
-                        from pymongo import MongoClient
                         from bson import ObjectId
-                        import os
                         from src.database.repositories.reservation_repo import consume_reservation_sync
                         from src.auth.quota import build_transcription_consumption_pipeline
 
-                        mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
-                        db_name = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
-                        client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
-                        db = client[db_name]
-
+                        db = get_sync_db()
                         duration_minutes = audio_duration_seconds / 60
 
                         # Step 1：原子刪除預扣（findOneAndDelete）
@@ -741,7 +702,6 @@ class TranscriptionService:
 
                         if reservation is None:
                             print(f"ℹ️  任務 {task_id} 無預扣記錄，跳過配額扣除（可能是舊任務或重複完成通知）")
-                            client.close()
                         else:
                             # Step 2：套用 pipeline 原子計算 plan/extra 分流並扣款
                             try:
@@ -764,8 +724,6 @@ class TranscriptionService:
                                     f"reservation_minutes={reservation.get('duration_minutes')} "
                                     f"err={e}"
                                 )
-                            finally:
-                                client.close()
 
                     # Audit log 保持異步（較不重要，失敗也沒關係）
                     try:
@@ -821,15 +779,8 @@ class TranscriptionService:
 
         # 釋放預扣配額（idempotent，若已被消耗或釋放則無動作）
         try:
-            from pymongo import MongoClient
-            import os
             from src.database.repositories.reservation_repo import release_reservation_sync
-
-            mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
-            db_name = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
-            client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
-            released = release_reservation_sync(client[db_name], task_id)
-            client.close()
+            released = release_reservation_sync(get_sync_db(), task_id)
             if released:
                 print(f"♻️  已釋放任務 {task_id} 的預扣配額")
         except Exception as release_error:
@@ -922,9 +873,6 @@ class TranscriptionService:
             task_id: 當前任務 ID
         """
         try:
-            from pymongo import MongoClient
-            import os
-
             # 獲取當前任務的用戶 ID
             task = self._get_task_sync(task_id)
             if not task:
@@ -938,11 +886,7 @@ class TranscriptionService:
             if not user_id:
                 return
 
-            # 連接數據庫
-            mongo_uri = os.getenv("MONGODB_URL", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
-            db_name = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
-            client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
-            db = client[db_name]
+            db = get_sync_db()
 
             # 查詢該用戶所有有音檔的任務，按創建時間排序
             # ⚠️ 排除已刪除的任務（deleted: True），已刪除的任務不計入額度
@@ -1006,8 +950,6 @@ class TranscriptionService:
                             deleted_count += 1
 
                     print(f"✅ 自動清理完成，共刪除 {deleted_count} 個舊音檔")
-
-            client.close()
         except Exception as e:
             print(f"⚠️ 清理舊音檔時發生錯誤：{e}")
             import traceback

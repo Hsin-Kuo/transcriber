@@ -29,45 +29,10 @@ from ..services.utils.punctuation_processor import PunctuationProcessor
 from ..services.utils.diarization_processor import DiarizationProcessor
 from ..utils.storage_service import is_aws
 from ..utils.config_loader import get_parameter, get_temp_dir
-from ..utils.sentry_helpers import create_background_task
+from ..database.sync_client import get_sync_db
+from ..services.worker_dispatch import get_worker_dispatch
 import os
 import asyncio
-
-
-def _get_sync_db():
-    """取得同步 MongoDB 連線（用於背景任務，不依賴 FastAPI DI）"""
-    from pymongo import MongoClient
-    mongodb_url = get_parameter("/transcriber/mongodb-url", fallback_env="MONGODB_URL", default="mongodb://localhost:27017")
-    db_name = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
-    client = MongoClient(mongodb_url, serverSelectionTimeoutMS=5000)
-    return client, client[db_name]
-
-
-def _sign_sqs_message(payload: dict) -> dict:
-    """為 SQS 訊息添加 HMAC 簽名
-
-    Args:
-        payload: 訊息內容
-
-    Returns:
-        添加了 _signature 欄位的訊息
-    """
-    worker_secret = get_parameter("/transcriber/worker-secret", fallback_env="WORKER_SECRET", default="")
-    if not worker_secret:
-        return payload  # 未設定密鑰時不簽名
-
-    import hmac
-    import hashlib
-
-    # 計算簽名（不含 _signature 欄位）
-    payload_str = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    signature = hmac.new(
-        worker_secret.encode(),
-        payload_str.encode(),
-        hashlib.sha256
-    ).hexdigest()
-
-    return {**payload, "_signature": signature}
 
 
 router = APIRouter(prefix="/transcriptions", tags=["Transcriptions"])
@@ -690,70 +655,21 @@ async def create_transcription(
 
         if is_aws():
             # ===== AWS 模式：背景上傳 S3 + 發送 SQS =====
-            from ..utils.storage_service import save_audio
-            import boto3
-
-            # 預先捕獲 SQS 配置
-            sqs_queue_url = os.getenv("SQS_QUEUE_URL", "")
-            sqs_region = os.getenv("S3_REGION", "ap-northeast-1")
-            use_punctuation = punct_provider != "none"
-            language_code = None if language == "auto" else language
-            sqs_payload = _sign_sqs_message({
-                "task_id": task_id,
-                "language": language_code,
-                "use_chunking": chunk_audio,
-                "use_punctuation": use_punctuation,
-                "punctuation_provider": punct_provider,
-                "use_diarization": diarize,
-                "max_speakers": max_speakers,
-            })
-
-            # 捕獲背景任務所需的變數
-            _bg_task_id = task_id
-            _bg_temp_audio = temp_audio
-            _bg_temp_dir = temp_dir
-            _bg_user_tier = full_user_data.get("quota", {}).get("tier", "free")
-
-            async def _upload_to_s3_and_notify():
-                """背景執行 S3 上傳 + SQS 發送"""
-                try:
-                    loop = asyncio.get_event_loop()
-                    # S3 上傳（blocking I/O），依用戶方案放到對應資料夾
-                    await loop.run_in_executor(None, save_audio, _bg_task_id, _bg_temp_audio, _bg_user_tier)
-                    print(f"☁️  音檔已上傳到 S3: uploads/{_bg_user_tier}/{_bg_task_id}.mp3")
-
-                    # 發送 SQS
-                    if sqs_queue_url:
-                        def _send_sqs():
-                            sqs = boto3.client("sqs", region_name=sqs_region)
-                            sqs.send_message(
-                                QueueUrl=sqs_queue_url,
-                                MessageBody=json.dumps(sqs_payload)
-                            )
-                        await loop.run_in_executor(None, _send_sqs)
-                        print(f"📨 已發送 SQS 訊息: {_bg_task_id}")
-                    else:
-                        print(f"⚠️  SQS_QUEUE_URL 未設定，任務 {_bg_task_id} 保持 pending 狀態")
-
-                except Exception as e:
-                    print(f"❌ S3 上傳失敗: {_bg_task_id}: {e}")
-                    try:
-                        client, sync_db = _get_sync_db()
-                        sync_db.tasks.update_one(
-                            {"_id": _bg_task_id},
-                            {"$set": {"status": "failed", "error": {"code": "UPLOAD_FAILED", "message": f"音檔上傳失敗: {str(e)}"}}}
-                        )
-                        client.close()
-                    except Exception as db_err:
-                        print(f"❌ 更新任務狀態失敗: {_bg_task_id}: {db_err}")
-                finally:
-                    if _bg_temp_dir.exists():
-                        shutil.rmtree(_bg_temp_dir)
-
-            # 發射背景任務，不等待；失敗會送 Sentry
-            create_background_task(
-                _upload_to_s3_and_notify(),
-                name=f"upload_s3_notify:{task_id}",
+            # 委派給 Worker dispatch seam：背景上傳 S3 + 簽章 + 送 SQS
+            # 失敗會把 Task 標 failed、清 temp_dir、送 Sentry
+            get_worker_dispatch().fire_and_forget(
+                task_id=task_id,
+                audio_local_path=temp_audio,
+                temp_dir=temp_dir,
+                user_tier=full_user_data.get("quota", {}).get("tier", "free"),
+                job_config={
+                    "language": None if language == "auto" else language,
+                    "use_chunking": chunk_audio,
+                    "use_punctuation": punct_provider != "none",
+                    "punctuation_provider": punct_provider,
+                    "use_diarization": diarize,
+                    "max_speakers": max_speakers,
+                },
             )
         else:
             # ===== 本地模式：現有行為 =====
@@ -1822,71 +1738,20 @@ async def create_batch_transcriptions(
 
             if is_aws():
                 # ===== AWS 模式：背景上傳 S3 + 發送 SQS =====
-                from ..utils.storage_service import save_audio
-                import boto3
-
-                # 預先捕獲配置
-                sqs_queue_url = os.getenv("SQS_QUEUE_URL", "")
-                sqs_region = os.getenv("S3_REGION", "ap-northeast-1")
-                use_punctuation = punct_provider != "none"
-                language_code = None if language == "auto" else language
-                sqs_payload = _sign_sqs_message({
-                    "task_id": task_id,
-                    "language": language_code,
-                    "use_chunking": True,
-                    "use_punctuation": use_punctuation,
-                    "punctuation_provider": punct_provider,
-                    "use_diarization": diarize,
-                    "max_speakers": max_speakers,
-                })
-
-                # 捕獲背景任務所需的變數
-                _bg_task_id = task_id
-                _bg_temp_audio = temp_audio
-                _bg_temp_dir = temp_dir
-                _bg_user_tier = full_user_data.get("quota", {}).get("tier", "free")
-
-                async def _batch_upload_to_s3_and_notify(
-                    bg_task_id=_bg_task_id, bg_temp_audio=_bg_temp_audio,
-                    bg_temp_dir=_bg_temp_dir, bg_sqs_payload=sqs_payload,
-                    bg_user_tier=_bg_user_tier,
-                    bg_sqs_url=sqs_queue_url, bg_sqs_region=sqs_region,
-                ):
-                    """背景執行 S3 上傳 + SQS 發送（批次）"""
-                    try:
-                        loop = asyncio.get_event_loop()
-                        await loop.run_in_executor(None, save_audio, bg_task_id, bg_temp_audio, bg_user_tier)
-                        print(f"☁️  批次音檔已上傳到 S3: uploads/{bg_user_tier}/{bg_task_id}.mp3")
-
-                        if bg_sqs_url:
-                            def _send_sqs():
-                                sqs = boto3.client("sqs", region_name=bg_sqs_region)
-                                sqs.send_message(
-                                    QueueUrl=bg_sqs_url,
-                                    MessageBody=json.dumps(bg_sqs_payload)
-                                )
-                            await loop.run_in_executor(None, _send_sqs)
-                            print(f"📨 批次已發送 SQS 訊息: {bg_task_id}")
-
-                    except Exception as e:
-                        print(f"❌ 批次 S3 上傳失敗: {bg_task_id}: {e}")
-                        try:
-                            client, sync_db = _get_sync_db()
-                            sync_db.tasks.update_one(
-                                {"_id": bg_task_id},
-                                {"$set": {"status": "failed", "error": {"code": "UPLOAD_FAILED", "message": f"音檔上傳失敗: {str(e)}"}}}
-                            )
-                            client.close()
-                        except Exception as db_err:
-                            print(f"❌ 更新任務狀態失敗: {bg_task_id}: {db_err}")
-                    finally:
-                        if bg_temp_dir.exists():
-                            shutil.rmtree(bg_temp_dir)
-
-                # 發射背景任務，不等待；失敗會送 Sentry
-                create_background_task(
-                    _batch_upload_to_s3_and_notify(),
-                    name=f"batch_upload_s3_notify:{task_id}",
+                # 委派給 Worker dispatch seam（批次：chunking 強制開）
+                get_worker_dispatch().fire_and_forget(
+                    task_id=task_id,
+                    audio_local_path=temp_audio,
+                    temp_dir=temp_dir,
+                    user_tier=full_user_data.get("quota", {}).get("tier", "free"),
+                    job_config={
+                        "language": None if language == "auto" else language,
+                        "use_chunking": True,
+                        "use_punctuation": punct_provider != "none",
+                        "punctuation_provider": punct_provider,
+                        "use_diarization": diarize,
+                        "max_speakers": max_speakers,
+                    },
                 )
                 temp_dir = None  # 避免 except 中重複清理
 

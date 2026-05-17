@@ -53,6 +53,10 @@ _Avoid_: memory state（舊命名，已從程式碼移除）。
 實際跑轉錄 pipeline 的進程。`DEPLOY_ENV=local` 時是 Web Server 同進程的背景執行緒；`DEPLOY_ENV=aws` 時是獨立的 GPU EC2，從 SQS 取訊息。
 _Avoid_: GPU server、Processor（後者是 pipeline 內部的元件名稱）。
 
+**Worker dispatch**:
+Web Server 把新建 Task 移交給 Worker 的動作。AWS 模式下含三件事：上傳音檔到 S3 → 簽 HMAC SQS 訊息 → 送進 `transcriber-tasks` queue；任一步失敗就把 Task 標 failed。`local` 模式下不適用（任務直接走 in-process executor）。封裝在 `src/services/worker_dispatch.py`。
+_Avoid_: handoff、enqueue（這兩個只是 dispatch 內部的子步驟）。
+
 ## Relationships
 
 - 一個 **Task** 經過三個 **Phase**（PREPARATION → TRANSCRIPTION → PUNCTUATION），完成後產出一份 **Transcription**。

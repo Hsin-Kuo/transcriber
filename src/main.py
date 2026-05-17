@@ -386,6 +386,26 @@ async def startup_event():
     else:
         print("ℹ️  AWS Web Server 模式：跳過 TranscriptionService 初始化和任務隊列")
 
+        # AWS 模式：建立 WorkerDispatch（boto3 client + S3 uploader 注入）
+        # local 模式不需要——任務直接走 in-process executor 不送 SQS
+        import boto3
+        from src.services.worker_dispatch import WorkerDispatch, init_worker_dispatch
+        from src.utils.storage_service import save_audio
+        from src.utils.config_loader import get_parameter as _gp
+
+        sqs_region = os.getenv("S3_REGION", "ap-northeast-1")
+        sqs_queue_url = os.getenv("SQS_QUEUE_URL", "")
+        worker_secret = _gp(
+            "/transcriber/worker-secret", fallback_env="WORKER_SECRET", default=""
+        )
+        init_worker_dispatch(WorkerDispatch(
+            sqs_client=boto3.client("sqs", region_name=sqs_region),
+            sqs_queue_url=sqs_queue_url,
+            worker_secret=worker_secret,
+            s3_uploader=save_audio,
+        ))
+        print("✅ WorkerDispatch 初始化完成")
+
     print("=" * 50)
     print("✨ 服務已就緒！")
     print("📚 API 文檔：http://localhost:8000/docs")
