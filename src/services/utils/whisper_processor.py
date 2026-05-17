@@ -12,15 +12,14 @@ import os
 from pydub import AudioSegment
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-# 只在本地環境或 GPU Worker 才 import faster_whisper
-# AWS Web Server 不需要這個模組，因為轉錄在 GPU Worker 執行
-_DEPLOY_ENV = os.getenv("DEPLOY_ENV", "local")
-_APP_ROLE = os.getenv("APP_ROLE", "server")
-
-if _DEPLOY_ENV == "local" or _APP_ROLE == "worker":
+# faster_whisper 是 ML 重依賴。
+# - GPU Worker / local 開發：有裝（requirements.txt），轉錄走 WhisperModel
+# - AWS Web Server / CI 測試：沒裝（requirements-web.txt 不含），WhisperModel = None
+# 用 try/except 比舊版「靠 DEPLOY_ENV 環境變數決定」乾淨：CI 不需特別設環境變數也不會炸
+try:
     from faster_whisper import WhisperModel
-else:
-    WhisperModel = None  # AWS Web Server 不需要
+except ImportError:
+    WhisperModel = None
 
 
 def _normalize_language(language: Optional[str]) -> Optional[str]:
