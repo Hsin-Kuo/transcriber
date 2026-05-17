@@ -33,19 +33,19 @@
 - [ ] Nginx 配 `staging.soundlite.app`（Cloudflare DNS + cert）
 - **預算**：~$15/月
 
-### B2. CI lint/test gate + 補核心測試
-- [ ] 新增 `.github/workflows/test.yml`，PR 階段跑：
-  - `ruff check src/`
-  - `pytest tests/`
-  - 前端 `eslint`（B2 完成後）
-- [ ] 補 `src/services/task_service.py` 單元測試（任務狀態機）
-- [ ] 補 `src/routers/auth.py` 單元測試（登入/註冊/密碼重設）
-- [ ] 補 `src/routers/subscriptions.py` webhook idempotency 測試（搭配 B9）
-- [ ] Playwright E2E 4 條黃金路徑：
-  - 註冊 → email 驗證 → 登入
-  - 上傳音檔 → 開始轉錄 → SSE 收進度 → 完成
-  - 訂閱付款 webhook 流程
-  - Admin 登入 + 改使用者方案
+### B2. CI lint/test gate + 補核心測試 ✅（基礎）
+- [x] `pyproject.toml` 集中 ruff + pytest 設定
+- [x] `requirements-dev.txt` 開發依賴（pytest / ruff）
+- [x] `.github/workflows/test.yml` PR 階段跑 ruff + pytest + nginx -t
+- [x] 補 JWT entropy 測試（B5，含 6 個弱密鑰反例）
+- [x] 補 cookie helper 測試（B3，含 production/local 差異驗證）
+- [x] 補 audio_validator 測試（B8，含 7 種音訊容器 + 5 種假冒檔）
+- [x] 順手修 ruff 揭露的 4 個真實 bug（typo / closure / shadow）
+- [ ] 補 `src/services/task_service.py` 單元測試（任務狀態機）— 待後續
+- [ ] 補 `src/routers/auth.py` 完整 happy/sad path（mongo 整合測試）— 待後續
+- [ ] 補 `src/routers/subscriptions.py` webhook 冪等性整合測試 — 待後續
+- [ ] 前端 ESLint（M3 處理）— 待後續
+- [ ] Playwright E2E 4 條黃金路徑 — 依賴 B1 staging 環境
 
 ### B3. Refresh token 改用 httpOnly cookie ✅
 - 檔案：`src/auth/cookies.py`（新）、`src/routers/auth.py`、`src/routers/oauth.py`、
