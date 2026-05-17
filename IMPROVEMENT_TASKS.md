@@ -1,5 +1,7 @@
 # 改善任務表
-> ⚠️ 全部修改完成後刪除此檔案
+
+> 此表追蹤架構性技術債（router/service 拆分、前端大檔、結構化 log 等）。
+> 上線前 blocker 改去看 [`docs/LAUNCH_READINESS_PLAN.md`](./docs/LAUNCH_READINESS_PLAN.md)，那邊的 M1-M8 與本表的 T2/T4/T7/T8/T10 有重疊。
 
 ## 🔴 高優先（影響維護性）
 
@@ -10,7 +12,7 @@
   - [x] T1-d：`worker.py` 改為入口，僅負責啟動
   - [x] T1-e：建立 `config.py`、`state.py`、`db.py`、`model_cache.py`、`audio_converter.py`
 
-- [ ] **T2** — 拆分 `src/services/transcription_service.py`（1,131 行）
+- [ ] **T2** — 拆分 `src/services/transcription_service.py`（1,131 行）→ 對應 LAUNCH_READINESS_PLAN M1
   - [ ] T2-a：抽出 `src/services/audio_preprocessor.py`（格式轉換、正規化）
   - [ ] T2-b：抽出 `src/services/segment_assembler.py`（Whisper 輸出 + 說話者合併）
   - [ ] T2-c：抽出 `src/services/chinese_converter.py`（繁簡轉換邏輯集中）
@@ -20,28 +22,29 @@
   - [x] T3-a：改寫為 `TaskStateStore` 類別，包含 get/set/delete/lock 方法
   - [x] T3-b：更新 `task_service.py`、`routers/tasks.py`、`main.py` 改用 `TaskStateStore` 注入
 
-- [ ] **T4** — 拆分 `frontend/src/views/TranscriptDetailView.vue`（107KB，單檔過重）
+- [ ] **T4** — 拆分 `frontend/src/views/TranscriptDetailView.vue`（107KB，單檔過重）→ 對應 LAUNCH_READINESS_PLAN M2
   - [ ] T4-a：抽出 `TranscriptCanvas.vue`（主要編輯區）
   - [ ] T4-b：抽出 `TranscriptSidebar.vue`（右側摘要/說話者面板）
   - [ ] T4-c：`TranscriptDetailView.vue` 改為組裝用頂層元件
 
 ## 🟡 中優先（技術債）
 
-- [ ] **T5** — 補充測試
+- [~] **T5** — 補充測試（部分由 LAUNCH_READINESS_PLAN B2 完成）
   - [ ] T5-a：建立 `tests/unit/test_task_repo.py`
   - [ ] T5-b：建立 `tests/unit/test_quota.py`
-  - [ ] T5-c：建立 `tests/unit/test_jwt_handler.py`
+  - [x] T5-c：JWT 測試已建於 `tests/auth/test_jwt_handler_entropy.py`（B5）
   - [ ] T5-d：建立 `tests/integration/test_transcription_flow.py`
+  - 附加：B2 也補了 `tests/auth/test_cookies.py` 與 `tests/services/test_audio_validator.py`
 
 - [x] **T6** — Magic number 集中管理
   - [x] T6-a：擴充 `src/worker_core/config.py`，集中 SQS、Spot、MongoDB 常數
   - [x] T6-b：更新 `sqs_consumer.py`、`spot_monitor.py`、`db.py` 引用 config 常數
 
-- [ ] **T7** — Router DI 統一
+- [ ] **T7** — Router DI 統一 → 對應 LAUNCH_READINESS_PLAN M1
   - [ ] T7-a：審查所有 router，找出直接 instantiate service 的地方
   - [ ] T7-b：統一改用 `Depends()` 注入 Service
 
-- [ ] **T8** — 結構化 logging
+- [ ] **T8** — 結構化 logging → 對應 LAUNCH_READINESS_PLAN M4
   - [ ] T8-a：建立 `src/utils/logger.py`（統一 logging 設定 + request-id）
   - [ ] T8-b：替換 `worker.py`、`transcription_service.py`、`task_service.py` 中的 `print()` 為 `logger`
 
@@ -50,7 +53,7 @@
 - [ ] **T9** — SSE 效能（可選，目前夠用，有效能問題再處理）
   - [ ] 評估是否改用 WebSocket 取代每 1-2 秒 poll
 
-- [ ] **T10** — 前端 API 型別安全
+- [ ] **T10** — 前端 API 型別安全 → 對應 LAUNCH_READINESS_PLAN M3
   - [ ] T10-a：為 `api/services.js` 加入 JSDoc 型別，或評估遷移 TypeScript
 
 ---
@@ -63,7 +66,7 @@
 | T2 transcription_service 拆分 | ⏳ 待處理 | — |
 | T3 shared_state 封裝 | ✅ 完成 | 2026-04-30 |
 | T4 TranscriptDetailView 拆分 | ⏳ 待處理 | — |
-| T5 測試補充 | ⏳ 待處理 | — |
+| T5 測試補充 | 🟡 部分完成（T5-c） | 2026-05-17 |
 | T6 Magic number 集中 | ✅ 完成 | 2026-04-30 |
 | T7 Router DI 統一 | ⏳ 待處理 | — |
 | T8 結構化 logging | ⏳ 待處理 | — |

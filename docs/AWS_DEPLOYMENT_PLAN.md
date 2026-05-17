@@ -1,9 +1,15 @@
-# AWS 部署計畫 (Whisper Transcriber)
+# AWS 部署計畫 (Whisper Transcriber)（**歷史文件**）
 
 > 最後更新：2026-04-22
-
-> **⚠️ 注意：此文件為原始規劃文件，部分設計在實際部署時有所調整。**
-> 實際現況與規劃的主要差異請見下方「[現況與規劃差異](#現況與規劃差異)」章節。
+> **⚠️ 此文件保留作為架構決策歷史紀錄，已不主動維護。**
+>
+> **新的部署資訊請看：**
+> - 日常部署 SOP → [`DEPLOYMENT.md`](./DEPLOYMENT.md)
+> - Staging 環境規劃 → [`STAGING_PLAN.md`](./STAGING_PLAN.md)
+> - 線上監控 → [`MONITORING_SETUP.md`](./MONITORING_SETUP.md)
+> - 上線前修改追蹤 → [`LAUNCH_READINESS_PLAN.md`](./LAUNCH_READINESS_PLAN.md)
+>
+> 實際部署與本文件規劃的差異見下方「[現況與規劃差異](#現況與規劃差異)」章節。
 
 ---
 
