@@ -1,7 +1,7 @@
 # 改善任務表
 
 > 此表追蹤架構性技術債（router/service 拆分、前端大檔、結構化 log 等）。
-> 上線前 blocker 改去看 [`docs/LAUNCH_READINESS_PLAN.md`](./docs/LAUNCH_READINESS_PLAN.md)；
+> 上線前 blocker 改去看 [`LAUNCH_READINESS_PLAN.md`](./LAUNCH_READINESS_PLAN.md)；
 > M 系列已完成大部分（M4 / M5 / M6 / M7 / M8 ✅，M1 / M2 / M3 部分 ✅）。
 
 ## 🔴 高優先（影響維護性）

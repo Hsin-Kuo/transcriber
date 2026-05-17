@@ -71,16 +71,29 @@ sudo nginx -t && sudo systemctl reload nginx
 
 GPU Worker（g4dn.xlarge）平常是**關機狀態**，收到 SQS 任務時由 Lambda 自動啟動，空閒 5 分鐘後自動關機。
 
-**若需更新 Worker 程式碼：**
+> **正常更新 Worker 程式碼不需要 SSH。** Worker 服務啟動時會自動 `git fetch + reset --hard origin/aws` 並執行 `pip install`，所以 push 到 `aws` branch 後下次任務觸發起機就會跑新版。只有改 systemd unit / 系統層東西時才需要手動進去。
 
-1. 先從 AWS Console 或 CLI 啟動實例
+**兩台 GPU 實例（Spot 優先 + On-Demand fallback）：**
+
+| Instance ID | 類型 | 用途 |
+|---|---|---|
+| `i-0d133cca8e6ce23c2` | g4dn.xlarge Spot | 預設啟動（Lambda 環境變數 `GPU_INSTANCE_ID`） |
+| `i-058f381c59210c00a` | g4dn.xlarge On-Demand | Spot 容量不足時的 fallback（Lambda 環境變數 `ONDEMAND_INSTANCE_ID`） |
+
+**手動 SSH（系統層改動時才需要）：**
+
+1. 啟動實例
 ```bash
+# Spot
 aws ec2 start-instances --instance-ids i-0d133cca8e6ce23c2 --region ap-northeast-1
+
+# 或 On-Demand
+aws ec2 start-instances --instance-ids i-058f381c59210c00a --region ap-northeast-1
 ```
 
-2. 等機器起來後 SSH 進去（需查當下 IP，Spot Instance IP 每次重啟會變）
+2. 等機器起來後 SSH 進去（需查當下 IP，每次重啟會變）
 ```bash
-# 查目前 IP
+# 查目前 IP（替換成想連的 instance id）
 aws ec2 describe-instances \
   --instance-ids i-0d133cca8e6ce23c2 \
   --query 'Reservations[0].Instances[0].PublicIpAddress' \
@@ -89,17 +102,15 @@ aws ec2 describe-instances \
 ssh -i ~/.ssh/transcriber-key.pem ec2-user@<GPU_WORKER_IP>
 ```
 
-3. 更新程式碼並重啟
+3. 常用指令
 ```bash
-cd /opt/transcriber
-
-# 手動上傳新版本（從本機執行）
-scp -i ~/.ssh/transcriber-key.pem -r src/ ec2-user@<GPU_IP>:/opt/transcriber/
+# 手動拉最新程式碼（通常自動，這裡是除錯用）
+cd /opt/transcriber && sudo -u ec2-user git fetch && sudo -u ec2-user git reset --hard origin/aws
 
 # 重啟 worker service
 sudo systemctl restart transcriber-worker
 
-# 查看 log
+# 即時 log
 sudo journalctl -u transcriber-worker -f
 ```
 
@@ -183,7 +194,7 @@ aws lambda update-function-code \
 | 後端程式碼 | push 到 `aws` branch | 自動（CI/CD） |
 | 前端 / Admin | push 到 `aws` branch | 不需要（靜態檔案） |
 | Nginx config | push 到 `aws` branch | 自動 reload |
-| GPU Worker 程式碼 | 手動 SSH + scp | 需要重啟 worker service |
+| GPU Worker 程式碼 | push 到 `aws` branch（下次起機自動 pull） | 自動（service 啟動時 git reset --hard） |
 | MongoDB schema | Atlas Console | 不需要 |
 | SSM 密鑰 | AWS CLI / Console | 需要重啟後端 |
 | Lambda | AWS Console / CLI | 不需要 |

@@ -15,7 +15,9 @@
 ```
 src/                  # 後端 (FastAPI)
   main.py             # 應用入口（uvicorn）
-  worker.py           # AWS GPU Worker（SQS consumer，APP_ROLE=worker 時啟動）
+  worker.py           # GPU Worker 入口（薄殼，APP_ROLE=worker 時啟動）
+  worker_core/        # Worker 拆出的元件：sqs_consumer / transcription_job /
+                      # spot_monitor / heartbeat / model_cache / audio_converter
   routers/            # API 路由
     auth.py           # 認證（註冊/登入/email驗證/密碼重設）
     oauth.py          # Google OAuth
@@ -26,15 +28,28 @@ src/                  # 後端 (FastAPI)
     tags.py           # 標籤管理
     summaries.py      # AI 摘要
     shared.py         # 分享連結（無需登入可看）
-    subscriptions.py  # Stripe 訂閱付款
-    admin.py          # 管理後台 API
+    subscriptions.py  # 藍新（Newebpay）訂閱付款 / webhook
+    admin.py          # 管理後台 API（prefix=/api/admin）
   services/           # 業務邏輯
-    utils/            # 工具類
+    task_service.py             # 任務狀態管理
+    transcription_service.py    # 轉錄 service 入口（協調用）
+    transcription_orchestrator.py # 單次 transcription run 的 Phase 狀態機
+    worker_dispatch.py          # AWS 模式下把 task 派發給 Worker（S3+HMAC+SQS）
+    progress_store.py           # transient progress state（task_progress collection）
+    tag_service.py / summary_service.py / audio_service.py
+    utils/            # 無狀態 processor
       whisper_processor.py      # faster-whisper 轉錄
       punctuation_processor.py  # Gemini 標點強化
       diarization_processor.py  # pyannote 說話者辨識
-      storage_service.py        # 檔案存取（local/S3 自動切換）
-      config_loader.py          # 密鑰讀取（SSM / .env fallback）
+      audio_validator.py        # 上傳副檔名 / magic bytes 白名單
+  utils/              # 跨層共用工具
+    storage_service.py          # 檔案存取（local/S3 自動切換）
+    config_loader.py            # 密鑰讀取（SSM / .env fallback）
+    newebpay_service.py         # 藍新金流 AES 加解密
+    audit_logger.py             # 操作審計記錄
+    email_service.py            # Resend / SMTP / console
+    logger.py                   # structlog + RequestIdMiddleware
+    shared_state.py             # TaskStateStore（封裝後的記憶體狀態）
   database/
     repositories/     # MongoDB CRUD
   auth/               # JWT、密碼、依賴注入
@@ -113,7 +128,8 @@ tail -f backend.log    # 即時 log
 | `HF_TOKEN` | HuggingFace（speaker diarization） |
 | `GOOGLE_CLIENT_ID` | Google OAuth |
 | `DEPLOY_ENV` | `local` 或 `aws` |
-| `STRIPE_SECRET_KEY` | Stripe 訂閱付款 |
+| `NEWEBPAY_MERCHANT_ID` / `NEWEBPAY_HASH_KEY` / `NEWEBPAY_HASH_IV` | 藍新金流（定期定額訂閱付款）|
+| `NEWEBPAY_ENV` | `sandbox` 或 `production` |
 | `EMAIL_PROVIDER` | `console` / `smtp` / `resend`（生產用 Resend，非 SES） |
 
 AWS 部署時額外需要：`S3_BUCKET`, `SQS_QUEUE_URL`, `WORKER_SECRET`, `APP_ROLE`
@@ -153,16 +169,25 @@ DEPLOY_ENV=aws    → Web Server (APP_ROLE=server) + GPU Worker (APP_ROLE=worker
 - **CI/CD**：GitHub Actions，push 到 **`aws` 分支**觸發部署（非 `main`）
 
 ### MongoDB Collections
-- `users` — 帳號、角色、使用配額、Stripe 訂閱 ID
-- `tasks` — 轉錄任務記錄（含 AWS 模式下的 progress 供 SSE polling）
-- `transcriptions` — 轉錄文字與中繼資料
+- `users` — 帳號、角色、使用配額、藍新訂閱 / merchant order 對照
+- `tasks` — 轉錄任務 **persistent state**（status / user / 結果引用）
+- `task_progress` — transient progress state（phase / phase_progress；TTL 6 小時自動清；ProgressStore 封裝）
+- `transcriptions` — 轉錄文字
+- `segments` — 轉錄時間軸片段
 - `tags` — 使用者標籤
 - `summaries` — AI 摘要
-- `audit_logs` — 管理員操作記錄
+- `audit_logs` — 操作審計記錄
+- `orders` — 藍新訂單與訂閱狀態
+- `processed_webhooks` — webhook idempotency（藍新等外部 callback 重發保護）
+- `rate_limits` — auth / upload rate limit 計數
+- `reservations` — 上傳前的配額預留
+- `worker_heartbeats` — GPU Worker 60 秒 keep-alive（B6 監控用）
 
 ### SSE 進度推送（本地 vs AWS 行為不同）
-- `DEPLOY_ENV=local`：in-memory dict，Worker 直接更新
-- `DEPLOY_ENV=aws`：Web Server SSE endpoint 每 2 秒 poll MongoDB，GPU Worker 寫入進度
+- `DEPLOY_ENV=local`：ProgressStore 直接更新 `task_progress`；同進程 SSE 讀同一份
+- `DEPLOY_ENV=aws`：GPU Worker 寫 `task_progress`，Web Server SSE endpoint 每 2 秒 poll 同一 collection
+
+> Persistent vs transient state 的劃分見 [`CONTEXT.md`](./CONTEXT.md)。
 
 ---
 

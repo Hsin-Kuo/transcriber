@@ -1,5 +1,8 @@
 # Speaker Diarization 效能優化指南
 
+> **適用範圍**：本地 M1 Mac 開發環境的效能調整建議。
+> Production (AWS) 已使用 g4dn.xlarge GPU Worker，本文中的 MPS / 降採樣 / 替代方案僅在本機需要關心。
+
 ## 當前狀況
 
 - 模型：pyannote/speaker-diarization-3.1
