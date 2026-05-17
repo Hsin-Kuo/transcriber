@@ -18,6 +18,11 @@ from dotenv import load_dotenv
 # 載入環境變數
 load_dotenv()
 
+# 結構化 logging 需要早 init，讓後續 import 的模組 print/logging 也走同一管道
+from src.utils.logger import setup_logging, RequestIdMiddleware, get_logger
+setup_logging()
+logger = get_logger(__name__)
+
 # Sentry 必須在其他模組 import 之前初始化才能完整 hook 例外
 from src.utils.sentry_init import init_sentry
 init_sentry(component="server")
@@ -95,6 +100,9 @@ app = FastAPI(
     description="基於三層架構的音檔轉錄服務",
     version="3.0.0"
 )
+
+# Request ID middleware：注入 request_id 到所有 log + Sentry tag
+app.add_middleware(RequestIdMiddleware)
 
 # CORS 中間件
 cors_origins_str = os.getenv("CORS_ORIGINS", "")

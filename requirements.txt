@@ -16,6 +16,9 @@ uvicorn[standard]
 python-multipart
 motor
 
+# 結構化 logging
+structlog
+
 # Google OAuth
 google-auth
 
