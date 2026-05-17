@@ -47,13 +47,19 @@
   - 訂閱付款 webhook 流程
   - Admin 登入 + 改使用者方案
 
-### B3. Refresh token 改用 httpOnly cookie
-- 檔案：`frontend/src/stores/auth.js`、`src/routers/auth.py`、`src/auth/jwt_handler.py`
-- [ ] 後端 `/auth/refresh` 改為從 cookie 讀 refresh token
-- [ ] 後端 login/register response 用 `Set-Cookie: refresh_token=...; HttpOnly; Secure; SameSite=Strict; Path=/auth/refresh`
-- [ ] 前端 axios 設 `withCredentials: true`，移除 localStorage 中的 refresh token
-- [ ] Access token 縮短到 15 分鐘
-- [ ] CORS 設定加 `allow_credentials=True`
+### B3. Refresh token 改用 httpOnly cookie ✅
+- 檔案：`src/auth/cookies.py`（新）、`src/routers/auth.py`、`src/routers/oauth.py`、
+  `frontend/src/{utils/api.js,stores/auth.js,composables/transcript/useAudioPlayer.js}`、
+  `admin-frontend/src/{utils/api.js,stores/auth.js}`
+- [x] cookie 屬性：`HttpOnly + Secure(prod only) + SameSite=Strict + Path=/auth + 30d`
+- [x] login / google_auth：set cookie，response body 不再回 `refresh_token`
+- [x] refresh：從 cookie 讀，無 cookie 或失效直接 401（不再接受 body）
+- [x] logout：讀 cookie 撤銷 DB token + 清 cookie
+- [x] 前端 axios 全域 `withCredentials: true`
+- [x] TokenManager 砍掉 `setTokens / getRefreshToken`，只剩 access 三方法
+- [x] 既有用戶會被踢一次（已預期）
+- [x] CORS `allow_credentials=True` 早就設好，無需動
+- [x] Access token 15 min（之前已設）
 
 ### B4. MongoDB 明確驗證 TLS CA ✅
 - 檔案：`src/database/mongodb.py`

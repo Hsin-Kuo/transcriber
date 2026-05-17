@@ -16,9 +16,13 @@ class UserLogin(BaseModel):
 
 
 class TokenResponse(BaseModel):
-    """Token 響應"""
+    """Token 響應。
+
+    refresh_token 已改用 httpOnly cookie 傳遞，不再放在 response body。
+    保留欄位為 Optional 僅供舊客戶端解析時不會炸；新前端應只讀 access_token。
+    """
     access_token: str
-    refresh_token: str
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
 
 

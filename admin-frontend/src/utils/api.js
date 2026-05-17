@@ -8,21 +8,22 @@ import router from '../router'
 const API_BASE = import.meta.env.VITE_API_URL || ''
 
 // 創建 axios 實例
+// withCredentials: 讓瀏覽器自動帶 httpOnly refresh_token cookie 給 /auth/* 端點
 const api = axios.create({
   baseURL: API_BASE,
   timeout: 300000,  // 5 分鐘 (考慮轉錄時間長)
+  withCredentials: true,
 })
 
-// Token 管理
+// Token 管理：refresh_token 改由 httpOnly cookie 持有，JS 不再保存
 export const TokenManager = {
   getAccessToken: () => localStorage.getItem('access_token'),
-  getRefreshToken: () => localStorage.getItem('refresh_token'),
-  setTokens: (accessToken, refreshToken) => {
+  setAccessToken: (accessToken) => {
     localStorage.setItem('access_token', accessToken)
-    localStorage.setItem('refresh_token', refreshToken)
   },
   clearTokens: () => {
     localStorage.removeItem('access_token')
+    // 舊版殘留：把以前存的 refresh_token 也清掉一次
     localStorage.removeItem('refresh_token')
   }
 }
@@ -82,18 +83,13 @@ api.interceptors.response.use(
       isRefreshing = true
 
       try {
-        const refreshToken = TokenManager.getRefreshToken()
-        if (!refreshToken) {
-          throw new Error('No refresh token')
-        }
-
-        // 刷新 Token
-        const response = await axios.post(`${API_BASE}/auth/refresh`, {
-          refresh_token: refreshToken
+        // 刷新 Token：refresh_token 由瀏覽器以 httpOnly cookie 自動帶出
+        const response = await axios.post(`${API_BASE}/auth/refresh`, null, {
+          withCredentials: true,
         })
 
-        const { access_token, refresh_token } = response.data
-        TokenManager.setTokens(access_token, refresh_token)
+        const { access_token } = response.data
+        TokenManager.setAccessToken(access_token)
 
         // 更新原請求的 header
         originalRequest.headers.Authorization = `Bearer ${access_token}`

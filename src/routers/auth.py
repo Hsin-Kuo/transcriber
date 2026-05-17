@@ -1,8 +1,13 @@
 """認證路由"""
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from datetime import datetime, timedelta
 import secrets
 from ..utils.time_utils import get_utc_timestamp
+from ..auth.cookies import (
+    REFRESH_COOKIE_NAME,
+    set_refresh_cookie,
+    clear_refresh_cookie,
+)
 
 
 # ============================================
@@ -14,7 +19,6 @@ from ..models.auth import (
     UserRegister,
     UserLogin,
     TokenResponse,
-    RefreshTokenRequest,
     ResendVerificationRequest,
     ChangePasswordRequest,
     UserResponse,
@@ -263,21 +267,13 @@ async def resend_verification_email(
 @router.post("/login", response_model=TokenResponse)
 async def login(
     request: Request,
+    response: Response,
     credentials: UserLogin,
     db=Depends(get_database)
 ):
-    """用戶登入
+    """用戶登入。
 
-    Args:
-        request: FastAPI Request 對象
-        credentials: 登入憑證（email, password）
-        db: 資料庫實例
-
-    Returns:
-        Token 響應
-
-    Raises:
-        HTTPException: Email 或密碼錯誤、帳號已停用、Email 未驗證
+    Refresh token 以 httpOnly cookie 寫入；response body 只回 access_token。
     """
     audit_logger = get_audit_logger()
     user_repo = UserRepository(db)
@@ -326,14 +322,17 @@ async def login(
         "email": user["email"],
         "role": user["role"]
     })
-    refresh_token = create_refresh_token({
+    refresh_token_value = create_refresh_token({
         "sub": str(user["_id"]),
         "email": user["email"],
         "role": user["role"]
     })
 
     # 存儲 Refresh Token
-    await user_repo.save_refresh_token(str(user["_id"]), refresh_token)
+    await user_repo.save_refresh_token(str(user["_id"]), refresh_token_value)
+
+    # httpOnly cookie 傳給 client；body 不再回 refresh_token
+    set_refresh_cookie(response, refresh_token_value)
 
     # 記錄成功登入
     await audit_logger.log_auth(
@@ -344,32 +343,30 @@ async def login(
         message="登入成功"
     )
 
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer"
-    }
+    return TokenResponse(access_token=access_token, token_type="bearer")
 
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(
-    request: RefreshTokenRequest,
+    request: Request,
+    response: Response,
     db=Depends(get_database)
 ):
-    """刷新 Access Token
+    """刷新 Access Token。
 
-    Args:
-        request: Refresh Token 請求
-        db: 資料庫實例
-
-    Returns:
-        新的 Token 響應
-
-    Raises:
-        HTTPException: Refresh Token 無效或已撤銷
+    從 httpOnly cookie 讀 refresh token，舊版傳 body 的呼叫一律拒絕（401）。
     """
-    token_data = verify_token(request.refresh_token, "refresh")
+    cookie_token = request.cookies.get(REFRESH_COOKIE_NAME)
+    if not cookie_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="缺少 refresh token cookie"
+        )
+
+    token_data = verify_token(cookie_token, "refresh")
     if not token_data:
+        # 順手清掉壞掉的 cookie，避免下次再帶錯
+        clear_refresh_cookie(response)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="無效的 Refresh Token"
@@ -377,46 +374,36 @@ async def refresh_token(
 
     # 驗證 Token 是否在資料庫中且未被撤銷
     user_repo = UserRepository(db)
-    if not await user_repo.verify_refresh_token(token_data.user_id, request.refresh_token):
+    if not await user_repo.verify_refresh_token(token_data.user_id, cookie_token):
+        clear_refresh_cookie(response)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh Token 已被撤銷或過期"
         )
 
-    # 生成新 Access Token
+    # 生成新 Access Token；refresh token 沿用不旋轉（簡化 client 同步）
     access_token = create_access_token({
         "sub": token_data.user_id,
         "email": token_data.email,
         "role": token_data.role
     })
 
-    return {
-        "access_token": access_token,
-        "refresh_token": request.refresh_token,  # Refresh Token 保持不變
-        "token_type": "bearer"
-    }
+    return TokenResponse(access_token=access_token, token_type="bearer")
 
 
 @router.post("/logout")
 async def logout(
     http_request: Request,
-    request: RefreshTokenRequest,
+    response: Response,
     current_user: dict = Depends(get_current_user),
     db=Depends(get_database)
 ):
-    """登出（撤銷 Refresh Token）
-
-    Args:
-        http_request: HTTP Request 對象
-        request: Refresh Token 請求
-        current_user: 當前用戶
-        db: 資料庫實例
-
-    Returns:
-        成功訊息
-    """
+    """登出：清 cookie + 撤銷 DB 中的 refresh token。"""
     user_repo = UserRepository(db)
-    await user_repo.revoke_refresh_token(str(current_user["_id"]), request.refresh_token)
+    cookie_token = http_request.cookies.get(REFRESH_COOKIE_NAME)
+    if cookie_token:
+        await user_repo.revoke_refresh_token(str(current_user["_id"]), cookie_token)
+    clear_refresh_cookie(response)
 
     # 記錄登出
     audit_logger = get_audit_logger()
