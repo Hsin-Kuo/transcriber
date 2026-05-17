@@ -426,7 +426,7 @@ class TaskService:
         task_progress 在最近 5 分鐘內有寫入 → Worker 還活著，跳過；
         否則才標 failed（適用 Worker crash / Spot 中斷後沒接手的情境）。
         """
-        from datetime import datetime, timedelta
+        from datetime import timedelta
         try:
             orphaned_tasks = await self.task_repo.collection.find(
                 {"status": {"$in": ["pending", "processing"]}},

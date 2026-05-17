@@ -211,7 +211,7 @@ class EmailService:
             else:
                 # console 模式：印到終端（開發環境）
                 print(f"\n{'='*60}")
-                print(f"📧 Email 發送（開發模式）")
+                print("📧 Email 發送（開發模式）")
                 print(f"{'='*60}")
                 print(f"收件人: {to_email}")
                 print(f"主題: {subject}")

@@ -874,7 +874,8 @@ async def payment_return(request: Request):
     form = await request.form()
     raw = dict(form)
 
-    status = "UNKNOWN"
+    # 別用 `status` 當變數名：會 shadow 從 fastapi import 的 status enum
+    notify_status = "UNKNOWN"
     merchant_order_no = ""
 
     period_enc = raw.get("Period", "")
@@ -882,7 +883,7 @@ async def payment_return(request: Request):
         svc = get_newebpay_service()
         payload = svc.decrypt_period_notify(raw)
         if payload:
-            status = payload.get("Status", "UNKNOWN")
+            notify_status = payload.get("Status", "UNKNOWN")
             result = payload.get("Result", {})
             merchant_order_no = (
                 result.get("MerchantOrderNo") or result.get("MerOrderNo", "")
@@ -895,10 +896,10 @@ async def payment_return(request: Request):
             svc = get_newebpay_service()
             data = svc.verify_and_decrypt_mpg_notify(trade_info, trade_sha)
             if data:
-                status = data.get("Status", "UNKNOWN")
+                notify_status = data.get("Status", "UNKNOWN")
                 merchant_order_no = data.get("MerchantOrderNo", "")
 
-    query = f"Status={status}&MerchantOrderNo={merchant_order_no}"
+    query = f"Status={notify_status}&MerchantOrderNo={merchant_order_no}"
     return RedirectResponse(
         url=f"{FRONTEND_URL}/payment/return?{query}",
         status_code=303  # 303 See Other：POST → GET redirect

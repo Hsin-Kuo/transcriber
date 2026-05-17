@@ -763,10 +763,10 @@ async def cancel_task(
     # 3. 立即終止 diarization 進程（如果正在運行）
     diarization_process = task_service.get_diarization_process(task_id)
     if diarization_process:
-        print(f"🛑 正在強制終止說話者辨識進程...")
+        print("🛑 正在強制終止說話者辨識進程...")
         try:
             diarization_process.shutdown(wait=False, cancel_futures=True)
-            print(f"✅ 說話者辨識進程已終止")
+            print("✅ 說話者辨識進程已終止")
         except Exception as e:
             print(f"⚠️ 終止 diarization 進程失敗：{e}")
 
@@ -1290,7 +1290,7 @@ async def batch_delete_tasks(
     print(f"🗑️ 批次刪除完成：成功 {deleted_count} 個，失敗 {failed_count} 個")
 
     return {
-        "message": f"批次刪除完成",
+        "message": "批次刪除完成",
         "deleted": deleted_count,
         "failed": failed_count,
         "total": len(task_ids)

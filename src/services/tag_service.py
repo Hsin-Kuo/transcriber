@@ -197,7 +197,7 @@ class TagService:
                 raise ValueError(f"標籤 {tag_id} 不存在或無權訪問")
 
         # 更新順序（使用 repository 的 update_order 方法）
-        print(f"🔍 [tag_service.update_tag_order] 開始調用 tag_repo.update_order")
+        print("🔍 [tag_service.update_tag_order] 開始調用 tag_repo.update_order")
         updated_count = await self.tag_repo.update_order(user_id, tag_ids)
         print(f"✅ [tag_service.update_tag_order] 更新完成，updated_count={updated_count}")
 

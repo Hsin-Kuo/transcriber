@@ -303,7 +303,7 @@ class WhisperProcessor:
         Returns:
             (完整文字, segments 列表, 偵測到的語言)
         """
-        print(f"🚀 [並行轉錄] 開始並行轉錄流程（ProcessPoolExecutor）", flush=True)
+        print("🚀 [並行轉錄] 開始並行轉錄流程（ProcessPoolExecutor）", flush=True)
 
         audio_path = self._ensure_valid_audio(audio_path)
 
@@ -325,7 +325,7 @@ class WhisperProcessor:
 
         # 建立 chunk_idx → start_seconds 的映射
         chunk_offsets = {}
-        for chunk_idx, (chunk_path, start_seconds) in enumerate(chunk_entries, start=1):
+        for chunk_idx, (_chunk_path, start_seconds) in enumerate(chunk_entries, start=1):
             chunk_offsets[chunk_idx] = start_seconds
 
         # 2. 使用 ProcessPoolExecutor 並行轉錄
@@ -357,7 +357,7 @@ class WhisperProcessor:
                 chunk_idx = int(re.search(r'chunk_(\d+)', str(chunk_path)).group(1))
                 future_to_idx[future] = chunk_idx
 
-            print(f"✅ [並行轉錄] 所有任務已提交到進程池", flush=True)
+            print("✅ [並行轉錄] 所有任務已提交到進程池", flush=True)
 
             # 計算初始正在處理中的 chunk 數量（worker 會立即拿走任務）
             processing_count = min(max_workers, num_chunks)
@@ -369,12 +369,12 @@ class WhisperProcessor:
             for future in as_completed(future_to_idx.keys()):
                 # 檢查取消
                 if cancel_check and cancel_check():
-                    print(f"⚠️ 用戶取消，終止所有任務", flush=True)
+                    print("⚠️ 用戶取消，終止所有任務", flush=True)
                     # 取消所有未完成的 future
                     for f in future_to_idx.keys():
                         f.cancel()
                     # 強制關閉 executor（不等待）
-                    print(f"🛑 強制關閉進程池...", flush=True)
+                    print("🛑 強制關閉進程池...", flush=True)
                     executor.shutdown(wait=False, cancel_futures=True)
                     raise Exception("任務被取消")
 
@@ -401,11 +401,11 @@ class WhisperProcessor:
                     for f in future_to_idx.keys():
                         f.cancel()
                     # 強制關閉 executor
-                    print(f"🛑 轉錄失敗，強制關閉進程池...", flush=True)
+                    print("🛑 轉錄失敗，強制關閉進程池...", flush=True)
                     executor.shutdown(wait=False, cancel_futures=True)
                     raise Exception(f"並行轉錄失敗：{e}")
 
-        except Exception as e:
+        except Exception:
             # 清理所有剩餘的 chunk 檔案
             for chunk_path, _ in chunk_entries:
                 try:
@@ -417,11 +417,11 @@ class WhisperProcessor:
         finally:
             # 確保 executor 被正確清理
             if executor is not None:
-                print(f"🧹 [並行轉錄] 清理進程池...", flush=True)
+                print("🧹 [並行轉錄] 清理進程池...", flush=True)
                 try:
                     # 優雅關閉，最多等待 10 秒
                     executor.shutdown(wait=True, cancel_futures=False)
-                    print(f"✅ [並行轉錄] 進程池已關閉", flush=True)
+                    print("✅ [並行轉錄] 進程池已關閉", flush=True)
                 except Exception as cleanup_error:
                     print(f"⚠️ [並行轉錄] 進程池關閉失敗：{cleanup_error}", flush=True)
 
@@ -437,7 +437,7 @@ class WhisperProcessor:
         all_segments = []
 
         # 合併 segments 並調整時間戳（使用實際切點偏移）
-        for chunk_idx, (text, segments, lang) in enumerate(sorted_results, start=1):
+        for chunk_idx, (_text, segments, _lang) in enumerate(sorted_results, start=1):
             time_offset = chunk_offsets[chunk_idx]
 
             # 調整每個 segment 的時間戳
@@ -552,12 +552,12 @@ class WhisperProcessor:
         Returns:
             (segments 列表, 偵測到的語言)
         """
-        print(f"🎯 [_transcribe_with_timestamps] 開始 Whisper 模型轉錄")
+        print("🎯 [_transcribe_with_timestamps] 開始 Whisper 模型轉錄")
         print(f"🎯 [_transcribe_with_timestamps] 音檔路徑: {audio_path}")
         print(f"🎯 [_transcribe_with_timestamps] 語言: {language}")
 
         segments_list = []
-        print(f"⏳ [_transcribe_with_timestamps] 調用 model.transcribe()...")
+        print("⏳ [_transcribe_with_timestamps] 調用 model.transcribe()...")
         normalized_lang = _normalize_language(language)
         segments, info = self.model.transcribe(
             str(audio_path),
@@ -572,7 +572,7 @@ class WhisperProcessor:
             hallucination_silence_threshold=2.0,
             initial_prompt="以下是繁體中文的逐字稿。" if normalized_lang == "zh" else None,
         )
-        print(f"✅ [_transcribe_with_timestamps] model.transcribe() 完成！")
+        print("✅ [_transcribe_with_timestamps] model.transcribe() 完成！")
 
         # 獲取 Whisper 偵測到的語言與總時長
         detected_language = info.language if hasattr(info, 'language') else None

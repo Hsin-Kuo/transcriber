@@ -399,7 +399,7 @@ async def create_transcription(
     # 字幕類型強制不使用標點符號
     if task_type == "subtitle":
         punct_provider = "none"
-        print(f"ℹ️  字幕模式：已自動停用標點符號處理")
+        print("ℹ️  字幕模式：已自動停用標點符號處理")
     # 獲取服務（AWS 模式下 TranscriptionService 可能為 None）
     transcription_service = _transcription_service
     if not is_aws() and transcription_service is None:
@@ -1845,7 +1845,8 @@ async def create_batch_transcriptions(
                 async def _batch_upload_to_s3_and_notify(
                     bg_task_id=_bg_task_id, bg_temp_audio=_bg_temp_audio,
                     bg_temp_dir=_bg_temp_dir, bg_sqs_payload=sqs_payload,
-                    bg_user_tier=_bg_user_tier
+                    bg_user_tier=_bg_user_tier,
+                    bg_sqs_url=sqs_queue_url, bg_sqs_region=sqs_region,
                 ):
                     """背景執行 S3 上傳 + SQS 發送（批次）"""
                     try:
@@ -1853,11 +1854,11 @@ async def create_batch_transcriptions(
                         await loop.run_in_executor(None, save_audio, bg_task_id, bg_temp_audio, bg_user_tier)
                         print(f"☁️  批次音檔已上傳到 S3: uploads/{bg_user_tier}/{bg_task_id}.mp3")
 
-                        if sqs_queue_url:
+                        if bg_sqs_url:
                             def _send_sqs():
-                                sqs = boto3.client("sqs", region_name=sqs_region)
+                                sqs = boto3.client("sqs", region_name=bg_sqs_region)
                                 sqs.send_message(
-                                    QueueUrl=sqs_queue_url,
+                                    QueueUrl=bg_sqs_url,
                                     MessageBody=json.dumps(bg_sqs_payload)
                                 )
                             await loop.run_in_executor(None, _send_sqs)

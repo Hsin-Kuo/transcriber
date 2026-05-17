@@ -355,7 +355,7 @@ class PunctuationProcessor:
                             continue
                         else:
                             # 所有備援模型都用完了
-                            print(f"❌ 所有模型的配額都已用完")
+                            print("❌ 所有模型的配額都已用完")
                             raise RuntimeError(
                                 f"所有 Google API Keys 都調用失敗。"
                                 f"已嘗試模型: {', '.join(tried_models)}。"
@@ -366,7 +366,7 @@ class PunctuationProcessor:
 
                 # 如果還有 key 可用，繼續嘗試
                 if attempt < max_attempts - 1:
-                    print(f"🔄 切換到下一個 API Key...")
+                    print("🔄 切換到下一個 API Key...")
                     continue
                 else:
                     raise RuntimeError(

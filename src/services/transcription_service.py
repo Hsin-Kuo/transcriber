@@ -98,7 +98,7 @@ class TranscriptionService:
         # 如果 max_speakers 為 1，視為不需要辨識（只有一個講者無需辨識）
         if max_speakers == 1:
             use_diarization = False
-            print(f"ℹ️  [start_transcription] max_speakers=1，停用說話者辨識")
+            print("ℹ️  [start_transcription] max_speakers=1，停用說話者辨識")
 
         # 在背景執行轉錄
         print(f"🚀 [start_transcription] 準備提交任務 {task_id} 到線程池")
@@ -154,7 +154,7 @@ class TranscriptionService:
 
         try:
             # 1. 音訊轉換（轉為 MP3 格式，用於轉錄和保存）
-            print(f"🔄 [_process_transcription] 開始轉換音檔為 MP3 格式")
+            print("🔄 [_process_transcription] 開始轉換音檔為 MP3 格式")
             self._update_progress(
                 task_id,
                 Phase.PREPARATION,
@@ -179,7 +179,7 @@ class TranscriptionService:
                 return
 
             # 2. 並行執行轉錄和說話者辨識（如果啟用）
-            print(f"🎤 [_process_transcription] 開始並行處理：轉錄 + 說話者辨識")
+            print("🎤 [_process_transcription] 開始並行處理：轉錄 + 說話者辨識")
 
             # 準備並行任務
             from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -227,14 +227,14 @@ class TranscriptionService:
                                 if full_text is not None:
                                     print(f"✅ [並行] Whisper 轉錄完成 (文字長度: {len(full_text)})")
                                 else:
-                                    print(f"⚠️ [並行] Whisper 轉錄返回空結果")
+                                    print("⚠️ [並行] Whisper 轉錄返回空結果")
                             elif future == diarization_future:
                                 diarization_segments = future.result()
                                 if diarization_segments:
                                     num_speakers = len(set(s['speaker'] for s in diarization_segments))
                                     print(f"✅ [並行] 說話者辨識完成，識別到 {num_speakers} 位說話者")
                                 else:
-                                    print(f"⚠️ [並行] 說話者辨識失敗或無結果")
+                                    print("⚠️ [並行] 說話者辨識失敗或無結果")
                     except Exception as e:
                         print(f"❌ [並行] 並行執行出錯：{e}")
                         import traceback
@@ -250,7 +250,7 @@ class TranscriptionService:
 
                     if task_type == "subtitle":
                         # 字幕模式：將 speaker 整合到 segments，文字不變
-                        print(f"🎬 [字幕模式] 將說話者資訊整合到 segments...")
+                        print("🎬 [字幕模式] 將說話者資訊整合到 segments...")
                         print(f"🎬 [字幕模式] 轉錄 segments 數量: {len(segments)}")
                         print(f"🎬 [字幕模式] 說話者 segments 數量: {len(diarization_segments)}")
 
@@ -264,7 +264,7 @@ class TranscriptionService:
 
                     else:
                         # 段落模式：合併到文字（現有行為）
-                        print(f"📝 [段落模式] 合併轉錄和說話者辨識到文字...")
+                        print("📝 [段落模式] 合併轉錄和說話者辨識到文字...")
                         print(f"📝 [段落模式] 轉錄 segments 數量: {len(segments)}")
                         print(f"📝 [段落模式] 說話者 segments 數量: {len(diarization_segments)}")
 
@@ -368,7 +368,7 @@ class TranscriptionService:
                     final_text = punctuated_text
                 except Exception as punct_error:
                     print(f"⚠️ [_process_transcription] 標點處理失敗：{punct_error}")
-                    print(f"   將使用原始轉錄文字（無標點）繼續完成任務")
+                    print("   將使用原始轉錄文字（無標點）繼續完成任務")
                     # 使用原始文字繼續，不中斷整個轉錄流程
                     final_text = full_text
                     self._update_progress(
@@ -386,7 +386,7 @@ class TranscriptionService:
 
             # 檢查是否已取消
             if self._is_cancelled(task_id):
-                self._cleanup_temp_files(task_id, wav_path, save_audio=False)  # 取消時不保存音檔
+                self._cleanup_temp_files(task_id, mp3_path, save_audio=False)  # 取消時不保存音檔
                 self.task_service.cleanup_task_memory(task_id)
                 return
 
@@ -1023,7 +1023,7 @@ class TranscriptionService:
         print(f"🔧 [_save_audio_file_sync] 開始處理，audio_files 數量: {len(audio_files)}")
 
         if not audio_files:
-            print(f"⚠️ [_save_audio_file_sync] 沒有找到音檔文件")
+            print("⚠️ [_save_audio_file_sync] 沒有找到音檔文件")
             return
 
         try:
@@ -1035,7 +1035,7 @@ class TranscriptionService:
                     break
 
             if not mp3_file:
-                print(f"⚠️ [_save_audio_file_sync] 未找到 MP3 檔案")
+                print("⚠️ [_save_audio_file_sync] 未找到 MP3 檔案")
                 return
 
             print(f"🔧 [_save_audio_file_sync] 找到 MP3: {mp3_file}")
@@ -1056,7 +1056,7 @@ class TranscriptionService:
                 "result.audio_file": stored_path,
                 "result.audio_filename": original_filename
             })
-            print(f"✅ [_save_audio_file_sync] 已更新資料庫")
+            print("✅ [_save_audio_file_sync] 已更新資料庫")
         except Exception as e:
             print(f"❌ [_save_audio_file_sync] 保存音檔時發生錯誤: {e}")
             import traceback
@@ -1118,9 +1118,9 @@ class TranscriptionService:
                     shutil.rmtree(temp_dir)
 
                     if keep_audio:
-                        print(f"🗑️ 已清理臨時目錄，音檔已保存並標記為受保護")
+                        print("🗑️ 已清理臨時目錄，音檔已保存並標記為受保護")
                     else:
-                        print(f"🗑️ 已清理臨時目錄，音檔已保存（可被自動清理）")
+                        print("🗑️ 已清理臨時目錄，音檔已保存（可被自動清理）")
                 except Exception as e:
                     print(f"⚠️ 保存音檔失敗：{e}")
                     # 如果保存失敗，還是清理臨時目錄
@@ -1130,10 +1130,10 @@ class TranscriptionService:
                         pass
             else:
                 # 任務失敗或取消，直接刪除臨時目錄和音檔
-                print(f"⚠️ 任務未成功完成，不保存音檔")
+                print("⚠️ 任務未成功完成，不保存音檔")
                 try:
                     shutil.rmtree(temp_dir)
-                    print(f"🗑️ 已清理臨時目錄和音檔（任務失敗/取消）")
+                    print("🗑️ 已清理臨時目錄和音檔（任務失敗/取消）")
                 except Exception as e:
                     print(f"⚠️ 清理臨時目錄失敗：{e}")
 
@@ -1204,7 +1204,7 @@ class TranscriptionService:
         # 進度由 _process_transcription 在合併段落後統一更新（避免兩個 thread
         # 同時寫 TRANSCRIPTION phase 導致 phase_progress 被互相覆蓋）。
         try:
-            print(f"🔊 [並行] 開始說話者辨識")
+            print("🔊 [並行] 開始說話者辨識")
             print(f"🔊 [並行] max_speakers 參數: {max_speakers}")
 
             diarization_segments = self.diarization.perform_diarization(

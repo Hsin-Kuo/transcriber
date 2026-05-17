@@ -193,7 +193,7 @@ def process_task(message_body: dict, progress_store: ProgressStore) -> None:
                     _run_diarization, diarization_pipeline, wav_path, max_speakers
                 )
                 # 等待兩個任務都結束（不在此處理異常，避免提前中斷）
-                for future in as_completed([transcription_future, diarization_future]):
+                for _future in as_completed([transcription_future, diarization_future]):
                     pass
 
             # 轉錄失敗 → 整個任務失敗（無可用結果）
