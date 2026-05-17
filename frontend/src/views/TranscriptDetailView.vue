@@ -363,6 +363,7 @@ class="transcript-layout"
             <div
               v-else
               class="transcript-display"
+              :class="{ 'alt-pressed': isAltPressed && currentTranscript.hasAudio }"
               :key="`transcript-${showTimecodeMarkers}-${contentVersion}`"
               ref="textareaRef"
             >
@@ -394,11 +395,10 @@ class="transcript-layout"
                     <span
                       v-else
                       class="text-part"
-                      :class="{ 'clickable': isAltPressed && currentTranscript.hasAudio }"
                       :data-segment-index="part.segmentIndex"
                       :data-start-time="part.start"
                       @click="handleTextClick(part.start, $event)"
-                    >{{ subPart.text }}<span v-if="isAltPressed && subIndex === 0" class="text-timecode-tooltip">
+                    >{{ subPart.text }}<span v-if="subIndex === 0" class="text-timecode-tooltip">
                         {{ formatTime(part.start) }}
                       </span></span>
                   </template>
@@ -1520,7 +1520,21 @@ function clearSegmentHighlight() {
     segmentHighlightRafId = null
   }
   if (window.CSS && CSS.highlights) {
+    // wasSet: 只在真的清掉東西時才觸發 repaint hack，避免 watch 因 editSegmentRanges
+    // 隨打字更新而每個 keystroke 都對 contenteditable 套 transform 微擾
+    const wasSet = CSS.highlights.has('segment-highlight')
     CSS.highlights.delete('segment-highlight')
+    if (wasSet) {
+      // Safari: 從 CSS.highlights registry 移除後不會自動重繪文字層
+      // 用 transform 微擾強制 repaint，translateZ(0) 不會造成視覺位移
+      const el = textareaRef.value
+      if (el) {
+        el.style.transform = 'translateZ(0)'
+        requestAnimationFrame(() => {
+          el.style.transform = ''
+        })
+      }
+    }
   }
 }
 
@@ -2216,7 +2230,17 @@ function handleKeyDown(e) {
 }
 
 function handleKeyUp(e) {
-  if (!e.altKey) {
+  // Safari/macOS: 在 contenteditable focus 時 Option(Alt) 的 keyup 不一定觸發；
+  // 多檢 e.key === 'Alt' 至少在事件確實送達時就放掉
+  if (!e.altKey || e.key === 'Alt') {
+    isAltPressed.value = false
+  }
+}
+
+// Safari 兜底：keyup 沒送到時，靠 mouse 事件同步 Alt 狀態
+// （mouse 事件在 Safari 可靠，且 isAltPressed=false 時 short-circuit，幾乎無成本）
+function syncAltFromMouse(e) {
+  if (isAltPressed.value && !e.altKey) {
     isAltPressed.value = false
   }
 }
@@ -2377,6 +2401,8 @@ onMounted(() => {
   // 註冊 Alt 鍵監聯
   window.addEventListener('keydown', handleKeyDown)
   window.addEventListener('keyup', handleKeyUp)
+  window.addEventListener('mousemove', syncAltFromMouse)
+  window.addEventListener('mousedown', syncAltFromMouse)
   window.addEventListener('blur', handleBlur)
   // resize listener: 由 useDisplayPreferences() 內部 onMounted 註冊
 
@@ -2435,6 +2461,8 @@ onUnmounted(() => {
   // 移除 Alt 鍵監聯
   window.removeEventListener('keydown', handleKeyDown)
   window.removeEventListener('keyup', handleKeyUp)
+  window.removeEventListener('mousemove', syncAltFromMouse)
+  window.removeEventListener('mousedown', syncAltFromMouse)
   window.removeEventListener('blur', handleBlur)
   // resize listener: 由 useDisplayPreferences() 內部 onUnmounted 移除
 
@@ -2642,16 +2670,17 @@ watch(displayMode, () => {
   position: relative;
   padding: 1px 0px; /* 預先保留空間，避免 Alt 切換時文字重排 */
   border-radius: 3px;
-  transition: background-color 0.2s ease;
 }
 
-/* Alt 鍵按下時的可點擊文字樣式 */
-.text-part.clickable {
+/* Alt 鍵按下時的可點擊文字樣式（透過 parent .alt-pressed 切換，
+   避免一次 patch 數百個 span 的 class —— Safari 上會明顯卡頓）
+   只套用到 .marker-wrapper 內的 .text-part：原本只有這些 span 有 click handler */
+.transcript-display.alt-pressed .marker-wrapper .text-part {
   background-color: rgba(229, 179, 133, 0.25);
   cursor: pointer;
 }
 
-.text-part.clickable:hover {
+.transcript-display.alt-pressed .marker-wrapper .text-part:hover {
   background-color: rgba(148, 171, 204, 0.3);
 }
 
@@ -2732,9 +2761,14 @@ watch(displayMode, () => {
   transition: opacity 0.2s ease;
   z-index: 1000;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  display: none;
 }
 
-.text-part.clickable:hover .text-timecode-tooltip {
+.transcript-display.alt-pressed .text-timecode-tooltip {
+  display: inline-block;
+}
+
+.transcript-display.alt-pressed .text-part:hover .text-timecode-tooltip {
   opacity: 1;
 }
 
