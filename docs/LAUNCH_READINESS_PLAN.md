@@ -136,29 +136,38 @@
 - [ ] `tsconfig.json` 設 `allowJs: true`，新檔強制 .ts
 - [ ] 優先轉 `src/api/services.js`、`src/stores/auth.js`
 
-### M4. 結構化 log + request_id
-- [ ] 上 `structlog` 取代 `print()`
-- [ ] FastAPI middleware 注入 `request_id` UUID
-- [ ] request_id 寫進 Sentry tag
+### M4. 結構化 log + request_id ✅
+- [x] 新增 `src/utils/logger.py`：structlog + ConsoleRenderer(local) / JSONRenderer(aws)
+- [x] FastAPI `RequestIdMiddleware` 注入 uuid 到 contextvars + Sentry tag + response header
+- [x] X-Request-Id 支援沿用 client 帶入（外部追蹤）
+- [x] tests/utils/test_logger.py 驗證 3 個 middleware 案例
+- 註：新模組改用 `logger.info()`，舊 print() 視觸碰頻率漸進遷移
 
-### M5. Sentry 死角補齊
-- [ ] `asyncio.create_task()` 包 sentry capture wrapper
-- [ ] Worker SQS poll loop 外層加 top-level `capture_exception`
-- [ ] 前端兩個 app 用同一 Sentry project + `component` tag 區分
+### M5. Sentry 死角補齊 ✅
+- [x] 新增 `src/utils/sentry_helpers.py` create_background_task
+- [x] 替換 6 處 asyncio.create_task：3 個 periodic_* + task_queue + 2 個 upload_to_s3
+- [x] Worker SQS poll loop 外層 capture_exception
+- [x] transcription_job 任務失敗時帶 task_id tag 送 Sentry
+- [x] 前端兩 app 加 `Sentry.setTag('component', 'frontend-user/admin')`
 
-### M6. GitHub Actions 改 OIDC + pin SHA
-- [ ] 短期：SSH key 改 `webfactory/ssh-agent`（不落地）
-- [ ] 中期：改 AWS OIDC + STS token
-- [ ] 所有 actions pin 到 commit SHA（dependabot 自動更新）
+### M6. GitHub Actions ssh-agent + pin SHA ✅
+- [x] webfactory/ssh-agent 取代 echo > .pem，key 不落地 disk
+- [x] 4 個 actions 全部釘 commit SHA（checkout / setup-python / setup-node / ssh-agent）
+- [x] 新增 `.github/dependabot.yml`：每週自動 PR 更新 actions/pip/npm
+- AWS OIDC 改用 STS token 留下次
 
-### M7. Admin 高權操作通知 + audit 強化
-- [ ] 改密碼/email/方案時寄通知信給使用者
-- [ ] audit_logs 補 admin IP、user-agent
-- [ ] Admin 介面對危險操作加二次確認
+### M7. Admin 高權操作通知 + audit 強化 ✅
+- [x] `send_admin_action_notification` email 範本（紅色強調 + 回報路徑）
+- [x] reset_password / disable_user / change_role / change_tier 四種情境寄信
+- [x] `log_admin_action` 接 Request，從 X-Forwarded-For 抽真實 IP + UA
+- 二次確認 UI（前端工作）留後續
 
-### M8. 分享連結權杖
-- [ ] `tasks` document 加 `share_token_expires`、`share_token_revoked`
-- [ ] 前端 UI 加「設定過期」與「撤銷」按鈕
+### M8. 分享連結權杖 ✅
+- [x] tasks 加 `share_token_expires`（unix 秒數，None=永久）
+- [x] toggle / get_shared_task / get_shared_audio 全部檢查過期，過期回 410 Gone
+- [x] 新增 PATCH `/shared/{task_id}/expiry` 不換 token 改過期時間
+- [x] 前端對話框：永久 / 7 / 30 / 90 天下拉選單；已分享可顯示當前過期時間並切換
+- [x] zh-TW / en i18n 補齊
 
 ---
 
