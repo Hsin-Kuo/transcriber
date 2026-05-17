@@ -552,6 +552,7 @@ import { NEW_ENDPOINTS } from '../api/endpoints'
 // Composables
 import { useDisplayPreferences } from '../composables/transcript/useDisplayPreferences'
 import { useTranscriptData } from '../composables/transcript/useTranscriptData'
+import { buildSearchRegex, findAllMatches } from '../utils/searchMatching'
 import { useAudioPlayer } from '../composables/transcript/useAudioPlayer'
 import { useSubtitleMode } from '../composables/transcript/useSubtitleMode'
 import { useTranscriptEditor } from '../composables/transcript/useTranscriptEditor'
@@ -1394,32 +1395,11 @@ function handleSearch(text) {
   }
 
   const content = getSearchableContent()
-  const matches = []
-
-  try {
-    // 跳脫正則表達式特殊字元
-    let escapedText = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-
-    // 全字匹配
-    if (matchWholeWord.value) {
-      escapedText = `\\b${escapedText}\\b`
-    }
-
-    // 大小寫匹配
-    const flags = matchCase.value ? 'g' : 'gi'
-    const regex = new RegExp(escapedText, flags)
-    let match
-
-    while ((match = regex.exec(content)) !== null) {
-      matches.push({
-        start: match.index,
-        end: match.index + match[0].length,
-        text: match[0]
-      })
-    }
-  } catch (e) {
-    // 無效的正則表達式，忽略
-  }
+  const regex = buildSearchRegex(text, {
+    matchCase: matchCase.value,
+    matchWholeWord: matchWholeWord.value,
+  })
+  const matches = findAllMatches(content, regex)
 
   searchMatches.value = matches
   currentMatchIndex.value = matches.length > 0 ? 0 : 0
@@ -1897,13 +1877,10 @@ function handleReplaceAllNew(newReplaceText) {
       content = extractText(textareaRef.value)
     }
 
-    // 跳脫正則表達式特殊字元
-    let escapedText = searchPattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    if (matchWholeWord.value) {
-      escapedText = `\\b${escapedText}\\b`
-    }
-    const flags = matchCase.value ? 'g' : 'gi'
-    const regex = new RegExp(escapedText, flags)
+    const regex = buildSearchRegex(searchPattern, {
+      matchCase: matchCase.value,
+      matchWholeWord: matchWholeWord.value,
+    })
     const replacedContent = content.replace(regex, newReplaceText)
 
     // 用 editSegmentRanges 切出當下打字後的每段文字,套 regex 後寫回 segments.value。
@@ -1925,12 +1902,10 @@ function handleReplaceAllNew(newReplaceText) {
     currentMatchIndex.value = 0
   } else if (displayMode.value === 'subtitle') {
     // 字幕模式
-    let escapedText = searchPattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    if (matchWholeWord.value) {
-      escapedText = `\\b${escapedText}\\b`
-    }
-    const flags = matchCase.value ? 'g' : 'gi'
-    const regex = new RegExp(escapedText, flags)
+    const regex = buildSearchRegex(searchPattern, {
+      matchCase: matchCase.value,
+      matchWholeWord: matchWholeWord.value,
+    })
 
     groupedSegments.value.forEach(group => {
       group.segments.forEach(segment => {
@@ -2131,13 +2106,13 @@ function splitTextWithHighlight(text, segmentIndex) {
   const parts = []
   let lastIndex = 0
 
+  const regex = buildSearchRegex(searchText.value, {
+    matchCase: matchCase.value,
+    matchWholeWord: matchWholeWord.value,
+  })
+  if (!regex) return [{ text, isHighlight: false }]
+
   try {
-    let escapedText = searchText.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    if (matchWholeWord.value) {
-      escapedText = `\\b${escapedText}\\b`
-    }
-    const flags = matchCase.value ? 'g' : 'gi'
-    const regex = new RegExp(escapedText, flags)
     let match
 
     // 計算這個 segment 的全局起始位置
