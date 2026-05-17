@@ -31,6 +31,7 @@ from ..utils.storage_service import is_aws
 from ..utils.config_loader import get_parameter, get_temp_dir
 from ..database.sync_client import get_sync_db
 from ..services.worker_dispatch import get_worker_dispatch
+from ..models.worker_job import TranscriptionWorkerJob
 import os
 import asyncio
 
@@ -658,18 +659,18 @@ async def create_transcription(
             # 委派給 Worker dispatch seam：背景上傳 S3 + 簽章 + 送 SQS
             # 失敗會把 Task 標 failed、清 temp_dir、送 Sentry
             get_worker_dispatch().fire_and_forget(
-                task_id=task_id,
+                job=TranscriptionWorkerJob(
+                    task_id=task_id,
+                    language=None if language == "auto" else language,
+                    use_chunking=chunk_audio,
+                    use_punctuation=punct_provider != "none",
+                    punctuation_provider=punct_provider,
+                    use_diarization=diarize,
+                    max_speakers=max_speakers,
+                ),
                 audio_local_path=temp_audio,
                 temp_dir=temp_dir,
                 user_tier=full_user_data.get("quota", {}).get("tier", "free"),
-                job_config={
-                    "language": None if language == "auto" else language,
-                    "use_chunking": chunk_audio,
-                    "use_punctuation": punct_provider != "none",
-                    "punctuation_provider": punct_provider,
-                    "use_diarization": diarize,
-                    "max_speakers": max_speakers,
-                },
             )
         else:
             # ===== 本地模式：現有行為 =====
@@ -1740,18 +1741,18 @@ async def create_batch_transcriptions(
                 # ===== AWS 模式：背景上傳 S3 + 發送 SQS =====
                 # 委派給 Worker dispatch seam（批次：chunking 強制開）
                 get_worker_dispatch().fire_and_forget(
-                    task_id=task_id,
+                    job=TranscriptionWorkerJob(
+                        task_id=task_id,
+                        language=None if language == "auto" else language,
+                        use_chunking=True,
+                        use_punctuation=punct_provider != "none",
+                        punctuation_provider=punct_provider,
+                        use_diarization=diarize,
+                        max_speakers=max_speakers,
+                    ),
                     audio_local_path=temp_audio,
                     temp_dir=temp_dir,
                     user_tier=full_user_data.get("quota", {}).get("tier", "free"),
-                    job_config={
-                        "language": None if language == "auto" else language,
-                        "use_chunking": True,
-                        "use_punctuation": punct_provider != "none",
-                        "punctuation_provider": punct_provider,
-                        "use_diarization": diarize,
-                        "max_speakers": max_speakers,
-                    },
                 )
                 temp_dir = None  # 避免 except 中重複清理
 

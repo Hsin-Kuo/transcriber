@@ -13,6 +13,7 @@ from typing import Optional
 
 import boto3
 
+from src.models.worker_job import TranscriptionWorkerJob
 from src.utils.storage_service import download_audio
 from src.utils.time_utils import get_utc_timestamp
 from src.utils.text_utils import convert_segments_punctuation
@@ -93,14 +94,19 @@ def _run_diarization(diarization_pipeline, wav_path: Path, max_speakers: Optiona
 
 
 def process_task(message_body: dict, progress_store: ProgressStore) -> None:
-    """處理單個轉錄任務（由 SQS consumer 呼叫）"""
-    task_id = message_body["task_id"]
-    language = message_body.get("language")
-    use_chunking = message_body.get("use_chunking", True)
-    use_punctuation = message_body.get("use_punctuation", True)
-    punctuation_provider = message_body.get("punctuation_provider", "gemini")
-    use_diarization = message_body.get("use_diarization", False)
-    max_speakers = message_body.get("max_speakers")
+    """處理單個轉錄任務（由 SQS consumer 呼叫）。
+
+    `message_body` 已被 sqs_consumer 驗 HMAC 並 pop `_signature`，
+    現用 TranscriptionWorkerJob 做 typed 反序列化（schema 見 src/models/worker_job.py）。
+    """
+    job = TranscriptionWorkerJob.model_validate(message_body)
+    task_id = job.task_id
+    language = job.language
+    use_chunking = job.use_chunking
+    use_punctuation = job.use_punctuation
+    punctuation_provider = job.punctuation_provider
+    use_diarization = job.use_diarization
+    max_speakers = job.max_speakers
 
     db = get_db()
 

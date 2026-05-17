@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from src.database.sync_client import get_sync_db
+from src.models.worker_job import TranscriptionWorkerJob
 from src.utils.sentry_helpers import create_background_task
 
 
@@ -54,45 +55,40 @@ class WorkerDispatch:
     def fire_and_forget(
         self,
         *,
-        task_id: str,
+        job: TranscriptionWorkerJob,
         audio_local_path: Path,
         temp_dir: Path,
         user_tier: str,
-        job_config: dict,
     ) -> None:
         """非阻擋發射：背景上傳 S3 + 送 SQS；失敗自動把 task 標 failed + 清 temp_dir。
 
         本方法立即返回，實際工作在 create_background_task 內（失敗會送 Sentry）。
 
         Args:
-            task_id: Task ID
+            job: typed Worker job（含 task_id + 轉錄參數）；schema 見 src/models/worker_job.py
             audio_local_path: 已落地的音檔絕對路徑
             temp_dir: 整個 temp 工作區，dispatch 完成後刪
             user_tier: free / pro / ...，決定 S3 路徑 prefix
-            job_config: Worker 需要的轉錄參數
-                {language, use_chunking, use_punctuation, punctuation_provider,
-                 use_diarization, max_speakers}
         """
         coro = self._dispatch(
-            task_id=task_id,
+            job=job,
             audio_local_path=audio_local_path,
             temp_dir=temp_dir,
             user_tier=user_tier,
-            job_config=job_config,
         )
-        create_background_task(coro, name=f"worker_dispatch:{task_id}")
+        create_background_task(coro, name=f"worker_dispatch:{job.task_id}")
 
     # ── internal ────────────────────────────────────────────
 
     async def _dispatch(
         self,
         *,
-        task_id: str,
+        job: TranscriptionWorkerJob,
         audio_local_path: Path,
         temp_dir: Path,
         user_tier: str,
-        job_config: dict,
     ) -> None:
+        task_id = job.task_id
         try:
             loop = asyncio.get_event_loop()
 
@@ -102,9 +98,9 @@ class WorkerDispatch:
             )
             print(f"☁️  音檔已上傳到 S3: uploads/{user_tier}/{task_id}.mp3", flush=True)
 
-            # 2. SQS 送出
+            # 2. SQS 送出（model_dump → sign envelope → JSON）
             if self._sqs_queue_url:
-                payload = self._sign({"task_id": task_id, **job_config})
+                payload = self._sign(job.model_dump())
                 await loop.run_in_executor(None, self._send_sqs_blocking, payload)
                 print(f"📨 已發送 SQS 訊息: {task_id}", flush=True)
             else:

@@ -21,7 +21,23 @@ os.environ.setdefault(
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from src.models.worker_job import TranscriptionWorkerJob  # noqa: E402
 from src.services.worker_dispatch import WorkerDispatch  # noqa: E402
+
+
+def _make_job(**overrides):
+    """Helper：給測試用的 default Job + 可覆寫欄位"""
+    base = dict(
+        task_id="task-1",
+        language="zh",
+        use_chunking=True,
+        use_punctuation=True,
+        punctuation_provider="gemini",
+        use_diarization=False,
+        max_speakers=None,
+    )
+    base.update(overrides)
+    return TranscriptionWorkerJob(**base)
 
 
 def _make_dispatch(
@@ -83,11 +99,10 @@ class TestHappyPath:
         d = _make_dispatch(sqs_client=sqs, s3_uploader=uploader)
 
         await d._dispatch(
-            task_id="task-1",
+            job=_make_job(task_id="task-1"),
             audio_local_path=fake_audio,
             temp_dir=fake_audio.parent,
             user_tier="pro",
-            job_config={"language": "zh", "use_chunking": True},
         )
 
         # S3 uploader 被呼叫且帶正確參數
@@ -113,11 +128,10 @@ class TestHappyPath:
         d = _make_dispatch(sqs_client=sqs, sqs_queue_url="", s3_uploader=uploader)
 
         await d._dispatch(
-            task_id="task-2",
+            job=_make_job(task_id="task-2"),
             audio_local_path=fake_audio,
             temp_dir=fake_audio.parent,
             user_tier="free",
-            job_config={},
         )
 
         uploader.assert_called_once()
@@ -143,11 +157,10 @@ class TestFailurePath:
 
         with pytest.raises(RuntimeError, match="S3 down"):
             await d._dispatch(
-                task_id="task-fail",
+                job=_make_job(task_id="task-fail"),
                 audio_local_path=fake_audio,
                 temp_dir=fake_audio.parent,
                 user_tier="free",
-                job_config={},
             )
 
         # SQS 沒被呼叫（S3 先掛）
@@ -178,11 +191,10 @@ class TestFailurePath:
 
         with pytest.raises(RuntimeError, match="SQS unreachable"):
             await d._dispatch(
-                task_id="task-sqs",
+                job=_make_job(task_id="task-sqs"),
                 audio_local_path=fake_audio,
                 temp_dir=fake_audio.parent,
                 user_tier="free",
-                job_config={},
             )
 
         uploader.assert_called_once()  # S3 上傳已成功
