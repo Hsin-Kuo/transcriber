@@ -89,6 +89,7 @@ export function useTranscriptData() {
         summary_status: task.summary_status || null,
         tags: task.tags || [],
         share_token: task.share_token || null,
+        share_token_expires: task.share_token_expires || null,
         content: ''
       }
 
