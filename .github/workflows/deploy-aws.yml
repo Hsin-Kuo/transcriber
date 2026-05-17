@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
 
       # ===== Backend 打包 =====
       - name: Package backend
@@ -37,7 +37,7 @@ jobs:
 
       # ===== Frontend 建置 =====
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444  # v5.0.0
         with:
           node-version: '22'
           cache: 'npm'
@@ -84,26 +84,29 @@ jobs:
         run: tar -czvf ../admin-frontend.tar.gz dist
 
       # ===== SSH 部署 =====
-      - name: Setup SSH key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/transcriber-key.pem
-          chmod 600 ~/.ssh/transcriber-key.pem
-          ssh-keyscan -H ${{ env.EC2_HOST }} >> ~/.ssh/known_hosts
+      # 用 ssh-agent 把 key 載入 agent 記憶體，不落地 disk
+      # 比 echo > .pem 安全：runner 暫存 / log / 殘留檔案都不會看到 key 內容
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@dc588b651fe13675774614f8e6a936a468676387  # v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: Add EC2 host key
+        run: ssh-keyscan -H ${{ env.EC2_HOST }} >> ~/.ssh/known_hosts
 
       - name: Upload packages to EC2
         env:
           SHA: ${{ github.sha }}
         run: |
-          scp -i ~/.ssh/transcriber-key.pem backend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/backend-${SHA}.tar.gz
-          scp -i ~/.ssh/transcriber-key.pem frontend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/frontend-${SHA}.tar.gz
-          scp -i ~/.ssh/transcriber-key.pem admin-frontend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/admin-frontend-${SHA}.tar.gz
+          scp backend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/backend-${SHA}.tar.gz
+          scp frontend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/frontend-${SHA}.tar.gz
+          scp admin-frontend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/admin-frontend-${SHA}.tar.gz
 
       - name: Deploy backend
         env:
           SHA: ${{ github.sha }}
         run: |
-          ssh -i ~/.ssh/transcriber-key.pem ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "SHA=${SHA} bash -s" << 'ENDSSH'
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "SHA=${SHA} bash -s" << 'ENDSSH'
           set -e
           echo "=== Deploying Backend [${SHA}] ==="
           # 保留釋出檔到 releases/，供 rollback.sh 使用
@@ -138,7 +141,7 @@ jobs:
         env:
           SHA: ${{ github.sha }}
         run: |
-          ssh -i ~/.ssh/transcriber-key.pem ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "SHA=${SHA} bash -s" << 'ENDSSH'
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "SHA=${SHA} bash -s" << 'ENDSSH'
           set -e
           echo "=== Deploying Frontend [${SHA}] ==="
           sudo mkdir -p /opt/transcriber/releases
@@ -159,7 +162,7 @@ jobs:
         env:
           SHA: ${{ github.sha }}
         run: |
-          ssh -i ~/.ssh/transcriber-key.pem ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "SHA=${SHA} bash -s" << 'ENDSSH'
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "SHA=${SHA} bash -s" << 'ENDSSH'
           set -e
           echo "=== Deploying Admin Frontend [${SHA}] ==="
           sudo mkdir -p /opt/transcriber/releases
@@ -181,7 +184,3 @@ jobs:
           sleep 5
           curl -f https://soundlite.app/health || exit 1
           echo "✅ Deployment successful! https://soundlite.app"
-
-      - name: Cleanup SSH key
-        if: always()
-        run: rm -f ~/.ssh/transcriber-key.pem

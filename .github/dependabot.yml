@@ -1,0 +1,48 @@
+# Dependabot 設定。
+#
+# Actions 釘 SHA 的代價是手動更新，這個檔讓 dependabot 每週自動開 PR 更新。
+# 開 PR 走 CI（test.yml）驗證，merge 後新 SHA 生效。
+version: 2
+updates:
+  # GitHub Actions（pinned SHA → 自動 PR 更新到新版 tag 的 SHA）
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # Python 後端
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # 主前端
+  - package-ecosystem: npm
+    directory: "/frontend"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # 管理後台
+  - package-ecosystem: npm
+    directory: "/admin-frontend"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types:
+          - minor
+          - patch
