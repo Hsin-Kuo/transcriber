@@ -499,75 +499,13 @@
     />
 
     <!-- 分享對話框 -->
-    <Teleport to="body">
-      <div v-if="showShareDialog" class="share-overlay" @click.self="showShareDialog = false">
-        <div class="share-dialog">
-          <h3>{{ $t('shared.shareTitle') }}</h3>
-          <p class="share-desc">{{ $t('shared.shareDesc') }}</p>
-
-          <div v-if="shareToken" class="share-link-section">
-            <div class="share-link-row">
-              <input
-                type="text"
-                :value="`${origin}/s/${shareToken}`"
-                readonly
-                class="share-link-input"
-                @click="$event.target.select()"
-              />
-              <button class="share-copy-btn" @click="copyShareLink">
-                {{ shareLinkCopied ? $t('shared.linkCopied') : $t('shared.copyLink') }}
-              </button>
-            </div>
-            <div class="share-expiry-row">
-              <span class="share-expiry-label">{{ $t('shared.expiryLabel') }}：{{ shareExpiryText }}</span>
-              <select
-                class="share-expiry-select"
-                :disabled="shareLoading"
-                :value="shareExpiresAt ? -1 : 0"
-                @change="updateShareExpiry(Number($event.target.value))"
-              >
-                <option :value="0">{{ $t('shared.expiryNever') }}</option>
-                <option :value="7">{{ $t('shared.expiry7d') }}</option>
-                <option :value="30">{{ $t('shared.expiry30d') }}</option>
-                <option :value="90">{{ $t('shared.expiry90d') }}</option>
-              </select>
-            </div>
-            <button
-              class="share-disable-btn"
-              :disabled="shareLoading"
-              @click="toggleShare"
-            >
-              {{ $t('shared.disableShare') }}
-            </button>
-          </div>
-
-          <div v-else class="share-enable-section">
-            <div class="share-expiry-row">
-              <label class="share-expiry-label">{{ $t('shared.expiryLabel') }}</label>
-              <select
-                v-model.number="shareExpiryDays"
-                class="share-expiry-select"
-                :disabled="shareLoading"
-              >
-                <option :value="0">{{ $t('shared.expiryNever') }}</option>
-                <option :value="7">{{ $t('shared.expiry7d') }}</option>
-                <option :value="30">{{ $t('shared.expiry30d') }}</option>
-                <option :value="90">{{ $t('shared.expiry90d') }}</option>
-              </select>
-            </div>
-            <button
-              class="share-enable-btn"
-              :disabled="shareLoading"
-              @click="toggleShare"
-            >
-              {{ shareLoading ? '...' : $t('shared.enableShare') }}
-            </button>
-          </div>
-
-          <button class="share-close-btn" @click="showShareDialog = false">✕</button>
-        </div>
-      </div>
-    </Teleport>
+    <ShareDialog
+      v-if="currentTranscript"
+      v-model:show="showShareDialog"
+      :task-id="currentTranscript.task_id"
+      :initial-share-token="currentTranscript.share_token || null"
+      :initial-share-expires-at="currentTranscript.share_token_expires || null"
+    />
 
     <!-- 標籤編輯 BottomSheet -->
     <BottomSheet v-model="showTagSheet" :title="$t('taskList.editTags')">
@@ -594,6 +532,7 @@ const { t: $t } = useI18n()
 
 // 子組件
 import TranscriptHeader from '../components/transcript/TranscriptHeader.vue'
+import ShareDialog from '../components/transcript/ShareDialog.vue'
 import AudioPlayer from '../components/transcript/AudioPlayer.vue'
 import SubtitleTable from '../components/transcript/SubtitleTable.vue'
 import DownloadDialog from '../components/transcript/DownloadDialog.vue'
@@ -984,10 +923,8 @@ async function loadTranscript(taskId) {
   )
 
   if (result) {
-    // 載入分享狀態
-    shareToken.value = currentTranscript.value.share_token || null
-    shareExpiresAt.value = currentTranscript.value.share_token_expires || null
-
+    // 分享狀態現由 ShareDialog 元件以 props 直接讀 currentTranscript，
+    // 不再需要同步到 parent 的 ref。
     if (result.audioUrl) {
       audioUrl.value = result.audioUrl
       audioError.value = null
@@ -1443,80 +1380,12 @@ async function deleteTask() {
 }
 
 // ========== 分享功能 ==========
+// 邏輯封裝在 components/transcript/ShareDialog.vue
+// Parent 只需控制可見性；taskId 與初始 share 狀態用 props 傳入
 const showShareDialog = ref(false)
-const shareToken = ref(null)
-const shareExpiresAt = ref(null)  // unix seconds 或 null
-const shareExpiryDays = ref(0)    // 開啟時選的天數；0 = 永久
-const shareLoading = ref(false)
 
-async function handleShare() {
-  // 如果已有 share_token，直接顯示對話框
-  if (shareToken.value) {
-    showShareDialog.value = true
-    return
-  }
+function handleShare() {
   showShareDialog.value = true
-}
-
-const origin = window.location.origin
-const shareLinkCopied = ref(false)
-
-// 過期時間顯示文字
-const shareExpiryText = computed(() => {
-  if (!shareExpiresAt.value) return $t('shared.expiryNever')
-  const d = new Date(shareExpiresAt.value * 1000)
-  return d.toLocaleString()
-})
-
-async function toggleShare() {
-  shareLoading.value = true
-  try {
-    const url = NEW_ENDPOINTS.shared.toggle(currentTranscript.value.task_id)
-    const params = shareToken.value || !shareExpiryDays.value
-      ? {}
-      : { expires_in_days: shareExpiryDays.value }
-    const response = await api.post(url, null, { params })
-    if (response.data.shared) {
-      shareToken.value = response.data.share_token
-      shareExpiresAt.value = response.data.expires_at
-    } else {
-      shareToken.value = null
-      shareExpiresAt.value = null
-      showShareDialog.value = false
-    }
-  } catch (error) {
-    const detail = error.response?.data?.detail
-    alert(detail || $t('shared.paidOnly'))
-    if (error.response?.status === 403) {
-      showShareDialog.value = false
-    }
-  } finally {
-    shareLoading.value = false
-  }
-}
-
-async function updateShareExpiry(days) {
-  // days = 0 → 改為永久；> 0 → 從現在起 N 天後過期
-  shareLoading.value = true
-  try {
-    const url = NEW_ENDPOINTS.shared.expiry(currentTranscript.value.task_id)
-    const params = days ? { expires_in_days: days } : {}
-    const response = await api.patch(url, null, { params })
-    shareExpiresAt.value = response.data.expires_at
-  } catch (error) {
-    alert(error.response?.data?.detail || 'update failed')
-  } finally {
-    shareLoading.value = false
-  }
-}
-
-function copyShareLink() {
-  if (!shareToken.value) return
-  const url = `${origin}/s/${shareToken.value}`
-  navigator.clipboard.writeText(url).then(() => {
-    shareLinkCopied.value = true
-    setTimeout(() => { shareLinkCopied.value = false }, 2000)
-  })
 }
 
 // ========== 搜尋功能處理 ==========
@@ -3573,131 +3442,4 @@ watch(displayMode, () => {
   }
 }
 
-/* 分享對話框 */
-.share-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.share-dialog {
-  background: white;
-  border-radius: 12px;
-  padding: 24px;
-  width: 420px;
-  max-width: 90vw;
-  position: relative;
-}
-
-.share-dialog h3 {
-  margin: 0 0 8px 0;
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.share-desc {
-  color: #78716c;
-  font-size: 13px;
-  margin: 0 0 20px 0;
-}
-
-.share-link-section {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.share-link-row {
-  display: flex;
-  gap: 8px;
-}
-
-.share-link-input {
-  flex: 1;
-  padding: 8px 12px;
-  border: 1px solid #d6d3d1;
-  border-radius: 6px;
-  font-size: 13px;
-  color: #44403c;
-  background: #fafaf9;
-  outline: none;
-}
-
-.share-link-input:focus {
-  border-color: #a8a29e;
-}
-
-.share-copy-btn {
-  padding: 8px 16px;
-  background: #292524;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  font-size: 13px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.share-copy-btn:hover {
-  background: #1c1917;
-}
-
-.share-disable-btn {
-  padding: 8px 16px;
-  background: none;
-  color: #dc2626;
-  border: 1px solid #fecaca;
-  border-radius: 6px;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.share-disable-btn:hover {
-  background: #fef2f2;
-}
-
-.share-enable-section {
-  text-align: center;
-}
-
-.share-enable-btn {
-  padding: 10px 24px;
-  background: #292524;
-  color: white;
-  border: none;
-  border-radius: 8px;
-  font-size: 14px;
-  cursor: pointer;
-  width: 100%;
-}
-
-.share-enable-btn:hover {
-  background: #1c1917;
-}
-
-.share-enable-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.share-close-btn {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  background: none;
-  border: none;
-  font-size: 18px;
-  color: #a8a29e;
-  cursor: pointer;
-  padding: 4px;
-  line-height: 1;
-}
-
-.share-close-btn:hover {
-  color: #44403c;
-}
 </style>
