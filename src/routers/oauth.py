@@ -1,6 +1,6 @@
 """OAuth 第三方登入路由"""
 import os
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
@@ -14,6 +14,7 @@ from ..models.auth import (
 )
 from ..auth.password import hash_password
 from ..auth.jwt_handler import create_access_token, create_refresh_token
+from ..auth.cookies import set_refresh_cookie
 from ..auth.dependencies import get_current_user
 from ..database.mongodb import get_database
 from ..database.repositories.user_repo import UserRepository
@@ -80,6 +81,7 @@ def verify_google_token(credential: str) -> dict:
 @router.post("/google", response_model=TokenResponse)
 async def google_auth(
     request: GoogleAuthRequest,
+    response: Response,
     db=Depends(get_database)
 ):
     """Google 登入/註冊
@@ -166,20 +168,19 @@ async def google_auth(
         "email": user["email"],
         "role": user["role"]
     })
-    refresh_token = create_refresh_token({
+    refresh_token_value = create_refresh_token({
         "sub": str(user["_id"]),
         "email": user["email"],
         "role": user["role"]
     })
 
     # 存儲 Refresh Token
-    await user_repo.save_refresh_token(str(user["_id"]), refresh_token)
+    await user_repo.save_refresh_token(str(user["_id"]), refresh_token_value)
 
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer"
-    }
+    # httpOnly cookie 傳給 client；body 不再回 refresh_token
+    set_refresh_cookie(response, refresh_token_value)
+
+    return TokenResponse(access_token=access_token, token_type="bearer")
 
 
 @router.post("/google/bind")

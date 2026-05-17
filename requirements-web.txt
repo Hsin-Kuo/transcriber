@@ -11,6 +11,9 @@ fastapi
 uvicorn[standard]
 python-multipart
 
+# 結構化 logging（JSON output + request_id contextvars）
+structlog
+
 # Google OAuth
 google-auth
 

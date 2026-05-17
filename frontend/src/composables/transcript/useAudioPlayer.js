@@ -165,26 +165,22 @@ export function useAudioPlayer() {
     if (!currentTaskId) return
 
     try {
-      // 刷新 token
-      const refreshToken = TokenManager.getRefreshToken()
-      if (refreshToken) {
-        const response = await fetch(`${API_BASE}/auth/refresh`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refresh_token: refreshToken })
-        })
+      // refresh_token 改由 httpOnly cookie 帶出，credentials: 'include' 必須加
+      const response = await fetch(`${API_BASE}/auth/refresh`, {
+        method: 'POST',
+        credentials: 'include',
+      })
 
-        if (response.ok) {
-          const data = await response.json()
-          TokenManager.setTokens(data.access_token, data.refresh_token)
-          console.log('Token 刷新成功')
+      if (response.ok) {
+        const data = await response.json()
+        TokenManager.setAccessToken(data.access_token)
+        console.log('Token 刷新成功')
 
-          // 更新音訊 URL（但不重新載入，等下次播放或 seek 時自然使用新 URL）
-          // 如果音訊還在播放中，不立即更換 URL 以避免中斷
-          if (!isPlaying.value) {
-            const newUrl = getAudioUrl(currentTaskId)
-            audioUrl.value = newUrl
-          }
+        // 更新音訊 URL（但不重新載入，等下次播放或 seek 時自然使用新 URL）
+        // 如果音訊還在播放中，不立即更換 URL 以避免中斷
+        if (!isPlaying.value) {
+          const newUrl = getAudioUrl(currentTaskId)
+          audioUrl.value = newUrl
         }
       }
     } catch (error) {
@@ -206,27 +202,20 @@ export function useAudioPlayer() {
     const wasPlaying = isPlaying.value
 
     try {
-      // 先嘗試刷新 token（透過發送一個測試請求觸發 token 刷新機制）
-      const refreshToken = TokenManager.getRefreshToken()
-      if (refreshToken) {
-        try {
-          // 使用 refresh token 獲取新的 access token
-          const response = await fetch(`${API_BASE}/auth/refresh`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ refresh_token: refreshToken })
-          })
+      // refresh_token 由 httpOnly cookie 自動帶；credentials: 'include' 必須加
+      try {
+        const response = await fetch(`${API_BASE}/auth/refresh`, {
+          method: 'POST',
+          credentials: 'include',
+        })
 
-          if (response.ok) {
-            const data = await response.json()
-            TokenManager.setTokens(data.access_token, data.refresh_token)
-            console.log(t('audioPlayer.tokenRefreshed'))
-          }
-        } catch (refreshError) {
-          console.warn(t('audioPlayer.tokenRefreshFailed'), refreshError)
+        if (response.ok) {
+          const data = await response.json()
+          TokenManager.setAccessToken(data.access_token)
+          console.log(t('audioPlayer.tokenRefreshed'))
         }
+      } catch (refreshError) {
+        console.warn(t('audioPlayer.tokenRefreshFailed'), refreshError)
       }
 
       // 生成新的音檔 URL

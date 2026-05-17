@@ -12,6 +12,7 @@ from ..auth.dependencies import get_current_user
 from ..database.mongodb import get_database
 from ..database.repositories.user_repo import UserRepository
 from ..database.repositories.order_repo import OrderRepository
+from ..database.repositories.processed_webhook_repo import ProcessedWebhookRepository
 from ..models.quota import QuotaTier, QUOTA_TIERS, is_upgrade
 from ..utils.newebpay_service import get_newebpay_service, NewebpayService
 from ..utils.time_utils import get_utc_timestamp
@@ -603,47 +604,84 @@ async def period_notify(request: Request, db=Depends(get_database)):
 
     print(f"📩 定期定額 Notify: {merchant_order_no} status={notify_status} first={is_first_payment}", flush=True)
 
-    order_repo = OrderRepository(db)
-    order = await order_repo.get_by_order_no(merchant_order_no)
-    if not order:
-        print(f"⚠️ 找不到訂單 {merchant_order_no}", flush=True)
-        return {"status": "ok"}
-
-    # 冪等性保護：首次付款若 order 已是 paid，直接跳過避免重複處理
-    if is_first_payment and order.get("status") == "paid":
-        print(f"ℹ️ 訂單 {merchant_order_no} 已處理，略過重複 Notify", flush=True)
-        return {"status": "ok"}
-
-    user_repo = UserRepository(db)
-    user_id = order["user_id"]
-
-    if notify_status == "SUCCESS":
-        await order_repo.update_by_order_no(merchant_order_no, {
+    # 冪等性：每期授權的 natural_id = order + already_times，重複到達直接略過
+    # 避免重發 Notify 造成重複授信、period_end 多滾一期等問題
+    webhook_repo = ProcessedWebhookRepository(db)
+    natural_id = f"{merchant_order_no}:{already_times if already_times is not None else 'init'}"
+    if not await webhook_repo.claim(
+        provider="newebpay-period",
+        natural_id=natural_id,
+        metadata={
+            "status": notify_status,
             "period_no": period_no,
-            "auth_times": already_times or 1,
-            "newebpay_trade_no": trade_no,
-        })
+            "trade_no": trade_no,
+        },
+    ):
+        print(f"♻️ Notify 已處理過，略過：{natural_id}", flush=True)
+        return {"status": "ok"}
 
-        order_type = order.get("type", "subscription")
+    # 已 claim → 進入處理。若中途失敗：釋放 claim + 送 Sentry，讓藍新重發能重做
+    try:
+        order_repo = OrderRepository(db)
+        order = await order_repo.get_by_order_no(merchant_order_no)
+        if not order:
+            print(f"⚠️ 找不到訂單 {merchant_order_no}", flush=True)
+            return {"status": "ok"}
 
-        if order_type in ("subscription", "upgrade_subscription"):
-            await _handle_subscription_paid(
-                db, user_repo, order_repo, order, user_id,
-                period_no, is_first_payment, trade_no
-            )
-        elif order_type == "downgrade_subscription":
-            await _handle_downgrade_paid(
-                db, user_repo, order_repo, order, user_id,
-                period_no, is_first_payment
-            )
+        # 冪等性保護：首次付款若 order 已是 paid，直接跳過避免重複處理
+        if is_first_payment and order.get("status") == "paid":
+            print(f"ℹ️ 訂單 {merchant_order_no} 已處理，略過重複 Notify", flush=True)
+            return {"status": "ok"}
 
-    else:
-        await order_repo.update_by_order_no(merchant_order_no, {"status": "failed"})
-        if not is_first_payment:
-            # 續扣失敗（非首次付款）→ 立即降為 free
-            await _handle_payment_failed(db, user_repo, user_id)
+        user_repo = UserRepository(db)
+        user_id = order["user_id"]
 
-    return {"status": "ok"}
+        if notify_status == "SUCCESS":
+            await order_repo.update_by_order_no(merchant_order_no, {
+                "period_no": period_no,
+                "auth_times": already_times or 1,
+                "newebpay_trade_no": trade_no,
+            })
+
+            order_type = order.get("type", "subscription")
+
+            if order_type in ("subscription", "upgrade_subscription"):
+                await _handle_subscription_paid(
+                    db, user_repo, order_repo, order, user_id,
+                    period_no, is_first_payment, trade_no
+                )
+            elif order_type == "downgrade_subscription":
+                await _handle_downgrade_paid(
+                    db, user_repo, order_repo, order, user_id,
+                    period_no, is_first_payment
+                )
+
+        else:
+            await order_repo.update_by_order_no(merchant_order_no, {"status": "failed"})
+            if not is_first_payment:
+                # 續扣失敗（非首次付款）→ 立即降為 free
+                await _handle_payment_failed(db, user_repo, user_id)
+
+        return {"status": "ok"}
+    except Exception as e:
+        # 處理失敗：釋放 claim 讓藍新下次重發能重做；送 Sentry 警示需人工檢查
+        await webhook_repo.release(provider="newebpay-period", natural_id=natural_id)
+        print(f"❌ Period notify 處理失敗 {natural_id}: {e}", flush=True)
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("webhook.provider", "newebpay-period")
+                scope.set_tag("webhook.order_no", merchant_order_no)
+                scope.set_context("webhook", {
+                    "natural_id": natural_id,
+                    "status": notify_status,
+                    "is_first_payment": is_first_payment,
+                })
+                sentry_sdk.capture_exception(e)
+        except ImportError:
+            pass
+        # 回 500 讓藍新重試
+        raise
 
 
 async def _handle_subscription_paid(
@@ -804,35 +842,58 @@ async def mpg_notify(request: Request, db=Depends(get_database)):
 
     print(f"📩 MPG Notify: {merchant_order_no} status={result}", flush=True)
 
-    order_repo = OrderRepository(db)
-    order = await order_repo.get_by_order_no(merchant_order_no)
-    if not order:
-        print(f"⚠️ 找不到訂單 {merchant_order_no}", flush=True)
+    # 冪等性：一次性付款 natural_id 就是訂單號
+    webhook_repo = ProcessedWebhookRepository(db)
+    if not await webhook_repo.claim(
+        provider="newebpay-mpg",
+        natural_id=merchant_order_no,
+        metadata={"status": result, "trade_no": trade_no},
+    ):
+        print(f"♻️ MPG Notify 已處理過，略過：{merchant_order_no}", flush=True)
         return {"status": "ok"}
 
-    # 冪等性保護
-    if order.get("status") == "paid":
-        print(f"ℹ️ 訂單 {merchant_order_no} 已處理，略過重複 Notify", flush=True)
+    try:
+        order_repo = OrderRepository(db)
+        order = await order_repo.get_by_order_no(merchant_order_no)
+        if not order:
+            print(f"⚠️ 找不到訂單 {merchant_order_no}", flush=True)
+            return {"status": "ok"}
+
+        # 冪等性保護
+        if order.get("status") == "paid":
+            print(f"ℹ️ 訂單 {merchant_order_no} 已處理，略過重複 Notify", flush=True)
+            return {"status": "ok"}
+
+        user_repo = UserRepository(db)
+        user_id = order["user_id"]
+
+        if result == "SUCCESS":
+            extra_dur = order.get("extra_duration_minutes", 0)
+            extra_ai = order.get("extra_ai_summaries", 0)
+            await user_repo.add_extra_quota(user_id, extra_dur, extra_ai)
+            await order_repo.update_by_order_no(merchant_order_no, {
+                "status": "paid",
+                "newebpay_trade_no": trade_no,
+                "paid_at": datetime.utcnow().timestamp(),
+            })
+            print(f"✅ 用戶 {user_id} 購買額外額度：+{extra_dur}分鐘 +{extra_ai}摘要", flush=True)
+        else:
+            await order_repo.update_by_order_no(merchant_order_no, {"status": "failed"})
+            print(f"⚠️ 用戶 {user_id} 額外額度購買失敗", flush=True)
+
         return {"status": "ok"}
-
-    user_repo = UserRepository(db)
-    user_id = order["user_id"]
-
-    if result == "SUCCESS":
-        extra_dur = order.get("extra_duration_minutes", 0)
-        extra_ai = order.get("extra_ai_summaries", 0)
-        await user_repo.add_extra_quota(user_id, extra_dur, extra_ai)
-        await order_repo.update_by_order_no(merchant_order_no, {
-            "status": "paid",
-            "newebpay_trade_no": trade_no,
-            "paid_at": datetime.utcnow().timestamp(),
-        })
-        print(f"✅ 用戶 {user_id} 購買額外額度：+{extra_dur}分鐘 +{extra_ai}摘要", flush=True)
-    else:
-        await order_repo.update_by_order_no(merchant_order_no, {"status": "failed"})
-        print(f"⚠️ 用戶 {user_id} 額外額度購買失敗", flush=True)
-
-    return {"status": "ok"}
+    except Exception as e:
+        await webhook_repo.release(provider="newebpay-mpg", natural_id=merchant_order_no)
+        print(f"❌ MPG notify 處理失敗 {merchant_order_no}: {e}", flush=True)
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("webhook.provider", "newebpay-mpg")
+                scope.set_tag("webhook.order_no", merchant_order_no)
+                sentry_sdk.capture_exception(e)
+        except ImportError:
+            pass
+        raise
 
 
 # ── Return URL ────────────────────────────────────────────────────────────────
@@ -847,7 +908,8 @@ async def payment_return(request: Request):
     form = await request.form()
     raw = dict(form)
 
-    status = "UNKNOWN"
+    # 別用 `status` 當變數名：會 shadow 從 fastapi import 的 status enum
+    notify_status = "UNKNOWN"
     merchant_order_no = ""
 
     period_enc = raw.get("Period", "")
@@ -855,7 +917,7 @@ async def payment_return(request: Request):
         svc = get_newebpay_service()
         payload = svc.decrypt_period_notify(raw)
         if payload:
-            status = payload.get("Status", "UNKNOWN")
+            notify_status = payload.get("Status", "UNKNOWN")
             result = payload.get("Result", {})
             merchant_order_no = (
                 result.get("MerchantOrderNo") or result.get("MerOrderNo", "")
@@ -868,10 +930,10 @@ async def payment_return(request: Request):
             svc = get_newebpay_service()
             data = svc.verify_and_decrypt_mpg_notify(trade_info, trade_sha)
             if data:
-                status = data.get("Status", "UNKNOWN")
+                notify_status = data.get("Status", "UNKNOWN")
                 merchant_order_no = data.get("MerchantOrderNo", "")
 
-    query = f"Status={status}&MerchantOrderNo={merchant_order_no}"
+    query = f"Status={notify_status}&MerchantOrderNo={merchant_order_no}"
     return RedirectResponse(
         url=f"{FRONTEND_URL}/payment/return?{query}",
         status_code=303  # 303 See Other：POST → GET redirect

@@ -332,7 +332,6 @@ class SummaryService:
         fallback_index = -1
         tried_models = [self.default_model]
         quota_exceeded_count = 0
-        last_error = None
 
         max_attempts = len(api_keys) * (len(self.fallback_models) + 1)
 
@@ -372,7 +371,6 @@ class SummaryService:
                     return summary_data, current_model, token_usage
 
             except Exception as e:
-                last_error = e
                 error_msg = str(e)
 
                 # 檢查是否為配額錯誤
@@ -397,7 +395,7 @@ class SummaryService:
                             quota_exceeded_count = 0
                             continue
                         else:
-                            print(f"❌ 所有模型的配額都已用完")
+                            print("❌ 所有模型的配額都已用完")
                             break
                 else:
                     print(f"⚠️ API 調用失敗 (嘗試 {attempt + 1}): {error_msg}")

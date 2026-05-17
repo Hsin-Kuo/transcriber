@@ -155,7 +155,7 @@ async def update_tag_order(
     try:
         user_id = str(current_user["_id"])
         print(f"\n{'='*60}")
-        print(f"🔍 [tags.py] 更新標籤順序")
+        print("🔍 [tags.py] 更新標籤順序")
         print(f"   current_user['_id'] 類型: {type(current_user['_id'])}")
         print(f"   current_user['_id'] 值: {current_user['_id']}")
         print(f"   轉換後 user_id: {user_id}")

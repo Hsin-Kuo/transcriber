@@ -182,6 +182,69 @@ class EmailService:
             text_content=text_content
         )
 
+    async def send_admin_action_notification(
+        self,
+        to_email: str,
+        action_label: str,
+        admin_email: str,
+        details_lines: Optional[list] = None,
+    ) -> bool:
+        """通知使用者 admin 對其帳號執行了高權限操作。
+
+        Args:
+            to_email: 收件使用者
+            action_label: 可讀文字，例如「密碼被重設」「帳號已停用」「方案變更」
+            admin_email: 執行的 admin email（出現在內文供使用者確認）
+            details_lines: 額外條列說明（每行一個 bullet）
+        """
+        details_lines = details_lines or []
+        details_html = "".join(
+            f"<li style='margin: 4px 0;'>{line}</li>" for line in details_lines
+        )
+        details_block = (
+            f"<ul style='background: #fff; padding: 15px 30px; border-left: 4px solid #ffc107; margin: 20px 0;'>{details_html}</ul>"
+            if details_lines else ""
+        )
+
+        html_content = f"""
+        <!DOCTYPE html>
+        <html><head><meta charset="UTF-8"></head>
+        <body style="font-family: 'Segoe UI', sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #d9534f 0%, #c9302c 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+                <h1 style="margin: 0; color: white;">⚠️ 帳號異動通知</h1>
+            </div>
+            <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
+                <p>您好，</p>
+                <p>您在 Sound Lite 的帳號剛剛由管理員 <strong>{admin_email}</strong> 執行了以下操作：</p>
+                <p style="font-size: 18px; font-weight: bold; color: #c9302c;">{action_label}</p>
+                {details_block}
+                <p>如果這是您預期或要求的操作（例如協助重設密碼），可忽略此信。</p>
+                <p>若您<strong>不認識此 admin</strong>或<strong>未授權此操作</strong>，請立即回信此地址，並考慮：</p>
+                <ul>
+                    <li>立即登入更改密碼</li>
+                    <li>檢查近期登入紀錄是否異常</li>
+                </ul>
+            </div>
+            <div style="text-align: center; margin-top: 30px; color: #666; font-size: 12px;">
+                <p>© 2026 Sound Lite. All rights reserved.</p>
+            </div>
+        </body></html>
+        """
+
+        text_content = (
+            f"帳號異動通知\n\n"
+            f"您的 Sound Lite 帳號由管理員 {admin_email} 執行了：\n  {action_label}\n\n"
+            + ("\n".join(f"  - {line}" for line in details_lines) + "\n\n" if details_lines else "")
+            + "若您未授權此操作，請立即回信本地址。"
+        )
+
+        return await self._send_email(
+            to_email=to_email,
+            subject=f"[Sound Lite] 帳號異動通知：{action_label}",
+            html_content=html_content,
+            text_content=text_content,
+        )
+
     async def _send_email(
         self,
         to_email: str,
@@ -211,7 +274,7 @@ class EmailService:
             else:
                 # console 模式：印到終端（開發環境）
                 print(f"\n{'='*60}")
-                print(f"📧 Email 發送（開發模式）")
+                print("📧 Email 發送（開發模式）")
                 print(f"{'='*60}")
                 print(f"收件人: {to_email}")
                 print(f"主題: {subject}")

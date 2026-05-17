@@ -768,75 +768,82 @@ const availableLanguages = [
 // 當前語言（優先 authStore → fallback localStorage/i18n → 預設值）
 const currentLanguage = ref(authStore.preferences.language || locale.value)
 
-// 可用時區列表
-const availableTimezones = [
-  { code: 'Pacific/Midway', name: 'UTC-11 Midway Island' },
-  { code: 'Pacific/Honolulu', name: 'UTC-10 Hawaii' },
-  { code: 'America/Anchorage', name: 'UTC-9 Alaska' },
-  { code: 'America/Los_Angeles', name: 'UTC-8 Los Angeles / Seattle' },
-  { code: 'America/Denver', name: 'UTC-7 Denver / Phoenix' },
-  { code: 'America/Chicago', name: 'UTC-6 Chicago / Dallas' },
-  { code: 'America/Mexico_City', name: 'UTC-6 Mexico City' },
-  { code: 'America/New_York', name: 'UTC-5 New York / Miami' },
-  { code: 'America/Toronto', name: 'UTC-5 Toronto' },
-  { code: 'America/Bogota', name: 'UTC-5 Bogota' },
-  { code: 'America/Caracas', name: 'UTC-4 Caracas' },
-  { code: 'America/Halifax', name: 'UTC-4 Halifax' },
-  { code: 'America/Manaus', name: 'UTC-4 Manaus' },
-  { code: 'America/Santiago', name: 'UTC-4 Santiago' },
-  { code: 'America/St_Johns', name: 'UTC-3:30 St. Johns' },
-  { code: 'America/Sao_Paulo', name: 'UTC-3 São Paulo' },
-  { code: 'America/Argentina/Buenos_Aires', name: 'UTC-3 Buenos Aires' },
-  { code: 'America/Godthab', name: 'UTC-3 Nuuk' },
-  { code: 'Atlantic/South_Georgia', name: 'UTC-2 South Georgia' },
-  { code: 'Atlantic/Azores', name: 'UTC-1 Azores' },
-  { code: 'Atlantic/Cape_Verde', name: 'UTC-1 Cape Verde' },
-  { code: 'Europe/London', name: 'UTC+0 London' },
-  { code: 'Europe/Lisbon', name: 'UTC+0 Lisbon' },
-  { code: 'Africa/Casablanca', name: 'UTC+0 Casablanca' },
-  { code: 'Europe/Paris', name: 'UTC+1 Paris / Berlin' },
-  { code: 'Europe/Rome', name: 'UTC+1 Rome / Madrid' },
-  { code: 'Africa/Lagos', name: 'UTC+1 Lagos' },
-  { code: 'Europe/Athens', name: 'UTC+2 Athens / Helsinki' },
-  { code: 'Africa/Cairo', name: 'UTC+2 Cairo' },
-  { code: 'Africa/Johannesburg', name: 'UTC+2 Johannesburg' },
-  { code: 'Europe/Istanbul', name: 'UTC+3 Istanbul' },
-  { code: 'Europe/Moscow', name: 'UTC+3 Moscow' },
-  { code: 'Asia/Riyadh', name: 'UTC+3 Riyadh' },
-  { code: 'Africa/Nairobi', name: 'UTC+3 Nairobi' },
-  { code: 'Asia/Tehran', name: 'UTC+3:30 Tehran' },
-  { code: 'Asia/Dubai', name: 'UTC+4 Dubai' },
-  { code: 'Asia/Baku', name: 'UTC+4 Baku' },
-  { code: 'Asia/Kabul', name: 'UTC+4:30 Kabul' },
-  { code: 'Asia/Karachi', name: 'UTC+5 Karachi' },
-  { code: 'Asia/Tashkent', name: 'UTC+5 Tashkent' },
-  { code: 'Asia/Kolkata', name: 'UTC+5:30 Mumbai / New Delhi' },
-  { code: 'Asia/Kathmandu', name: 'UTC+5:45 Kathmandu' },
-  { code: 'Asia/Dhaka', name: 'UTC+6 Dhaka' },
-  { code: 'Asia/Almaty', name: 'UTC+6 Almaty' },
-  { code: 'Asia/Rangoon', name: 'UTC+6:30 Yangon' },
-  { code: 'Asia/Bangkok', name: 'UTC+7 Bangkok / Hanoi' },
-  { code: 'Asia/Jakarta', name: 'UTC+7 Jakarta' },
-  { code: 'Asia/Taipei', name: 'UTC+8 Taipei' },
-  { code: 'Asia/Shanghai', name: 'UTC+8 Shanghai / Beijing' },
-  { code: 'Asia/Hong_Kong', name: 'UTC+8 Hong Kong' },
-  { code: 'Asia/Singapore', name: 'UTC+8 Singapore' },
-  { code: 'Asia/Kuala_Lumpur', name: 'UTC+8 Kuala Lumpur' },
-  { code: 'Australia/Perth', name: 'UTC+8 Perth' },
-  { code: 'Asia/Tokyo', name: 'UTC+9 Tokyo' },
-  { code: 'Asia/Seoul', name: 'UTC+9 Seoul' },
-  { code: 'Australia/Adelaide', name: 'UTC+9:30 Adelaide' },
-  { code: 'Australia/Darwin', name: 'UTC+9:30 Darwin' },
-  { code: 'Australia/Sydney', name: 'UTC+10 Sydney / Melbourne' },
-  { code: 'Australia/Brisbane', name: 'UTC+10 Brisbane' },
-  { code: 'Pacific/Guam', name: 'UTC+10 Guam' },
-  { code: 'Australia/Lord_Howe', name: 'UTC+10:30 Lord Howe Island' },
-  { code: 'Pacific/Noumea', name: 'UTC+11 New Caledonia' },
-  { code: 'Pacific/Auckland', name: 'UTC+12 Auckland' },
-  { code: 'Pacific/Fiji', name: 'UTC+12 Fiji' },
-  { code: 'Pacific/Tongatapu', name: 'UTC+13 Tonga' },
-  { code: 'Pacific/Apia', name: 'UTC+13 Samoa' },
+// 可用時區代碼（顯示名稱由 i18n 提供，見 locales/*.json 的 userSettings.timezones）
+const TIMEZONE_CODES = [
+  'Pacific/Midway',
+  'Pacific/Honolulu',
+  'America/Anchorage',
+  'America/Los_Angeles',
+  'America/Denver',
+  'America/Chicago',
+  'America/Mexico_City',
+  'America/New_York',
+  'America/Toronto',
+  'America/Bogota',
+  'America/Caracas',
+  'America/Halifax',
+  'America/Manaus',
+  'America/Santiago',
+  'America/St_Johns',
+  'America/Sao_Paulo',
+  'America/Argentina/Buenos_Aires',
+  'America/Godthab',
+  'Atlantic/South_Georgia',
+  'Atlantic/Azores',
+  'Atlantic/Cape_Verde',
+  'Europe/London',
+  'Europe/Lisbon',
+  'Africa/Casablanca',
+  'Europe/Paris',
+  'Europe/Rome',
+  'Africa/Lagos',
+  'Europe/Athens',
+  'Africa/Cairo',
+  'Africa/Johannesburg',
+  'Europe/Istanbul',
+  'Europe/Moscow',
+  'Asia/Riyadh',
+  'Africa/Nairobi',
+  'Asia/Tehran',
+  'Asia/Dubai',
+  'Asia/Baku',
+  'Asia/Kabul',
+  'Asia/Karachi',
+  'Asia/Tashkent',
+  'Asia/Kolkata',
+  'Asia/Kathmandu',
+  'Asia/Dhaka',
+  'Asia/Almaty',
+  'Asia/Rangoon',
+  'Asia/Bangkok',
+  'Asia/Jakarta',
+  'Asia/Taipei',
+  'Asia/Shanghai',
+  'Asia/Hong_Kong',
+  'Asia/Singapore',
+  'Asia/Kuala_Lumpur',
+  'Australia/Perth',
+  'Asia/Tokyo',
+  'Asia/Seoul',
+  'Australia/Adelaide',
+  'Australia/Darwin',
+  'Australia/Sydney',
+  'Australia/Brisbane',
+  'Pacific/Guam',
+  'Australia/Lord_Howe',
+  'Pacific/Noumea',
+  'Pacific/Auckland',
+  'Pacific/Fiji',
+  'Pacific/Tongatapu',
+  'Pacific/Apia',
 ]
+
+const availableTimezones = computed(() =>
+  TIMEZONE_CODES.map(code => ({
+    code,
+    name: $t(`userSettings.timezones.${code}`),
+  }))
+)
 
 // 當前時區（優先 authStore → fallback localStorage → 偵測系統時區）
 const currentTimezone = ref(authStore.preferences.timezone || localStorage.getItem('timezone') || detectTimezone())
@@ -884,7 +891,7 @@ const currentLanguageLabel = computed(() => {
 })
 
 const currentTimezoneLabel = computed(() => {
-  const tz = availableTimezones.find(t => t.code === currentTimezone.value)
+  const tz = availableTimezones.value.find(t => t.code === currentTimezone.value)
   return tz ? tz.name : ''
 })
 
@@ -1034,7 +1041,7 @@ function changeTheme() {
 
 // 取得時區簡短顯示
 function getTimezoneShort(tzCode) {
-  const tz = availableTimezones.find(t => t.code === tzCode)
+  const tz = availableTimezones.value.find(t => t.code === tzCode)
   if (!tz) return tzCode
   // 從 "UTC+8 台北" 取出 "UTC+8"
   const match = tz.name.match(/UTC[+-]?\d+/)

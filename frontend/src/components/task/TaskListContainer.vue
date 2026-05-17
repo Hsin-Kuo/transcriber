@@ -1,5 +1,5 @@
 <template>
-  <div class="task-list" :class="[`task-type-${selectedTaskType}`, { 'batch-edit-active': isBatchEditMode }]">
+  <div class="task-list" :class="[`task-type-${selectedTaskType}`, { 'batch-edit-active': isBatchEditMode, 'has-pagination': totalPages > 0 }]">
     <!-- 篩選列 -->
     <TaskFilterBar
       :all-tags="allTags"
@@ -227,15 +227,16 @@ watch([selectedTaskType, selectedFilterTags], emitFilterChange, { deep: true })
 const allTags = ref([])
 
 const sortedTasks = computed(() => {
-  // 後端已經處理了 task_type 和 tags 篩選
-  // 這裡只需要對前端顯示的任務進行排序
-  let filtered = [...props.tasks]
-
-  // 依狀態排序
-  return filtered.sort((a, b) => {
-    const statusOrder = { processing: 0, pending: 1, completed: 2, failed: 3 }
-    return statusOrder[a.status] - statusOrder[b.status]
-  })
+  // 後端已經處理了 task_type 和 tags 篩選，且預設按 created_at desc 排序。
+  // 這裡把任務分三層：processing 最上、pending 第二，
+  // 其餘狀態（completed / failed / cancelled）維持後端原本的時間順序。
+  // Array.sort 在 ES2019+ 是穩定排序，同 priority 的內部順序不會被打亂。
+  const priority = (status) => {
+    if (status === 'processing') return 0
+    if (status === 'pending') return 1
+    return 2
+  }
+  return [...props.tasks].sort((a, b) => priority(a.status) - priority(b.status))
 })
 
 // Methods - Batch Mode
@@ -472,28 +473,10 @@ onMounted(() => {
   z-index: 5;
 }
 
-/* empty-state 根據任務類型設置背景色，在頁籤之上、.tasks 之下 */
-.task-list.task-type-all :deep(.empty-state) {
-  background-color: var(--upload-bg);
-  border-radius: 8px;
-  position: relative;
-  z-index: 3;
-}
-
-.task-list.task-type-paragraph :deep(.empty-state) {
-  background-color: var(--color-teal-light);
-  border-radius: 8px;
-  position: relative;
-  z-index: 3;
-}
-
-.task-list.task-type-subtitle :deep(.empty-state) {
-  background-color: var(--color-teal);
-  border-radius: 8px;
-  position: relative;
-  z-index: 3;
-}
-
+/* empty-state 統一使用 --upload-bg，在頁籤之上、.tasks 之下 */
+.task-list.task-type-all :deep(.empty-state),
+.task-list.task-type-paragraph :deep(.empty-state),
+.task-list.task-type-subtitle :deep(.empty-state),
 .task-list.task-type-has_audio :deep(.empty-state) {
   background-color: var(--upload-bg);
   border-radius: 8px;
@@ -521,7 +504,7 @@ onMounted(() => {
   margin-top: 20px;
   padding-left: 0px;
   position: relative;
-  z-index: 1;
+  z-index: 101;
 }
 
 /* 分頁控制容器 */
@@ -648,6 +631,11 @@ onMounted(() => {
 
 /* 平板以下 (768px) */
 @media (max-width: 768px) {
+  /* 為浮動的分頁列預留底部空間，避免遮住最後一筆任務 */
+  .task-list.has-pagination {
+    padding-bottom: 80px;
+  }
+
   /* 任務類型頁籤換行排列 */
   .task-type-tabs {
     flex-wrap: wrap;
@@ -687,6 +675,10 @@ onMounted(() => {
 
 /* 小手機 (480px) */
 @media (max-width: 480px) {
+  .task-list.has-pagination {
+    padding-bottom: 72px;
+  }
+
   .task-type-tabs {
     gap: 4px;
     margin-top: 8px;

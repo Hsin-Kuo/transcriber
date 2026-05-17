@@ -2,20 +2,33 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import RedirectResponse
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import secrets
 
 from ..auth.dependencies import get_current_user
 from ..database.mongodb import get_database
 from ..database.repositories.task_repo import TaskRepository
 from ..utils.storage_service import is_aws
+from ..utils.time_utils import get_utc_timestamp
 
 router = APIRouter(prefix="/shared", tags=["Shared"])
+
+
+def _share_is_expired(task: dict) -> bool:
+    """檢查分享連結是否已過期。
+
+    share_token_expires 為 Unix 秒數，None 代表永久有效。
+    """
+    expires = task.get("share_token_expires")
+    if expires is None:
+        return False
+    return get_utc_timestamp() > int(expires)
 
 
 @router.post("/{task_id}/toggle")
 async def toggle_share(
     task_id: str,
+    expires_in_days: Optional[int] = None,
     current_user: dict = Depends(get_current_user),
     db=Depends(get_database)
 ):
@@ -23,11 +36,9 @@ async def toggle_share(
 
     Args:
         task_id: 任務 ID
+        expires_in_days: 1-365 天；不傳代表永久有效
         current_user: 當前用戶
         db: 資料庫實例
-
-    Returns:
-        分享狀態和 token
     """
     # 從 DB 取得完整用戶資料以檢查方案
     from ..database.repositories.user_repo import UserRepository
@@ -58,20 +69,70 @@ async def toggle_share(
     current_token = task.get("share_token")
 
     if current_token:
-        # 取消分享
+        # 取消分享（撤銷）
         await task_repo.update(task_id, {
             "share_token": None,
-            "shared_at": None
+            "shared_at": None,
+            "share_token_expires": None,
         })
-        return {"shared": False, "share_token": None}
-    else:
-        # 開啟分享：產生 token
-        token = secrets.token_urlsafe(16)
-        await task_repo.update(task_id, {
-            "share_token": token,
-            "shared_at": datetime.now(timezone.utc)
-        })
-        return {"shared": True, "share_token": token}
+        return {"shared": False, "share_token": None, "expires_at": None}
+
+    # 開啟分享：驗證過期參數
+    if expires_in_days is not None:
+        if expires_in_days < 1 or expires_in_days > 365:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="expires_in_days 必須在 1-365 之間",
+            )
+
+    token = secrets.token_urlsafe(16)
+    expires_at: Optional[int] = None
+    if expires_in_days:
+        expires_at = int(
+            (datetime.now(timezone.utc) + timedelta(days=expires_in_days)).timestamp()
+        )
+
+    await task_repo.update(task_id, {
+        "share_token": token,
+        "shared_at": datetime.now(timezone.utc),
+        "share_token_expires": expires_at,
+    })
+    return {
+        "shared": True,
+        "share_token": token,
+        "expires_at": expires_at,
+    }
+
+
+@router.patch("/{task_id}/expiry")
+async def update_share_expiry(
+    task_id: str,
+    expires_in_days: Optional[int] = None,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database)
+):
+    """更新已啟用分享連結的過期時間（不換 token，連結網址保持不變）。
+
+    expires_in_days=None 代表改為永久；數字代表從現在起 N 天後過期。
+    """
+    task_repo = TaskRepository(db)
+    task = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
+    if not task:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "任務不存在或無權訪問")
+    if not task.get("share_token"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "尚未開啟分享")
+
+    if expires_in_days is not None and (expires_in_days < 1 or expires_in_days > 365):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "expires_in_days 必須在 1-365 之間")
+
+    expires_at: Optional[int] = None
+    if expires_in_days:
+        expires_at = int(
+            (datetime.now(timezone.utc) + timedelta(days=expires_in_days)).timestamp()
+        )
+
+    await task_repo.update(task_id, {"share_token_expires": expires_at})
+    return {"share_token": task["share_token"], "expires_at": expires_at}
 
 
 @router.get("/{token}")
@@ -94,6 +155,12 @@ async def get_shared_task(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="分享連結無效或已取消"
+        )
+
+    if _share_is_expired(task):
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="分享連結已過期"
         )
 
     # 取得逐字稿內容
@@ -194,6 +261,12 @@ async def get_shared_audio(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="分享連結無效或已取消"
+        )
+
+    if _share_is_expired(task):
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="分享連結已過期"
         )
 
     if is_aws():

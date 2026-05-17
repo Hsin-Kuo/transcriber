@@ -100,11 +100,12 @@ async def get_recent_tasks(
     Returns:
         精簡的任務列表（僅包含 task_id, display_name, created_at）
     """
-    # 從資料庫獲取最近的任務
+    # 從資料庫獲取最近的任務（排除終止狀態：nav 只顯示可用任務）
     tasks = await task_service.task_repo.find_by_user(
         str(current_user["_id"]),
         skip=0,
         limit=limit,
+        status_nin=["failed", "cancelled"],
         include_deleted=False
     )
 
@@ -271,11 +272,12 @@ async def get_tasks(
 _task_service_singleton: TaskService = None
 
 
-def init_task_service(db, state_store: TaskStateStore = None):
+def init_task_service(db, progress_store, state_store: TaskStateStore = None):
     """初始化全域 TaskService 單例
 
     Args:
         db: 資料庫實例
+        progress_store: ProgressStore 實例（進度的單一介面）
         state_store: TaskStateStore 實例（未提供時使用模組級單例）
     """
     global _task_service_singleton
@@ -283,6 +285,7 @@ def init_task_service(db, state_store: TaskStateStore = None):
     task_repo = TaskRepository(db)
     _task_service_singleton = TaskService(
         task_repo,
+        progress_store=progress_store,
         state_store=state_store or _default_store,
     )
     return _task_service_singleton
@@ -637,9 +640,7 @@ async def task_status_events(
         SSE 事件流
     """
     async def event_generator():
-        """生成 SSE 事件流"""
-        # AWS 模式下 Worker 更新 MongoDB，Web Server 輪詢 DB；
-        # 本地模式使用 in-memory state
+        """生成 SSE 事件流（兩種部署模式統一走 task_service.get_task → ProgressStore）"""
         poll_interval = 2 if is_aws() else 1
 
         try:
@@ -656,17 +657,7 @@ async def task_status_events(
             heartbeat_counter = 0
 
             while True:
-                if is_aws():
-                    # AWS 模式：直接從 MongoDB 讀取（Worker 寫入 DB）
-                    task_data = await task_service.task_repo.get_by_id(task_id)
-                    if task_data:
-                        # 驗證用戶權限
-                        task_user_id = task_data.get("user", {}).get("user_id")
-                        if task_user_id != str(current_user["_id"]):
-                            task_data = None
-                else:
-                    # 本地模式：使用 in-memory state（現有行為）
-                    task_data = await task_service.get_task(task_id, str(current_user["_id"]))
+                task_data = await task_service.get_task(task_id, str(current_user["_id"]))
 
                 if not task_data:
                     yield f"event: error\ndata: {json.dumps({'error': '任務不存在'})}\n\n"
@@ -772,10 +763,10 @@ async def cancel_task(
     # 3. 立即終止 diarization 進程（如果正在運行）
     diarization_process = task_service.get_diarization_process(task_id)
     if diarization_process:
-        print(f"🛑 正在強制終止說話者辨識進程...")
+        print("🛑 正在強制終止說話者辨識進程...")
         try:
             diarization_process.shutdown(wait=False, cancel_futures=True)
-            print(f"✅ 說話者辨識進程已終止")
+            print("✅ 說話者辨識進程已終止")
         except Exception as e:
             print(f"⚠️ 終止 diarization 進程失敗：{e}")
 
@@ -1299,7 +1290,7 @@ async def batch_delete_tasks(
     print(f"🗑️ 批次刪除完成：成功 {deleted_count} 個，失敗 {failed_count} 個")
 
     return {
-        "message": f"批次刪除完成",
+        "message": "批次刪除完成",
         "deleted": deleted_count,
         "failed": failed_count,
         "total": len(task_ids)

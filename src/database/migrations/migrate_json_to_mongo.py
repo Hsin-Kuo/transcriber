@@ -129,22 +129,22 @@ async def migrate():
         shutil.copy2(TASKS_JSON_PATH, backup_path)
         print(f"💾 原檔案已備份至: {backup_path}")
 
-    print(f"\n🎉 遷移完成!")
+    print("\n🎉 遷移完成!")
     print(f"  - 成功: {migrated}")
     print(f"  - 跳過: {skipped}")
     print(f"  - 失敗: {failed}")
 
     if migrated > 0:
         # 建立索引
-        print(f"\n📊 正在建立索引...")
+        print("\n📊 正在建立索引...")
         await db.tasks.create_index([("user_id", 1), ("created_at", -1)])
         await db.tasks.create_index([("user_id", 1), ("status", 1)])
         await db.tasks.create_index([("status", 1)])
         await db.tasks.create_index([("tags", 1)])
-        print(f"✅ 索引建立完成")
+        print("✅ 索引建立完成")
 
         # 顯示統計
-        print(f"\n📊 任務狀態統計:")
+        print("\n📊 任務狀態統計:")
         pipeline = [
             {"$group": {"_id": "$status", "count": {"$sum": 1}}},
             {"$sort": {"count": -1}}
@@ -153,7 +153,7 @@ async def migrate():
         for stat in status_stats:
             print(f"   {stat['_id']}: {stat['count']} 個")
 
-        print(f"\n📊 用戶任務統計:")
+        print("\n📊 用戶任務統計:")
         pipeline = [
             {"$group": {
                 "_id": {"user_email": "$user_email"},
@@ -166,7 +166,7 @@ async def migrate():
             print(f"   {stat['_id']['user_email']}: {stat['count']} 個")
 
         # 顯示範例任務
-        print(f"\n📝 已遷移的任務範例（前3個）:")
+        print("\n📝 已遷移的任務範例（前3個）:")
         sample_tasks = await db.tasks.find({}).sort("created_at", -1).limit(3).to_list(3)
         for i, task in enumerate(sample_tasks, 1):
             filename = task.get("custom_name") or task.get("filename", "未命名")

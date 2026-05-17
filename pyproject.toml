@@ -1,0 +1,55 @@
+# 工具設定集中於此（pytest / ruff）
+# 故意不寫 [project] 區塊：本專案靠 requirements*.txt 管理依賴，pyproject 只當設定檔。
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-ra --strict-markers"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = [
+    "venv",
+    ".venv",
+    "node_modules",
+    "frontend",
+    "admin-frontend",
+    "scripts/migrations",
+]
+
+[tool.ruff.lint]
+# 先以「找真實 bug + 安全問題」為主，不啟用 style-only 規則
+# 上線後可逐步加 I (isort)、N (naming)、UP (pyupgrade) 等
+select = [
+    "E9",   # syntax errors
+    "F",    # pyflakes：unused import / undefined names / 等
+    "B",    # bugbear：常見 bug pattern（mutable default、broad except 等）
+    "S",    # bandit：基本資安檢查
+    "W6",   # invalid escape sequence
+]
+ignore = [
+    "B008",   # do not perform function call in argument defaults — FastAPI Depends 大量使用
+    "B904",   # raise from / raise ... from None — 暫不強求
+    "S101",   # assert used — 測試需要
+    "S104",   # 0.0.0.0 bind — 容器內部署正常
+    "S105",   # hardcoded password string — 測試 fixture 會 false positive
+    "S106",   # hardcoded password func arg — 同上
+    "S110",   # try/except/pass — 部分場景合理
+    "S311",   # pseudo-random for security — 多數 random 用途是抽樣不是 crypto
+    "S324",   # md5/sha1 weak hash — 若有業務用途檢視時再開
+    "S603",   # subprocess without shell=True — 已知用法
+    "S607",   # subprocess partial path — deploy 腳本接受
+    "F401",   # unused import — 路由模組大量條件 import
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "F401", "B011"]   # 測試放寬
+# IMDSv2 metadata endpoint 固定為 169.254.169.254，S310 false positive
+"src/worker_core/spot_monitor.py" = ["S310"]
+"src/worker_core/heartbeat.py" = ["S310"]
+# token_type 是 JWT claim 名稱，不是密碼
+"src/auth/jwt_handler.py" = ["S107"]

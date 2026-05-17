@@ -18,12 +18,18 @@ from ..database.repositories.task_repo import TaskRepository
 from ..database.repositories.tag_repo import TagRepository
 from ..services.task_service import TaskService
 from ..services.transcription_service import TranscriptionService
+from ..services.progress_store import Phase
 from ..services.tag_service import TagService
+from ..services.utils.audio_validator import (
+    validate_filename_extension,
+    validate_magic_bytes,
+)
 from ..services.utils.whisper_processor import WhisperProcessor
 from ..services.utils.punctuation_processor import PunctuationProcessor
 from ..services.utils.diarization_processor import DiarizationProcessor
 from ..utils.storage_service import is_aws
 from ..utils.config_loader import get_parameter, get_temp_dir
+from ..utils.sentry_helpers import create_background_task
 import os
 import asyncio
 
@@ -77,15 +83,17 @@ _transcription_service: Optional[TranscriptionService] = None
 def init_transcription_service(
     whisper_model,
     task_service: TaskService,
+    progress_store,
     model_name: str = "medium",
     diarization_pipeline=None,
-    executor=None
+    executor=None,
 ):
     """初始化全域 TranscriptionService 單例
 
     Args:
         whisper_model: Whisper 模型實例
         task_service: TaskService 實例
+        progress_store: ProgressStore（應與 task_service 共用同一個實例）
         model_name: 模型名稱（用於 ProcessPoolExecutor 中重新載入模型）
         diarization_pipeline: Diarization pipeline（可選）
         executor: 線程池執行器（可選）
@@ -103,7 +111,8 @@ def init_transcription_service(
         whisper_processor=_whisper_processor,
         punctuation_processor=_punctuation_processor,
         diarization_processor=_diarization_processor,
-        executor=executor
+        executor=executor,
+        progress_store=progress_store,
     )
 
     return _transcription_service
@@ -335,6 +344,12 @@ async def create_transcription(
                 detail="檔案總大小超過限制（最大500MB）"
             )
 
+    # 直接上傳（非 chunked）：先驗證每個檔的副檔名屬於白名單
+    # chunked / merge_chunked 在 uploads.py init_upload 已驗證
+    if uploaded_files:
+        for upload_file in uploaded_files:
+            validate_filename_extension(upload_file.filename)
+
     # 驗證任務類型
     if task_type not in ["paragraph", "subtitle"]:
         raise HTTPException(
@@ -385,7 +400,7 @@ async def create_transcription(
     # 字幕類型強制不使用標點符號
     if task_type == "subtitle":
         punct_provider = "none"
-        print(f"ℹ️  字幕模式：已自動停用標點符號處理")
+        print("ℹ️  字幕模式：已自動停用標點符號處理")
     # 獲取服務（AWS 模式下 TranscriptionService 可能為 None）
     transcription_service = _transcription_service
     if not is_aws() and transcription_service is None:
@@ -455,6 +470,11 @@ async def create_transcription(
                     content = await upload_file.read()
                     f.write(content)
 
+                try:
+                    validate_magic_bytes(temp_path)
+                except HTTPException:
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    raise
                 saved_files.append(temp_path)
                 print(f"  📁 {idx + 1}. {upload_file.filename}")
 
@@ -498,6 +518,12 @@ async def create_transcription(
             with temp_audio.open("wb") as f:
                 content = await upload_file.read()
                 f.write(content)
+
+            try:
+                validate_magic_bytes(temp_audio)
+            except HTTPException:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                raise
 
             original_filename = upload_file.filename
             print(f"📁 收到檔案：{upload_file.filename} ({len(content) / 1024 / 1024:.2f} MB)")
@@ -724,15 +750,17 @@ async def create_transcription(
                     if _bg_temp_dir.exists():
                         shutil.rmtree(_bg_temp_dir)
 
-            # 發射背景任務，不等待
-            asyncio.create_task(_upload_to_s3_and_notify())
+            # 發射背景任務，不等待；失敗會送 Sentry
+            create_background_task(
+                _upload_to_s3_and_notify(),
+                name=f"upload_s3_notify:{task_id}",
+            )
         else:
             # ===== 本地模式：現有行為 =====
-            # 初始化記憶體狀態（確保 SSE 能立即讀取到正確狀態）
-            transcription_service.task_service.update_memory_state(task_id, {
-                "status": "pending",
-                "progress": "等待處理中..."
-            })
+            # 初始化進度（讓 SSE 立即看到「等待處理中」）
+            transcription_service.task_service.progress_store.set_phase(
+                task_id, Phase.PREPARATION, 0.0, message="等待處理中..."
+            )
 
             # 記錄臨時目錄
             transcription_service.task_service.set_temp_dir(task_id, temp_dir)
@@ -748,10 +776,9 @@ async def create_transcription(
                     "status": "processing"
                     # updated_at 由 task_repo.update() 自動設置
                 })
-                transcription_service.task_service.update_memory_state(task_id, {
-                    "status": "processing",
-                    "progress": "準備開始轉錄..."
-                })
+                transcription_service.task_service.progress_store.set_phase(
+                    task_id, Phase.PREPARATION, 0.0, message="準備開始轉錄..."
+                )
 
                 await transcription_service.start_transcription(
                     task_id=task_id,
@@ -1701,12 +1728,13 @@ async def create_batch_transcriptions(
                 raise ValueError("upload_id 無效或尚未完成組裝")
 
             if chunked_meta:
-                # 分片上傳模式
+                # 分片上傳模式（uploads.py 已驗副檔名與 magic bytes）
                 temp_dir = chunked_meta["temp_dir"]
                 temp_audio = chunked_meta["assembled_path"]
                 original_filename = chunked_meta["filename"]
             else:
                 # 直接上傳模式
+                validate_filename_extension(upload_file.filename)
                 temp_dir = get_temp_dir()
                 file_suffix = Path(upload_file.filename).suffix
                 temp_audio = temp_dir / f"input{file_suffix}"
@@ -1714,6 +1742,7 @@ async def create_batch_transcriptions(
                 content = await upload_file.read()
                 with temp_audio.open("wb") as f:
                     f.write(content)
+                validate_magic_bytes(temp_audio)
                 original_filename = upload_file.filename
 
             # 獲取音檔資訊
@@ -1820,7 +1849,8 @@ async def create_batch_transcriptions(
                 async def _batch_upload_to_s3_and_notify(
                     bg_task_id=_bg_task_id, bg_temp_audio=_bg_temp_audio,
                     bg_temp_dir=_bg_temp_dir, bg_sqs_payload=sqs_payload,
-                    bg_user_tier=_bg_user_tier
+                    bg_user_tier=_bg_user_tier,
+                    bg_sqs_url=sqs_queue_url, bg_sqs_region=sqs_region,
                 ):
                     """背景執行 S3 上傳 + SQS 發送（批次）"""
                     try:
@@ -1828,11 +1858,11 @@ async def create_batch_transcriptions(
                         await loop.run_in_executor(None, save_audio, bg_task_id, bg_temp_audio, bg_user_tier)
                         print(f"☁️  批次音檔已上傳到 S3: uploads/{bg_user_tier}/{bg_task_id}.mp3")
 
-                        if sqs_queue_url:
+                        if bg_sqs_url:
                             def _send_sqs():
-                                sqs = boto3.client("sqs", region_name=sqs_region)
+                                sqs = boto3.client("sqs", region_name=bg_sqs_region)
                                 sqs.send_message(
-                                    QueueUrl=sqs_queue_url,
+                                    QueueUrl=bg_sqs_url,
                                     MessageBody=json.dumps(bg_sqs_payload)
                                 )
                             await loop.run_in_executor(None, _send_sqs)
@@ -1853,8 +1883,11 @@ async def create_batch_transcriptions(
                         if bg_temp_dir.exists():
                             shutil.rmtree(bg_temp_dir)
 
-                # 發射背景任務，不等待
-                asyncio.create_task(_batch_upload_to_s3_and_notify())
+                # 發射背景任務，不等待；失敗會送 Sentry
+                create_background_task(
+                    _batch_upload_to_s3_and_notify(),
+                    name=f"batch_upload_s3_notify:{task_id}",
+                )
                 temp_dir = None  # 避免 except 中重複清理
 
                 file_result["task_id"] = task_id
@@ -1864,11 +1897,10 @@ async def create_batch_transcriptions(
                 print(f"☁️  批次任務 [{idx + 1}/{total_files}] {original_filename} -> {task_id} (SQS)")
             else:
                 # ===== 本地模式：現有行為 =====
-                # 初始化記憶體狀態
-                transcription_service.task_service.update_memory_state(task_id, {
-                    "status": "pending",
-                    "progress": "等待處理中..."
-                })
+                # 初始化進度
+                transcription_service.task_service.progress_store.set_phase(
+                    task_id, Phase.PREPARATION, 0.0, message="等待處理中..."
+                )
 
                 # 記錄臨時目錄
                 transcription_service.task_service.set_temp_dir(task_id, temp_dir)
@@ -1883,10 +1915,9 @@ async def create_batch_transcriptions(
                     language_code = None if language == "auto" else language
 
                     await task_repo.update(task_id, {"status": "processing"})
-                    transcription_service.task_service.update_memory_state(task_id, {
-                        "status": "processing",
-                        "progress": "準備開始轉錄..."
-                    })
+                    transcription_service.task_service.progress_store.set_phase(
+                        task_id, Phase.PREPARATION, 0.0, message="準備開始轉錄..."
+                    )
 
                     await transcription_service.start_transcription(
                         task_id=task_id,

@@ -57,7 +57,7 @@ class DiarizationProcessor:
             return None
 
         try:
-            print(f"🔊 正在分析說話者...")
+            print("🔊 正在分析說話者...")
 
             # 準備 diarization 參數
             diarization_kwargs = {}
@@ -113,7 +113,7 @@ class DiarizationProcessor:
             if self.hf_token:
                 login(token=self.hf_token, add_to_git_credential=False)
 
-            print(f"🔊 [進程] 正在載入 diarization pipeline...")
+            print("🔊 [進程] 正在載入 diarization pipeline...")
             import torch
             pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1")
 
@@ -123,9 +123,9 @@ class DiarizationProcessor:
                 print(f"🔊 [進程] 使用 CUDA 加速: {torch.cuda.get_device_name(0)}")
             elif torch.backends.mps.is_available():
                 pipeline.to(torch.device("mps"))
-                print(f"🔊 [進程] 使用 MPS 加速")
+                print("🔊 [進程] 使用 MPS 加速")
 
-            print(f"🔊 [進程] 正在分析說話者...")
+            print("🔊 [進程] 正在分析說話者...")
 
             # 準備 diarization 參數
             diarization_kwargs = {}

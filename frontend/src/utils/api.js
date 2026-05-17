@@ -2,7 +2,6 @@
  * API 客戶端 - 支援 Token 自動刷新
  */
 import axios from 'axios'
-import router from '../router'
 
 // 未設定 VITE_API_URL 時，自動沿用當前 hostname + port 8000
 // 支援 localhost、Tailscale IP、任意裝置直接存取
@@ -17,21 +16,22 @@ function resolveApiBase() {
 const API_BASE = resolveApiBase()
 
 // 創建 axios 實例
+// withCredentials: 讓瀏覽器自動帶 httpOnly refresh_token cookie 給 /auth/* 端點
 const api = axios.create({
   baseURL: API_BASE,
   timeout: 300000,  // 5 分鐘（一般 API 請求）
+  withCredentials: true,
 })
 
-// Token 管理
+// Token 管理：refresh_token 改由 httpOnly cookie 持有，JS 不再保存
 export const TokenManager = {
   getAccessToken: () => localStorage.getItem('access_token'),
-  getRefreshToken: () => localStorage.getItem('refresh_token'),
-  setTokens: (accessToken, refreshToken) => {
+  setAccessToken: (accessToken) => {
     localStorage.setItem('access_token', accessToken)
-    localStorage.setItem('refresh_token', refreshToken)
   },
   clearTokens: () => {
     localStorage.removeItem('access_token')
+    // 舊版殘留：把以前存的 refresh_token 也清掉一次
     localStorage.removeItem('refresh_token')
   }
 }
@@ -67,6 +67,18 @@ function onRefreshFailed(error) {
   refreshSubscribers = []
 }
 
+// 強制跳轉到登入頁，避開 SPA router 在 in-flight navigation 中失效的問題。
+// 用 location.replace 不留 history，避免按上一頁回到失效頁面。
+let redirectingToLogin = false
+function redirectToLogin(reason) {
+  if (redirectingToLogin) return
+  if (window.location.pathname === '/login') return
+  redirectingToLogin = true
+  console.info(`[auth] redirecting to /login: ${reason}`)
+  const redirect = encodeURIComponent(window.location.pathname + window.location.search)
+  window.location.replace(`/login?redirect=${redirect}`)
+}
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -90,24 +102,14 @@ api.interceptors.response.use(
       originalRequest._retry = true
       isRefreshing = true
 
-      const refreshToken = TokenManager.getRefreshToken()
-      if (!refreshToken) {
-        isRefreshing = false
-        const noTokenError = new Error('No refresh token')
-        onRefreshFailed(noTokenError)
-        TokenManager.clearTokens()
-        router.push('/login')
-        return Promise.reject(noTokenError)
-      }
-
       try {
-        // 刷新 Token
-        const response = await axios.post(`${API_BASE}/auth/refresh`, {
-          refresh_token: refreshToken
+        // 刷新 Token：refresh_token 由瀏覽器以 httpOnly cookie 自動帶出
+        const response = await axios.post(`${API_BASE}/auth/refresh`, null, {
+          withCredentials: true,
         })
 
-        const { access_token, refresh_token } = response.data
-        TokenManager.setTokens(access_token, refresh_token)
+        const { access_token } = response.data
+        TokenManager.setAccessToken(access_token)
 
         // 更新原請求的 header
         originalRequest.headers.Authorization = `Bearer ${access_token}`
@@ -125,7 +127,7 @@ api.interceptors.response.use(
         // 網路錯誤或後端暫時不可用（5xx）不清 token，避免短暫故障造成登出
         if (refreshError.response?.status === 401 || refreshError.response?.status === 403) {
           TokenManager.clearTokens()
-          router.push('/login')
+          redirectToLogin('refresh token rejected by backend')
         }
         return Promise.reject(refreshError)
       }

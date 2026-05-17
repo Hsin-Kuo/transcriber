@@ -90,7 +90,7 @@ class AudioService:
 
             print(f"🔧 執行 ffmpeg 合併：{len(audio_paths)} 個檔案")
 
-            result = subprocess.run(
+            subprocess.run(
                 cmd,
                 check=True,
                 capture_output=True,

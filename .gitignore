@@ -16,6 +16,12 @@ api_keys.json
 !frontend/.env.production
 !frontend/.env.tailscale
 
+# admin-frontend 的 .env.production 含 Sentry DSN，由 CI secrets 注入，不入 git
+admin-frontend/.env.production
+# Vite 慣例：*.local 為本機覆寫，永遠不入 git
+frontend/.env.*.local
+admin-frontend/.env.*.local
+
 # Python
 __pycache__/
 *.py[cod]

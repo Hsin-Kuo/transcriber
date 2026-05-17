@@ -77,7 +77,7 @@ async def create_admin():
     print(f"  - Email: {admin_email}")
     print(f"  - 密碼: {admin_password}")
     print(f"  - ID: {result.inserted_id}")
-    print(f"\n⚠️  請立即登入並修改密碼!")
+    print("\n⚠️  請立即登入並修改密碼!")
 
     # 建立索引
     await db.users.create_index("email", unique=True)

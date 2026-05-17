@@ -18,6 +18,15 @@ from dotenv import load_dotenv
 # 載入環境變數
 load_dotenv()
 
+# 結構化 logging 需要早 init，讓後續 import 的模組 print/logging 也走同一管道
+from src.utils.logger import setup_logging, RequestIdMiddleware, get_logger
+setup_logging()
+logger = get_logger(__name__)
+
+# Sentry 必須在其他模組 import 之前初始化才能完整 hook 例外
+from src.utils.sentry_init import init_sentry
+init_sentry(component="server")
+
 # 資料庫和 Repositories
 from src.database.mongodb import MongoDB
 from src.database.repositories.task_repo import TaskRepository
@@ -45,6 +54,8 @@ from src.utils.audit_logger import init_audit_logger
 
 # 共享狀態
 from src.utils.shared_state import store as task_state_store
+from src.utils.sentry_helpers import create_background_task
+from src.services.progress_store import InMemoryProgressStore, MongoProgressStore
 
 # 部署環境設定
 DEPLOY_ENV = os.getenv("DEPLOY_ENV", "local")
@@ -89,6 +100,9 @@ app = FastAPI(
     description="基於三層架構的音檔轉錄服務",
     version="3.0.0"
 )
+
+# Request ID middleware：注入 request_id 到所有 log + Sentry tag
+app.add_middleware(RequestIdMiddleware)
 
 # CORS 中間件
 cors_origins_str = os.getenv("CORS_ORIGINS", "")
@@ -168,7 +182,7 @@ def signal_handler(signum, frame):
     """處理終止信號，確保清理所有資源"""
     print(f"\n⚠️  收到終止信號 ({signal.Signals(signum).name})，正在清理...")
     cleanup_worker_processes()
-    print(f"✅ 清理完成，退出程序")
+    print("✅ 清理完成，退出程序")
     exit(0)
 
 
@@ -215,23 +229,23 @@ async def startup_event():
 
     # 1. 連接 MongoDB
     mongodb_db = os.getenv('MONGODB_DB_NAME', 'whisper_transcriber')
-    print(f"🔌 正在連接 MongoDB...", flush=True)
+    print("🔌 正在連接 MongoDB...", flush=True)
     print(f"   Mode: {DEPLOY_ENV}", flush=True)
     print(f"   Database: {mongodb_db}", flush=True)
     try:
         await asyncio.wait_for(MongoDB.connect(), timeout=10.0)
         print(f"✅ 已連接到 MongoDB: {mongodb_db}", flush=True)
     except asyncio.TimeoutError:
-        print(f"❌ MongoDB 連接超時（10秒）", flush=True)
-        print(f"   請確保 MongoDB 正在運行", flush=True)
+        print("❌ MongoDB 連接超時（10秒）", flush=True)
+        print("   請確保 MongoDB 正在運行", flush=True)
         raise
     except Exception as e:
         print(f"❌ MongoDB 連接失敗: {e}", flush=True)
-        print(f"   請確保 MongoDB 正在運行並檢查配置", flush=True)
+        print("   請確保 MongoDB 正在運行並檢查配置", flush=True)
         raise
 
     # 2. 初始化 Repositories
-    print(f"📂 正在初始化 Repositories...")
+    print("📂 正在初始化 Repositories...")
     db = MongoDB.get_db()
     task_repo = TaskRepository(db)
     tag_repo = TagRepository(db)
@@ -261,7 +275,11 @@ async def startup_event():
         from src.database.repositories.user_repo import UserRepository
         user_repo_init = UserRepository(db)
         await user_repo_init.create_indexes()
-        print(f"✅ 資料庫索引建立完成")
+        # 建立 processed_webhooks 索引（webhook 冪等性 + TTL 90 天清理）
+        from src.database.repositories.processed_webhook_repo import ProcessedWebhookRepository
+        processed_webhook_repo_init = ProcessedWebhookRepository(db)
+        await processed_webhook_repo_init.create_indexes()
+        print("✅ 資料庫索引建立完成")
     except Exception as e:
         print(f"⚠️  索引建立失敗: {e}")
 
@@ -270,38 +288,56 @@ async def startup_event():
     print(f"✅ 資料庫已就緒（共 {task_count} 個任務）")
 
     # 初始化 AuditLogger
-    print(f"📝 正在初始化 AuditLogger...")
+    print("📝 正在初始化 AuditLogger...")
     init_audit_logger(audit_log_repo)
-    print(f"✅ AuditLogger 初始化完成")
+    print("✅ AuditLogger 初始化完成")
 
-    # 3. 初始化 TaskService
-    print(f"🔧 正在初始化 TaskService...")
-    task_service = tasks_router.init_task_service(db, state_store=task_state_store)
-    print(f"✅ TaskService 初始化完成")
+    # 3. 初始化 ProgressStore
+    # Local 模式：InMemory adapter（同進程的 TranscriptionService 寫，TaskService.get_task 讀）
+    # AWS 模式：Mongo adapter（GPU Worker 寫 task_progress collection，Web Server 在這裡讀）
+    if DEPLOY_ENV == "aws":
+        from src.worker_core.db import get_db as _get_sync_db
+        progress_store = MongoProgressStore(_get_sync_db().task_progress)
+        print("🔧 ProgressStore: MongoProgressStore (AWS mode, task_progress collection)")
+    else:
+        progress_store = InMemoryProgressStore()
+        print("🔧 ProgressStore: InMemoryProgressStore (local mode)")
+
+    # 3.1. 初始化 TaskService
+    print("🔧 正在初始化 TaskService...")
+    task_service = tasks_router.init_task_service(
+        db, state_store=task_state_store, progress_store=progress_store
+    )
+    print("✅ TaskService 初始化完成")
 
     # 4. 清理異常中斷的任務
-    print(f"🧹 清理異常中斷的任務...")
+    print("🧹 清理異常中斷的任務...")
     await task_service.cleanup_orphaned_tasks()
 
     # 5. 啟動定期記憶體清理
-    asyncio.create_task(task_service.periodic_memory_cleanup())
+    create_background_task(
+        task_service.periodic_memory_cleanup(),
+        name="periodic_memory_cleanup",
+    )
 
     # 5.1. 啟動定期孤立進程清理
-    asyncio.create_task(task_service.periodic_orphaned_process_cleanup())
+    create_background_task(
+        task_service.periodic_orphaned_process_cleanup(),
+        name="periodic_orphaned_process_cleanup",
+    )
 
     # 5.2. 啟動定期孤兒預扣清掃（轉錄 reservations + AI 摘要計數器）
     from src.database.repositories.reservation_repo import periodic_reservation_cleanup
-    asyncio.create_task(periodic_reservation_cleanup(db))
-
-    # 5.5. 啟動任務隊列處理器（在 TranscriptionService 初始化後）
-    # 注意：這裡暫時先創建任務，稍後在 TranscriptionService 初始化後會實際啟動
-    queue_processor_task = None
+    create_background_task(
+        periodic_reservation_cleanup(db),
+        name="periodic_reservation_cleanup",
+    )
 
     # 6. 載入 Whisper 模型（條件式）
     if SHOULD_LOAD_MODELS:
         from faster_whisper import WhisperModel
         print(f"🎙 正在載入 Whisper 模型：{DEFAULT_MODEL}...")
-        print(f"🔧 配置：device=auto, compute_type=int8")
+        print("🔧 配置：device=auto, compute_type=int8")
         current_model_name = DEFAULT_MODEL
         whisper_model = WhisperModel(
             current_model_name,
@@ -310,9 +346,9 @@ async def startup_event():
             cpu_threads=2,  # 優化：配合 ProcessPoolExecutor，降低單進程並行度
             num_workers=1   # 優化：避免進程內過度並行（外部已有 ProcessPoolExecutor）
         )
-        print(f"✅ Whisper 模型載入完成！")
+        print("✅ Whisper 模型載入完成！")
     else:
-        print(f"ℹ️  AWS Web Server 模式：跳過 Whisper 模型載入")
+        print("ℹ️  AWS Web Server 模式：跳過 Whisper 模型載入")
         whisper_model = None
         current_model_name = None
 
@@ -324,45 +360,49 @@ async def startup_event():
         else:
             print("ℹ️  未設定 HF_TOKEN，speaker diarization 功能不可用")
     elif not SHOULD_LOAD_MODELS:
-        print(f"ℹ️  AWS Web Server 模式：跳過 Diarization 模型載入")
+        print("ℹ️  AWS Web Server 模式：跳過 Diarization 模型載入")
 
     # 9. 初始化 TranscriptionService（僅在有 Whisper 模型時）
     transcription_service = None
     if SHOULD_LOAD_MODELS and whisper_model is not None:
-        print(f"🔧 正在初始化 TranscriptionService...")
+        print("🔧 正在初始化 TranscriptionService...")
         transcription_service = transcriptions_router.init_transcription_service(
             whisper_model=whisper_model,
             task_service=task_service,
             model_name=current_model_name,  # 傳遞模型名稱供 ProcessPoolExecutor 使用
             diarization_pipeline=diarization_pipeline,
-            executor=executor
+            executor=executor,
+            progress_store=progress_store,
         )
-        print(f"✅ TranscriptionService 初始化完成")
+        print("✅ TranscriptionService 初始化完成")
 
         # 10. 啟動任務隊列處理器
-        print(f"🚀 正在啟動任務隊列處理器...")
-        asyncio.create_task(task_service.process_pending_queue(transcription_service, max_concurrent=2))
-        print(f"✅ 任務隊列處理器已啟動")
+        print("🚀 正在啟動任務隊列處理器...")
+        create_background_task(
+            task_service.process_pending_queue(transcription_service, max_concurrent=2),
+            name="task_queue_processor",
+        )
+        print("✅ 任務隊列處理器已啟動")
     else:
-        print(f"ℹ️  AWS Web Server 模式：跳過 TranscriptionService 初始化和任務隊列")
+        print("ℹ️  AWS Web Server 模式：跳過 TranscriptionService 初始化和任務隊列")
 
     print("=" * 50)
-    print(f"✨ 服務已就緒！")
-    print(f"📚 API 文檔：http://localhost:8000/docs")
-    print(f"🔗 健康檢查：http://localhost:8000/health")
-    print(f"📋 任務隊列：最多 2 個並發任務")
+    print("✨ 服務已就緒！")
+    print("📚 API 文檔：http://localhost:8000/docs")
+    print("🔗 健康檢查：http://localhost:8000/health")
+    print("📋 任務隊列：最多 2 個並發任務")
     print("=" * 50)
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """應用關閉時的清理"""
-    print(f"👋 正在關閉服務...")
+    print("👋 正在關閉服務...")
 
     # 關閉線程池
     if executor:
         executor.shutdown(wait=True)
-        print(f"✅ 線程池已關閉")
+        print("✅ 線程池已關閉")
 
     # 清理所有 ProcessPoolExecutor worker 進程
     cleaned = cleanup_worker_processes()
@@ -371,9 +411,9 @@ async def shutdown_event():
 
     # 斷開 MongoDB
     await MongoDB.close()
-    print(f"✅ MongoDB 連接已關閉")
+    print("✅ MongoDB 連接已關閉")
 
-    print(f"👋 服務已關閉")
+    print("👋 服務已關閉")
 
 
 # ========== 基本端點 ==========
@@ -393,15 +433,63 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """健康檢查端點"""
-    return {
-        "status": "healthy",
+    """健康檢查端點：實際 ping DB，degraded 時回 503 讓 LB / CloudWatch 抓得到"""
+    db_status = "unknown"
+    db_error = None
+    try:
+        # 強制走連線：用 1 秒 timeout，避免拖垮整個 health probe
+        client = MongoDB.client
+        if client is None:
+            db_status = "disconnected"
+        else:
+            await asyncio.wait_for(client.admin.command("ping"), timeout=1.0)
+            db_status = "connected"
+    except asyncio.TimeoutError:
+        db_status = "timeout"
+        db_error = "ping > 1s"
+    except Exception as e:
+        db_status = "error"
+        db_error = str(e)[:200]
+
+    healthy = db_status == "connected"
+    body = {
+        "status": "healthy" if healthy else "degraded",
         "deploy_env": DEPLOY_ENV,
         "app_role": APP_ROLE,
         "whisper_model": current_model_name,
         "diarization_available": diarization_pipeline is not None,
-        "database": "connected" if MongoDB.get_db() is not None else "disconnected"
+        "database": db_status,
     }
+    if db_error:
+        body["database_error"] = db_error
+    if not healthy:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=body)
+    return body
+
+
+@app.get("/readiness")
+async def readiness_check():
+    """就緒檢查：DB ok 且（若需載入模型）model 已載入。給 LB / k8s readiness probe 用"""
+    # DB 必須可 ping
+    try:
+        client = MongoDB.client
+        if client is None:
+            raise RuntimeError("client is None")
+        await asyncio.wait_for(client.admin.command("ping"), timeout=1.0)
+    except Exception as e:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"ready": False, "reason": f"database not ready: {str(e)[:200]}"},
+        )
+
+    # 需要載入模型的角色（local 或 worker）必須 model 就緒
+    if SHOULD_LOAD_MODELS and whisper_model is None:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"ready": False, "reason": "whisper model not loaded"},
+        )
+
+    return {"ready": True, "deploy_env": DEPLOY_ENV, "app_role": APP_ROLE}
 
 
 # ========== 主程序入口 ==========

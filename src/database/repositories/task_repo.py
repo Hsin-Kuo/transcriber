@@ -109,6 +109,7 @@ class TaskRepository:
         skip: int = 0,
         limit: int = 20,
         status: Optional[str] = None,
+        status_nin: Optional[List[str]] = None,
         task_type: Optional[str] = None,
         tags: Optional[List[str]] = None,
         sort: List[tuple] = None,
@@ -120,6 +121,7 @@ class TaskRepository:
         支援巢狀結構 (user.user_id) 和扁平結構 (user_id)
 
         Args:
+            status_nin: 排除指定 status 列表（白名單驗證；status 已指定時忽略）
             include_deleted: 是否包含已刪除的任務（默認 False，過濾已刪除）
             task_type: 過濾任務類型（可選：paragraph, subtitle）
             tags: 過濾標籤列表（AND 邏輯，任務必須包含所有指定的標籤）
@@ -136,10 +138,14 @@ class TaskRepository:
             ]
         }
 
-        # 驗證並應用 status 篩選（白名單）
+        # 驗證並應用 status 篩選（白名單）；status 與 status_nin 互斥，status 優先
         validated_status = _validate_status(status)
         if validated_status:
             filters["status"] = validated_status
+        elif status_nin:
+            validated_nin = [s for s in status_nin if s in ALLOWED_STATUSES]
+            if validated_nin:
+                filters["status"] = {"$nin": validated_nin}
 
         # 驗證並應用 task_type 篩選（白名單）
         validated_task_type = _validate_task_type(task_type)

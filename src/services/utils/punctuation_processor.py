@@ -74,6 +74,24 @@ class PunctuationProcessor:
 
     # ========== 私有方法 ==========
 
+    def _estimate_max_output_tokens(self, input_text: str, language: str) -> int:
+        """估算標點處理的合理輸出 token 上限，防止 LLM 重複迴圈跑滿 65k tokens。
+
+        標點處理輸出最多比輸入長 20-30%，留 buffer 後 cap 在 60000。
+        """
+        char_count = len(input_text)
+        if language in ("zh", "zh-TW", "zh-CN", "ja", "ko"):
+            estimated = int(char_count * 1.6) + 500
+        else:
+            estimated = int(char_count * 0.5) + 500
+        return min(estimated, 60000)
+
+    def _is_output_exploded(self, input_text: str, output_text: str) -> bool:
+        """偵測 Gemini 輸出是否異常膨脹（疑似 LLM 重複迴圈）。"""
+        if not input_text or not output_text:
+            return False
+        return len(output_text) > len(input_text) * 1.5
+
     def _remove_cjk_latin_spaces(self, text: str) -> str:
         """移除中英文、全形標點與英文之間被 AI 擅自插入的空白"""
         # 中文字與英文/數字之間的空白
@@ -161,7 +179,17 @@ class PunctuationProcessor:
         if len(text) <= chunk_size:
             system_msg, user_msg = self._get_punctuation_prompt(language, text)
             prompt = f"{system_msg}\n\n{user_msg}"
-            result, model_used, token_usage = self._call_gemini_with_retry(prompt)
+            max_out = self._estimate_max_output_tokens(text, language)
+            result, model_used, token_usage = self._call_gemini_with_retry(
+                prompt, max_output_tokens=max_out
+            )
+            if self._is_output_exploded(text, result):
+                print(
+                    f"⚠️ Gemini 輸出異常膨脹（輸入 {len(text)} 字 → 輸出 {len(result)} 字），"
+                    f"疑似 LLM 重複迴圈，回退為未處理原文",
+                    flush=True,
+                )
+                result = text
             if language in ("zh", "zh-TW", "zh-CN"):
                 result = self._remove_cjk_latin_spaces(result)
             return result, model_used, token_usage
@@ -192,7 +220,18 @@ class PunctuationProcessor:
             prompt = f"{system_msg}\n\n{user_msg}"
 
             # 調用 Gemini
-            result, chunk_model, chunk_token_usage = self._call_gemini_with_retry(prompt)
+            max_out = self._estimate_max_output_tokens(chunk_text, language)
+            result, chunk_model, chunk_token_usage = self._call_gemini_with_retry(
+                prompt, max_output_tokens=max_out
+            )
+            if self._is_output_exploded(chunk_text, result):
+                print(
+                    f"⚠️ Gemini 第 {chunk_idx}/{total_chunks} 段輸出異常膨脹"
+                    f"（輸入 {len(chunk_text)} 字 → 輸出 {len(result)} 字），"
+                    f"疑似 LLM 重複迴圈，該段回退為未處理原文",
+                    flush=True,
+                )
+                result = chunk_text
             if language in ("zh", "zh-TW", "zh-CN"):
                 result = self._remove_cjk_latin_spaces(result)
             results.append(result)
@@ -218,7 +257,8 @@ class PunctuationProcessor:
     def _call_gemini_with_retry(
         self,
         prompt: str,
-        max_retries: Optional[int] = None
+        max_retries: Optional[int] = None,
+        max_output_tokens: Optional[int] = None
     ) -> Tuple[str, str, Optional[Dict[str, int]]]:
         """調用 Gemini API，支援自動重試和模型備援
 
@@ -259,9 +299,12 @@ class PunctuationProcessor:
                 model = genai.GenerativeModel(current_model)
 
                 # 調用 API
+                gen_config: Dict[str, Any] = {"temperature": 0.2}
+                if max_output_tokens:
+                    gen_config["max_output_tokens"] = max_output_tokens
                 resp = model.generate_content(
                     [{"role": "user", "parts": [prompt]}],
-                    generation_config={"temperature": 0.2}
+                    generation_config=gen_config
                 )
 
                 result = (resp.text or "").strip()
@@ -312,7 +355,7 @@ class PunctuationProcessor:
                             continue
                         else:
                             # 所有備援模型都用完了
-                            print(f"❌ 所有模型的配額都已用完")
+                            print("❌ 所有模型的配額都已用完")
                             raise RuntimeError(
                                 f"所有 Google API Keys 都調用失敗。"
                                 f"已嘗試模型: {', '.join(tried_models)}。"
@@ -323,7 +366,7 @@ class PunctuationProcessor:
 
                 # 如果還有 key 可用，繼續嘗試
                 if attempt < max_attempts - 1:
-                    print(f"🔄 切換到下一個 API Key...")
+                    print("🔄 切換到下一個 API Key...")
                     continue
                 else:
                     raise RuntimeError(

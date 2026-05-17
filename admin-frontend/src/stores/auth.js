@@ -49,12 +49,8 @@ export const useAuthStore = defineStore('auth', () => {
 
     try {
       const response = await api.post('/auth/register', { email, password })
-      const { access_token, refresh_token } = response.data
-
-      TokenManager.setTokens(access_token, refresh_token)
-      await fetchCurrentUser()
-
-      return { success: true }
+      // 註冊 API 已不發 token；保留呼叫保留註冊流程
+      return { success: true, message: response.data?.message }
     } catch (err) {
       error.value = err.response?.data?.detail || '註冊失敗'
       return {
@@ -72,9 +68,9 @@ export const useAuthStore = defineStore('auth', () => {
 
     try {
       const response = await api.post('/auth/login', { email, password })
-      const { access_token, refresh_token } = response.data
-
-      TokenManager.setTokens(access_token, refresh_token)
+      const { access_token } = response.data
+      // refresh_token 由後端寫進 httpOnly cookie，前端不再保管
+      TokenManager.setAccessToken(access_token)
       await fetchCurrentUser()
 
       return { success: true }
@@ -91,10 +87,8 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function logout() {
     try {
-      const refreshToken = TokenManager.getRefreshToken()
-      if (refreshToken) {
-        await api.post('/auth/logout', { refresh_token: refreshToken })
-      }
+      // 後端會清 cookie + 撤銷 refresh token；瀏覽器自動帶 cookie 出去
+      await api.post('/auth/logout')
     } catch (err) {
       console.error('登出錯誤:', err)
     } finally {

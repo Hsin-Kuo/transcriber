@@ -42,6 +42,7 @@
           @click.stop="toggleSearch"
           class="btn btn-header btn-icon search-btn btn-expandable"
           :class="{ active: showSearchPopup }"
+          :disabled="!isContentReady"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="11" cy="11" r="8"/>
@@ -75,7 +76,7 @@
       </div>
 
       <!-- 編輯/儲存按鈕 -->
-      <button v-if="!isEditing" @click="$emit('start-editing')" class="btn btn-header btn-expandable">
+      <button v-if="!isEditing" @click="$emit('start-editing')" class="btn btn-header btn-expandable" :disabled="!isContentReady">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
           <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
@@ -157,7 +158,7 @@
         <!-- 下拉選單 -->
         <div v-if="showMoreOptions" class="more-options-panel">
           <!-- 下載按鈕 -->
-          <button class="action-btn" @click="handleDownload">
+          <button class="action-btn" @click="handleDownload" :disabled="!isContentReady">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
               <polyline points="7 10 12 15 17 10"></polyline>
@@ -167,7 +168,7 @@
           </button>
 
           <!-- 複製文字 -->
-          <button class="action-btn" :class="{ copied: isCopied }" @click="handleCopyText">
+          <button class="action-btn" :class="{ copied: isCopied }" @click="handleCopyText" :disabled="!isContentReady">
             <svg v-if="isCopied" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="20 6 9 17 4 12"></polyline>
             </svg>
@@ -179,7 +180,7 @@
           </button>
 
           <!-- 分享按鈕 -->
-          <button class="action-btn" @click="handleShare">
+          <button class="action-btn" @click="handleShare" :disabled="!isContentReady">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="18" cy="5" r="3"></circle>
               <circle cx="6" cy="12" r="3"></circle>
@@ -247,6 +248,10 @@ const props = defineProps({
   copyableText: {
     type: String,
     default: ''
+  },
+  isContentReady: {
+    type: Boolean,
+    default: true
   },
   showTimecodeMarkers: {
     type: Boolean,
@@ -616,6 +621,14 @@ onUnmounted(() => {
   color: var(--main-primary);
 }
 
+.btn-header:disabled,
+.btn-header:disabled:hover {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: transparent;
+  color: var(--main-text);
+}
+
 .btn-header.btn-primary {
   background: var(--nav-active-bg);
   color: white;
@@ -959,6 +972,14 @@ onUnmounted(() => {
 .action-btn:hover {
   background: rgba(163, 177, 198, 0.15);
   color: var(--main-primary);
+}
+
+.action-btn:disabled,
+.action-btn:disabled:hover {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: transparent;
+  color: var(--main-text);
 }
 
 .action-btn.copied {

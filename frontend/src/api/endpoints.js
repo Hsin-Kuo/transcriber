@@ -63,6 +63,7 @@ export const NEW_ENDPOINTS = {
   // 公開分享
   shared: {
     toggle: (taskId) => `/shared/${taskId}/toggle`,
+    expiry: (taskId) => `/shared/${taskId}/expiry`,
     get: (token) => `/shared/${token}`,
     audio: (token) => `/shared/${token}/audio`,
   },

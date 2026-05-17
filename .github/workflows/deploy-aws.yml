@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
 
       # ===== Backend 打包 =====
       - name: Package backend
@@ -37,7 +37,7 @@ jobs:
 
       # ===== Frontend 建置 =====
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444  # v5.0.0
         with:
           node-version: '22'
           cache: 'npm'
@@ -49,8 +49,15 @@ jobs:
           VITE_API_URL: "https://soundlite.app"
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
         run: |
-          echo "VITE_API_URL=" > .env.production
-          echo "VITE_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}" >> .env.production
+          # 寫入 .env.production（會覆寫 repo 內的同名檔，所有需要的變數都要列出）
+          cat > .env.production <<EOF
+          VITE_API_URL=
+          VITE_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+          VITE_SENTRY_DSN=${{ secrets.VITE_SENTRY_DSN }}
+          VITE_SENTRY_ENVIRONMENT=production
+          VITE_SENTRY_TRACES_SAMPLE_RATE=0.1
+          VITE_SENTRY_RELEASE=${{ github.sha }}
+          EOF
           npm ci
           npm run build
 
@@ -62,6 +69,13 @@ jobs:
       - name: Build admin-frontend
         working-directory: admin-frontend
         run: |
+          # admin-frontend/.env.production 在 .gitignore，由 CI 從 secrets 產生
+          cat > .env.production <<EOF
+          VITE_SENTRY_DSN=${{ secrets.VITE_SENTRY_DSN_ADMIN }}
+          VITE_SENTRY_ENVIRONMENT=production-admin
+          VITE_SENTRY_TRACES_SAMPLE_RATE=0.1
+          VITE_SENTRY_RELEASE=${{ github.sha }}
+          EOF
           npm ci
           npm run build
 
@@ -70,25 +84,38 @@ jobs:
         run: tar -czvf ../admin-frontend.tar.gz dist
 
       # ===== SSH 部署 =====
-      - name: Setup SSH key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/transcriber-key.pem
-          chmod 600 ~/.ssh/transcriber-key.pem
-          ssh-keyscan -H ${{ env.EC2_HOST }} >> ~/.ssh/known_hosts
+      # 用 ssh-agent 把 key 載入 agent 記憶體，不落地 disk
+      # 比 echo > .pem 安全：runner 暫存 / log / 殘留檔案都不會看到 key 內容
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@dc588b651fe13675774614f8e6a936a468676387  # v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: Add EC2 host key
+        run: ssh-keyscan -H ${{ env.EC2_HOST }} >> ~/.ssh/known_hosts
 
       - name: Upload packages to EC2
+        env:
+          SHA: ${{ github.sha }}
         run: |
-          scp -i ~/.ssh/transcriber-key.pem backend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/
-          scp -i ~/.ssh/transcriber-key.pem frontend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/
-          scp -i ~/.ssh/transcriber-key.pem admin-frontend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/
+          scp backend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/backend-${SHA}.tar.gz
+          scp frontend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/frontend-${SHA}.tar.gz
+          scp admin-frontend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/admin-frontend-${SHA}.tar.gz
 
       - name: Deploy backend
+        env:
+          SHA: ${{ github.sha }}
         run: |
-          ssh -i ~/.ssh/transcriber-key.pem ${{ env.EC2_USER }}@${{ env.EC2_HOST }} << 'ENDSSH'
-          echo "=== Deploying Backend ==="
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "SHA=${SHA} bash -s" << 'ENDSSH'
+          set -e
+          echo "=== Deploying Backend [${SHA}] ==="
+          # 保留釋出檔到 releases/，供 rollback.sh 使用
+          sudo mkdir -p /opt/transcriber/releases
+          sudo mv /tmp/backend-${SHA}.tar.gz /opt/transcriber/releases/
+          sudo chown ec2-user:ec2-user /opt/transcriber/releases/backend-${SHA}.tar.gz
+
           cd /opt/transcriber
-          tar -xzf /tmp/backend.tar.gz
+          tar -xzf /opt/transcriber/releases/backend-${SHA}.tar.gz
 
           python3.11 -m pip install --user -r requirements-web.txt -q
 
@@ -98,33 +125,58 @@ jobs:
           sudo nginx -t && sudo systemctl reload nginx
 
           sudo systemctl restart transcriber
-          echo "=== Backend deployed ==="
+
+          # 安裝/更新 rollback 腳本到固定位置（即使本次部署壞掉，rollback 仍可用）
+          sudo install -m 0755 /opt/transcriber/deploy/rollback.sh /usr/local/bin/transcriber-rollback
+
+          # 紀錄當前版本，清理舊釋出（保留最近 5 個 backend/frontend/admin-frontend）
+          echo "${SHA}" | sudo tee /opt/transcriber/releases/CURRENT > /dev/null
+          for prefix in backend frontend admin-frontend; do
+            ls -1t /opt/transcriber/releases/${prefix}-*.tar.gz 2>/dev/null | tail -n +6 | xargs -r sudo rm -f
+          done
+          echo "=== Backend deployed [${SHA}] ==="
           ENDSSH
 
       - name: Deploy frontend
+        env:
+          SHA: ${{ github.sha }}
         run: |
-          ssh -i ~/.ssh/transcriber-key.pem ${{ env.EC2_USER }}@${{ env.EC2_HOST }} << 'ENDSSH'
-          echo "=== Deploying Frontend ==="
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "SHA=${SHA} bash -s" << 'ENDSSH'
+          set -e
+          echo "=== Deploying Frontend [${SHA}] ==="
+          sudo mkdir -p /opt/transcriber/releases
+          sudo mv /tmp/frontend-${SHA}.tar.gz /opt/transcriber/releases/
+          sudo chown ec2-user:ec2-user /opt/transcriber/releases/frontend-${SHA}.tar.gz
+
           cd /tmp
-          tar -xzf frontend.tar.gz
+          tar -xzf /opt/transcriber/releases/frontend-${SHA}.tar.gz
           sudo mkdir -p /var/www/transcriber
           sudo rm -rf /var/www/transcriber/*
           sudo cp -r dist/* /var/www/transcriber/
           sudo chown -R nginx:nginx /var/www/transcriber
-          echo "=== Frontend deployed ==="
+          rm -rf /tmp/dist
+          echo "=== Frontend deployed [${SHA}] ==="
           ENDSSH
 
       - name: Deploy admin-frontend
+        env:
+          SHA: ${{ github.sha }}
         run: |
-          ssh -i ~/.ssh/transcriber-key.pem ${{ env.EC2_USER }}@${{ env.EC2_HOST }} << 'ENDSSH'
-          echo "=== Deploying Admin Frontend ==="
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "SHA=${SHA} bash -s" << 'ENDSSH'
+          set -e
+          echo "=== Deploying Admin Frontend [${SHA}] ==="
+          sudo mkdir -p /opt/transcriber/releases
+          sudo mv /tmp/admin-frontend-${SHA}.tar.gz /opt/transcriber/releases/
+          sudo chown ec2-user:ec2-user /opt/transcriber/releases/admin-frontend-${SHA}.tar.gz
+
           cd /tmp
-          tar -xzf admin-frontend.tar.gz
+          tar -xzf /opt/transcriber/releases/admin-frontend-${SHA}.tar.gz
           sudo mkdir -p /var/www/admin
           sudo rm -rf /var/www/admin/*
           sudo cp -r dist/* /var/www/admin/
           sudo chown -R nginx:nginx /var/www/admin
-          echo "=== Admin Frontend deployed ==="
+          rm -rf /tmp/dist
+          echo "=== Admin Frontend deployed [${SHA}] ==="
           ENDSSH
 
       - name: Verify deployment
@@ -132,7 +184,3 @@ jobs:
           sleep 5
           curl -f https://soundlite.app/health || exit 1
           echo "✅ Deployment successful! https://soundlite.app"
-
-      - name: Cleanup SSH key
-        if: always()
-        run: rm -f ~/.ssh/transcriber-key.pem

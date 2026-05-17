@@ -690,8 +690,9 @@ defineExpose({
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
-    padding: 8px 12px;
-    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    /* 加大上下與左右 padding，避開圓角螢幕與 safe area */
+    padding: 12px calc(16px + env(safe-area-inset-right, 0px)) 12px calc(16px + env(safe-area-inset-left, 0px));
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   }
 
   /* 深色模式 */
@@ -769,17 +770,9 @@ defineExpose({
     height: 14px;
   }
 
+  /* 手機版隱藏快進/快退按鈕上的「10」秒數標籤，節省空間 */
   .audio-control-label {
-    font-size: 7px;
-    bottom: 5px;
-  }
-
-  .skip-backward .audio-control-label {
-    left: 6px;
-  }
-
-  .skip-forward .audio-control-label {
-    right: 6px;
+    display: none;
   }
 
   /* 音量和速度控制 */
@@ -828,8 +821,8 @@ defineExpose({
 /* 小手機進一步調整 */
 @media (max-width: 480px) {
   .audio-player-container {
-    padding: 6px 8px;
-    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+    padding: 10px calc(12px + env(safe-area-inset-right, 0px)) 10px calc(12px + env(safe-area-inset-left, 0px));
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
   }
 
   .time-display-center {

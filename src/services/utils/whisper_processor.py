@@ -12,15 +12,14 @@ import os
 from pydub import AudioSegment
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-# 只在本地環境或 GPU Worker 才 import faster_whisper
-# AWS Web Server 不需要這個模組，因為轉錄在 GPU Worker 執行
-_DEPLOY_ENV = os.getenv("DEPLOY_ENV", "local")
-_APP_ROLE = os.getenv("APP_ROLE", "server")
-
-if _DEPLOY_ENV == "local" or _APP_ROLE == "worker":
+# faster_whisper 是 ML 重依賴。
+# - GPU Worker / local 開發：有裝（requirements.txt），轉錄走 WhisperModel
+# - AWS Web Server / CI 測試：沒裝（requirements-web.txt 不含），WhisperModel = None
+# 用 try/except 比舊版「靠 DEPLOY_ENV 環境變數決定」乾淨：CI 不需特別設環境變數也不會炸
+try:
     from faster_whisper import WhisperModel
-else:
-    WhisperModel = None  # AWS Web Server 不需要
+except ImportError:
+    WhisperModel = None
 
 
 def _normalize_language(language: Optional[str]) -> Optional[str]:
@@ -39,6 +38,37 @@ def _convert_chinese_script(text: str, language: Optional[str]) -> str:
         from zhconv import convert
         return convert(text, "zh-hans")
     return text
+
+
+def _collapse_repeated_segments(segments: List[Dict], max_repeat: int = 2) -> List[Dict]:
+    """壓縮連續完全相同 text 的 segments，避免 Whisper 幻覺觸發下游 LLM 重複迴圈。
+
+    保留前 max_repeat 個，最後一個的 end 延伸到原 run 末尾以保留正確時長。
+    """
+    if not segments:
+        return segments
+
+    result: List[Dict] = []
+    i = 0
+    while i < len(segments):
+        current_text = segments[i]["text"].strip()
+        j = i + 1
+        while j < len(segments) and segments[j]["text"].strip() == current_text:
+            j += 1
+
+        run_length = j - i
+        if run_length <= max_repeat:
+            result.extend(segments[i:j])
+        else:
+            kept = [dict(seg) for seg in segments[i:i + max_repeat]]
+            kept[-1]["end"] = segments[j - 1]["end"]
+            result.extend(kept)
+            print(
+                f"⚠️ 偵測到 segment 重複幻覺：「{current_text}」x {run_length}，壓縮為 x {max_repeat}",
+                flush=True,
+            )
+        i = j
+    return result
 
 
 def transcribe_chunk_worker(
@@ -87,26 +117,33 @@ def transcribe_chunk_worker(
 
     print(f"[Worker {chunk_idx}] 開始轉錄", flush=True)
 
+    normalized_lang = _normalize_language(language)
     segments_list, info = model.transcribe(
         chunk_path,
-        language=_normalize_language(language),
+        language=normalized_lang,
         beam_size=5,
         vad_filter=True,
-        vad_parameters=dict(min_silence_duration_ms=500)
+        vad_parameters=dict(min_silence_duration_ms=1000),
+        condition_on_previous_text=False,
+        repetition_penalty=1.1,
+        no_repeat_ngram_size=3,
+        word_timestamps=True,
+        hallucination_silence_threshold=2.0,
+        initial_prompt="以下是繁體中文的逐字稿。" if normalized_lang == "zh" else None,
     )
 
     # 收集結果（字型轉換由呼叫端的清洗步驟統一處理）
     segments = []
-    text_parts = []
     for segment in segments_list:
         segments.append({
             "start": segment.start,
             "end": segment.end,
             "text": segment.text
         })
-        text_parts.append(segment.text)
 
-    full_text = " ".join(text_parts)
+    # 壓縮重複幻覺，再從壓縮後的 segments 重建 full_text
+    segments = _collapse_repeated_segments(segments)
+    full_text = " ".join(seg["text"] for seg in segments)
     detected_language = info.language
 
     print(f"[Worker {chunk_idx}] 轉錄完成，文字長度: {len(full_text)}", flush=True)
@@ -140,20 +177,22 @@ class WhisperProcessor:
     def transcribe(
         self,
         audio_path: Path,
-        language: Optional[str] = None
+        language: Optional[str] = None,
+        progress_callback: Optional[callable] = None,
     ) -> Tuple[str, List[Dict], str]:
         """轉錄音檔（單次轉錄，不分段）
 
         Args:
             audio_path: 音檔路徑
             language: 語言代碼（None 表示自動偵測）
+            progress_callback: segment 完成時呼叫 callback(elapsed_seconds, total_seconds)
 
         Returns:
             (完整文字, segments 列表, 偵測到的語言)
         """
         audio_path = self._ensure_valid_audio(audio_path)
         segments_list, detected_language = self._transcribe_with_timestamps(
-            audio_path, language
+            audio_path, language, progress_callback=progress_callback,
         )
 
         # 合併所有 segment 的文字
@@ -166,7 +205,7 @@ class WhisperProcessor:
         audio_path: Path,
         chunk_duration_ms: int = 1500000,  # 25 分鐘
         language: Optional[str] = None,
-        progress_callback: Optional[callable] = None
+        progress_callback: Optional[callable] = None,
     ) -> Tuple[str, List[Dict], str]:
         """將音檔分段後轉錄（提高長音檔的準確度）
 
@@ -174,7 +213,8 @@ class WhisperProcessor:
             audio_path: 音檔路徑
             chunk_duration_ms: 每段長度（毫秒）
             language: 語言代碼（None 表示自動偵測）
-            progress_callback: 進度回調函數 callback(chunk_idx, total_chunks)
+            progress_callback: callback(elapsed_seconds, total_seconds)，
+                以整段音檔為單位的時間軸進度。chunked 模式下會自動加上各 chunk 的 time_offset。
 
         Returns:
             (完整文字, segments 列表, 偵測到的語言)
@@ -183,23 +223,24 @@ class WhisperProcessor:
         # 獲取音檔總長度
         total_duration_ms = self._get_audio_duration(audio_path)
         total_minutes = total_duration_ms / 1000 / 60
+        total_seconds = total_duration_ms / 1000
         print(f"📊 音檔總長度：{total_minutes:.1f} 分鐘")
 
         # 如果音檔不長，直接轉錄（audio_path 已 normalize，跳過重複 probe）
         if total_duration_ms <= chunk_duration_ms:
             print(f"📝 音檔長度在 {chunk_duration_ms/1000/60:.0f} 分鐘內，直接轉錄...")
-            segments_list, detected_language = self._transcribe_with_timestamps(audio_path, language)
+            segments_list, detected_language = self._transcribe_with_timestamps(
+                audio_path, language, progress_callback=progress_callback,
+            )
             full_text = " ".join(seg["text"] for seg in segments_list)
             return full_text, segments_list, detected_language
 
         # 長音檔：智慧分段處理
-        # 切分音檔（回傳 [(chunk_path, start_seconds), ...]）
         chunk_entries = self._split_audio_into_chunks(
             audio_path, total_duration_ms, chunk_duration_ms
         )
         num_chunks = len(chunk_entries)
 
-        # 轉錄每個 chunk
         all_text_parts = []
         all_segments = []
         detected_language = None
@@ -207,39 +248,35 @@ class WhisperProcessor:
         for chunk_idx, (chunk_path, time_offset) in enumerate(chunk_entries, start=1):
             print(f"🎙 轉錄第 {chunk_idx}/{num_chunks} 段...")
 
-            # 進度回調
+            # 包裝 callback：chunk 內部 segment 時間（相對 chunk）→ 加 time_offset → 轉成「整段音檔」的時間軸
+            chunk_callback = None
             if progress_callback:
-                progress_callback(chunk_idx, num_chunks)
+                def _wrap(seg_end_in_chunk, _chunk_total, _offset=time_offset, _total=total_seconds):
+                    progress_callback(_offset + seg_end_in_chunk, _total)
+                chunk_callback = _wrap
 
-            # 轉錄這個 chunk
             chunk_text, chunk_segments, chunk_lang = self.transcribe(
-                chunk_path, language
+                chunk_path, language, progress_callback=chunk_callback,
             )
 
             all_text_parts.append(chunk_text)
 
-            # 調整時間戳並加入 segments
             for seg in chunk_segments:
-                adjusted_segment = {
+                all_segments.append({
                     "start": seg["start"] + time_offset,
                     "end": seg["end"] + time_offset,
-                    "text": seg["text"]
-                }
-                all_segments.append(adjusted_segment)
+                    "text": seg["text"],
+                })
 
-            # 記錄偵測到的語言（使用第一段的結果）
             if detected_language is None:
                 detected_language = chunk_lang
 
-            # 清理臨時檔案
             try:
                 chunk_path.unlink()
             except Exception as e:
                 print(f"⚠️ 清理 chunk 檔案失敗：{e}")
 
-        # 合併所有文字
         full_text = " ".join(all_text_parts)
-
         print(f"✅ 順序轉錄完成！總共 {num_chunks} 段，{len(all_segments)} 個 segments（時間戳已調整）")
         return full_text, all_segments, detected_language
 
@@ -265,7 +302,7 @@ class WhisperProcessor:
         Returns:
             (完整文字, segments 列表, 偵測到的語言)
         """
-        print(f"🚀 [並行轉錄] 開始並行轉錄流程（ProcessPoolExecutor）", flush=True)
+        print("🚀 [並行轉錄] 開始並行轉錄流程（ProcessPoolExecutor）", flush=True)
 
         audio_path = self._ensure_valid_audio(audio_path)
 
@@ -287,7 +324,7 @@ class WhisperProcessor:
 
         # 建立 chunk_idx → start_seconds 的映射
         chunk_offsets = {}
-        for chunk_idx, (chunk_path, start_seconds) in enumerate(chunk_entries, start=1):
+        for chunk_idx, (_chunk_path, start_seconds) in enumerate(chunk_entries, start=1):
             chunk_offsets[chunk_idx] = start_seconds
 
         # 2. 使用 ProcessPoolExecutor 並行轉錄
@@ -319,7 +356,7 @@ class WhisperProcessor:
                 chunk_idx = int(re.search(r'chunk_(\d+)', str(chunk_path)).group(1))
                 future_to_idx[future] = chunk_idx
 
-            print(f"✅ [並行轉錄] 所有任務已提交到進程池", flush=True)
+            print("✅ [並行轉錄] 所有任務已提交到進程池", flush=True)
 
             # 計算初始正在處理中的 chunk 數量（worker 會立即拿走任務）
             processing_count = min(max_workers, num_chunks)
@@ -331,12 +368,12 @@ class WhisperProcessor:
             for future in as_completed(future_to_idx.keys()):
                 # 檢查取消
                 if cancel_check and cancel_check():
-                    print(f"⚠️ 用戶取消，終止所有任務", flush=True)
+                    print("⚠️ 用戶取消，終止所有任務", flush=True)
                     # 取消所有未完成的 future
                     for f in future_to_idx.keys():
                         f.cancel()
                     # 強制關閉 executor（不等待）
-                    print(f"🛑 強制關閉進程池...", flush=True)
+                    print("🛑 強制關閉進程池...", flush=True)
                     executor.shutdown(wait=False, cancel_futures=True)
                     raise Exception("任務被取消")
 
@@ -363,11 +400,11 @@ class WhisperProcessor:
                     for f in future_to_idx.keys():
                         f.cancel()
                     # 強制關閉 executor
-                    print(f"🛑 轉錄失敗，強制關閉進程池...", flush=True)
+                    print("🛑 轉錄失敗，強制關閉進程池...", flush=True)
                     executor.shutdown(wait=False, cancel_futures=True)
                     raise Exception(f"並行轉錄失敗：{e}")
 
-        except Exception as e:
+        except Exception:
             # 清理所有剩餘的 chunk 檔案
             for chunk_path, _ in chunk_entries:
                 try:
@@ -379,11 +416,11 @@ class WhisperProcessor:
         finally:
             # 確保 executor 被正確清理
             if executor is not None:
-                print(f"🧹 [並行轉錄] 清理進程池...", flush=True)
+                print("🧹 [並行轉錄] 清理進程池...", flush=True)
                 try:
                     # 優雅關閉，最多等待 10 秒
                     executor.shutdown(wait=True, cancel_futures=False)
-                    print(f"✅ [並行轉錄] 進程池已關閉", flush=True)
+                    print("✅ [並行轉錄] 進程池已關閉", flush=True)
                 except Exception as cleanup_error:
                     print(f"⚠️ [並行轉錄] 進程池關閉失敗：{cleanup_error}", flush=True)
 
@@ -399,7 +436,7 @@ class WhisperProcessor:
         all_segments = []
 
         # 合併 segments 並調整時間戳（使用實際切點偏移）
-        for chunk_idx, (text, segments, lang) in enumerate(sorted_results, start=1):
+        for chunk_idx, (_text, segments, _lang) in enumerate(sorted_results, start=1):
             time_offset = chunk_offsets[chunk_idx]
 
             # 調整每個 segment 的時間戳
@@ -499,34 +536,46 @@ class WhisperProcessor:
     def _transcribe_with_timestamps(
         self,
         audio_path: Path,
-        language: Optional[str] = None
+        language: Optional[str] = None,
+        progress_callback: Optional[callable] = None,
     ) -> Tuple[List[Dict], str]:
         """轉錄音檔並返回帶時間戳的 segments
 
         Args:
             audio_path: 音檔路徑
             language: 語言代碼（None 表示自動偵測）
+            progress_callback: 每個 segment 完成時呼叫 callback(elapsed_seconds, total_seconds)。
+                注意：faster-whisper 的 segments 是 lazy generator，迭代時才實際運算 —
+                所以 callback 自然會隨著轉錄進度發生。
 
         Returns:
             (segments 列表, 偵測到的語言)
         """
-        print(f"🎯 [_transcribe_with_timestamps] 開始 Whisper 模型轉錄")
+        print("🎯 [_transcribe_with_timestamps] 開始 Whisper 模型轉錄")
         print(f"🎯 [_transcribe_with_timestamps] 音檔路徑: {audio_path}")
         print(f"🎯 [_transcribe_with_timestamps] 語言: {language}")
 
         segments_list = []
-        print(f"⏳ [_transcribe_with_timestamps] 調用 model.transcribe()...")
+        print("⏳ [_transcribe_with_timestamps] 調用 model.transcribe()...")
+        normalized_lang = _normalize_language(language)
         segments, info = self.model.transcribe(
             str(audio_path),
-            language=_normalize_language(language),
+            language=normalized_lang,
             beam_size=5,
             vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=500),
+            vad_parameters=dict(min_silence_duration_ms=1000),
+            condition_on_previous_text=False,
+            repetition_penalty=1.1,
+            no_repeat_ngram_size=3,
+            word_timestamps=True,
+            hallucination_silence_threshold=2.0,
+            initial_prompt="以下是繁體中文的逐字稿。" if normalized_lang == "zh" else None,
         )
-        print(f"✅ [_transcribe_with_timestamps] model.transcribe() 完成！")
+        print("✅ [_transcribe_with_timestamps] model.transcribe() 完成！")
 
-        # 獲取 Whisper 偵測到的語言
+        # 獲取 Whisper 偵測到的語言與總時長
         detected_language = info.language if hasattr(info, 'language') else None
+        total_duration = float(getattr(info, "duration", 0) or 0)
 
         # 字型轉換由呼叫端的清洗步驟統一處理
         for segment in segments:
@@ -535,7 +584,14 @@ class WhisperProcessor:
                 "end": segment.end,
                 "text": segment.text
             })
+            if progress_callback and total_duration > 0:
+                try:
+                    progress_callback(segment.end, total_duration)
+                except Exception as cb_err:
+                    # 進度回報不該打斷轉錄本身
+                    print(f"⚠️ progress_callback 失敗（忽略）：{cb_err}")
 
+        segments_list = _collapse_repeated_segments(segments_list)
         return segments_list, detected_language
 
     def _get_audio_duration(self, audio_path: Path) -> int:

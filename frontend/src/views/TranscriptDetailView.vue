@@ -12,6 +12,7 @@
       :editing-task-name="editingTaskName"
       :display-mode="displayMode"
       :copyable-text="copyableText"
+      :is-content-ready="currentTranscript.status === 'completed'"
       :show-timecode-markers="showTimecodeMarkers"
       :time-format="timeFormat"
       :density-threshold="densityThreshold"
@@ -317,6 +318,7 @@
           :task-id="currentTranscript.task_id"
           :initial-summary-status="currentTranscript.summary_status"
           :display-mode="displayMode"
+          :is-content-ready="currentTranscript.status === 'completed'"
           @summary-updated="handleSummaryUpdated"
         />
 
@@ -516,6 +518,20 @@
                 {{ shareLinkCopied ? $t('shared.linkCopied') : $t('shared.copyLink') }}
               </button>
             </div>
+            <div class="share-expiry-row">
+              <span class="share-expiry-label">{{ $t('shared.expiryLabel') }}：{{ shareExpiryText }}</span>
+              <select
+                class="share-expiry-select"
+                :disabled="shareLoading"
+                :value="shareExpiresAt ? -1 : 0"
+                @change="updateShareExpiry(Number($event.target.value))"
+              >
+                <option :value="0">{{ $t('shared.expiryNever') }}</option>
+                <option :value="7">{{ $t('shared.expiry7d') }}</option>
+                <option :value="30">{{ $t('shared.expiry30d') }}</option>
+                <option :value="90">{{ $t('shared.expiry90d') }}</option>
+              </select>
+            </div>
             <button
               class="share-disable-btn"
               :disabled="shareLoading"
@@ -526,6 +542,19 @@
           </div>
 
           <div v-else class="share-enable-section">
+            <div class="share-expiry-row">
+              <label class="share-expiry-label">{{ $t('shared.expiryLabel') }}</label>
+              <select
+                v-model.number="shareExpiryDays"
+                class="share-expiry-select"
+                :disabled="shareLoading"
+              >
+                <option :value="0">{{ $t('shared.expiryNever') }}</option>
+                <option :value="7">{{ $t('shared.expiry7d') }}</option>
+                <option :value="30">{{ $t('shared.expiry30d') }}</option>
+                <option :value="90">{{ $t('shared.expiry90d') }}</option>
+              </select>
+            </div>
             <button
               class="share-enable-btn"
               :disabled="shareLoading"
@@ -957,6 +986,7 @@ async function loadTranscript(taskId) {
   if (result) {
     // 載入分享狀態
     shareToken.value = currentTranscript.value.share_token || null
+    shareExpiresAt.value = currentTranscript.value.share_token_expires || null
 
     if (result.audioUrl) {
       audioUrl.value = result.audioUrl
@@ -1415,6 +1445,8 @@ async function deleteTask() {
 // ========== 分享功能 ==========
 const showShareDialog = ref(false)
 const shareToken = ref(null)
+const shareExpiresAt = ref(null)  // unix seconds 或 null
+const shareExpiryDays = ref(0)    // 開啟時選的天數；0 = 永久
 const shareLoading = ref(false)
 
 async function handleShare() {
@@ -1429,14 +1461,27 @@ async function handleShare() {
 const origin = window.location.origin
 const shareLinkCopied = ref(false)
 
+// 過期時間顯示文字
+const shareExpiryText = computed(() => {
+  if (!shareExpiresAt.value) return $t('shared.expiryNever')
+  const d = new Date(shareExpiresAt.value * 1000)
+  return d.toLocaleString()
+})
+
 async function toggleShare() {
   shareLoading.value = true
   try {
-    const response = await api.post(NEW_ENDPOINTS.shared.toggle(currentTranscript.value.task_id))
+    const url = NEW_ENDPOINTS.shared.toggle(currentTranscript.value.task_id)
+    const params = shareToken.value || !shareExpiryDays.value
+      ? {}
+      : { expires_in_days: shareExpiryDays.value }
+    const response = await api.post(url, null, { params })
     if (response.data.shared) {
       shareToken.value = response.data.share_token
+      shareExpiresAt.value = response.data.expires_at
     } else {
       shareToken.value = null
+      shareExpiresAt.value = null
       showShareDialog.value = false
     }
   } catch (error) {
@@ -1445,6 +1490,21 @@ async function toggleShare() {
     if (error.response?.status === 403) {
       showShareDialog.value = false
     }
+  } finally {
+    shareLoading.value = false
+  }
+}
+
+async function updateShareExpiry(days) {
+  // days = 0 → 改為永久；> 0 → 從現在起 N 天後過期
+  shareLoading.value = true
+  try {
+    const url = NEW_ENDPOINTS.shared.expiry(currentTranscript.value.task_id)
+    const params = days ? { expires_in_days: days } : {}
+    const response = await api.patch(url, null, { params })
+    shareExpiresAt.value = response.data.expires_at
+  } catch (error) {
+    alert(error.response?.data?.detail || 'update failed')
   } finally {
     shareLoading.value = false
   }
@@ -3334,8 +3394,8 @@ watch(displayMode, () => {
 .mobile-drawer-toggle {
   display: none;
   position: fixed;
-  bottom: calc(70px + env(safe-area-inset-bottom, 0px));
-  right: 16px;
+  bottom: calc(90px + env(safe-area-inset-bottom, 0px));
+  right: calc(16px + env(safe-area-inset-right, 0px));
   width: 56px;
   height: 56px;
   border-radius: 50%;
@@ -3484,8 +3544,8 @@ watch(displayMode, () => {
   .mobile-drawer-toggle {
     width: 48px;
     height: 48px;
-    bottom: calc(56px + env(safe-area-inset-bottom, 0px));
-    right: 12px;
+    bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+    right: calc(12px + env(safe-area-inset-right, 0px));
   }
 
   .mobile-drawer-toggle svg {

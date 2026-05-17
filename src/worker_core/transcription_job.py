@@ -17,10 +17,25 @@ from src.utils.storage_service import download_audio
 from src.utils.time_utils import get_utc_timestamp
 from src.utils.text_utils import convert_segments_punctuation
 from src.utils.config_loader import get_temp_dir
+from src.services.progress_store import Phase, ProgressStore
 from src.worker_core.config import S3_REGION, S3_BUCKET
-from src.worker_core.db import get_db, update_task, update_progress
+from src.worker_core.db import get_db, update_task
 from src.worker_core.model_cache import get_whisper_processor, get_diarization_pipeline
 from src.worker_core.audio_converter import convert_to_mp3, convert_to_wav
+
+
+# Cancel 信號跨進程靠 DB status：Web Server cancel endpoint 寫 status="canceling/cancelled"，
+# Worker 在 segment / punctuation chunk callback 內 poll 並 raise 此 exception 中斷迭代。
+class TaskCancelled(Exception):
+    pass
+
+
+_CANCEL_STATUSES = {"canceling", "cancelled"}
+
+
+def _is_task_cancelled(db, task_id: str) -> bool:
+    doc = db.tasks.find_one({"_id": task_id}, {"status": 1})
+    return bool(doc and doc.get("status") in _CANCEL_STATUSES)
 
 
 def _resolve_punct_language(
@@ -36,13 +51,23 @@ def _resolve_punct_language(
     return detected_language or language or "zh"
 
 
-def _run_transcription(whisper_processor, audio_path: str, language: str, use_chunking: bool):
+def _run_transcription(
+    whisper_processor,
+    audio_path: str,
+    language: str,
+    use_chunking: bool,
+    progress_callback=None,
+):
     print("🎤 [平行] 開始轉錄...")
     try:
         if use_chunking:
-            result = whisper_processor.transcribe_in_chunks(audio_path, language=language)
+            result = whisper_processor.transcribe_in_chunks(
+                audio_path, language=language, progress_callback=progress_callback,
+            )
         else:
-            result = whisper_processor.transcribe(audio_path, language=language)
+            result = whisper_processor.transcribe(
+                audio_path, language=language, progress_callback=progress_callback,
+            )
     except Exception as e:
         if not getattr(e, "error_code", None):
             err = RuntimeError(f"Whisper 轉錄失敗: {e}")
@@ -67,7 +92,7 @@ def _run_diarization(diarization_pipeline, wav_path: Path, max_speakers: Optiona
     return segments
 
 
-def process_task(message_body: dict) -> None:
+def process_task(message_body: dict, progress_store: ProgressStore) -> None:
     """處理單個轉錄任務（由 SQS consumer 呼叫）"""
     task_id = message_body["task_id"]
     language = message_body.get("language")
@@ -80,13 +105,18 @@ def process_task(message_body: dict) -> None:
     db = get_db()
 
     # 防止重複處理（Spot 中斷恢復後可能收到相同 SQS 訊息）
+    # 也包含「在 SQS 排隊期間被使用者取消」的情境 — 直接跳過
     task_doc = db.tasks.find_one({"_id": task_id}, {"status": 1})
-    if task_doc and task_doc.get("status") == "completed":
-        print(f"⏭️ [Worker] 任務 {task_id} 已完成，跳過重複處理")
+    if task_doc and task_doc.get("status") in ("completed", *_CANCEL_STATUSES):
+        print(f"⏭️ [Worker] 任務 {task_id} 狀態 {task_doc.get('status')}，跳過處理")
+        progress_store.clear(task_id)
         return
 
     print(f"🎬 [Worker] 開始處理任務 {task_id}")
-    update_task(db, task_id, {"status": "processing", "progress": "Worker 開始處理..."})
+    update_task(db, task_id, {"status": "processing"})
+    progress_store.set_phase(
+        task_id, Phase.PREPARATION, 0.0, message="Worker 開始處理..."
+    )
 
     task_doc = db.tasks.find_one({"_id": task_id})
     user_tier = task_doc.get("user", {}).get("tier", "free") if task_doc else "free"
@@ -96,16 +126,18 @@ def process_task(message_body: dict) -> None:
 
     try:
         # 1. 下載音檔（副檔名 .original 不預設格式）
-        update_progress(db, task_id, "正在下載音檔...", {"progress_percentage": 5})
+        progress_store.set_phase(task_id, Phase.PREPARATION, 0.2, message="正在下載音檔...")
         audio_path = temp_dir / f"{task_id}.original"
         download_audio(task_id, audio_path, tier=user_tier)
         print(f"📥 已下載音檔: {audio_path} ({audio_path.stat().st_size / 1024 / 1024:.2f} MB)")
 
         # 2. 統一轉為 MP3
-        update_progress(db, task_id, "正在轉換音檔格式...", {"progress_percentage": 10})
+        progress_store.set_phase(task_id, Phase.PREPARATION, 0.5, message="正在轉換音檔格式...")
         audio_path, transcoded = convert_to_mp3(audio_path)
         if transcoded:
-            update_progress(db, task_id, "正在上傳轉碼後的音檔...", {"progress_percentage": 15})
+            progress_store.set_phase(
+                task_id, Phase.PREPARATION, 0.7, message="正在上傳轉碼後的音檔..."
+            )
             s3_key = f"uploads/{user_tier}/{task_id}.mp3"
             boto3.client("s3", region_name=S3_REGION).upload_file(
                 str(audio_path), S3_BUCKET, s3_key
@@ -113,7 +145,7 @@ def process_task(message_body: dict) -> None:
             print(f"☁️ 已上傳轉碼後的音檔到 S3: {s3_key}")
 
         # 3. 取得模型（快取，只在首次任務載入）
-        update_progress(db, task_id, "正在準備模型...", {"progress_percentage": 20})
+        progress_store.set_phase(task_id, Phase.PREPARATION, 1.0, message="正在準備模型...")
         from src.services.utils.punctuation_processor import PunctuationProcessor
 
         whisper_processor = get_whisper_processor()
@@ -122,19 +154,46 @@ def process_task(message_body: dict) -> None:
         # 4. 平行執行轉錄 + 說話者辨識
         full_text = segments = detected_language = diarization_segments = None
 
+        # 進度回報 callback：whisper 每完成一個 segment 就推進 TRANSCRIPTION phase。
+        # 順便檢查使用者是否已取消 — 是的話 raise 中斷 segment 迭代。
+        # phase_progress 上限 0.99 留給後續的合併/收尾步驟。
+        def _on_transcription_segment(elapsed_s, total_s, _tid=task_id, _db=db):
+            if _is_task_cancelled(_db, _tid):
+                raise TaskCancelled(f"task {_tid} cancelled during transcription")
+            if total_s <= 0:
+                return
+            pp = min(0.99, elapsed_s / total_s)
+            progress_store.set_phase(
+                _tid,
+                Phase.TRANSCRIPTION,
+                pp,
+                message=f"轉錄中（{int(elapsed_s)}s / {int(total_s)}s）...",
+            )
+
         if use_diarization and diarization_pipeline:
-            update_progress(db, task_id, "正在轉錄音檔與說話者辨識（平行處理）...", {"progress_percentage": 30})
+            progress_store.set_phase(
+                task_id,
+                Phase.TRANSCRIPTION,
+                0.0,
+                message="正在轉錄音檔與說話者辨識（平行處理）...",
+                details={"diarization_started": True},
+            )
             wav_path = convert_to_wav(audio_path, temp_dir / f"{task_id}.wav")
 
             with ThreadPoolExecutor(max_workers=2) as executor:
                 transcription_future = executor.submit(
-                    _run_transcription, whisper_processor, str(audio_path), language, use_chunking
+                    _run_transcription,
+                    whisper_processor,
+                    str(audio_path),
+                    language,
+                    use_chunking,
+                    _on_transcription_segment,
                 )
                 diarization_future = executor.submit(
                     _run_diarization, diarization_pipeline, wav_path, max_speakers
                 )
                 # 等待兩個任務都結束（不在此處理異常，避免提前中斷）
-                for future in as_completed([transcription_future, diarization_future]):
+                for _future in as_completed([transcription_future, diarization_future]):
                     pass
 
             # 轉錄失敗 → 整個任務失敗（無可用結果）
@@ -146,7 +205,13 @@ def process_task(message_body: dict) -> None:
             except Exception as e:
                 print(f"⚠️ 說話者辨識失敗，使用純轉錄結果: {e}")
                 diarization_segments = None
-                update_progress(db, task_id, "語者辨識失敗，使用純轉錄結果", {"progress_percentage": 70})
+                progress_store.set_phase(
+                    task_id,
+                    Phase.TRANSCRIPTION,
+                    1.0,
+                    message="語者辨識失敗，使用純轉錄結果",
+                    details={"diarization_failed": True},
+                )
 
             if diarization_segments and segments:
                 task = db.tasks.find_one({"_id": task_id})
@@ -162,20 +227,29 @@ def process_task(message_body: dict) -> None:
                         segments, diarization_segments
                     )
 
-                update_progress(db, task_id, "語者辨識完成", {
-                    "stats.diarization.num_speakers": num_speakers,
-                    "progress_percentage": 70,
-                })
+                # 寫入永久 stat（保留 update_task 路徑）
+                update_task(db, task_id, {"stats.diarization.num_speakers": num_speakers})
+                progress_store.set_phase(
+                    task_id,
+                    Phase.TRANSCRIPTION,
+                    1.0,
+                    message="語者辨識完成",
+                    details={"diarization_completed": True, "num_speakers": num_speakers},
+                )
         else:
-            update_progress(db, task_id, "正在轉錄音檔...", {"progress_percentage": 30})
+            progress_store.set_phase(
+                task_id, Phase.TRANSCRIPTION, 0.0, message="正在轉錄音檔..."
+            )
             try:
                 if use_chunking:
                     full_text, segments, detected_language = whisper_processor.transcribe_in_chunks(
-                        str(audio_path), language=language
+                        str(audio_path), language=language,
+                        progress_callback=_on_transcription_segment,
                     )
                 else:
                     full_text, segments, detected_language = whisper_processor.transcribe(
-                        str(audio_path), language=language
+                        str(audio_path), language=language,
+                        progress_callback=_on_transcription_segment,
                     )
             except Exception as e:
                 if not getattr(e, "error_code", None):
@@ -201,23 +275,50 @@ def process_task(message_body: dict) -> None:
         # 6. 標點處理
         punctuation_model = punctuation_token_usage = None
         if use_punctuation:
-            update_progress(db, task_id, "正在添加標點符號...", {"progress_percentage": 80})
+            progress_store.set_phase(
+                task_id, Phase.PUNCTUATION, 0.0, message="正在添加標點符號...",
+                details={"punctuation_started": True},
+            )
+
+            def _on_punctuation_chunk(i, n, _tid=task_id, _db=db):
+                if _is_task_cancelled(_db, _tid):
+                    raise TaskCancelled(f"task {_tid} cancelled during punctuation")
+                if n <= 0:
+                    return
+                pp = min(0.99, i / n)
+                progress_store.set_phase(
+                    _tid,
+                    Phase.PUNCTUATION,
+                    pp,
+                    message=f"添加標點（{i}/{n} 段）...",
+                    details={"punctuation_current_chunk": i, "punctuation_total_chunks": n},
+                )
+
             try:
                 punctuation_processor = PunctuationProcessor()
                 punctuated_text, punctuation_model, punctuation_token_usage = punctuation_processor.process(
                     full_text, provider=punctuation_provider, language=punct_language,
+                    progress_callback=_on_punctuation_chunk,
                 )
                 full_text = punctuated_text
-                update_progress(db, task_id, "標點處理完成", {"progress_percentage": 90})
+                progress_store.set_phase(
+                    task_id, Phase.PUNCTUATION, 0.99, message="標點處理完成",
+                    details={"punctuation_completed": True, "punctuation_model": punctuation_model},
+                )
             except Exception as e:
                 print(f"⚠️ 標點處理失敗: {e}")
-                update_progress(db, task_id, "標點處理失敗，使用原始文字", {"progress_percentage": 90})
+                progress_store.set_phase(
+                    task_id, Phase.PUNCTUATION, 0.99, message="標點處理失敗，使用原始文字",
+                    details={"punctuation_failed": True, "punctuation_error": str(e)[:200]},
+                )
 
         # 7. Segment 標點轉換
         converted_segments = convert_segments_punctuation(segments)
 
         # 8. 儲存到 MongoDB
-        update_progress(db, task_id, "正在保存結果...", {"progress_percentage": 95})
+        progress_store.set_phase(
+            task_id, Phase.PUNCTUATION, 1.0, message="正在保存結果..."
+        )
         now = get_utc_timestamp()
         db.transcriptions.replace_one(
             {"_id": task_id},
@@ -242,7 +343,6 @@ def process_task(message_body: dict) -> None:
         # 10. 標記完成
         complete_updates = {
             "status": "completed",
-            "progress": "轉錄完成",
             "result.text_length": len(full_text),
             "result.word_count": len(full_text.split()),
             "config.language": detected_language or language,
@@ -257,7 +357,10 @@ def process_task(message_body: dict) -> None:
                 "completion": punctuation_token_usage.get("completion", 0),
                 "model": punctuation_model or "unknown",
             }
-        update_task(db, task_id, complete_updates)
+        # 順便 unset error：如果 Web Server cleanup_orphaned_tasks 在 Worker
+        # 跑到一半時誤標 SERVER_RESTART error，這裡完成後要把那個殘留清掉。
+        update_task(db, task_id, complete_updates, unset_fields=["error"])
+        progress_store.clear(task_id)
         print(f"✅ [Worker] 任務 {task_id} 完成！({len(full_text)} 字元)")
 
         # 扣除配額（兩步式：先刪預扣、再套用 pipeline）
@@ -302,16 +405,40 @@ def process_task(message_body: dict) -> None:
                         f"err={e}"
                     )
 
+    except TaskCancelled as e:
+        # 使用者已經透過 Web Server cancel endpoint 把 DB status 設為 cancelled，
+        # Web Server 也已釋放預扣。Worker 這邊：
+        # - 不要再 update_task 寫 status（會覆蓋 cancelled）
+        # - 清掉 progress_store snapshot 讓 SSE 立刻收尾
+        # - reservation release 是 idempotent，保險再呼叫一次
+        # - 正常 return（讓 sqs_consumer 把訊息刪掉，不重發）
+        print(f"🛑 [Worker] 任務 {task_id} 被使用者取消，中止處理: {e}")
+        progress_store.clear(task_id)
+        try:
+            from src.database.repositories.reservation_repo import release_reservation_sync
+            release_reservation_sync(db, task_id)
+        except Exception as release_err:
+            print(f"⚠️ [Worker] 釋放預扣失敗（cancel path）：{release_err}")
+
     except Exception as e:
         print(f"❌ [Worker] 任務 {task_id} 失敗: {e}")
         import traceback
         traceback.print_exc()
+        # 送 Sentry（worker 已在 main 初始化 component=worker）
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("task_id", task_id)
+                scope.set_context("task", {"task_id": task_id})
+                sentry_sdk.capture_exception(e)
+        except ImportError:
+            pass
         error_code = getattr(e, "error_code", None) or "SYSTEM_ERROR"
         update_task(db, task_id, {
             "status": "failed",
             "error": {"code": error_code, "message": str(e)},
-            "progress": f"處理失敗: {str(e)[:200]}",
         })
+        progress_store.clear(task_id)
 
         # 釋放預扣（任務失敗）
         try:

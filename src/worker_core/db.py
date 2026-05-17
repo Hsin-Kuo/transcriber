@@ -24,13 +24,15 @@ def get_db():
     return _mongo_client[MONGODB_DB_NAME]
 
 
-def update_task(db, task_id: str, updates: dict) -> None:
+def update_task(db, task_id: str, updates: dict, unset_fields=None) -> None:
+    """更新 task document。
+
+    Args:
+        updates: $set 內容
+        unset_fields: 要 $unset 的欄位名稱列表（例如完成時清掉 SERVER_RESTART 殘留的 error）
+    """
     updates["updated_at"] = get_utc_timestamp()
-    db.tasks.update_one({"_id": task_id}, {"$set": updates})
-
-
-def update_progress(db, task_id: str, progress: str, extra: Optional[dict] = None) -> None:
-    updates = {"progress": progress}
-    if extra:
-        updates.update(extra)
-    update_task(db, task_id, updates)
+    op = {"$set": updates}
+    if unset_fields:
+        op["$unset"] = {f: "" for f in unset_fields}
+    db.tasks.update_one({"_id": task_id}, op)

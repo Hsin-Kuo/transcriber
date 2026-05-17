@@ -187,10 +187,10 @@ class AuditLogRepository:
         Returns:
             統計資料
         """
-        days_ago_ts_ts = get_utc_timestamp() - (days * 24 * 60 * 60)
+        days_ago_ts = get_utc_timestamp() - (days * 24 * 60 * 60)
 
         # 總操作數
-        total = await self.collection.count_documents({"timestamp": {"$gte": days_ago_ts_ts}})
+        total = await self.collection.count_documents({"timestamp": {"$gte": days_ago_ts}})
 
         # 按類型統計
         type_pipeline = [
