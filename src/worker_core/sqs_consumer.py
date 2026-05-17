@@ -161,6 +161,12 @@ def main() -> None:
             print(f"❌ [Worker] SQS polling 錯誤: {e}")
             import traceback
             traceback.print_exc()
+            # 送 Sentry（未 init 時 sentry_sdk.capture_exception 為 no-op）
+            try:
+                import sentry_sdk
+                sentry_sdk.capture_exception(e)
+            except ImportError:
+                pass
             time.sleep(5)
 
     write_heartbeat(status="stopped")

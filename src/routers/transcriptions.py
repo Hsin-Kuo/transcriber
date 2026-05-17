@@ -29,6 +29,7 @@ from ..services.utils.punctuation_processor import PunctuationProcessor
 from ..services.utils.diarization_processor import DiarizationProcessor
 from ..utils.storage_service import is_aws
 from ..utils.config_loader import get_parameter, get_temp_dir
+from ..utils.sentry_helpers import create_background_task
 import os
 import asyncio
 
@@ -749,8 +750,11 @@ async def create_transcription(
                     if _bg_temp_dir.exists():
                         shutil.rmtree(_bg_temp_dir)
 
-            # 發射背景任務，不等待
-            asyncio.create_task(_upload_to_s3_and_notify())
+            # 發射背景任務，不等待；失敗會送 Sentry
+            create_background_task(
+                _upload_to_s3_and_notify(),
+                name=f"upload_s3_notify:{task_id}",
+            )
         else:
             # ===== 本地模式：現有行為 =====
             # 初始化進度（讓 SSE 立即看到「等待處理中」）
@@ -1879,8 +1883,11 @@ async def create_batch_transcriptions(
                         if bg_temp_dir.exists():
                             shutil.rmtree(bg_temp_dir)
 
-                # 發射背景任務，不等待
-                asyncio.create_task(_batch_upload_to_s3_and_notify())
+                # 發射背景任務，不等待；失敗會送 Sentry
+                create_background_task(
+                    _batch_upload_to_s3_and_notify(),
+                    name=f"batch_upload_s3_notify:{task_id}",
+                )
                 temp_dir = None  # 避免 except 中重複清理
 
                 file_result["task_id"] = task_id

@@ -49,6 +49,7 @@ from src.utils.audit_logger import init_audit_logger
 
 # 共享狀態
 from src.utils.shared_state import store as task_state_store
+from src.utils.sentry_helpers import create_background_task
 from src.services.progress_store import InMemoryProgressStore, MongoProgressStore
 
 # 部署環境設定
@@ -306,14 +307,23 @@ async def startup_event():
     await task_service.cleanup_orphaned_tasks()
 
     # 5. 啟動定期記憶體清理
-    asyncio.create_task(task_service.periodic_memory_cleanup())
+    create_background_task(
+        task_service.periodic_memory_cleanup(),
+        name="periodic_memory_cleanup",
+    )
 
     # 5.1. 啟動定期孤立進程清理
-    asyncio.create_task(task_service.periodic_orphaned_process_cleanup())
+    create_background_task(
+        task_service.periodic_orphaned_process_cleanup(),
+        name="periodic_orphaned_process_cleanup",
+    )
 
     # 5.2. 啟動定期孤兒預扣清掃（轉錄 reservations + AI 摘要計數器）
     from src.database.repositories.reservation_repo import periodic_reservation_cleanup
-    asyncio.create_task(periodic_reservation_cleanup(db))
+    create_background_task(
+        periodic_reservation_cleanup(db),
+        name="periodic_reservation_cleanup",
+    )
 
     # 6. 載入 Whisper 模型（條件式）
     if SHOULD_LOAD_MODELS:
@@ -360,7 +370,10 @@ async def startup_event():
 
         # 10. 啟動任務隊列處理器
         print("🚀 正在啟動任務隊列處理器...")
-        asyncio.create_task(task_service.process_pending_queue(transcription_service, max_concurrent=2))
+        create_background_task(
+            task_service.process_pending_queue(transcription_service, max_concurrent=2),
+            name="task_queue_processor",
+        )
         print("✅ 任務隊列處理器已啟動")
     else:
         print("ℹ️  AWS Web Server 模式：跳過 TranscriptionService 初始化和任務隊列")

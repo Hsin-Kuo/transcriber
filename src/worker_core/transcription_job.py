@@ -424,6 +424,15 @@ def process_task(message_body: dict, progress_store: ProgressStore) -> None:
         print(f"❌ [Worker] 任務 {task_id} 失敗: {e}")
         import traceback
         traceback.print_exc()
+        # 送 Sentry（worker 已在 main 初始化 component=worker）
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("task_id", task_id)
+                scope.set_context("task", {"task_id": task_id})
+                sentry_sdk.capture_exception(e)
+        except ImportError:
+            pass
         error_code = getattr(e, "error_code", None) or "SYSTEM_ERROR"
         update_task(db, task_id, {
             "status": "failed",
