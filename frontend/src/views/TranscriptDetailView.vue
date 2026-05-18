@@ -357,7 +357,7 @@ class="transcript-layout"
               @compositionend="segOffsets.handleCompositionEnd($event.currentTarget)"
               @mousemove="handleEditorMouseMove"
               @mousedown="handleEditorClickInEditing"
-              @scroll="hideHoverChip"
+              @scroll="handleEditorScroll"
             ></div>
             <!-- 非編輯模式：使用 v-for 渲染高亮和標記 -->
             <div
@@ -1479,6 +1479,7 @@ const hoverChipStyle = ref({ left: '0px', top: '0px' })
 let segmentHighlightRafId = null
 let hoverChipRafId = null
 let pendingMouseEvent = null
+let scrollHighlightTimer = null
 
 function rebuildSegmentHighlight() {
   segmentHighlightRafId = null
@@ -1496,12 +1497,34 @@ function rebuildSegmentHighlight() {
     return
   }
 
-  const map = buildCharIndexMap(textareaRef.value)
+  // Safari paint cost for CSS Custom Highlight 大致跟 range 數量線性
+  // （實測 ~2.5ms/range，長逐字稿 800+ ranges 會卡 2+ 秒才畫完）。
+  // 視窗外的高亮使用者反正看不到 —— 只 build 視窗 + buffer 範圍內的
+  // segment。用 scrollTop/scrollHeight 比例直接估算 canonical char 範圍，
+  // 完全不做 getBoundingClientRect（不然 force layout × N 一樣慢）。
+  // 滾動時由 handleEditorScroll debounce 80ms 重建。
+  // hit-testing 用 editSegmentRanges 不受影響。
+  const el = textareaRef.value
+  const segs = segOffsets.editSegmentRanges.value
+  const totalChars = segs[segs.length - 1].charEnd
+  let startChar = 0
+  let endChar = totalChars
+  if (el.scrollHeight > 0 && totalChars > 0) {
+    const topRatio = el.scrollTop / el.scrollHeight
+    const bottomRatio = (el.scrollTop + el.clientHeight) / el.scrollHeight
+    const buffer = (bottomRatio - topRatio) * 1.5
+    startChar = Math.floor(Math.max(0, topRatio - buffer) * totalChars)
+    endChar = Math.ceil(Math.min(1, bottomRatio + buffer) * totalChars)
+  }
+
+  const map = buildCharIndexMap(el)
   const ranges = []
-  for (const r of segOffsets.editSegmentRanges.value) {
+  for (const r of segs) {
+    if (r.charEnd < startChar || r.charStart > endChar) continue
     const range = charOffsetToRange(map, r.charStart, r.charEnd)
     if (range) ranges.push(range)
   }
+
   if (ranges.length > 0) {
     CSS.highlights.set('segment-highlight', new Highlight(...ranges))
   } else {
@@ -1563,6 +1586,19 @@ function hitTestSegmentAt(clientX, clientY) {
 
 function hideHoverChip() {
   hoverChipVisible.value = false
+}
+
+// 滾動時：藏 hover chip + debounce 重建 viewport 內的 segment highlight
+// （rebuild 本身已 RAF throttle，但對長逐字稿 paint 仍貴；80ms debounce
+// 讓使用者連續滾動時不會每個 scroll frame 都 paint，停下來才更新）
+function handleEditorScroll() {
+  hideHoverChip()
+  if (!isAltPressed.value || !isEditing.value || displayMode.value !== 'paragraph') return
+  if (scrollHighlightTimer) clearTimeout(scrollHighlightTimer)
+  scrollHighlightTimer = setTimeout(() => {
+    scrollHighlightTimer = null
+    scheduleSegmentHighlightRebuild()
+  }, 80)
 }
 
 function updateHoverChipFromEvent(e) {
@@ -2431,6 +2467,10 @@ onUnmounted(() => {
   if (hoverChipRafId !== null) {
     cancelAnimationFrame(hoverChipRafId)
     hoverChipRafId = null
+  }
+  if (scrollHighlightTimer) {
+    clearTimeout(scrollHighlightTimer)
+    scrollHighlightTimer = null
   }
   if (window.CSS && CSS.highlights) {
     CSS.highlights.delete('segment-highlight')
