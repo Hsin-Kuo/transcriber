@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Callable
 from concurrent.futures import ThreadPoolExecutor
 import shutil
-import subprocess
 import json
 from datetime import datetime, timezone, timedelta
 
@@ -123,26 +122,11 @@ class TranscriptionService:
         Returns:
             MP3 檔案路徑
         """
-        # 如果已經是 MP3，直接返回（Whisper 和 pyannote 都支援 MP3）
-        if audio_path.suffix.lower() == '.mp3':
-            return audio_path
-
-        # 使用 ffmpeg 轉換為 16kHz MP3
-        mp3_path = audio_path.with_suffix('.mp3')
-
-        subprocess.run([
-            'ffmpeg', '-y', '-i', str(audio_path),
-            '-vn',  # 不處理視頻（支援影片檔輸入）
-            '-acodec', 'libmp3lame',  # MP3 編碼器
-            '-b:a', '128k',  # 128kbps（語音品質足夠）
-            '-ar', '16000',  # 16kHz 採樣率（Whisper 推薦）
-            '-ac', '1',  # 單聲道
-            str(mp3_path)
-        ], check=True, capture_output=True, timeout=300)
-
-        # 轉換成功後立即刪除原始檔案，釋放儲存空間
-        audio_path.unlink()
-
+        # 委派給 src/utils/audio_converter.convert_to_mp3
+        # 該函數實現 Compact audio 契約 + precise skip：5 屬性全 match 才 skip
+        # ffmpeg、不 match 用自適應 target re-encode（不 upsample、不 grow）
+        from src.utils.audio_converter import convert_to_mp3
+        mp3_path, _transcoded = convert_to_mp3(audio_path)
         return mp3_path
 
 

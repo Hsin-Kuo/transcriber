@@ -58,11 +58,39 @@ Web Server 把新建 Task 移交給 Worker 的動作。AWS 模式下含三件事
 _Avoid_: handoff、enqueue（這兩個只是 dispatch 內部的子步驟）。
 
 **TranscriptionOrchestrator**:
-單次 transcription run 的 Phase 狀態機 + 取消 + 終態（completed / failed）協調者。持有 processors（whisper / punctuation / diarization）與 progress_store，不持有 Task 業務狀態。run() 從 PREPARATION 跑到 PUNCTUATION，期間透過 check_cancelled() poll DB；遇取消拋 `TranscriptionCancelled`、遇例外走 `_mark_failed`、成功走 `_mark_completed`（含 quota consume + audit log）。封裝在 `src/services/transcription_orchestrator.py`。
+單次 transcription run 的 Phase 狀態機 + 取消 + 終態（completed / failed）協調者。持有 processors（whisper / punctuation / diarization）與 progress_store，不持有 Task 業務狀態。run() 從 PREPARATION 跑到 PUNCTUATION，期間透過 check_cancelled() poll DB；遇取消拋 `TranscriptionCancelled`、遇例外走 `_mark_failed`、成功走 `_mark_completed`（含 quota consume + audit log）。封裝在 `src/transcription/orchestrator.py`，**Web Server 與 Worker 兩個進程共用同一個 class**（透過 [[AudioSource]] adapter 抽掉「音檔從哪來」這個唯一會變的點）。
 _Avoid_: pipeline（暗示 declarative DAG）、runner（過泛）、TranscriptionRun（容易誤以為是 Task 本身）。
 
+**AudioSource**:
+取得單一 Task 的 [[Handoff audio]] 到本機檔案系統的 adapter，是 Orchestrator 兩進程共用的唯一變化點。`LocalFileSource` 直接回傳 router 已經放在 disk 上的路徑；`S3Source` 從 `handoff/{task_id}.{ext}` 下載到 temp dir、成功 acquire 後在 cleanup() 時 DELETE handoff 物件。**只負責 acquire() + cleanup()**——格式轉換在 `audio_converter`、永久儲存在 `storage_service`，都不歸 AudioSource 管。封裝在 `src/transcription/audio_source.py`。
+_Avoid_: AudioFetcher、AudioProvider（過泛）、AudioAdapter（adapter 是 role 不是名字）、AudioInput（容易跟 raw bytes / file handle 等多種 input 概念混）。
+
 **TranscriptionCancelled**:
-Orchestrator 內 check_cancelled() 偵測到 Task status 已被使用者透過 cancel endpoint 設成 canceling/cancelled 時拋出。Top-level except 統一處理 cleanup 但**不**覆蓋 status（避免覆掉 cancel endpoint 寫的 cancelled）。跟 Worker 端 `src/worker_core/transcription_job.TaskCancelled` 同 pattern——兩個 process 各有一個 exception，因為跨 process 不能共用 class。
+Orchestrator 內 check_cancelled() 偵測到 Task status 已被使用者透過 cancel endpoint 設成 canceling/cancelled 時拋出。Top-level except 統一處理 cleanup 但**不**覆蓋 status（避免覆掉 cancel endpoint 寫的 cancelled）。**單一 exception class，兩個進程共用**——Orchestrator 模組搬到 `src/transcription/` 後，Web Server 與 Worker 都從同一處 import。
+
+### 音檔形態與儲存
+
+**Handoff audio**:
+使用者上傳的原始音檔，AWS 模式下由 Web Server 透過 dispatch 寫到 `s3://{bucket}/handoff/{task_id}.{actual_ext}`（key 副檔名誠實反映實際內容）。**只是 Web Server → Worker 的傳遞暫態**，Worker 取走 + 轉成 [[Compact audio]] 後 DELETE。Local 模式對應 `temp_dir/input.{ext}`，由 router 直接交給 Orchestrator、轉完後 temp_dir 整個清掉。
+_Avoid_: raw audio（過泛、容易跟「未壓縮 PCM」混）、source audio（容易跟 [[AudioSource]] adapter 混）、original（過泛）。
+
+**Compact audio**:
+使用者下載「這個 task 的音檔」時拿到的唯一形態。**契約是物理狀態的範圍，不是流程**——永久檔必須滿足全部五個屬性：
+- container = `mp3`
+- codec = `mp3`
+- channels = `1`（mono）
+- bit_rate ≤ `128000`（VBR 略有誤差，實作上保留 slack 到 ≤ ~130000）
+- sample_rate ∈ `{8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000}`（標準 MP3 支援的 sample rate）
+
+由 [[TranscriptionOrchestrator]] 的 PREPARATION phase 從 [[Handoff audio]] 產生。實作策略是 **precise skip + 自適應 re-encode**：ffprobe 抓 5 個屬性，全 match 才 skip ffmpeg（保留輸入品質、節省 CPU）；任一不 match 就 re-encode，target 依輸入自適應——`channels = 1`（永遠 mono）、`sample_rate = min(input, 16000)`（不 upsample）、`bit_rate = min(input, 128000)`（不 grow）。**設計保證：re-encode 永不讓檔案變大**，只把超出契約上限的維度壓回去。儲存在 `uploads/{tier}/{task_id}.mp3`（AWS 為 S3 key，local 為 `uploads/{task_id}.mp3` 不帶 tier）。`task.result.audio_file` 指向此處，僅在 Orchestrator finalize 成功後寫入；`task.result.audio_filename` 保留使用者上傳的原 stem + `.mp3`。
+
+**為什麼不叫 "Normalized"**：永久檔的 sample_rate **不保證一致**（不同 task 可能是 8kHz、16kHz、44.1kHz 等通過 predicate 的任何 rate）——"normalized" 暗示「屬性完全一致」會誤導。"Compact" 強調真正硬性的共同點：mono + bitrate 上限 + mp3 container。Whisper 內部一律 downsample，所以 sample_rate 對轉錄無影響；對使用者下載也只是檔案微差。
+
+_Avoid_: normalized audio（過度承諾屬性一致性、暗示「全部 task 的永久檔屬性 identical」是錯的）、processed audio、converted audio、output audio、final audio（都不夠特定）；mp3（過泛、容易跟使用者上傳的 mp3 混）。
+
+> **Skip predicate 為什麼必須檢全部 5 個屬性**：歷史上有兩次踩過半成品優化——`suffix == '.mp3'`（連 ffprobe 都沒查、wav 改名 .mp3 直接 crash whisper）跟 `codec == 'mp3'`（不檢 sample_rate / channels / bit_rate，44.1kHz stereo 192k MP3 也被當成 Compact audio 存進去）。**不要再寫「mp3 就跳」這種寬條件**——要嘛 5 個全檢、要嘛永遠重編。中間版本永遠是 bug。
+
+> **舊資料**：2026-05 之前的 task 用半成品 skip predicate 產出的 `result.audio_file` 物件可能違反 Compact audio 契約（stereo、>128kbps 等）。未做 backfill——契約只承諾未來 task。
 
 ## Relationships
 

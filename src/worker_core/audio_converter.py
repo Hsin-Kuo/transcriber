@@ -1,79 +1,11 @@
+"""音檔格式轉換 — Worker 端 thin re-export。
+
+實作放在 [src/utils/audio_converter.py](../utils/audio_converter.py)，兩個進程
+共用同一份。Worker 因為歷史 import path 保留此檔當 forwarder，方便逐步遷移
+（之後 Orchestrator 統一後可以拔掉，把 callers 直接指向 utils 版本）。
+
+對應 CONTEXT.md「Compact audio」。
 """
-音檔格式轉換工具
+from src.utils.audio_converter import convert_to_mp3, convert_to_wav
 
-Worker 收到的音檔可能是任意格式（ALAC、AAC、WAV、FLAC 等），
-統一轉為 MP3（128kbps, mono）以確保瀏覽器可播放並節省儲存空間。
-pyannote 說話者辨識需要 WAV 格式，因此另提供 WAV 轉換。
-"""
-
-import json
-import subprocess
-from pathlib import Path
-
-
-def convert_to_mp3(audio_path: Path) -> tuple[Path, bool]:
-    """將音檔轉為 MP3（128kbps, mono）。
-
-    Returns:
-        (mp3_path, transcoded)
-        transcoded=False：已是 MP3，僅重新命名
-        transcoded=True：實際重新編碼，S3 需要更新
-    """
-    mp3_path = audio_path.with_suffix(".mp3")
-
-    codec = ""
-    try:
-        result = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", str(audio_path)],
-            capture_output=True, text=True, timeout=30,
-        )
-        if result.stdout:
-            probe = json.loads(result.stdout)
-            codec = probe.get("streams", [{}])[0].get("codec_name", "")
-    except Exception:
-        pass  # codec 保持 ""，繼續嘗試 ffmpeg 轉碼
-
-    # 已是 MP3 codec，只需重新命名（若副檔名不同）
-    if codec == "mp3":
-        if audio_path != mp3_path:
-            audio_path.rename(mp3_path)
-        print("✅ 音檔已是 MP3 格式，無需轉碼")
-        return mp3_path, False
-
-    print(f"🔄 音檔格式 {codec or '未知'}，轉碼為 MP3 128kbps...")
-    original_size = audio_path.stat().st_size / 1024 / 1024
-    tmp_path = mp3_path.with_name(f"_tmp_{mp3_path.name}")
-    try:
-        subprocess.run(
-            ["ffmpeg", "-y", "-i", str(audio_path),
-             "-vn", "-acodec", "libmp3lame", "-b:a", "128k", "-ac", "1",
-             "-f", "mp3", str(tmp_path)],
-            check=True, capture_output=True, timeout=600,
-        )
-        if audio_path != mp3_path:
-            audio_path.unlink()
-        tmp_path.rename(mp3_path)
-        new_size = mp3_path.stat().st_size / 1024 / 1024
-        print(f"✅ MP3 轉碼完成: {original_size:.1f} MB → {new_size:.1f} MB")
-        return mp3_path, True
-    except Exception as e:
-        if tmp_path.exists():
-            tmp_path.unlink()
-        stderr = e.stderr.decode(errors="replace")[-300:] if hasattr(e, "stderr") and e.stderr else ""
-        err = RuntimeError(f"音檔格式轉換失敗，檔案可能損壞或受 DRM 保護。ffmpeg: {stderr}")
-        err.error_code = "INVALID_AUDIO"
-        raise err from e
-
-
-def convert_to_wav(audio_path: Path, wav_path: Path) -> Path:
-    """將音檔轉為 16kHz mono WAV（pyannote 說話者辨識需要）。"""
-    try:
-        subprocess.run(
-            ["ffmpeg", "-y", "-i", str(audio_path), "-ar", "16000", "-ac", "1", str(wav_path)],
-            check=True, capture_output=True,
-        )
-        print(f"🔄 已轉換為 WAV: {wav_path}")
-        return wav_path
-    except Exception as e:
-        print(f"⚠️ WAV 轉換失敗: {e}，使用原始音檔")
-        return audio_path
+__all__ = ["convert_to_mp3", "convert_to_wav"]
