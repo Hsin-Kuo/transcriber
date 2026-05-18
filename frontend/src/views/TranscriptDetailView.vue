@@ -956,6 +956,12 @@ function handleStartEditing() {
   if (displayMode.value === 'paragraph') {
     nextTick(() => {
       if (textareaRef.value) {
+        // 防禦：若 segmentMarkers 為空（例如儲存後 content 與 segments 不同步導致 match 失敗），
+        // 在 initEditing 前用當前 DOM 內容重產一次
+        if (!segmentMarkers.value?.length && segments.value?.length) {
+          const content = textareaRef.value.textContent || currentTranscript.value?.content || ''
+          if (content) generateSegmentMarkers(segments.value, content)
+        }
         segOffsets.initEditing(textareaRef.value, segmentMarkers.value)
       }
     })
