@@ -2312,6 +2312,17 @@ function handlePaste(e) {
 
 // 處理 contenteditable 區域的按鍵事件（使用 Alt 作為修飾鍵）
 function handleContentEditableKeyDown(e) {
+  // Intercept Enter: insert '\n' directly into the text node instead of letting
+  // the browser create new <div> elements. Keeping the DOM flat preserves the
+  // text-node references held by CSS Custom Highlight Ranges (search + AltHL),
+  // preventing highlights from disappearing after a newline. white-space:pre-wrap
+  // renders the '\n' as a visible line break.
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    document.execCommand('insertText', false, '\n')
+    return
+  }
+
   if (!e.altKey) return
 
   // Alt + ArrowUp: 加速播放
