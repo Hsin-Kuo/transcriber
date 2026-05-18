@@ -1855,7 +1855,9 @@ function handleReplaceCurrent(newReplaceText) {
         newLen
       )
       if (!adjusted || adjusted.charEnd <= adjusted.charStart) {
-        return { ...seg, text: '' }
+        // Match fully covers this segment — assign replacement text so the segment
+        // stays findable in the new content and doesn't get persisted as "".
+        return { ...seg, text: newReplaceText }
       }
       return { ...seg, text: replacedContent.slice(adjusted.charStart, adjusted.charEnd) }
     })

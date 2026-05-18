@@ -19,7 +19,7 @@ from src.utils.storage_service import (
     save_audio,
 )
 from src.utils.time_utils import get_utc_timestamp
-from src.utils.text_utils import convert_segments_punctuation
+from src.utils.text_utils import align_segments_to_punctuated_text, convert_segments_punctuation
 from src.utils.config_loader import get_temp_dir
 from src.services.progress_store import Phase, ProgressStore
 from src.worker_core.db import get_db, update_task
@@ -309,6 +309,7 @@ def process_task(message_body: dict, progress_store: ProgressStore) -> None:
                     progress_callback=_on_punctuation_chunk,
                 )
                 full_text = punctuated_text
+                segments = align_segments_to_punctuated_text(segments, punctuated_text)
                 progress_store.set_phase(
                     task_id, Phase.PUNCTUATION, 0.99, message="標點處理完成",
                     details={"punctuation_completed": True, "punctuation_model": punctuation_model},

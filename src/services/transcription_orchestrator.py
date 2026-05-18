@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from src.database.sync_client import get_sync_db
-from src.utils.text_utils import convert_segments_punctuation
+from src.utils.text_utils import align_segments_to_punctuated_text, convert_segments_punctuation
 from src.utils.time_utils import get_utc_timestamp
 
 from .progress_store import Phase, ProgressStore
@@ -369,7 +369,12 @@ class TranscriptionOrchestrator:
                     "punctuation_model": punctuation_model,
                 },
             )
-            return punctuated_text, segments, punctuation_model, punctuation_token_usage
+            aligned_segments = align_segments_to_punctuated_text(segments, punctuated_text)
+            if aligned_segments is not segments:
+                print(f"✅ [Orchestrator] segments 已同步標點（{len(aligned_segments)} 個）")
+            else:
+                print("⚠️ [Orchestrator] segments 對齊失敗，保留原始文字")
+            return punctuated_text, aligned_segments, punctuation_model, punctuation_token_usage
         except Exception as punct_error:
             print(f"⚠️ [Orchestrator] 標點處理失敗：{punct_error}")
             print("   將使用原始轉錄文字（無標點）繼續完成任務")
