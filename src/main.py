@@ -390,7 +390,7 @@ async def startup_event():
         # local 模式不需要——任務直接走 in-process executor 不送 SQS
         import boto3
         from src.services.worker_dispatch import WorkerDispatch, init_worker_dispatch
-        from src.utils.storage_service import save_audio
+        from src.utils.storage_service import upload_to_handoff
         from src.utils.config_loader import get_parameter as _gp
 
         sqs_region = os.getenv("S3_REGION", "ap-northeast-1")
@@ -402,7 +402,7 @@ async def startup_event():
             sqs_client=boto3.client("sqs", region_name=sqs_region),
             sqs_queue_url=sqs_queue_url,
             worker_secret=worker_secret,
-            s3_uploader=save_audio,
+            handoff_uploader=upload_to_handoff,
         ))
         print("✅ WorkerDispatch 初始化完成")
 

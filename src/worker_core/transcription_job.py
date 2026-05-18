@@ -11,15 +11,17 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
-import boto3
-
 from src.models.worker_job import TranscriptionWorkerJob
-from src.utils.storage_service import download_audio
+from src.utils.storage_service import (
+    delete_handoff,
+    download_audio,
+    download_from_handoff,
+    save_audio,
+)
 from src.utils.time_utils import get_utc_timestamp
 from src.utils.text_utils import convert_segments_punctuation
 from src.utils.config_loader import get_temp_dir
 from src.services.progress_store import Phase, ProgressStore
-from src.worker_core.config import S3_REGION, S3_BUCKET
 from src.worker_core.db import get_db, update_task
 from src.worker_core.model_cache import get_whisper_processor, get_diarization_pipeline
 from src.worker_core.audio_converter import convert_to_mp3, convert_to_wav
@@ -131,24 +133,24 @@ def process_task(message_body: dict, progress_store: ProgressStore) -> None:
     temp_dir = get_temp_dir()
 
     try:
-        # 1. 下載音檔（副檔名 .original 不預設格式）
+        # 1. 下載 Handoff audio（Layer 2）
         progress_store.set_phase(task_id, Phase.PREPARATION, 0.2, message="正在下載音檔...")
-        audio_path = temp_dir / f"{task_id}.original"
-        download_audio(task_id, audio_path, tier=user_tier)
+        if job.handoff_ext:
+            audio_path = temp_dir / f"{task_id}.{job.handoff_ext}"
+            download_from_handoff(task_id, job.handoff_ext, audio_path)
+        else:
+            # Legacy fallback：舊版 Server 上傳到 uploads/{tier}/{task_id}.mp3
+            # （SQS 排空後可拔；deploy 順序務必 Worker 先於 Server）
+            audio_path = temp_dir / f"{task_id}.original"
+            download_audio(task_id, audio_path, tier=user_tier)
         print(f"📥 已下載音檔: {audio_path} ({audio_path.stat().st_size / 1024 / 1024:.2f} MB)")
 
-        # 2. 統一轉為 MP3
+        # 2. 轉成 Compact audio MP3（precise skip + 自適應 re-encode，見 utils.audio_converter）
         progress_store.set_phase(task_id, Phase.PREPARATION, 0.5, message="正在轉換音檔格式...")
-        audio_path, transcoded = convert_to_mp3(audio_path)
-        if transcoded:
-            progress_store.set_phase(
-                task_id, Phase.PREPARATION, 0.7, message="正在上傳轉碼後的音檔..."
-            )
-            s3_key = f"uploads/{user_tier}/{task_id}.mp3"
-            boto3.client("s3", region_name=S3_REGION).upload_file(
-                str(audio_path), S3_BUCKET, s3_key
-            )
-            print(f"☁️ 已上傳轉碼後的音檔到 S3: {s3_key}")
+        audio_path, _transcoded = convert_to_mp3(audio_path)
+        # 寫入 uploads/ 永久區 + 刪除 handoff 移到 finalize 階段（步驟 9），
+        # 因為 save_audio 在 AWS 模式下會 unlink 本機檔案，但 audio_path
+        # 後續還要餵 whisper / diarization。
 
         # 3. 取得模型（快取，只在首次任務載入）
         progress_store.set_phase(task_id, Phase.PREPARATION, 1.0, message="正在準備模型...")
@@ -340,11 +342,27 @@ def process_task(message_body: dict, progress_store: ProgressStore) -> None:
                 upsert=True,
             )
 
-        # 9. 更新音檔路徑
+        # 9. 寫入 uploads/ 永久區（Compact audio）→ 設 audio_file / audio_filename
+        # save_audio 在 AWS 模式下會 unlink 本機 audio_path（已不再需要）；回傳 s3:// URI
+        audio_file_uri = save_audio(task_id, audio_path, tier=user_tier)
+        original_upload_name = (task_doc.get("file") or {}).get("filename") if task_doc else None
+        audio_filename = (
+            f"{Path(original_upload_name).stem}.mp3"
+            if original_upload_name
+            else f"{task_id}.mp3"
+        )
         update_task(db, task_id, {
-            "result.audio_file": f"s3://{S3_BUCKET}/uploads/{user_tier}/{task_id}.mp3",
-            "result.audio_filename": f"{task_id}.mp3",
+            "result.audio_file": audio_file_uri,
+            "result.audio_filename": audio_filename,
         })
+
+        # 9b. 刪除 handoff（Compact audio 已落地 uploads/，handoff 不再需要）
+        # 失敗不影響任務完成——orphan sweep 會收
+        if job.handoff_ext:
+            try:
+                delete_handoff(task_id, job.handoff_ext)
+            except Exception as e:
+                print(f"⚠️ 刪除 handoff 失敗（將由 sweep 處理）：{e}")
 
         # 10. 標記完成
         complete_updates = {

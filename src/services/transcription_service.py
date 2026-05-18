@@ -360,7 +360,7 @@ class TranscriptionService:
             print(f"🔧 [_save_audio_file_sync] 找到 MP3: {mp3_file}")
             print(f"🔧 [_save_audio_file_sync] 音檔是否存在: {mp3_file.exists()}")
 
-            # 從 task 取得用戶 tier
+            # 從 task 取得用戶 tier + 原始上傳檔名
             task = self._get_task_sync(task_id)
             user_tier = task.get("user", {}).get("tier", "free") if task else "free"
 
@@ -368,12 +368,17 @@ class TranscriptionService:
             stored_path = save_audio(task_id, mp3_file, tier=user_tier)
             print(f"💾 已儲存音檔: {stored_path}")
 
-            # 使用同步方法更新任務的 audio_file 路徑
-            # 保存原始檔名（但副檔名改為 .mp3）
-            original_filename = Path(audio_files[0].name).stem + ".mp3"
+            # audio_filename 保留使用者上傳檔名的 stem（副檔名換成 .mp3），
+            # 而非 temp 內的「input.mp3」。對齊 Worker 模式 + CONTEXT.md 的 Compact audio 契約。
+            original_upload_name = (task.get("file") or {}).get("filename") if task else None
+            audio_filename = (
+                f"{Path(original_upload_name).stem}.mp3"
+                if original_upload_name
+                else f"{task_id}.mp3"
+            )
             self._update_task_sync(task_id, {
                 "result.audio_file": stored_path,
-                "result.audio_filename": original_filename
+                "result.audio_filename": audio_filename,
             })
             print("✅ [_save_audio_file_sync] 已更新資料庫")
         except Exception as e:

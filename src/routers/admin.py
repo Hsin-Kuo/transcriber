@@ -1347,3 +1347,33 @@ async def get_resource_audit_logs(
         "logs": logs,
         "total": len(logs)
     }
+
+
+@router.post("/cleanup/handoff-orphans")
+async def cleanup_handoff_orphans(
+    older_than_hours: int = Query(24, ge=1, le=720),
+    admin: dict = Depends(get_current_admin),
+):
+    """掃 S3 handoff/ 找超過 N 小時的孤兒並刪除。
+
+    正常情況下 Worker 完成任務後會立即刪除自己的 handoff；殘留代表 dispatch
+    上傳後 Worker 沒處理（crash / cancel / Spot 中斷沒恢復等）。
+
+    對應 CONTEXT.md「Handoff audio」。手動觸發，未自動排程——
+    建議搭 crontab 每日跑一次。
+    """
+    from ..utils.storage_service import is_aws, sweep_handoff_orphans
+
+    if not is_aws():
+        return {"deleted": 0, "message": "local 模式無 handoff/ 結構"}
+
+    # 包 executor 避免 blocking event loop（S3 list/delete 是 sync）
+    import asyncio
+    loop = asyncio.get_event_loop()
+    deleted = await loop.run_in_executor(
+        None, sweep_handoff_orphans, older_than_hours,
+    )
+    return {
+        "deleted": deleted,
+        "older_than_hours": older_than_hours,
+    }

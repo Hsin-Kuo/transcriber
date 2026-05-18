@@ -1,7 +1,7 @@
 """WorkerDispatch 單元測試（M1.1）。
 
-驗證 seam 的價值——用 mock 注入 sqs_client / s3_uploader 完整覆蓋 dispatch
-邏輯，不需要 boto3 也不需要 SQS 帳號。
+驗證 seam 的價值——用 mock 注入 sqs_client / handoff_uploader 完整覆蓋
+dispatch 邏輯，不需要 boto3 也不需要 SQS 帳號。
 """
 import asyncio
 import hashlib
@@ -45,13 +45,13 @@ def _make_dispatch(
     sqs_client=None,
     sqs_queue_url="https://sqs.example.com/queue",
     worker_secret="test-secret-32-chars-minimum-len",
-    s3_uploader=None,
+    handoff_uploader=None,
 ):
     return WorkerDispatch(
         sqs_client=sqs_client or MagicMock(),
         sqs_queue_url=sqs_queue_url,
         worker_secret=worker_secret,
-        s3_uploader=s3_uploader or MagicMock(),
+        handoff_uploader=handoff_uploader or MagicMock(),
     )
 
 
@@ -96,7 +96,7 @@ class TestHappyPath:
     async def test_uploads_and_sends_sqs(self, fake_audio: Path):
         sqs = MagicMock()
         uploader = MagicMock()
-        d = _make_dispatch(sqs_client=sqs, s3_uploader=uploader)
+        d = _make_dispatch(sqs_client=sqs, handoff_uploader=uploader)
 
         await d._dispatch(
             job=_make_job(task_id="task-1"),
@@ -105,8 +105,9 @@ class TestHappyPath:
             user_tier="pro",
         )
 
-        # S3 uploader 被呼叫且帶正確參數
-        uploader.assert_called_once_with("task-1", fake_audio, "pro")
+        # Handoff uploader 被呼叫且帶正確參數 (task_id, local_path, ext)
+        # ext 從 audio_local_path.suffix 推導，與 user_tier 無關
+        uploader.assert_called_once_with("task-1", fake_audio, "mp3")
 
         # SQS send_message 被呼叫
         sqs.send_message.assert_called_once()
@@ -125,7 +126,7 @@ class TestHappyPath:
     async def test_skips_sqs_when_url_empty(self, fake_audio: Path):
         sqs = MagicMock()
         uploader = MagicMock()
-        d = _make_dispatch(sqs_client=sqs, sqs_queue_url="", s3_uploader=uploader)
+        d = _make_dispatch(sqs_client=sqs, sqs_queue_url="", handoff_uploader=uploader)
 
         await d._dispatch(
             job=_make_job(task_id="task-2"),
@@ -144,7 +145,7 @@ class TestFailurePath:
     async def test_s3_failure_raises_after_cleanup(self, fake_audio: Path, monkeypatch):
         sqs = MagicMock()
         uploader = MagicMock(side_effect=RuntimeError("S3 down"))
-        d = _make_dispatch(sqs_client=sqs, s3_uploader=uploader)
+        d = _make_dispatch(sqs_client=sqs, handoff_uploader=uploader)
 
         # 攔截 get_sync_db 避免真的打 mongo
         update_mock = MagicMock()
@@ -181,7 +182,7 @@ class TestFailurePath:
         sqs = MagicMock()
         sqs.send_message.side_effect = RuntimeError("SQS unreachable")
         uploader = MagicMock()
-        d = _make_dispatch(sqs_client=sqs, s3_uploader=uploader)
+        d = _make_dispatch(sqs_client=sqs, handoff_uploader=uploader)
 
         fake_db = MagicMock()
         monkeypatch.setattr(

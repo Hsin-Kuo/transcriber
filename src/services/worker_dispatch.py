@@ -1,10 +1,11 @@
 """Worker dispatch seam — Web Server 把 Task 移交給 Worker 的封裝。
 
 對應 CONTEXT.md「Worker dispatch」：AWS 模式下，建立 Task 後要把音檔送到
-S3、簽 HMAC 訊息、發進 SQS。任一步失敗就把 Task 標 failed。
+S3 [[Handoff audio]] 位置、簽 HMAC 訊息、發進 SQS。任一步失敗就把 Task 標
+failed。Worker 取走 handoff、轉成 [[Compact audio]] 後 DELETE handoff。
 
-本模組以可注入的 boto3 client 與 S3 uploader 為 interface，方便測試以 mock
-替換而不必 monkeypatch 環境變數。
+本模組以可注入的 boto3 client 與 handoff uploader 為 interface，方便測試以
+mock 替換而不必 monkeypatch 環境變數。
 
 Lifecycle：main.py startup 一次性呼叫 init_worker_dispatch()；routers 拿
 get_worker_dispatch() 用同一實例。local 模式下不需要 init。
@@ -25,7 +26,7 @@ from src.utils.sentry_helpers import create_background_task
 class WorkerDispatch:
     """封裝 Web Server → Worker 的 task 移交。
 
-    Construction-time DI：sqs_client + s3_uploader 由呼叫端注入，
+    Construction-time DI：sqs_client + handoff_uploader 由呼叫端注入，
     測試可塞 mock。
     """
 
@@ -35,20 +36,21 @@ class WorkerDispatch:
         sqs_client: Any,
         sqs_queue_url: str,
         worker_secret: str,
-        s3_uploader: Callable[[str, Path, str], None],
+        handoff_uploader: Callable[[str, Path, str], str],
     ):
         """
         Args:
             sqs_client: boto3.client("sqs", region_name=...)
             sqs_queue_url: SQS queue URL；空字串時略過發送（dev/未配置）
             worker_secret: HMAC 簽名密鑰；空字串時略過簽章（dev/未配置）
-            s3_uploader: callable(task_id, local_path, tier) -> None
-                         負責把音檔上傳到 S3 對應 tier 路徑（包 blocking I/O）
+            handoff_uploader: callable(task_id, local_path, ext) -> str
+                              把音檔上傳到 S3 `handoff/{task_id}.{ext}`，回傳 s3:// URI
+                              （包 blocking I/O；典型實作見 storage_service.upload_to_handoff）
         """
         self._sqs_client = sqs_client
         self._sqs_queue_url = sqs_queue_url
         self._worker_secret = worker_secret
-        self._s3_uploader = s3_uploader
+        self._handoff_uploader = handoff_uploader
 
     # ── public ──────────────────────────────────────────────
 
@@ -92,11 +94,13 @@ class WorkerDispatch:
         try:
             loop = asyncio.get_event_loop()
 
-            # 1. S3 上傳（blocking → executor）
+            # 1. Handoff S3 上傳（blocking → executor）
+            # ext 從本機檔案的副檔名推；job.handoff_ext 應該由 caller 設成同一值。
+            ext = audio_local_path.suffix.lstrip(".").lower()
             await loop.run_in_executor(
-                None, self._s3_uploader, task_id, audio_local_path, user_tier
+                None, self._handoff_uploader, task_id, audio_local_path, ext
             )
-            print(f"☁️  音檔已上傳到 S3: uploads/{user_tier}/{task_id}.mp3", flush=True)
+            print(f"☁️  音檔已上傳到 S3: handoff/{task_id}.{ext}", flush=True)
 
             # 2. SQS 送出（model_dump → sign envelope → JSON）
             if self._sqs_queue_url:

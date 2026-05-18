@@ -40,3 +40,8 @@ class TranscriptionWorkerJob(BaseModel):
 
     max_speakers: Optional[int] = None
     """diarization 最大說話者數；None = 自動"""
+
+    handoff_ext: Optional[str] = None
+    """Handoff audio 副檔名（不含 dot），例如 "wav"。Worker 用此推 S3 key
+    `handoff/{task_id}.{ext}`。None = 來自舊版 Server（Layer 2 前），Worker
+    fallback 到 `uploads/{tier}/{task_id}.mp3` 下載——SQS 排空後可拔。"""
