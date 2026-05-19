@@ -89,6 +89,7 @@ export function alignSegmentsToContent(segments, content) {
       const expected = lastSearchIndex + timeDelta * charPerSecond
       const expectedInt = Math.floor(expected)
 
+      const firstHit = contentLower.indexOf(textLower, lastSearchIndex)
       const backward = contentLower.lastIndexOf(textLower, expectedInt)
       const validBackward = backward >= lastSearchIndex ? backward : -1
       const forward = contentLower.indexOf(
@@ -96,14 +97,32 @@ export function alignSegmentsToContent(segments, content) {
         Math.max(lastSearchIndex, expectedInt + 1),
       )
 
-      if (validBackward === -1 && forward === -1) continue // 失配
-      if (validBackward === -1) chosen = forward
-      else if (forward === -1) chosen = validBackward
-      else
+      if (firstHit === -1) continue // 完全找不到 → 失配
+
+      // 偵測 expected over-shoot：當 [lastSearchIndex, expected] 範圍內有
+      // 多個候選且彼此相距遠（firstHit 跟 validBackward 距離 > 30 chars），
+      // 代表 candidates 散落在 content 不同段落。「最靠 expected」的
+      // validBackward 通常是錯的（後段同字 — cps 高估、silence/speaker tag
+      // 導致 local 密度低於全域，expected 飄遠造成）。信時間軸 monotone 選
+      // firstHit 較安全，避免 lastSearchIndex 跳過頭污染後續 cascade。
+      // 經典 case：seg 2 silence (text="") 後的 seg 3，其 text 在 line 2
+      // 和 line 3 各出現一次，bidirectional 會挑後者 → 之後 segments 全失配。
+      const SPREAD_FOR_EARLIEST = 30
+      if (
+        validBackward !== -1 &&
+        validBackward - firstHit > SPREAD_FOR_EARLIEST
+      ) {
+        chosen = firstHit
+      } else if (validBackward === -1) {
+        chosen = forward
+      } else if (forward === -1) {
+        chosen = validBackward
+      } else {
         chosen =
           Math.abs(validBackward - expected) <= Math.abs(forward - expected)
             ? validBackward
             : forward
+      }
 
       // 短字 spurious match 防護：當 ≤2 字段唯一找到的位置距 expected 過遠，
       // 多半是 LLM 把該段原本的位置改掉（或改字）後，演算法被迫挑到很遠的
