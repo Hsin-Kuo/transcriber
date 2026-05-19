@@ -68,8 +68,14 @@ export function alignSegmentsToContent(segments, content) {
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i]
     const text = (seg?.text ?? '').trim()
-    if (!text) continue
-    if (!CONTENT_CHAR_RE.test(text)) continue // 全標點/空白 segment 跳過
+    if (!text || !CONTENT_CHAR_RE.test(text)) {
+      // 空白/純標點 segment 跳過，但仍推進時間錨點：
+      // silence 等無文字段仍佔據真實音訊時間，若不更新 lastSearchTime，
+      // 下一個 segment 的 timeDelta 會被虛增，導致 expected 過度向後偏移，
+      // 在文字有重複出現時（如兩處「SSK」）選到錯誤的後者。
+      if (Number.isFinite(seg?.end)) lastSearchTime = seg.end
+      continue
+    }
 
     const textLower = text.toLowerCase()
     const hasTime =

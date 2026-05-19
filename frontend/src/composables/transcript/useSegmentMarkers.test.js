@@ -368,6 +368,23 @@ describe('alignSegmentsToContent', () => {
       expect(result[1].textStartIndex).toBe(5)
     })
 
+    it('silence segment（空文字）不應造成後續 expected 過度偏移（真實 case：兩個 SSK）', () => {
+      // segment 285 是 silence（text=""），跳過後若不更新 lastSearchTime，
+      // 下一個 "SSK" 的 timeDelta 被虛增，expected 飛到第二個 SSK 位置而非第一個。
+      const content = '[皓棠] Blow跟Popper。\n[宗文] SSK愛丁堡，還有呢？拉圖。\n[宗文] 其實愛丁堡，還有另外一個，一個SSK，'
+      const segments = [
+        { text: 'Blow跟Popper', start: 920.65, end: 922.89 },
+        { text: '', start: 922.89, end: 927.5 },  // silence
+        { text: 'SSK', start: 932.46, end: 933.44 },
+        { text: '愛丁堡', start: 933.44, end: 934.92 },
+      ]
+      const result = alignSegmentsToContent(segments, content)
+      const sskMarker = result.find(m => m.text === 'SSK')
+      expect(sskMarker).toBeDefined()
+      // 第一個 SSK 在「[宗文] SSK愛丁堡」這行，不是結尾的「一個SSK」
+      expect(sskMarker.textStartIndex).toBeLessThan(40)
+    })
+
     it('使用者實測 case：「有」segment + 之後 segments 仍能對齊', () => {
       // 簡化版的 user-reported case:「有」在 transcript 出現幾百次,
       // segment.start = 410.52 (60% 進度) 該對到中後段位置
