@@ -8,23 +8,25 @@ const CONTENT_CHAR_RE = /[^\s\p{P}\p{S}\u200B]/u
  * 把 segments 對齊到 content text，回傳 marker 陣列（純函數，方便測試）。
  *
  * 策略：對每個 segment 在 [lastSearchIndex, ...) 範圍內找最靠近 ExpectedPosition
- * 的位置。ExpectedPosition 由 segment.start × charPerSecond 線性換算
- * （charPerSecond = content.length / totalDuration），假設內容字元密度對
- * 時間軸近似線性 —— 中文逐字稿即使有標點強化造成 ±10% 偏差仍夠用。
+ * 的位置。ExpectedPosition 用**局部錨定**估算（而非全域累積）：
+ *
+ *   expected = lastSearchIndex + (seg.start - lastSearchTime) × charPerSecond
+ *
+ * 而不是 `seg.start × charPerSecond`。理由：中文逐字稿經標點強化後 content
+ * 字元密度通常比真實 audio rate 高 10-15%，用 absolute seg.start × cps 算出
+ * 的 expected 會穩定 over-shoot，造成緊接前段尾部的短重複字（例如使用者
+ * 實測「？有，因為」中那個「有」）被推到更後面的同字位置。
+ *
+ * 改用 lastSearchIndex + 時間差 × cps：誤差只乘上「相鄰兩段的時間差」
+ * （通常 < 1s），不再隨整段時間軸累積放大。
  *
  * 用 lastIndexOf + indexOf 雙向各找一個最近候選（而非枚舉所有候選）：
  *   - backward = content.lastIndexOf(text, expected)   ← expected 前最靠近
  *   - forward  = content.indexOf(text, expected+1)     ← expected 後最靠近
- * 選兩者裡離 expected 比較近、且 >= lastSearchIndex 的。這保證在 constraint
- * window 內拿到**最佳**位置，不會被上限式 candidate 收集（之前 MAX_CANDIDATES=16）
- * 拖累。
+ * 選兩者裡離 expected 比較近、且 >= lastSearchIndex 的。
  *
- * 對「短重複文字」（如「有」「對」在整篇 transcript 出現上百次）的 segment：
- * 舊版收集前 16 個 candidate 全都在 lastSearchIndex 附近、離真實 expected 很遠，
- * 被迫選錯位置，緩慢推進 lastSearchIndex，最終越過該 segment 真實位置 → 之後
- * 的 segments 全部 indexOf 回 -1 失配 → cascade 失敗。雙向搜尋一步到位、無上限。
- *
- * 失配 segment（content 沒這段文字）**不**推進 lastSearchIndex，避免污染後續。
+ * 失配 segment（content 沒這段文字）**不**推進 lastSearchIndex / lastSearchTime，
+ * 避免污染後續錨點。
  *
  * 同時拿掉舊版「跳過 ≤6 字 segment」的限制 —— 中文逐字稿大量短句
  * （「對」「好的」「是」），原本完全無法 Alt-click 跳轉，是功能缺口。
@@ -52,6 +54,7 @@ export function alignSegmentsToContent(segments, content) {
 
   const markers = []
   let lastSearchIndex = 0
+  let lastSearchTime = 0 // 上一個成功匹配 segment 的 end time，當 local 錨點
 
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i]
@@ -70,8 +73,11 @@ export function alignSegmentsToContent(segments, content) {
       if (idx === -1) continue
       chosen = idx
     } else {
-      // 雙向搜尋 expected 兩側最近候選，constraint 為 >= lastSearchIndex
-      const expected = seg.start * charPerSecond
+      // 局部錨定 expected：用上一段成功匹配的 end time/pos 推算當前段位置，
+      // 而不是 seg.start × cps（後者誤差會隨整段時間軸累積放大，標點強化
+      // 造成 cps 高估時會穩定 over-shoot，緊接的短字會被推到後面的同字）
+      const timeDelta = Math.max(0, seg.start - lastSearchTime)
+      const expected = lastSearchIndex + timeDelta * charPerSecond
       const expectedInt = Math.floor(expected)
 
       const backward = contentLower.lastIndexOf(textLower, expectedInt)
@@ -101,6 +107,7 @@ export function alignSegmentsToContent(segments, content) {
     })
 
     lastSearchIndex = chosen + text.length
+    if (Number.isFinite(seg.end)) lastSearchTime = seg.end
   }
 
   return markers
