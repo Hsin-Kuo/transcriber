@@ -4,6 +4,15 @@ import { ref } from 'vue'
 // \p{P} 含全形與半形標點、\p{S} 含符號、\s 含空白、\u200B 是 zero-width space
 const CONTENT_CHAR_RE = /[^\s\p{P}\p{S}\u200B]/u
 
+// \u77ED\u6587\u5B57 segment\uFF08\u22642 \u5B57\uFF09\u8996\u70BA\u300C\u4E0D\u53EF\u4FE1 anchor\u300D\u7684 drift \u9580\u6ABB\u3002LLM \u5F37\u5316\u904E\u7A0B
+// \u5076\u723E\u6703\u6084\u6084\u6539\u6389\u77ED\u5B57\uFF08\u4F8B\u5982\u300C\u90A3\u300D\u6D88\u5931\uFF09\uFF0C\u73FE\u6709 bidirectional \u6703\u88AB\u8FEB\u6311\u5F8C\u9762\u7684
+// \u540C\u5B57 \u2192 lastSearchIndex \u8DF3\u904E\u982D \u2192 \u4E4B\u5F8C segments \u5168\u90E8\u5931\u914D cascade\u3002
+// \u4FEE\u6CD5\uFF1A\u82E5\u77ED\u5B57 chosen \u8DDD local expected \u592A\u9060\uFF08> allowedDrift\uFF09\uFF0C\u8996\u70BA LLM
+// \u6539\u5B57\u5F8C\u7684 spurious match\uFF0C\u8DF3\u904E\u8A72\u6BB5\uFF08\u4E0D\u6C61\u67D3 anchor\uFF0C\u4FDD\u7559\u9577\u5B57 anchor \u7D66\u5F8C\u7E8C\uFF09\u3002
+const SHORT_TEXT_MAX_LEN = 2
+const SHORT_DRIFT_MIN = 20 // \u81F3\u5C11\u5BB9\u5FCD 20 chars\uFF08cps \u4F30\u7B97\u5076\u6709\u5FAE\u8AA4\u5DEE\uFF09
+const SHORT_DRIFT_TIME_FACTOR = 1.5 // \u984D\u5916\u5BB9\u5FCD timeDelta \u00D7 cps \u00D7 1.5
+
 /**
  * 把 segments 對齊到 content text，回傳 marker 陣列（純函數，方便測試）。
  *
@@ -95,6 +104,18 @@ export function alignSegmentsToContent(segments, content) {
           Math.abs(validBackward - expected) <= Math.abs(forward - expected)
             ? validBackward
             : forward
+
+      // 短字 spurious match 防護：當 ≤2 字段唯一找到的位置距 expected 過遠，
+      // 多半是 LLM 把該段原本的位置改掉（或改字）後，演算法被迫挑到很遠的
+      // 同字。直接視為失配以避免污染 anchor → 後續 segments 仍能用上次成功
+      // 匹配的長字 anchor 繼續對齊。
+      if (text.length <= SHORT_TEXT_MAX_LEN) {
+        const allowedDrift = Math.max(
+          SHORT_DRIFT_MIN,
+          timeDelta * charPerSecond * SHORT_DRIFT_TIME_FACTOR,
+        )
+        if (Math.abs(chosen - expected) > allowedDrift) continue
+      }
     }
 
     markers.push({
