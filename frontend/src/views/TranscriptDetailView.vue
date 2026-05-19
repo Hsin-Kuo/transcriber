@@ -1512,7 +1512,12 @@ function rebuildSegmentHighlight() {
   // hit-testing 用 editSegmentRanges 不受影響。
   const el = textareaRef.value
   const segs = segOffsets.editSegmentRanges.value
-  const totalChars = segs[segs.length - 1].charEnd
+  // 用 snapshot length（canonical 文字長度，對應 scrollHeight 整段內容）作為 totalChars
+  // 而不是 segs[last].charEnd —— 若 applyDiff 因大區段 diff 把中後段 ranges 全 drop
+  // （例：Chrome execCommand 的 <div> wrap 觸發單區段 diff 把整段標成替換），
+  // 殘留 segs 只覆蓋前段，charEnd 變很小，viewport ratio × 小 totalChars 算出
+  // 的視窗只剩幾十 chars，連存活的前段 ranges 都被 filter 掉，highlight 表面消失。
+  const totalChars = segOffsets.snapshot.value.length || segs[segs.length - 1].charEnd
   let startChar = 0
   let endChar = totalChars
   if (el.scrollHeight > 0 && totalChars > 0) {
