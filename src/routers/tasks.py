@@ -1,5 +1,5 @@
 """任務管理路由"""
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Request
 from fastapi.responses import StreamingResponse
 from typing import Dict, Any
 from pathlib import Path
@@ -166,6 +166,7 @@ async def get_tasks(
     has_audio: bool = None,
     limit: int = 100,
     skip: int = 0,
+    background_tasks: BackgroundTasks = None,
     task_service: TaskService = Depends(get_task_service),
     current_user: dict = Depends(get_current_user)
 ):
@@ -218,7 +219,16 @@ async def get_tasks(
             enriched_task = await task_service.get_task(task_id, str(current_user["_id"]))
             if enriched_task and enriched_task.get("status") in ["pending", "processing"]:
                 enriched = enrich_task_data(enriched_task)
+                had_audio = bool(enriched.get("result", {}).get("audio_file"))
                 filtered = filter_task_for_list(enriched, retention_days)
+                if had_audio and not filtered.get("result", {}).get("audio_file"):
+                    if background_tasks:
+                        background_tasks.add_task(
+                            _clear_expired_audio_in_db,
+                            task_service.task_repo,
+                            task_id
+                        )
+                    continue
                 active_tasks.append(filtered)
 
         return {
@@ -247,7 +257,16 @@ async def get_tasks(
             enriched_task = await task_service.get_task(task_id, str(current_user["_id"]))
             if enriched_task:
                 enriched = enrich_task_data(enriched_task)
+                had_audio = bool(enriched.get("result", {}).get("audio_file"))
                 filtered = filter_task_for_list(enriched, retention_days)
+                if had_audio and not filtered.get("result", {}).get("audio_file"):
+                    if background_tasks:
+                        background_tasks.add_task(
+                            _clear_expired_audio_in_db,
+                            task_service.task_repo,
+                            task_id
+                        )
+                    continue
                 enriched_tasks.append(filtered)
 
         # 計算總數（包含 task_type 和 tags 篩選）
@@ -362,6 +381,15 @@ def get_task_field(task: Dict[str, Any], field: str) -> Any:
             return None
 
     return value
+
+
+async def _clear_expired_audio_in_db(task_repo: TaskRepository, task_id: str) -> None:
+    """S3 Lifecycle 已刪除音檔後，同步清除 MongoDB 裡的路徑，
+    讓 has_audio=true 篩選在後續查詢中能正確排除這些任務。"""
+    await task_repo.update(task_id, {
+        "result.audio_file": None,
+        "result.audio_filename": None
+    })
 
 
 def _is_audio_expired(task: Dict[str, Any], retention_days: int) -> bool:
