@@ -232,7 +232,7 @@ describe('alignSegmentsToContent', () => {
       expect(alignSegmentsToContent(segments, '其他內容')).toEqual([])
     })
 
-    it('MAX_CANDIDATES 上限：1 字 segment 在大量重複的 content 中不會掃描爆炸', () => {
+    it('大量短重複文字：每個 segment 仍能依時間軸選到對的位置', () => {
       // 100 個「對」連續 + 1 個「結束」
       const content = '對'.repeat(100) + '結束'
       const segments = [
@@ -244,6 +244,67 @@ describe('alignSegmentsToContent', () => {
       expect(result[0].textStartIndex).toBe(0)
       // 「結束」應該對到 [100, 102)
       expect(result[1]).toMatchObject({ textStartIndex: 100, textEndIndex: 102 })
+    })
+
+    it('短重複文字位於 expected 遠處時仍能正確對齊（regression: cascade 失配）', () => {
+      // 模擬使用者實際 bug:「有」在整篇出現上百次,某個 segment 時間軸該對到
+      // 中後段;舊版 MAX_CANDIDATES=16 + 從 lastSearchIndex 線性掃只能拿到
+      // 早期 16 個候選、全部 < expected,被迫選 16 個裡離 expected 最近的
+      // （也是錯位最少的）→ lastSearchIndex 緩慢前進 → 終究越過該 segment
+      // 真實位置 → 後續 segment 全部 indexOf 回 -1 → cascade 失配。
+      //
+      // 新版用 lastIndexOf 直接找 expected 之前最近的「有」一步到位。
+      const head = '頭'.repeat(100)
+      const tail = '尾'.repeat(100)
+      // 中間每 2 個字插一個「有」,共 200 個「有」散佈中段
+      const middle = Array(200).fill('有X').join('')
+      const content = head + middle + tail // 100 + 400 + 100 = 600 chars
+
+      // segments: 一開始的「頭」、中段每隔一段時間說一個「有」、最後「尾」
+      // totalDuration 假設 600s,charPerSecond = 1
+      const segments = [
+        { text: '頭', start: 0, end: 0.5 },
+        { text: '有', start: 150, end: 150.1 }, // expected ≈ 150 → content[150]='有'
+        { text: '有', start: 300, end: 300.1 }, // expected ≈ 300 → content[300]='有'
+        { text: '尾', start: 599, end: 600 },
+      ]
+
+      const result = alignSegmentsToContent(segments, content)
+      expect(result.length).toBe(4) // 沒有 cascade 失配 → 全 4 個都有 marker
+      expect(result[0].textStartIndex).toBe(0) // 第一個「頭」
+      // 兩個「有」應該各自對到中段約 150 / 300 位置（誤差 ≤ 2，因為「有」每 2 字一個）
+      expect(result[1].textStartIndex).toBeGreaterThanOrEqual(148)
+      expect(result[1].textStartIndex).toBeLessThanOrEqual(152)
+      expect(result[2].textStartIndex).toBeGreaterThanOrEqual(298)
+      expect(result[2].textStartIndex).toBeLessThanOrEqual(302)
+      // 「尾」start=599 → expected=599 → 演算法選最靠近的「尾」位置（最後一個）
+      expect(result[3].textStartIndex).toBeGreaterThanOrEqual(500)
+      expect(result[3].textStartIndex).toBeLessThanOrEqual(599)
+    })
+
+    it('使用者實測 case：「有」segment + 之後 segments 仍能對齊', () => {
+      // 簡化版的 user-reported case:「有」在 transcript 出現幾百次,
+      // segment.start = 410.52 (60% 進度) 該對到中後段位置
+      const beforeY = 'X'.repeat(500) // 前段 500 字無「有」
+      const yArea = '有'.repeat(50) // 中段大量「有」
+      const afterY = 'Z'.repeat(450) // 後段
+      const content = beforeY + yArea + afterY // 1000 chars total
+
+      const segments = [
+        { text: 'X', start: 0, end: 100 }, // 開頭某個 X
+        { text: '有', start: 410.52, end: 410.76 }, // user 報的這個 segment
+        { text: 'Z', start: 900, end: 1000 }, // 結尾某個 Z
+      ]
+      // totalDuration = 1000,charPerSecond = 1
+      // 「有」expected ≈ 410 → 該對到位置 500~549 區間（最靠近 410 的是 500）
+      const result = alignSegmentsToContent(segments, content)
+      expect(result.length).toBe(3)
+      expect(result[1].text).toBe('有')
+      expect(result[1].textStartIndex).toBeGreaterThanOrEqual(500)
+      expect(result[1].textStartIndex).toBeLessThanOrEqual(549)
+      // 後續「Z」segment 仍能對齊（沒 cascade 失配）
+      expect(result[2].text).toBe('Z')
+      expect(result[2].textStartIndex).toBeGreaterThanOrEqual(550)
     })
   })
 })

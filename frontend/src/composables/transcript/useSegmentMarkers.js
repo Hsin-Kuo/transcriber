@@ -1,8 +1,5 @@
 import { ref } from 'vue'
 
-// 多候選位置的搜尋上限，避免短重複字（中文常見「對對對」「然後」）退化成 O(N²)
-const MAX_CANDIDATES = 16
-
 // 「至少一個有意義內容字元」的判定，用來跳過純標點/純空白 segment（例如 "。"）
 // \p{P} 含全形與半形標點、\p{S} 含符號、\s 含空白、\u200B 是 zero-width space
 const CONTENT_CHAR_RE = /[^\s\p{P}\p{S}\u200B]/u
@@ -10,14 +7,24 @@ const CONTENT_CHAR_RE = /[^\s\p{P}\p{S}\u200B]/u
 /**
  * 把 segments 對齊到 content text，回傳 marker 陣列（純函數，方便測試）。
  *
- * 策略：用 indexOf 從 lastSearchIndex 之後找候選位置，相對於原本的「貪婪首
- * 個匹配」做兩個改善：
- *   1. 失配的 segment **不**推進 lastSearchIndex —— 避免後續 segment 因
- *      lastSearchIndex 殘留在錯誤位置而對到錯字。
- *   2. 多候選時用 segment.start 時間軸線性換算的 ExpectedPosition 選最近
- *      者（假設 content 字元密度對時間軸近似線性，標點密度差異容忍 ±10%
- *      內）。對「短重複文字 + 中間 segment 失配」這類過往會錯位的情境，
- *      時間軸資訊足夠把後續 segment 鎖到對的重複出現位置。
+ * 策略：對每個 segment 在 [lastSearchIndex, ...) 範圍內找最靠近 ExpectedPosition
+ * 的位置。ExpectedPosition 由 segment.start × charPerSecond 線性換算
+ * （charPerSecond = content.length / totalDuration），假設內容字元密度對
+ * 時間軸近似線性 —— 中文逐字稿即使有標點強化造成 ±10% 偏差仍夠用。
+ *
+ * 用 lastIndexOf + indexOf 雙向各找一個最近候選（而非枚舉所有候選）：
+ *   - backward = content.lastIndexOf(text, expected)   ← expected 前最靠近
+ *   - forward  = content.indexOf(text, expected+1)     ← expected 後最靠近
+ * 選兩者裡離 expected 比較近、且 >= lastSearchIndex 的。這保證在 constraint
+ * window 內拿到**最佳**位置，不會被上限式 candidate 收集（之前 MAX_CANDIDATES=16）
+ * 拖累。
+ *
+ * 對「短重複文字」（如「有」「對」在整篇 transcript 出現上百次）的 segment：
+ * 舊版收集前 16 個 candidate 全都在 lastSearchIndex 附近、離真實 expected 很遠，
+ * 被迫選錯位置，緩慢推進 lastSearchIndex，最終越過該 segment 真實位置 → 之後
+ * 的 segments 全部 indexOf 回 -1 失配 → cascade 失敗。雙向搜尋一步到位、無上限。
+ *
+ * 失配 segment（content 沒這段文字）**不**推進 lastSearchIndex，避免污染後續。
  *
  * 同時拿掉舊版「跳過 ≤6 字 segment」的限制 —— 中文逐字稿大量短句
  * （「對」「好的」「是」），原本完全無法 Alt-click 跳轉，是功能缺口。
@@ -53,39 +60,35 @@ export function alignSegmentsToContent(segments, content) {
     if (!CONTENT_CHAR_RE.test(text)) continue // 全標點/空白 segment 跳過
 
     const textLower = text.toLowerCase()
-    const expected =
+    const hasTime =
       charPerSecond > 0 && Number.isFinite(seg.start) && seg.start >= 0
-        ? seg.start * charPerSecond
-        : null
 
-    // 收集候選：從 lastSearchIndex 開始連續 indexOf，上限 MAX_CANDIDATES，
-    // 一旦越過 expected 就停（之後只會更遠）
-    const candidates = []
-    let from = lastSearchIndex
-    while (candidates.length < MAX_CANDIDATES) {
-      const idx = contentLower.indexOf(textLower, from)
-      if (idx === -1) break
-      candidates.push(idx)
-      if (expected !== null && idx > expected) break
-      from = idx + 1
-    }
-
-    if (candidates.length === 0) continue // 失配 → 不推進 lastSearchIndex
-
-    // 選擇：單候選或沒時間軸資訊 → 取首個；否則挑距 expected 最近
     let chosen
-    if (candidates.length === 1 || expected === null) {
-      chosen = candidates[0]
+    if (!hasTime) {
+      // 沒時間軸資訊：退化到貪婪首匹配
+      const idx = contentLower.indexOf(textLower, lastSearchIndex)
+      if (idx === -1) continue
+      chosen = idx
     } else {
-      chosen = candidates[0]
-      let bestDist = Math.abs(chosen - expected)
-      for (let k = 1; k < candidates.length; k++) {
-        const d = Math.abs(candidates[k] - expected)
-        if (d < bestDist) {
-          bestDist = d
-          chosen = candidates[k]
-        }
-      }
+      // 雙向搜尋 expected 兩側最近候選，constraint 為 >= lastSearchIndex
+      const expected = seg.start * charPerSecond
+      const expectedInt = Math.floor(expected)
+
+      const backward = contentLower.lastIndexOf(textLower, expectedInt)
+      const validBackward = backward >= lastSearchIndex ? backward : -1
+      const forward = contentLower.indexOf(
+        textLower,
+        Math.max(lastSearchIndex, expectedInt + 1),
+      )
+
+      if (validBackward === -1 && forward === -1) continue // 失配
+      if (validBackward === -1) chosen = forward
+      else if (forward === -1) chosen = validBackward
+      else
+        chosen =
+          Math.abs(validBackward - expected) <= Math.abs(forward - expected)
+            ? validBackward
+            : forward
     }
 
     markers.push({
