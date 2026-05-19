@@ -58,7 +58,7 @@ jobs:
             nginx:alpine nginx -t
 
   frontend-lint:
-    name: Frontend ESLint + type-check
+    name: Frontend ESLint + type-check + test
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -79,3 +79,8 @@ jobs:
       - name: Type-check
         working-directory: ${{ matrix.package }}
         run: npm run type-check
+      # --if-present 讓 admin-frontend（目前無 test script）靜默跳過,
+      # 等 admin 也加 vitest 後不用改 CI 即自動生效
+      - name: Test
+        working-directory: ${{ matrix.package }}
+        run: npm run test --if-present

@@ -70,7 +70,7 @@ def align_segments_to_punctuated_text(segments: List[Dict], punctuated_text: str
     # 數量或字符不符 → fallback
     if len(punct_content) != len(seg_content):
         return segments
-    for (_, ch_p), (_, ch_s) in zip(punct_content, seg_content):
+    for (_, ch_p), (_, ch_s) in zip(punct_content, seg_content, strict=True):
         if ch_p != ch_s:
             return segments
 
@@ -80,7 +80,7 @@ def align_segments_to_punctuated_text(segments: List[Dict], punctuated_text: str
     # 記錄每個 segment 在 punctuated_text 中第一個與最後一個內容字符的位置
     seg_first: Dict[int, int] = {}
     seg_last: Dict[int, int] = {}
-    for (pos, _), (seg_idx, _) in zip(punct_content, seg_content):
+    for (pos, _), (seg_idx, _) in zip(punct_content, seg_content, strict=True):
         if seg_idx not in seg_first:
             seg_first[seg_idx] = pos
         seg_last[seg_idx] = pos

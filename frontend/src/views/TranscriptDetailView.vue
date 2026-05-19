@@ -1499,13 +1499,6 @@ function rebuildSegmentHighlight() {
     displayMode.value === 'paragraph' &&
     segOffsets.editSegmentRanges.value.length > 0
   if (!shouldShow) {
-    console.debug('[AltHL] shouldShow=false', {
-      isAltPressed: isAltPressed.value,
-      isEditing: isEditing.value,
-      displayMode: displayMode.value,
-      editSegmentRangesLen: segOffsets.editSegmentRanges.value.length,
-      segmentMarkersLen: segmentMarkers.value.length,
-    })
     CSS.highlights.delete('segment-highlight')
     return
   }
@@ -1519,7 +1512,12 @@ function rebuildSegmentHighlight() {
   // hit-testing 用 editSegmentRanges 不受影響。
   const el = textareaRef.value
   const segs = segOffsets.editSegmentRanges.value
-  const totalChars = segs[segs.length - 1].charEnd
+  // 用 snapshot length（canonical 文字長度，對應 scrollHeight 整段內容）作為 totalChars
+  // 而不是 segs[last].charEnd —— 若 applyDiff 因大區段 diff 把中後段 ranges 全 drop
+  // （例：Chrome execCommand 的 <div> wrap 觸發單區段 diff 把整段標成替換），
+  // 殘留 segs 只覆蓋前段，charEnd 變很小，viewport ratio × 小 totalChars 算出
+  // 的視窗只剩幾十 chars，連存活的前段 ranges 都被 filter 掉，highlight 表面消失。
+  const totalChars = segOffsets.snapshot.value.length || segs[segs.length - 1].charEnd
   let startChar = 0
   let endChar = totalChars
   if (el.scrollHeight > 0 && totalChars > 0) {
@@ -2312,14 +2310,34 @@ function handlePaste(e) {
 
 // 處理 contenteditable 區域的按鍵事件（使用 Alt 作為修飾鍵）
 function handleContentEditableKeyDown(e) {
-  // Intercept Enter: insert '\n' directly into the text node instead of letting
-  // the browser create new <div> elements. Keeping the DOM flat preserves the
-  // text-node references held by CSS Custom Highlight Ranges (search + AltHL),
-  // preventing highlights from disappearing after a newline. white-space:pre-wrap
-  // renders the '\n' as a visible line break.
-  if (e.key === 'Enter') {
+  // Intercept Enter to insert a literal '\n' into the text node so the DOM stays
+  // flat and CSS Custom Highlight Ranges survive (AltHL + search highlight).
+  //
+  // 關鍵守衛 e.isComposing：注音/拼音 IME 確認選字時 key 也是 'Enter'，
+  // 若在 composition 中 preventDefault + 改 DOM，會把 IME commit 流程攪爛。
+  // handleInput 在 isComposing.value=true 期間被 short-circuit，
+  // 到 compositionend 才看到「IME 字 + 亂塞的 \n」混合 DOM，diffSingleRegion
+  // 把中間整段標為「替換」，applyAnchorRule 把落在區段內的 segment 全部 drop
+  // → editSegmentRanges 變空 → AltHL 完全失效。
+  //
+  // 不用 document.execCommand('insertText', '\n')：實測 Chrome 仍會產生 <div>
+  // 包裝（不是註解宣稱的「flat text node」）；改用 Range API 直接插入字面 \n
+  // 的 text node，DOM 真正保持 flat。Range mutation 不會自動 fire input event，
+  // 手動呼叫 segOffsets.handleInput 同步狀態。
+  if (e.key === 'Enter' && !e.isComposing) {
     e.preventDefault()
-    document.execCommand('insertText', false, '\n')
+    const sel = window.getSelection()
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0)
+      range.deleteContents()
+      const nl = document.createTextNode('\n')
+      range.insertNode(nl)
+      range.setStartAfter(nl)
+      range.setEndAfter(nl)
+      sel.removeAllRanges()
+      sel.addRange(range)
+      segOffsets.handleInput(e.currentTarget)
+    }
     return
   }
 
