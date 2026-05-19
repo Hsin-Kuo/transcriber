@@ -354,7 +354,7 @@ class="transcript-layout"
               @paste="handlePaste"
               @input="segOffsets.handleInput($event.currentTarget)"
               @compositionstart="segOffsets.handleCompositionStart()"
-              @compositionend="segOffsets.handleCompositionEnd($event.currentTarget)"
+              @compositionend="handleCompositionEnd($event)"
               @mousemove="handleEditorMouseMove"
               @mousedown="handleEditorClickInEditing"
               @scroll="handleEditorScroll"
@@ -803,6 +803,9 @@ let scrollRestoreTimers = []
 let isMounted = true
 // 追蹤是否正在初始化（避免載入時觸發儲存）
 let isInitializing = true
+// Safari IME 守衛：compositionend 在 Safari 先於 keydown 觸發，
+// 導致確認選字的 Enter 的 isComposing 已是 false，需自行追蹤
+let compositionJustEnded = false
 
 watch(speakerNames, (newValue) => {
   // 只有在字幕模式下才需要自動儲存
@@ -2271,7 +2274,7 @@ function handleKeyDown(e) {
 
     // 防止 Alt 組合鍵的預設瀏覽器行為
     // 只針對我們有定義快捷鍵的按鍵
-    const shortcutKeys = ['m', 'M', ',', '.', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']
+    const shortcutKeys = ['m', 'M', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']
     if (shortcutKeys.includes(e.key)) {
       e.stopPropagation() // 阻止事件繼續傳播，避免 contenteditable 插入字元
     }
@@ -2308,6 +2311,14 @@ function handlePaste(e) {
   }
 }
 
+// Safari IME 守衛：compositionend 在 Safari 先於 keydown 觸發，
+// setTimeout(0) 確保 flag 在同一批 keydown 事件處理後才清掉
+function handleCompositionEnd(e) {
+  compositionJustEnded = true
+  segOffsets.handleCompositionEnd(e.currentTarget)
+  setTimeout(() => { compositionJustEnded = false }, 0)
+}
+
 // 處理 contenteditable 區域的按鍵事件（使用 Alt 作為修飾鍵）
 function handleContentEditableKeyDown(e) {
   // Intercept Enter to insert a literal '\n' into the text node so the DOM stays
@@ -2324,7 +2335,7 @@ function handleContentEditableKeyDown(e) {
   // 包裝（不是註解宣稱的「flat text node」）；改用 Range API 直接插入字面 \n
   // 的 text node，DOM 真正保持 flat。Range mutation 不會自動 fire input event，
   // 手動呼叫 segOffsets.handleInput 同步狀態。
-  if (e.key === 'Enter' && !e.isComposing) {
+  if (e.key === 'Enter' && !e.isComposing && !compositionJustEnded) {
     e.preventDefault()
     const sel = window.getSelection()
     if (sel && sel.rangeCount > 0) {
@@ -2571,6 +2582,10 @@ watch(() => route.params.taskId, (newTaskId, oldTaskId) => {
         router.replace({ name: 'transcript-detail', params: { taskId: oldTaskId } })
         return
       }
+    }
+    // 切換任務前先離開編輯狀態
+    if (isEditing.value) {
+      handleCancelEditing()
     }
     // 載入新任務
     loadTranscript(newTaskId)

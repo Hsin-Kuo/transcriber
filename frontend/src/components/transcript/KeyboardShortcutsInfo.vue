@@ -28,10 +28,6 @@
           <span>{{ $t('audioPlayer.skipShortcut') }}</span>
         </div>
         <div class="shortcut-item">
-          <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>, .</kbd>
-          <span>{{ $t('audioPlayer.fineSkipShortcut') }}</span>
-        </div>
-        <div class="shortcut-item">
           <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>↑ ↓</kbd>
           <span>{{ $t('audioPlayer.speedShortcut') }}</span>
         </div>
