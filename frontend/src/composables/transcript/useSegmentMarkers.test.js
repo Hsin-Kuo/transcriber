@@ -246,40 +246,75 @@ describe('alignSegmentsToContent', () => {
       expect(result[1]).toMatchObject({ textStartIndex: 100, textEndIndex: 102 })
     })
 
-    it('短重複文字位於 expected 遠處時仍能正確對齊（regression: cascade 失配）', () => {
-      // 模擬使用者實際 bug:「有」在整篇出現上百次,某個 segment 時間軸該對到
-      // 中後段;舊版 MAX_CANDIDATES=16 + 從 lastSearchIndex 線性掃只能拿到
-      // 早期 16 個候選、全部 < expected,被迫選 16 個裡離 expected 最近的
-      // （也是錯位最少的）→ lastSearchIndex 緩慢前進 → 終究越過該 segment
-      // 真實位置 → 後續 segment 全部 indexOf 回 -1 → cascade 失配。
+    it('短重複文字大量散佈 content：不會 cascade 失配（每個 segment 都有 marker）', () => {
+      // Regression: 短重複文字在整篇出現上百次時,各 segment 至少能對到某個位置、
+      // lastSearchIndex 不會跳過頭、後面 segments 不會 cascade 失配。
       //
-      // 新版用 lastIndexOf 直接找 expected 之前最近的「有」一步到位。
+      // 注意:當 firstHit 跟 validBackward 相距 > 30（candidates 散落在 content
+      // 不同段落）時,演算法會偏好 monotone 順序選 firstHit 而非「最靠 expected」
+      // 的 validBackward—— 避免 cps 高估造成的 cascade。所以這裡「有」segment
+      // 不保證對到 time-correct 位置（150/300），但**保證每段都有 marker**。
       const head = '頭'.repeat(100)
       const tail = '尾'.repeat(100)
-      // 中間每 2 個字插一個「有」,共 200 個「有」散佈中段
       const middle = Array(200).fill('有X').join('')
       const content = head + middle + tail // 100 + 400 + 100 = 600 chars
 
-      // segments: 一開始的「頭」、中段每隔一段時間說一個「有」、最後「尾」
-      // totalDuration 假設 600s,charPerSecond = 1
       const segments = [
         { text: '頭', start: 0, end: 0.5 },
-        { text: '有', start: 150, end: 150.1 }, // expected ≈ 150 → content[150]='有'
-        { text: '有', start: 300, end: 300.1 }, // expected ≈ 300 → content[300]='有'
+        { text: '有', start: 150, end: 150.1 },
+        { text: '有', start: 300, end: 300.1 },
         { text: '尾', start: 599, end: 600 },
       ]
 
       const result = alignSegmentsToContent(segments, content)
-      expect(result.length).toBe(4) // 沒有 cascade 失配 → 全 4 個都有 marker
-      expect(result[0].textStartIndex).toBe(0) // 第一個「頭」
-      // 兩個「有」應該各自對到中段約 150 / 300 位置（誤差 ≤ 2，因為「有」每 2 字一個）
-      expect(result[1].textStartIndex).toBeGreaterThanOrEqual(148)
-      expect(result[1].textStartIndex).toBeLessThanOrEqual(152)
-      expect(result[2].textStartIndex).toBeGreaterThanOrEqual(298)
-      expect(result[2].textStartIndex).toBeLessThanOrEqual(302)
-      // 「尾」start=599 → expected=599 → 演算法選最靠近的「尾」位置（最後一個）
+      expect(result.length).toBe(4) // 沒 cascade
+      expect(result[0].textStartIndex).toBe(0)
+      // 兩個「有」都對到中段範圍內某個「有」位置 (100~498，每 2 字一個)
+      expect(result[1].textStartIndex).toBeGreaterThanOrEqual(100)
+      expect(result[1].textStartIndex).toBeLessThanOrEqual(498)
+      expect(result[2].textStartIndex).toBeGreaterThan(result[1].textStartIndex)
+      expect(result[2].textStartIndex).toBeLessThanOrEqual(498)
+      // 「尾」對到尾段範圍 [500, 599]
       expect(result[3].textStartIndex).toBeGreaterThanOrEqual(500)
       expect(result[3].textStartIndex).toBeLessThanOrEqual(599)
+    })
+
+    it('silence 後第一個段：同字在 line 2 / line 3 各出現，演算法選 line 2 不破壞 line 4 對齊', () => {
+      // 使用者實測 case (PR #44 之後的問題):
+      //   "[皓棠] Blow跟Popper。\n[宗文] SSK愛丁堡...還有呢？拉圖。\n[宗文] 其實愛丁堡,...一個SSK,..."
+      // segments:
+      //   1. "Blow跟Popper" (920-923)
+      //   2. ""             (923-927)  silence
+      //   3. "SSK"          (932-933)  ← 應對到 line 2 的 SSK
+      //   4. "愛丁堡"        (933-935)  ← 緊接 line 2 的 SSK 之後
+      //
+      // 4.6s silence 讓 global cps 對這段嚴重高估,expected 飄到後段。
+      // lastIndexOf 給 line 3 的 SSK（最靠 expected），lastSearchIndex 跳過頭,
+      // 之後「愛丁堡」對不到 → cascade。
+      // 修法: spread heuristic 偏好 firstHit (line 2 SSK)，保留後續對齊。
+      const content =
+        '[皓棠] Blow跟Popper。\n' +
+        '[宗文] SSK愛丁堡，還有呢？拉圖。\n' +
+        '[宗文] 其實愛丁堡，還有另外一個，一個SSK，另一'
+
+      const segments = [
+        { text: 'Blow跟Popper', start: 920.65, end: 922.89 },
+        { text: '', start: 922.89, end: 927.5 }, // silence
+        { text: 'SSK', start: 932.46, end: 933.44 },
+        { text: '愛丁堡', start: 933.44, end: 934.92 },
+      ]
+
+      const result = alignSegmentsToContent(segments, content)
+      const byIdx = Object.fromEntries(result.map((m) => [m.segmentIndex, m]))
+      expect(byIdx[0]?.text).toBe('Blow跟Popper') // seg 1 有 marker
+      // seg 3 「SSK」對到 line 2 的 SSK，不該對到 line 3 那個（後者位置 >50）
+      expect(byIdx[2]).toBeDefined()
+      expect(byIdx[2].textStartIndex).toBeLessThan(30)
+      // 關鍵: seg 4 「愛丁堡」**有 marker**（沒 cascade 失配）
+      expect(byIdx[3]).toBeDefined()
+      // 且對到的位置在 line 2 範圍（接近 SSK 的位置之後）
+      expect(byIdx[3].textStartIndex).toBeGreaterThan(byIdx[2].textStartIndex)
+      expect(byIdx[3].textStartIndex).toBeLessThan(40)
     })
 
     it('短字段 LLM 被改掉 + 同字後面才出現：當失配，不污染 anchor 不影響後續', () => {
