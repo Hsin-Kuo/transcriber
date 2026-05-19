@@ -1499,13 +1499,6 @@ function rebuildSegmentHighlight() {
     displayMode.value === 'paragraph' &&
     segOffsets.editSegmentRanges.value.length > 0
   if (!shouldShow) {
-    console.debug('[AltHL] shouldShow=false', {
-      isAltPressed: isAltPressed.value,
-      isEditing: isEditing.value,
-      displayMode: displayMode.value,
-      editSegmentRangesLen: segOffsets.editSegmentRanges.value.length,
-      segmentMarkersLen: segmentMarkers.value.length,
-    })
     CSS.highlights.delete('segment-highlight')
     return
   }

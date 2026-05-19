@@ -328,7 +328,6 @@ export function useSegmentEditingOffsets() {
   }
 
   function applyDiff(from, to, newLen) {
-    const prevLen = editSegmentRanges.value.length
     const next = []
     for (const r of editSegmentRanges.value) {
       const adjusted = applyAnchorRule(r.charStart, r.charEnd, from, to, newLen)
@@ -340,9 +339,6 @@ export function useSegmentEditingOffsets() {
         })
       }
       // else: collapsed → drop (Q4 b)
-    }
-    if (next.length === 0 && prevLen > 0) {
-      console.warn('[AltHL] editSegmentRanges 變空！diff:', { from, to, newLen, prevLen })
     }
     editSegmentRanges.value = next
   }
