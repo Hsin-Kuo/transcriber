@@ -34,6 +34,39 @@ updates:
         update-types:
           - minor
           - patch
+      # 以下是 major bump 群組，按生態系切分，避免一票 PR 同時開。
+      # Dependabot 按順序匹配，每個套件只進第一個命中的 group。
+      typescript-major:
+        patterns:
+          - "typescript"
+          - "vue-tsc"
+        update-types:
+          - major
+      eslint-major:
+        patterns:
+          - "eslint"
+          - "@eslint/*"
+          - "eslint-plugin-*"
+          - "eslint-config-*"
+        update-types:
+          - major
+      vue-major:
+        patterns:
+          - "vue"
+          - "@vue/*"
+          - "vue-i18n"
+          - "vue-router"
+          - "pinia"
+        update-types:
+          - major
+      vite-major:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+          - "vitest"
+          - "@vitest/*"
+        update-types:
+          - major
 
   # 管理後台
   - package-ecosystem: npm
@@ -46,3 +79,34 @@ updates:
         update-types:
           - minor
           - patch
+      typescript-major:
+        patterns:
+          - "typescript"
+          - "vue-tsc"
+        update-types:
+          - major
+      eslint-major:
+        patterns:
+          - "eslint"
+          - "@eslint/*"
+          - "eslint-plugin-*"
+          - "eslint-config-*"
+        update-types:
+          - major
+      vue-major:
+        patterns:
+          - "vue"
+          - "@vue/*"
+          - "vue-i18n"
+          - "vue-router"
+          - "pinia"
+        update-types:
+          - major
+      vite-major:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+          - "vitest"
+          - "@vitest/*"
+        update-types:
+          - major
