@@ -71,14 +71,6 @@ export function useKeyboardShortcuts(
           event.preventDefault()
           toggleMute()
           break
-        case ',':
-          event.preventDefault()
-          skipBackward(5)
-          break
-        case '.':
-          event.preventDefault()
-          skipForward(5)
-          break
       }
       return
     }

@@ -2271,7 +2271,7 @@ function handleKeyDown(e) {
 
     // 防止 Alt 組合鍵的預設瀏覽器行為
     // 只針對我們有定義快捷鍵的按鍵
-    const shortcutKeys = ['m', 'M', ',', '.', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']
+    const shortcutKeys = ['m', 'M', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']
     if (shortcutKeys.includes(e.key)) {
       e.stopPropagation() // 阻止事件繼續傳播，避免 contenteditable 插入字元
     }
