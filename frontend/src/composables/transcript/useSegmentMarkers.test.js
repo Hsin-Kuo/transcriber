@@ -282,6 +282,38 @@ describe('alignSegmentsToContent', () => {
       expect(result[3].textStartIndex).toBeLessThanOrEqual(599)
     })
 
+    it('短字段 LLM 被改掉 + 同字後面才出現：當失配，不污染 anchor 不影響後續', () => {
+      // 模擬 user 實測 case: LLM 強化過程把短字「那」從 content 改掉了,
+      // 但 segments 還記錄著「那」。content 後面 200 chars 才又出現一個「那」。
+      // 沒 drift threshold 時:演算法被迫挑後面那個「那」→ lastSearchIndex 推
+      // 過頭 → 之後 segment 都失配。加 drift threshold 後:該段被當失配,
+      // lastSearchIndex 不變,後面 segments 仍能對齊。
+      const content =
+        '段落一結束。' + 'X'.repeat(200) + '那段內容也很重要。' // 「那」只在 200 chars 之後
+      // positions: 段落一結束。 = 0-5。X×200 = 6-205。那段內容也很重要。 = 206-214
+
+      const segments = [
+        { text: '段落一結束', start: 0, end: 1 }, // 對到 0-4
+        { text: '那', start: 1.05, end: 1.1 }, // ← LLM 把這字改掉了,該失配
+        { text: '那段內容也很重要', start: 1.2, end: 3 }, // 應對到 206
+      ]
+      // duration = 3,cps = 215/3 ≈ 71.67
+      // seg 1 「那」timeDelta=0.05, expected=5 + 0.05×71.67 ≈ 8.58
+      // 沒 threshold: forward = 206 (那段內容也...的那), chosen=206, drift=197
+      //   → lastSearchIndex 變 207 → seg 2 「那段內容...」 indexOf from 207 = -1 → 失配!
+      // 有 threshold (短字): allowedDrift = max(20, 0.05×71.67×1.5) = 20
+      //   drift 197 > 20 → reject,當失配。lastSearchIndex 不變
+      // seg 2 仍能從 lastSearchIndex(5) 找到「那段內容...」at 206 ✓
+
+      const result = alignSegmentsToContent(segments, content)
+      const segmentIndices = result.map((m) => m.segmentIndex)
+      expect(segmentIndices).not.toContain(1) // 「那」被當失配跳過
+      expect(segmentIndices).toContain(0) // seg 0 有 marker
+      expect(segmentIndices).toContain(2) // seg 2 不受 cascade 影響,仍有 marker
+      const seg2Result = result.find((m) => m.segmentIndex === 2)
+      expect(seg2Result.textStartIndex).toBe(206)
+    })
+
     it('時間軸緊接的短 segment 對到緊接位置，不被「同字後出現」吸引（local-anchored expected）', () => {
       // 模擬使用者實測 case 2:「？有，因為」中那個「有」緊接前段尾巴,
       // 但 content 後面還有另一個「有」。若用 seg.start × global_cps 算 expected
