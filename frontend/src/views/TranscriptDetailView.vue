@@ -2572,6 +2572,10 @@ watch(() => route.params.taskId, (newTaskId, oldTaskId) => {
         return
       }
     }
+    // 切換任務前先離開編輯狀態
+    if (isEditing.value) {
+      handleCancelEditing()
+    }
     // 載入新任務
     loadTranscript(newTaskId)
   }
