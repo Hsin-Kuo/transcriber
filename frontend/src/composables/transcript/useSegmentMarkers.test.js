@@ -282,6 +282,25 @@ describe('alignSegmentsToContent', () => {
       expect(result[3].textStartIndex).toBeLessThanOrEqual(599)
     })
 
+    it('時間軸緊接的短 segment 對到緊接位置，不被「同字後出現」吸引（local-anchored expected）', () => {
+      // 模擬使用者實測 case 2:「？有，因為」中那個「有」緊接前段尾巴,
+      // 但 content 後面還有另一個「有」。若用 seg.start × global_cps 算 expected
+      // 容易 over-shoot 到後面的「有」(標點強化會讓全域 cps 比 local 高);
+      // 用 lastSearchIndex + timeDelta × cps 把 expected 鎖在 local,正確選緊接位置。
+      const content = '段落結束嗎' + '有' + 'XXXX' + '有過'
+      // 段(0)落(1)結(2)束(3)嗎(4) 有(5) X(6-9) 有(10)過(11)，length=12
+      const segments = [
+        { text: '段落結束嗎', start: 0, end: 1 }, // 對到 0,結尾 lastSearchIndex=5
+        { text: '有', start: 1.1, end: 1.2 }, // 緊接,該對到 5
+      ]
+      // duration = 1.2,cps = 12/1.2 = 10。
+      // 全域 expected = 1.1 × 10 = 11 → backward 會挑到位置 10、forward -1 → 錯選 10。
+      // local expected = lastSearchIndex(5) + (1.1-1)×10 = 6 → backward=5,forward=10,選 5。✓
+      const result = alignSegmentsToContent(segments, content)
+      expect(result.length).toBe(2)
+      expect(result[1].textStartIndex).toBe(5)
+    })
+
     it('使用者實測 case：「有」segment + 之後 segments 仍能對齊', () => {
       // 簡化版的 user-reported case:「有」在 transcript 出現幾百次,
       // segment.start = 410.52 (60% 進度) 該對到中後段位置
