@@ -13,6 +13,10 @@ const CHUNK_SIZE = 90 * 1024 * 1024 // 90 MB
 const MAX_RETRIES = 3
 const RETRY_DELAY_MS = 2000
 
+// 單檔上限：須與後端 MAX_UPLOAD_SIZE_MB 一致（預設 3 GB）
+export const MAX_UPLOAD_SIZE_MB = 3072
+const MAX_UPLOAD_SIZE = MAX_UPLOAD_SIZE_MB * 1024 * 1024
+
 /**
  * 判斷檔案是否需要分片上傳
  * @param {File} file
@@ -20,6 +24,15 @@ const RETRY_DELAY_MS = 2000
  */
 export function needsChunking(file) {
   return file.size >= CHUNK_THRESHOLD
+}
+
+/**
+ * 判斷檔案是否超過單檔上限
+ * @param {File} file
+ * @returns {boolean}
+ */
+export function exceedsMaxSize(file) {
+  return file.size > MAX_UPLOAD_SIZE
 }
 
 /**

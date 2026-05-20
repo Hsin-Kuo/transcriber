@@ -1,4 +1,5 @@
 """分片上傳路由 — 解決 Cloudflare 100MB 上傳限制"""
+import os
 import uuid
 import asyncio
 import shutil
@@ -24,8 +25,10 @@ _active_uploads: dict[str, dict] = {}
 _cleanup_started = False
 
 CHUNK_SIZE = 90 * 1024 * 1024  # 90 MB — 單片上限
-MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500 MB — 單檔上限
-UPLOAD_EXPIRY_SECONDS = 3600  # 1 小時未完成即清理
+# 單檔上限：以環境變數 MAX_UPLOAD_SIZE_MB 設定（預設 3072 MB = 3 GB）
+MAX_UPLOAD_SIZE_MB = int(os.environ.get("MAX_UPLOAD_SIZE_MB", "3072"))
+MAX_UPLOAD_SIZE = MAX_UPLOAD_SIZE_MB * 1024 * 1024
+UPLOAD_EXPIRY_SECONDS = 10800  # 3 小時未完成即清理（大檔上傳較慢）
 
 
 @router.post("/init")
@@ -38,7 +41,10 @@ async def init_upload(
     if total_size <= 0:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "檔案大小無效")
     if total_size > MAX_UPLOAD_SIZE:
-        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "檔案超過 500MB 上限")
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            f"檔案超過 {MAX_UPLOAD_SIZE_MB}MB 上限",
+        )
 
     validate_filename_extension(filename)
 

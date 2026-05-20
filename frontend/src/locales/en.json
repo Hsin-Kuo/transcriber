@@ -329,7 +329,10 @@
   "uploadZone": {
     "clickToUpload": "Click to upload or drag and drop",
     "supportedFormats": "Supports audio (M4A, MP3, WAV) and video (MP4, MOV, AVI) formats",
-    "uploadingFile": "Uploading file..."
+    "uploadingFile": "Uploading file...",
+    "fileTooLarge": "File Too Large",
+    "fileTooLargeMessage": "\"{name}\" is {size}, exceeding the {max}MB limit",
+    "filesTooLargeMessage": "{count} file(s) exceed the {max}MB limit and were skipped"
   },
   "tasksView": {
     "downloadFailed": "Download failed, please try again later",

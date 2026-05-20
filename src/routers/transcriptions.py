@@ -302,12 +302,12 @@ async def create_transcription(
 
     # 檢查檔案總大小（注意：UploadFile.size 可能為 None）
     if not use_chunked_upload:
+        from .uploads import MAX_UPLOAD_SIZE, MAX_UPLOAD_SIZE_MB
         total_size = sum(f.size or 0 for f in uploaded_files)
-        MAX_TOTAL_SIZE = 500 * 1024 * 1024  # 500MB
-        if total_size > 0 and total_size > MAX_TOTAL_SIZE:
+        if total_size > 0 and total_size > MAX_UPLOAD_SIZE:
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail="檔案總大小超過限制（最大500MB）"
+                detail=f"檔案總大小超過限制（最大 {MAX_UPLOAD_SIZE_MB}MB）"
             )
 
     # 直接上傳（非 chunked）：先驗證每個檔的副檔名屬於白名單
