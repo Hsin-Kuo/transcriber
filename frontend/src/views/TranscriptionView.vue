@@ -249,6 +249,7 @@ import BatchUploadPanel from '../components/batch/BatchUploadPanel.vue'
 
 // 新 API 服務層
 import { transcriptionService, taskService } from '../api/services'
+import { exceedsMaxSize, MAX_UPLOAD_SIZE_MB } from '../utils/chunkedUpload.js'
 
 const { t: $t, locale } = useI18n()
 
@@ -311,14 +312,42 @@ const availableQuickTags = computed(() => {
   return allTags.value.filter(tag => !selectedTags.value.includes(tag))
 })
 
+// 過濾超過單檔上限的檔案，彈出提示；回傳允許上傳的檔案
+function filterOversizedFiles(files) {
+  const oversized = files.filter(exceedsMaxSize)
+  if (oversized.length > 0 && showNotification) {
+    showNotification({
+      title: $t('uploadZone.fileTooLarge'),
+      message:
+        oversized.length === 1
+          ? $t('uploadZone.fileTooLargeMessage', {
+              name: oversized[0].name,
+              size: formatFileSize(oversized[0].size),
+              max: MAX_UPLOAD_SIZE_MB,
+            })
+          : $t('uploadZone.filesTooLargeMessage', {
+              count: oversized.length,
+              max: MAX_UPLOAD_SIZE_MB,
+            }),
+      type: 'warning',
+      duration: 5000,
+    })
+  }
+  return files.filter((f) => !exceedsMaxSize(f))
+}
+
 // 選擇檔案後顯示確認表單（單檔）
 function handleFileUpload(file) {
+  if (filterOversizedFiles([file]).length === 0) return
   pendingFile.value = file
 }
 
 // 選擇多個檔案後進入批次模式
 function handleFilesUpload(files) {
   if (!files || files.length === 0) return
+
+  files = filterOversizedFiles(files)
+  if (files.length === 0) return
 
   // 檢查檔案數量上限
   const MAX_BATCH_FILES = 10
@@ -501,7 +530,9 @@ function closeMergeModal() {
 // 處理合併對話窗確認（進入轉錄設定表單）
 function handleMergeConfirm(files) {
   closeMergeModal()
-  handleShowTranscriptionForm(files)
+  const allowed = filterOversizedFiles(files)
+  if (allowed.length < 2) return  // 合併至少需 2 個檔案
+  handleShowTranscriptionForm(allowed)
 }
 
 // 處理「進入轉錄設定」（合併模式）

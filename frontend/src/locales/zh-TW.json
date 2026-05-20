@@ -329,7 +329,10 @@
   "uploadZone": {
     "clickToUpload": "點擊或拖放檔案",
     "supportedFormats": "支援音訊（M4A、MP3、WAV）及影片（MP4、MOV、AVI）格式",
-    "uploadingFile": "上傳檔案中..."
+    "uploadingFile": "上傳檔案中...",
+    "fileTooLarge": "檔案過大",
+    "fileTooLargeMessage": "「{name}」大小為 {size}，超過 {max}MB 上限",
+    "filesTooLargeMessage": "有 {count} 個檔案超過 {max}MB 上限，已自動略過"
   },
   "tasksView": {
     "downloadFailed": "下載失敗，請稍後再試",
