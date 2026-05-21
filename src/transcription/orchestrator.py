@@ -13,15 +13,20 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from structlog.contextvars import bind_contextvars, clear_contextvars
+
 from src.services.progress_store import Phase
 from src.utils.audio_converter import convert_to_mp3, convert_to_wav
 from src.utils.config_loader import get_temp_dir
+from src.utils.logger import get_logger
 from src.utils.text_utils import (
     align_segments_to_punctuated_text,
     convert_segments_punctuation,
 )
 from src.utils.storage_service import save_audio
 from src.utils.time_utils import get_utc_timestamp
+
+log = get_logger(__name__)
 
 _CANCEL_STATUSES = {"canceling", "cancelled"}
 
@@ -75,7 +80,10 @@ class TranscriptionOrchestrator:
         ui_language: Optional[str] = None,
     ) -> None:
         """執行整個 run(sync)。cleanup 由 finally 統一處理。"""
-        print(f"🎬 [Orchestrator] 開始處理任務 {task_id}")
+        # 綁定 task_id 到 log context:本 run 內所有 log 都帶 task_id。
+        # local 模式 run() 在 executor thread 跑、不繼承 request contextvars,故在此自綁。
+        bind_contextvars(task_id=task_id)
+        log.info("transcription.run.started")
         temp_dir = get_temp_dir(prefix="run_")
         succeeded = False
         try:
@@ -108,16 +116,14 @@ class TranscriptionOrchestrator:
                 punct_model, punct_tokens,
             )
             succeeded = True
-            print(f"✅ 任務 {task_id} 完成！")
+            log.info("transcription.run.completed")
 
         except TranscriptionCancelled:
-            print(f"🛑 [Orchestrator] 任務 {task_id} 已取消,中止處理")
+            log.info("transcription.run.cancelled")
             # status 已被 cancel endpoint 設,不覆蓋
 
         except Exception as e:
-            print(f"❌ [Orchestrator] 轉錄失敗：{e}")
-            import traceback
-            traceback.print_exc()
+            log.error("transcription.run.failed", error=str(e), exc_info=True)
             try:
                 import sentry_sdk
                 with sentry_sdk.push_scope() as scope:
@@ -131,9 +137,10 @@ class TranscriptionOrchestrator:
             try:
                 audio_source.cleanup(succeeded)
             except Exception as e:
-                print(f"⚠️ audio_source cleanup 失敗：{e}")
+                log.warning("audio_source.cleanup_failed", error=str(e))
             self._cleanup_temp_dir(temp_dir)
             self.progress_store.clear(task_id)
+            clear_contextvars()
 
     # ── public:Phase 機器(測試 surface)───────────────
 
@@ -141,7 +148,9 @@ class TranscriptionOrchestrator:
         self, task_id: str, phase: Phase, phase_progress: float,
         message: str = "", details: Optional[Dict[str, Any]] = None,
     ) -> None:
-        print(f"📡 [SSE] {phase.value}@{phase_progress:.0%}: {message}", flush=True)
+        log.debug(
+            "progress.update", phase=phase.value, phase_progress=phase_progress, msg=message
+        )
         self.progress_store.set_phase(
             task_id, phase, phase_progress, message=message, details=details
         )
@@ -201,7 +210,7 @@ class TranscriptionOrchestrator:
             try:
                 diar_segments = d_future.result()
             except Exception as e:
-                print(f"⚠️ 說話者辨識失敗,降級純轉錄：{e}")
+                log.warning("diarization.failed_degraded", error=str(e))
                 diar_segments = None
 
             if diar_segments and segments:
@@ -306,7 +315,7 @@ class TranscriptionOrchestrator:
             # 取消不是「標點失敗」——不可被 fallback 吞掉,往上拋給 run() 收
             raise
         except Exception as e:
-            print(f"⚠️ [Orchestrator] 標點處理失敗,使用原始文字：{e}")
+            log.warning("punctuation.failed_fallback", error=str(e))
             self.complete_phase(
                 task_id, Phase.PUNCTUATION,
                 f"標點處理失敗（{str(e)[:100]}）,使用原始文字",
@@ -405,10 +414,10 @@ class TranscriptionOrchestrator:
         try:
             reservation = consume_reservation_sync(self.db, task_id)
         except Exception as e:
-            print(f"⚠️ 刪除預扣失敗(留下殘留預扣)：task={task_id} err={e}")
+            log.warning("quota.reservation.consume_failed", error=str(e))
             return
         if reservation is None:
-            print(f"ℹ️  任務 {task_id} 無預扣記錄,跳過配額扣除")
+            log.info("quota.reservation.absent")
             return
         try:
             duration_minutes = audio_duration_seconds / 60
@@ -417,14 +426,15 @@ class TranscriptionOrchestrator:
             )
             self.db.users.update_one({"_id": ObjectId(user_id)}, pipeline)
         except Exception as e:
-            print(
-                f"⚠️ [QUOTA_LEAK] 扣款失敗(漏算一次)：user_id={user_id} "
-                f"task_id={task_id} err={e}"
+            # quota.leak 是監控訊號:預扣已刪、扣款未套用 = 漏算一次
+            log.error(
+                "quota.leak", user_id=user_id,
+                duration_minutes=audio_duration_seconds / 60, error=str(e),
             )
 
     def _mark_failed(self, task_id: str, error: str) -> None:
         """標記失敗 + 釋放預扣(idempotent)。"""
-        print(f"❌ [Orchestrator] 標記任務 {task_id} 失敗：{error}")
+        log.info("task.marked_failed", error=error)
         self._update_task(
             task_id, {"status": "failed", "error": {"code": "SYSTEM_ERROR", "message": error}}
         )
@@ -432,7 +442,7 @@ class TranscriptionOrchestrator:
             from src.database.repositories.reservation_repo import release_reservation_sync
             release_reservation_sync(self.db, task_id)
         except Exception as e:
-            print(f"⚠️ 釋放預扣失敗：{e}")
+            log.warning("quota.reservation.release_failed", error=str(e))
 
     # ── private:DB helpers ───────────────────────────
 
@@ -440,7 +450,7 @@ class TranscriptionOrchestrator:
         try:
             return self.db.tasks.find_one({"_id": task_id})
         except Exception as e:
-            print(f"⚠️ 取得任務失敗：{e}")
+            log.warning("task.fetch_failed", error=str(e))
             return None
 
     def _update_task(self, task_id: str, updates: dict, unset_fields=None) -> bool:
@@ -452,7 +462,7 @@ class TranscriptionOrchestrator:
             self.db.tasks.update_one({"_id": task_id}, op)
             return True
         except Exception as e:
-            print(f"❌ [CRITICAL] 更新任務 {task_id} 失敗：{e}")
+            log.error("task.update_failed", error=str(e))
             return False
 
     def _cleanup_temp_dir(self, temp_dir: Path) -> None:
@@ -460,4 +470,4 @@ class TranscriptionOrchestrator:
             if temp_dir and temp_dir.exists():
                 shutil.rmtree(temp_dir, ignore_errors=True)
         except Exception as e:
-            print(f"⚠️ 清理 temp_dir 失敗：{e}")
+            log.warning("temp_dir.cleanup_failed", error=str(e))

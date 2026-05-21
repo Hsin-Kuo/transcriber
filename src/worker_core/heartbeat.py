@@ -14,6 +14,9 @@ from typing import Optional
 import urllib.request
 
 from src.worker_core.db import get_db
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
 
 
 _HEARTBEAT_INTERVAL_SECONDS = 60
@@ -83,7 +86,7 @@ def write_heartbeat(
             upsert=True,
         )
     except Exception as e:
-        print(f"⚠️ heartbeat 寫入失敗: {e}", flush=True)
+        log.warning("heartbeat.write_failed", error=str(e))
 
 
 def start_background_heartbeat() -> None:
@@ -105,6 +108,6 @@ def start_background_heartbeat() -> None:
                     upsert=True,
                 )
             except Exception as e:
-                print(f"⚠️ background heartbeat 失敗: {e}", flush=True)
+                log.warning("heartbeat.background_write_failed", error=str(e))
 
     threading.Thread(target=_loop, daemon=True, name="HeartbeatLoop").start()

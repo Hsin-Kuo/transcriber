@@ -22,6 +22,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from dotenv import load_dotenv
 load_dotenv()
 
+from src.utils.logger import setup_logging
+setup_logging()
+
 from src.utils.sentry_init import init_sentry
 init_sentry(component="worker")
 

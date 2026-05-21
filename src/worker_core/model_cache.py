@@ -7,6 +7,9 @@ Whisper 與 Diarization 模型快取
 
 from src.worker_core.config import DEFAULT_MODEL
 from src.utils.config_loader import get_parameter
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
 
 _cached_whisper_processor = None
 _cached_diarization_pipeline = None
@@ -19,10 +22,10 @@ def get_whisper_processor():
         from faster_whisper import WhisperModel
         from src.services.utils.whisper_processor import WhisperProcessor
 
-        print(f"🔄 [Worker] 載入 Whisper 模型: {DEFAULT_MODEL} (float16)...")
+        log.info("whisper.model.loading", model=DEFAULT_MODEL, compute_type="float16")
         whisper_model = WhisperModel(DEFAULT_MODEL, device="auto", compute_type="float16")
         _cached_whisper_processor = WhisperProcessor(whisper_model, DEFAULT_MODEL)
-        print("✅ [Worker] Whisper 模型載入完成")
+        log.info("whisper.model.loaded", model=DEFAULT_MODEL)
     return _cached_whisper_processor
 
 
@@ -36,13 +39,13 @@ def get_diarization_pipeline():
 
     hf_token = get_parameter("/transcriber/hf-token", fallback_env="HF_TOKEN", default="")
     if not hf_token:
-        print("⚠️ [Worker] 未設定 HF_TOKEN，Diarization 不可用")
+        log.warning("diarization.disabled", reason="no_hf_token")
         return None
 
-    print("🔄 [Worker] 載入 Diarization 模型...")
+    log.info("diarization.model.loading")
     _cached_diarization_pipeline = DiarizationProcessor.load_pipeline(hf_token)
     if _cached_diarization_pipeline:
-        print("✅ [Worker] Diarization 模型載入完成")
+        log.info("diarization.model.loaded")
     else:
-        print("⚠️ [Worker] Diarization 模型載入失敗")
+        log.warning("diarization.model.load_failed")
     return _cached_diarization_pipeline

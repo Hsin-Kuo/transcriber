@@ -17,6 +17,9 @@ from src.utils.storage_service import (
     download_audio,
     download_from_handoff,
 )
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
 
 
 class AudioSource(Protocol):
@@ -81,4 +84,4 @@ class S3Source:
             try:
                 delete_handoff(self._task_id, self._handoff_ext)
             except Exception as e:
-                print(f"⚠️ 刪除 handoff 失敗（將由 sweep 處理）：{e}")
+                log.warning("handoff.delete_failed", task_id=self._task_id, error=str(e))
