@@ -34,12 +34,12 @@
 
 ## 🟡 中優先（技術債）
 
-- [~] **T5** — 補充測試（部分由 LAUNCH_READINESS_PLAN B2 完成）
+- [x] **T5** — 補充測試（部分由 LAUNCH_READINESS_PLAN B2 完成）
   - **2026-05-17 進度**：121 個測試（base 31 + 新增 90）
-  - **2026-05-22 進度**：135 個測試（新增 TaskDispatch 閘門 + 轉錄派發整合流程）
-  - 新增覆蓋：JWT entropy / cookie helper / audio validator / WorkerDispatch / TranscriptionJob / TranscriptionOrchestrator / logger middleware / TaskDispatch
-  - [ ] T5-a：建立 `tests/unit/test_task_repo.py`
-  - [ ] T5-b：建立 `tests/unit/test_quota.py`
+  - **2026-05-22 進度**：164 個測試（新增 TaskDispatch / 轉錄派發整合流程 / TaskRepository / QuotaManager）
+  - 新增覆蓋：JWT entropy / cookie helper / audio validator / WorkerDispatch / TranscriptionJob / TranscriptionOrchestrator / logger middleware / TaskDispatch / TaskRepository / QuotaManager
+  - [x] T5-a：建立 `tests/unit/test_task_repo.py`（2026-05-22）
+  - [x] T5-b：建立 `tests/unit/test_quota.py`（2026-05-22）
   - [x] T5-c：JWT 測試已建（B5）
   - [x] T5-d：建立 `tests/integration/test_transcription_flow.py`（2026-05-22；LocalDispatch 整合測試）
 
@@ -76,7 +76,7 @@
 | T2 transcription_service 拆分 | 🟡 部分完成（M1.3 由協調者抽出） | 2026-05-17 |
 | T3 shared_state 封裝 | ✅ 完成 | 2026-04-30 |
 | T4 TranscriptDetailView 拆分 | 🟡 部分完成（M2 三刀） | 2026-05-17 |
-| T5 測試補充 | 🟡 部分完成（135 個測試；T5-d ✅，T5-a/b 待補） | 2026-05-22 |
+| T5 測試補充 | ✅ 完成（164 個測試；T5-a/b/c/d 全 ✅） | 2026-05-22 |
 | T6 Magic number 集中 | ✅ 完成 | 2026-04-30 |
 | T7 Router DI 統一 | ⏳ 待處理 | — |
 | T8 結構化 logging | ✅ 完成（M4） | 2026-05-17 |
