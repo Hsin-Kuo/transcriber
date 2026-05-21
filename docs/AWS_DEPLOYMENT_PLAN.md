@@ -24,7 +24,7 @@
 | **CI/CD 前端** | `aws s3 sync` | **GitHub Actions SSH 到 EC2**，解壓縮到 `/var/www/` |
 | **Email 服務** | Amazon SES | **Resend**（`EMAIL_PROVIDER=resend`） |
 | **GPU 啟動機制** | Lambda 觸發 / Auto Scaling Group | **Worker 自管**：SQS Long Poll + 空閒 5 分鐘後自行呼叫 `shutdown` |
-| **Stripe** | 未提及 | **已整合**（訂閱付款） |
+| **金流** | 未提及 | **已整合藍新（Newebpay）訂閱付款**（無 Stripe 程式碼） |
 | **DNS** | Route 53 → 分別指向 CloudFront / EC2 | Route 53 → EC2 Elastic IP（單一入口） |
 
 ---

@@ -11,15 +11,13 @@
   - [x] T1-b：建立 `src/worker_core/transcription_job.py`（轉錄流程協調）
   - [x] T1-c：建立 `src/worker_core/spot_monitor.py`（Spot 中斷偵測執行緒）
   - [x] T1-d：`worker.py` 改為入口，僅負責啟動
-  - [x] T1-e：建立 `config.py`、`state.py`、`db.py`、`model_cache.py`、`audio_converter.py`
+  - [x] T1-e：建立 `config.py`、`state.py`、`db.py`、`model_cache.py`（`audio_converter.py` 後於 pipeline 統一重構併入 `src/utils/audio_converter.py`）
 
-- [~] **T2** — 拆分 `src/services/transcription_service.py`
-  - **2026-05-17 進度**：M1.3 B 範圍把 service 從 1145 → 399 行（−65%）抽出 `TranscriptionOrchestrator`
-  - 原 T2 細部拆分（audio_preprocessor / segment_assembler / chinese_converter）仍可做但 ROI 已降低
-  - [ ] T2-a：抽出 `src/services/audio_preprocessor.py`（格式轉換、正規化）— 留剩 399 行可繼續啃
-  - [ ] T2-b：抽出 `src/services/segment_assembler.py`（Whisper 輸出 + 說話者合併）
-  - [ ] T2-c：抽出 `src/services/chinese_converter.py`（繁簡轉換邏輯集中）
-  - [x] T2-d：`transcription_service.py` 精簡為協調者角色（已完成由 M1.3）
+- [x] **T2** — 拆分 `src/services/transcription_service.py`
+  - **2026-05-17**：M1.3 B 把 service 從 1145 → 399 行，抽出 `TranscriptionOrchestrator`
+  - **2026-05（pipeline 統一重構）**：Web Server 與 Worker 收斂成共用的 `src/transcription/orchestrator.py`，`transcription_service.py` 再縮到 ~72 行、只剩協調者角色
+  - [x] T2-a/b/c：原規劃的 audio_preprocessor / segment_assembler / chinese_converter 抽取已被此重構吸收（格式轉換 → `src/utils/audio_converter.py`、segment 合併 → `orchestrator.py`、繁簡 → `orchestrator._run_punctuation_phase`），不再單獨拆
+  - [x] T2-d：`transcription_service.py` 精簡為協調者角色
 
 - [x] **T3** — 封裝 `src/utils/shared_state.py`（全域可變字典）
   - [x] T3-a：改寫為 `TaskStateStore` 類別，包含 get/set/delete/lock 方法

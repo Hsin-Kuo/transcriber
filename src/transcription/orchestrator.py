@@ -362,7 +362,7 @@ class TranscriptionOrchestrator:
         self, task_id: str, language: Optional[str], transcription_text: str,
         punctuation_model: Optional[str], punctuation_token_usage: Optional[Dict[str, int]],
     ) -> None:
-        """標記完成 + quota consume + audit log。完成時順帶 unset 殘留 error。"""
+        """標記完成 + quota consume。完成時順帶 unset 殘留 error。"""
         text_length = len(transcription_text)
         update_data = {
             "status": "completed",
