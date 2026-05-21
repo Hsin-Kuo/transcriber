@@ -931,7 +931,6 @@ async def download_transcription(
 
 @router.get("/{task_id}/audio")
 async def download_audio(
-    request: Request,
     task_id: str,
     token: Optional[str] = Query(None, description="JWT access token (查詢參數，用於 audio 元素)"),
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
@@ -993,20 +992,6 @@ async def download_audio(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="任務不存在或無權訪問"
         )
-
-    # 記錄 audit log（存取音檔）
-    try:
-        from ..utils.audit_logger import get_audit_logger
-        await get_audit_logger().log_file_operation(
-            request=request,
-            action="download",
-            user_id=user_id,
-            resource_id=task_id,
-            status_code=200,
-            message="存取音檔",
-        )
-    except Exception as e:
-        log.warning("transcription.audit_log.failed", action="audio_access", error=str(e))
 
     if is_aws():
         # AWS 模式：回傳 S3 presigned URL redirect

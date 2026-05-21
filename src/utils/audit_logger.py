@@ -148,38 +148,6 @@ class AuditLogger:
             user_agent=request.headers.get("User-Agent")
         )
 
-    async def log_file_operation(
-        self,
-        request: Request,
-        action: str,
-        user_id: str,
-        resource_id: Optional[str],
-        status_code: int,
-        message: Optional[str] = None
-    ):
-        """記錄檔案相關操作
-
-        Args:
-            request: FastAPI Request 對象
-            action: 操作動作 (download, upload, delete)
-            user_id: 用戶 ID
-            resource_id: 資源 ID
-            status_code: HTTP 狀態碼
-            message: 訊息
-        """
-        await self.repo.log(
-            user_id=user_id,
-            log_type="file",
-            action=action,
-            ip_address=self.get_client_ip(request),
-            path=request.url.path,
-            method=request.method,
-            status_code=status_code,
-            resource_id=resource_id,
-            response_message=message,
-            user_agent=request.headers.get("User-Agent")
-        )
-
     async def log_tag_operation(
         self,
         request: Request,
