@@ -4,6 +4,9 @@ from datetime import datetime
 import uuid
 
 from ...utils.time_utils import get_utc_timestamp
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
 
 
 class TagRepository:
@@ -159,21 +162,30 @@ class TagRepository:
         updated_count = 0
         current_time = get_utc_timestamp()
 
-        print(f"🔍 [tag_repo.update_order] user_id: {user_id}, tag_ids: {tag_ids}")
+        log.debug("tag.update_order.start", user_id=user_id, tag_ids=tag_ids)
 
         for index, tag_id in enumerate(tag_ids):
             # 先檢查標籤是否存在
             existing = await self.collection.find_one({"tag_id": tag_id, "user_id": user_id})
-            print(f"🔍 [tag_repo.update_order] tag_id={tag_id}, index={index}, exists={existing is not None}")
+            log.debug(
+                "tag.update_order.item",
+                tag_id=tag_id,
+                index=index,
+                exists=existing is not None,
+            )
 
             result = await self.collection.update_one(
                 {"tag_id": tag_id, "user_id": user_id},
                 {"$set": {"order": index, "updated_at": current_time}}
             )
-            print(f"🔍 [tag_repo.update_order] matched={result.matched_count}, modified={result.modified_count}")
+            log.debug(
+                "tag.update_order.result",
+                matched=result.matched_count,
+                modified=result.modified_count,
+            )
             updated_count += result.modified_count
 
-        print(f"✅ [tag_repo.update_order] 總共更新 {updated_count} 個標籤")
+        log.debug("tag.update_order.completed", updated_count=updated_count)
         return updated_count
 
     async def get_by_name(self, user_id: str, name: str) -> Optional[Dict[str, Any]]:

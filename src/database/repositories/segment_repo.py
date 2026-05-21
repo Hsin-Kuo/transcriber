@@ -4,6 +4,9 @@ from typing import Optional, Dict, Any, List
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from ...utils.time_utils import get_utc_timestamp
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
 
 
 class SegmentRepository:
@@ -95,4 +98,4 @@ class SegmentRepository:
         """建立索引"""
         # _id 已經是主鍵,自動有唯一索引
         await self.collection.create_index("created_at")
-        print("✅ Segments 索引已建立")
+        log.info("segment.indexes.created")

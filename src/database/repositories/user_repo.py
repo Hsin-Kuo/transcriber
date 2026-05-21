@@ -4,6 +4,9 @@ from typing import Optional, Dict, Any, List
 from bson import ObjectId
 
 from ...utils.time_utils import get_utc_timestamp
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
 
 
 class UserRepository:
@@ -21,7 +24,7 @@ class UserRepository:
             [("reserved_ai_summaries", 1)],
             partialFilterExpression={"reserved_ai_summaries": {"$gt": 0}},
         )
-        print("✅ 用戶索引已建立")
+        log.info("user.indexes.created")
 
     async def create(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
         """建立新用戶"""

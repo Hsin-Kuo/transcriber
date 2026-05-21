@@ -4,6 +4,9 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from typing import Optional
 
 from ..utils.config_loader import get_parameter
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
 
 # 環境變數配置（AWS 從 SSM 讀取，本地從環境變數）
 MONGODB_URL = get_parameter("/transcriber/mongodb-url", fallback_env="MONGODB_URL", default="mongodb://localhost:27017")
@@ -56,9 +59,9 @@ class MongoDB:
             )
             # 測試連接
             await cls.client.admin.command('ping')
-            print(f"✅ 已連接到 MongoDB: {MONGODB_DB_NAME} (tls={is_atlas})", flush=True)
+            log.info("db.connected", db_name=MONGODB_DB_NAME, tls=is_atlas)
         except Exception as e:
-            print(f"❌ MongoDB 連接失敗: {e}", flush=True)
+            log.error("db.connect.failed", error=str(e), exc_info=True)
             raise
 
     @classmethod
@@ -66,7 +69,7 @@ class MongoDB:
         """關閉時斷開 MongoDB 連接"""
         if cls.client:
             cls.client.close()
-            print("✅ MongoDB 連接已關閉")
+            log.info("db.closed")
 
     @classmethod
     def get_db(cls):
