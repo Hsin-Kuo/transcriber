@@ -29,7 +29,14 @@ const SHORT_DRIFT_TIME_FACTOR = 1.5 // \u984D\u5916\u5BB9\u5FCD timeDelta \u00D7
  * 改用 lastSearchIndex + 時間差 × cps：誤差只乘上「相鄰兩段的時間差」
  * （通常 < 1s），不再隨整段時間軸累積放大。
  *
- * 用 lastIndexOf + indexOf 雙向各找一個最近候選（而非枚舉所有候選）：
+ * 快速路徑：若自上次成功匹配以來沒跳過任何「有內容」的 segment，這一段
+ * 在文字上就緊接前一段，直接取 firstHit（[lastSearchIndex, ...) 內第一個
+ * 匹配）。expected 只在「中間有內容段失配」時才需要。理由：相鄰兩段之間
+ * 的時間差多半是純停頓（無對應文字），用 timeDelta × cps 換算會虛增出
+ * 不存在的位移，把緊接的同字片語推到後面的重複位置（實測：「這個是」後
+ * 緊接的「AI的課」被選到第二次出現的「AI的課」）。
+ *
+ * 中間有內容段失配時才用 lastIndexOf + indexOf 雙向各找一個最近候選：
  *   - backward = content.lastIndexOf(text, expected)   ← expected 前最靠近
  *   - forward  = content.indexOf(text, expected+1)     ← expected 後最靠近
  * 選兩者裡離 expected 比較近、且 >= lastSearchIndex 的。
@@ -64,6 +71,10 @@ export function alignSegmentsToContent(segments, content) {
   const markers = []
   let lastSearchIndex = 0
   let lastSearchTime = 0 // 上一個成功匹配 segment 的 end time，當 local 錨點
+  // 自上次成功匹配以來，是否跳過了「有內容」的 segment（失配 / 短字 drift 拒絕）。
+  // false 代表這一段在文字上緊接前一段 → 可直接取 firstHit，不需 expected 推估。
+  // silence / 純標點段不算（它們本來就沒有對應的 content 文字）。
+  let skippedContentSinceMatch = false
 
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i]
@@ -85,7 +96,10 @@ export function alignSegmentsToContent(segments, content) {
     if (!hasTime) {
       // 沒時間軸資訊：退化到貪婪首匹配
       const idx = contentLower.indexOf(textLower, lastSearchIndex)
-      if (idx === -1) continue
+      if (idx === -1) {
+        skippedContentSinceMatch = true
+        continue
+      }
       chosen = idx
     } else {
       // 局部錨定 expected：用上一段成功匹配的 end time/pos 推算當前段位置，
@@ -96,38 +110,51 @@ export function alignSegmentsToContent(segments, content) {
       const expectedInt = Math.floor(expected)
 
       const firstHit = contentLower.indexOf(textLower, lastSearchIndex)
-      const backward = contentLower.lastIndexOf(textLower, expectedInt)
-      const validBackward = backward >= lastSearchIndex ? backward : -1
-      const forward = contentLower.indexOf(
-        textLower,
-        Math.max(lastSearchIndex, expectedInt + 1),
-      )
+      if (firstHit === -1) {
+        // 完全找不到 → 失配
+        skippedContentSinceMatch = true
+        continue
+      }
 
-      if (firstHit === -1) continue // 完全找不到 → 失配
-
-      // 偵測 expected over-shoot：當 [lastSearchIndex, expected] 範圍內有
-      // 多個候選且彼此相距遠（firstHit 跟 validBackward 距離 > 30 chars），
-      // 代表 candidates 散落在 content 不同段落。「最靠 expected」的
-      // validBackward 通常是錯的（後段同字 — cps 高估、silence/speaker tag
-      // 導致 local 密度低於全域，expected 飄遠造成）。信時間軸 monotone 選
-      // firstHit 較安全，避免 lastSearchIndex 跳過頭污染後續 cascade。
-      // 經典 case：seg 2 silence (text="") 後的 seg 3，其 text 在 line 2
-      // 和 line 3 各出現一次，bidirectional 會挑後者 → 之後 segments 全失配。
-      const SPREAD_FOR_EARLIEST = 30
-      if (
-        validBackward !== -1 &&
-        validBackward - firstHit > SPREAD_FOR_EARLIEST
-      ) {
+      if (!skippedContentSinceMatch) {
+        // 自上次成功匹配以來未跳過任何有內容的 segment → 這一段在文字上
+        // 緊接前一段，直接取最近的 firstHit。避免相鄰兩段之間的純停頓
+        // 時間被 cps 放大成 expected over-shoot，把緊接的同字片語推到
+        // 後面的重複位置（實測：「這個是」後緊接的「AI的課」被選到後面
+        // 第二次出現的「AI的課」）。短字 drift guard 仍會在下方把離 expected
+        // 過遠的 firstHit 當失配，所以 LLM 改掉短字的 case 不受影響。
         chosen = firstHit
-      } else if (validBackward === -1) {
-        chosen = forward
-      } else if (forward === -1) {
-        chosen = validBackward
       } else {
-        chosen =
-          Math.abs(validBackward - expected) <= Math.abs(forward - expected)
-            ? validBackward
-            : forward
+        // 中間有內容段被跳過（失配），當前段位置不確定 → 用 expected 雙向定位。
+        const backward = contentLower.lastIndexOf(textLower, expectedInt)
+        const validBackward = backward >= lastSearchIndex ? backward : -1
+        const forward = contentLower.indexOf(
+          textLower,
+          Math.max(lastSearchIndex, expectedInt + 1),
+        )
+
+        // 偵測 expected over-shoot：當 [lastSearchIndex, expected] 範圍內有
+        // 多個候選且彼此相距遠（firstHit 跟 validBackward 距離 > 30 chars），
+        // 代表 candidates 散落在 content 不同段落。「最靠 expected」的
+        // validBackward 通常是錯的（後段同字 — cps 高估、silence/speaker tag
+        // 導致 local 密度低於全域，expected 飄遠造成）。信時間軸 monotone 選
+        // firstHit 較安全，避免 lastSearchIndex 跳過頭污染後續 cascade。
+        const SPREAD_FOR_EARLIEST = 30
+        if (
+          validBackward !== -1 &&
+          validBackward - firstHit > SPREAD_FOR_EARLIEST
+        ) {
+          chosen = firstHit
+        } else if (validBackward === -1) {
+          chosen = forward
+        } else if (forward === -1) {
+          chosen = validBackward
+        } else {
+          chosen =
+            Math.abs(validBackward - expected) <= Math.abs(forward - expected)
+              ? validBackward
+              : forward
+        }
       }
 
       // 短字 spurious match 防護：當 ≤2 字段唯一找到的位置距 expected 過遠，
@@ -139,7 +166,10 @@ export function alignSegmentsToContent(segments, content) {
           SHORT_DRIFT_MIN,
           timeDelta * charPerSecond * SHORT_DRIFT_TIME_FACTOR,
         )
-        if (Math.abs(chosen - expected) > allowedDrift) continue
+        if (Math.abs(chosen - expected) > allowedDrift) {
+          skippedContentSinceMatch = true
+          continue
+        }
       }
     }
 
@@ -154,6 +184,7 @@ export function alignSegmentsToContent(segments, content) {
 
     lastSearchIndex = chosen + text.length
     if (Number.isFinite(seg.end)) lastSearchTime = seg.end
+    skippedContentSinceMatch = false
   }
 
   return markers

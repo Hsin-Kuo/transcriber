@@ -179,18 +179,18 @@ class DiarizationProcessor:
             # 使用 huggingface_hub 登入
             login(token=hf_token, add_to_git_credential=False)
 
-            log.debug("diarization.model_loading")
+            log.debug("diarization.model.loading")
             pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1")
 
             # GPU 加速：優先 CUDA，其次 MPS
             if torch.cuda.is_available():
                 pipeline.to(torch.device("cuda"))
-                log.info("diarization.model_loaded", device="cuda", device_name=torch.cuda.get_device_name(0))
+                log.info("diarization.model.loaded", device="cuda", device_name=torch.cuda.get_device_name(0))
             elif torch.backends.mps.is_available():
                 pipeline.to(torch.device("mps"))
-                log.info("diarization.model_loaded", device="mps")
+                log.info("diarization.model.loaded", device="mps")
             else:
-                log.warning("diarization.model_loaded", device="cpu")
+                log.warning("diarization.model.loaded", device="cpu")
 
             return pipeline
 
@@ -199,7 +199,7 @@ class DiarizationProcessor:
             return None
         except Exception as e:
             log.error(
-                "diarization.model_load_failed",
+                "diarization.model.load_failed",
                 error=str(e),
                 hint="請確認已在 Hugging Face 同意使用條款：https://huggingface.co/pyannote/speaker-diarization-3.1",
                 exc_info=True,
