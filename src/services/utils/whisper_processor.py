@@ -200,7 +200,44 @@ class WhisperProcessor:
 
         return full_text, segments_list, detected_language
 
+    def _has_gpu(self) -> bool:
+        """偵測是否有可用 GPU，決定分段轉錄走序列(GPU)或平行(CPU)。"""
+        try:
+            import torch
+            return torch.cuda.is_available()
+        except Exception:
+            return False
+
     def transcribe_in_chunks(
+        self,
+        audio_path: Path,
+        chunk_duration_ms: int = 1500000,  # 25 分鐘
+        language: Optional[str] = None,
+        progress_callback: Optional[callable] = None,
+    ) -> Tuple[str, List[Dict], str]:
+        """長音檔分段轉錄。平行(CPU 多核)vs 序列(單 GPU)由 device 自動決定。
+
+        多進程平行只在 CPU 有意義——單張 GPU 上 N 個進程各自載入模型只會搶
+        VRAM、不會更快(GPU 本身已把工作序列化)。對外是單一方法,呼叫端
+        (Orchestrator)不需知道跑在什麼裝置上。
+        """
+        if self._has_gpu():
+            return self._transcribe_in_chunks_serial(
+                audio_path, chunk_duration_ms, language, progress_callback
+            )
+        # 平行版 callback 是 (completed, total[, processing])；統一收斂成 (done, total)
+        cb = None
+        if progress_callback is not None:
+            def cb(completed, total, *_extra):
+                progress_callback(completed, total)
+        return self.transcribe_in_chunks_parallel(
+            audio_path,
+            chunk_duration_ms=chunk_duration_ms,
+            language=language,
+            progress_callback=cb,
+        )
+
+    def _transcribe_in_chunks_serial(
         self,
         audio_path: Path,
         chunk_duration_ms: int = 1500000,  # 25 分鐘

@@ -58,11 +58,11 @@ Web Server 把新建 Task 移交給 Worker 的動作。AWS 模式下含三件事
 _Avoid_: handoff、enqueue（這兩個只是 dispatch 內部的子步驟）。
 
 **TranscriptionOrchestrator**:
-單次 transcription run 的 Phase 狀態機 + 取消 + 終態（completed / failed）協調者。持有 processors（whisper / punctuation / diarization）與 progress_store，不持有 Task 業務狀態。run() 從 PREPARATION 跑到 PUNCTUATION，期間透過 check_cancelled() poll DB；遇取消拋 `TranscriptionCancelled`、遇例外走 `_mark_failed`、成功走 `_mark_completed`（含 quota consume + audit log）。封裝在 `src/transcription/orchestrator.py`，**Web Server 與 Worker 兩個進程共用同一個 class**（透過 [[AudioSource]] adapter 抽掉「音檔從哪來」這個唯一會變的點）。
+單次 transcription run 的 Phase 狀態機 + 取消 + 終態（completed / failed）協調者。持有 processors（whisper / punctuation / diarization）與 progress_store，不持有 Task 業務狀態。run() 從 PREPARATION 跑到 PUNCTUATION，期間透過 check_cancelled() poll DB；遇取消拋 `TranscriptionCancelled`、遇例外走 `_mark_failed`、成功走 `_mark_completed`（含 quota consume）。封裝在 `src/transcription/orchestrator.py`，**Web Server 與 Worker 兩個進程共用同一個 class**（透過 [[AudioSource]] adapter 抽掉「音檔從哪來」這個唯一會變的點）。
 _Avoid_: pipeline（暗示 declarative DAG）、runner（過泛）、TranscriptionRun（容易誤以為是 Task 本身）。
 
 **AudioSource**:
-取得單一 Task 的 [[Handoff audio]] 到本機檔案系統的 adapter，是 Orchestrator 兩進程共用的唯一變化點。`LocalFileSource` 直接回傳 router 已經放在 disk 上的路徑；`S3Source` 從 `handoff/{task_id}.{ext}` 下載到 temp dir、成功 acquire 後在 cleanup() 時 DELETE handoff 物件。**只負責 acquire() + cleanup()**——格式轉換在 `audio_converter`、永久儲存在 `storage_service`，都不歸 AudioSource 管。封裝在 `src/transcription/audio_source.py`。
+取得單一 Task 的 [[Handoff audio]] 到本機檔案系統的 adapter，是 Orchestrator 兩進程共用的唯一變化點。`LocalFileSource` 直接回傳 router 已放在 disk 上的路徑，`cleanup()` 清掉 router 為該 task 建的 temp_dir；`S3Source` 從 `handoff/{task_id}.{ext}` 下載到 temp dir，只在 `cleanup(succeeded=True)`（任務成功）才 DELETE handoff 物件——失敗/取消時保留 handoff 供重試，殘留由 orphan sweep 收。**只負責 acquire() + cleanup()**——格式轉換在 `audio_converter`、永久儲存在 `storage_service`，都不歸 AudioSource 管。封裝在 `src/transcription/audio_source.py`。
 _Avoid_: AudioFetcher、AudioProvider（過泛）、AudioAdapter（adapter 是 role 不是名字）、AudioInput（容易跟 raw bytes / file handle 等多種 input 概念混）。
 
 **TranscriptionCancelled**:

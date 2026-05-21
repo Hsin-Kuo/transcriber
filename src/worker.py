@@ -9,8 +9,7 @@ AI Worker — AWS SQS Consumer 入口點
     worker_core/state.py           — 共享執行時狀態（shutdown flag、Spot 中斷標記）
     worker_core/db.py              — MongoDB 同步連線與 CRUD helpers
     worker_core/model_cache.py     — Whisper / Diarization 模型快取
-    worker_core/audio_converter.py — 音檔格式轉換（MP3、WAV）
-    worker_core/transcription_job.py — 轉錄主流程（下載 → 轉錄 → 標點 → 儲存）
+    worker_core/transcription_job.py — Worker 入口薄殼（dispatch 給統一 Orchestrator）
     worker_core/spot_monitor.py    — Spot 中斷偵測與 EC2 自動關機
     worker_core/sqs_consumer.py    — SQS Long-poll 主迴圈
 """

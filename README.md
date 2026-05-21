@@ -43,10 +43,10 @@ src/
 ├── worker.py               # GPU Worker 入口（APP_ROLE=worker）
 ├── worker_core/            # Worker 拆出的元件
 │   ├── sqs_consumer.py     # SQS Long Poll
-│   ├── transcription_job.py# 單次任務生命週期
+│   ├── transcription_job.py# Worker 入口薄殼
 │   ├── spot_monitor.py     # Spot 中斷偵測
 │   ├── heartbeat.py        # 60 秒 keep-alive
-│   └── model_cache.py / audio_converter.py / config.py / db.py / state.py
+│   └── model_cache.py / config.py / db.py / state.py
 ├── routers/                # API 路由層
 │   ├── auth.py / oauth.py             # 認證 / Google OAuth
 │   ├── tasks.py / transcriptions.py   # 任務 / 轉錄
@@ -57,8 +57,7 @@ src/
 │   └── admin.py                       # 管理後台（prefix=/api/admin）
 ├── services/               # 業務邏輯層
 │   ├── task_service.py
-│   ├── transcription_service.py
-│   ├── transcription_orchestrator.py  # Phase 狀態機
+│   ├── transcription_service.py       # 本地模式轉錄入口
 │   ├── worker_dispatch.py             # S3 + HMAC + SQS 派發
 │   ├── progress_store.py              # transient progress state
 │   ├── tag_service.py / summary_service.py / audio_service.py
@@ -67,6 +66,9 @@ src/
 │       ├── punctuation_processor.py   # 標點處理
 │       ├── diarization_processor.py   # 說話者辨識
 │       └── audio_validator.py         # 上傳白名單（副檔名 + magic bytes）
+├── transcription/          # 轉錄 pipeline（Web Server 與 Worker 共用）
+│   ├── orchestrator.py     # 單次 run 的 Phase 狀態機 + 取消 + 終態
+│   └── audio_source.py     # AudioSource：LocalFileSource / S3Source
 ├── utils/                  # 跨層共用工具
 │   ├── storage_service.py  # local / S3 切換
 │   ├── config_loader.py    # SSM / .env
