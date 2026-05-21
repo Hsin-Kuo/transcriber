@@ -38,7 +38,10 @@ from src.worker_core.model_cache import get_whisper_processor, get_diarization_p
 from src.worker_core.spot_monitor import run_spot_monitor, shutdown_instance
 from src.worker_core.transcription_job import process_task
 from src.services.progress_store import MongoProgressStore
+from src.utils.logger import get_logger
 import src.worker_core.state as state
+
+log = get_logger(__name__)
 
 
 def _verify_message_signature(body: dict) -> bool:
@@ -48,7 +51,7 @@ def _verify_message_signature(body: dict) -> bool:
 
     signature = body.pop("_signature", None)
     if not signature:
-        print("⚠️ SQS 訊息缺少簽名，可能來源不明")
+        log.warning("sqs.message.no_signature")
         return False
 
     payload = json.dumps(body, sort_keys=True, separators=(",", ":"))
@@ -57,7 +60,7 @@ def _verify_message_signature(body: dict) -> bool:
     ).hexdigest()
 
     if not hmac.compare_digest(signature, expected):
-        print("⚠️ SQS 訊息簽名無效，拒絕處理")
+        log.warning("sqs.message.invalid_signature")
         return False
 
     return True
@@ -65,13 +68,13 @@ def _verify_message_signature(body: dict) -> bool:
 
 def _signal_handler(signum, frame):
     state.shutdown = True
-    print(f"\n🛑 收到停止訊號 ({signum})，等待當前任務完成後退出...")
+    log.info("worker.shutdown.signal_received", signal=signum)
 
 
 def main() -> None:
     """SQS Consumer 主迴圈"""
     if not SQS_QUEUE_URL:
-        print("❌ SQS_QUEUE_URL 未設定，無法啟動 Worker")
+        log.error("worker.start_failed", reason="no_sqs_queue_url")
         sys.exit(1)
 
     # 在主函式中才註冊 signal handler，避免 import state.py 時產生副作用
@@ -79,18 +82,19 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _signal_handler)
 
     sqs = boto3.client("sqs", region_name=S3_REGION)
-    print("🚀 AI Worker 已啟動")
-    print(f"   SQS Queue: {SQS_QUEUE_URL}")
-    print(f"   Whisper Model: {DEFAULT_MODEL}")
-    print(f"   MongoDB: {MONGODB_DB_NAME}")
-    print(f"   Auto Shutdown: {AUTO_SHUTDOWN_IDLE_MINUTES} 分鐘空閒後")
-    print("   平行處理: 轉錄 + 語者辨識同時執行")
+    log.info(
+        "worker.started",
+        sqs_queue=SQS_QUEUE_URL,
+        whisper_model=DEFAULT_MODEL,
+        db=MONGODB_DB_NAME,
+        auto_shutdown_minutes=AUTO_SHUTDOWN_IDLE_MINUTES,
+    )
 
     monitor_thread = threading.Thread(
         target=run_spot_monitor, args=(sqs,), daemon=True, name="SpotMonitor"
     )
     monitor_thread.start()
-    print(f"🔍 Spot 中斷監控已啟動（每 {SPOT_CHECK_INTERVAL_SECONDS} 秒輪詢）")
+    log.info("spot.monitor.started", interval_seconds=SPOT_CHECK_INTERVAL_SECONDS)
 
     get_whisper_processor()
     get_diarization_pipeline()
@@ -119,10 +123,10 @@ def main() -> None:
             if not messages:
                 if idle_start is None:
                     idle_start = time.time()
-                    print(f"⏳ 佇列空閒，{AUTO_SHUTDOWN_IDLE_MINUTES} 分鐘後自動關機...")
+                    log.info("worker.idle", auto_shutdown_minutes=AUTO_SHUTDOWN_IDLE_MINUTES)
 
                 if time.time() - idle_start >= idle_threshold:
-                    print(f"💤 空閒超過 {AUTO_SHUTDOWN_IDLE_MINUTES} 分鐘，準備關機...")
+                    log.info("worker.idle.shutdown_triggered", idle_minutes=AUTO_SHUTDOWN_IDLE_MINUTES)
                     write_heartbeat(status="shutting_down")
                     shutdown_instance()
                     break
@@ -136,7 +140,7 @@ def main() -> None:
 
                 if not _verify_message_signature(body):
                     sqs.delete_message(QueueUrl=SQS_QUEUE_URL, ReceiptHandle=receipt_handle)
-                    print(f"🚫 已丟棄無效簽名的訊息: {body.get('task_id', 'unknown')}")
+                    log.warning("sqs.message.dropped", task_id=body.get("task_id", "unknown"), reason="invalid_signature")
                     continue
 
                 task_id = body.get("task_id")
@@ -151,16 +155,14 @@ def main() -> None:
                 write_heartbeat(status="idle", last_task_id=task_id, task_completed=True)
 
                 if state.spot_interruption_detected:
-                    print("⚠️ [Spot] 保留 SQS 訊息，其他 Worker 將接手任務")
+                    log.warning("sqs.message.retained", reason="spot_interruption")
                     break
 
                 sqs.delete_message(QueueUrl=SQS_QUEUE_URL, ReceiptHandle=receipt_handle)
-                print(f"📨 已確認 SQS 訊息: {task_id}")
+                log.debug("sqs.message.deleted", task_id=task_id)
 
         except Exception as e:
-            print(f"❌ [Worker] SQS polling 錯誤: {e}")
-            import traceback
-            traceback.print_exc()
+            log.error("sqs.poll.error", error=str(e), exc_info=True)
             # 送 Sentry（未 init 時 sentry_sdk.capture_exception 為 no-op）
             try:
                 import sentry_sdk
@@ -170,4 +172,4 @@ def main() -> None:
             time.sleep(5)
 
     write_heartbeat(status="stopped")
-    print("👋 Worker 已停止")
+    log.info("worker.stopped")

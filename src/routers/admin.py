@@ -17,7 +17,7 @@ from ..utils.time_utils import get_utc_timestamp
 from ..utils.audit_logger import log_admin_action
 from ..utils.email_service import get_email_service
 from ..utils.sentry_helpers import create_background_task
-import logging
+from ..utils.logger import get_logger
 
 
 def _notify_user_async(to_email: str, action_label: str, admin_email: str, details_lines: list) -> None:
@@ -34,11 +34,11 @@ def _notify_user_async(to_email: str, action_label: str, admin_email: str, detai
                 details_lines=details_lines,
             )
         except Exception as e:
-            logger.warning(f"admin notification email failed: {e}")
+            logger.warning("admin.notification_email.failed", error=str(e))
 
     create_background_task(_send(), name=f"admin_notify:{action_label[:20]}")
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # 單次調整額外額度的上限（避免 admin 手滑）
 MAX_EXTRA_QUOTA_DELTA_DURATION = 10000  # 分鐘
@@ -567,9 +567,13 @@ async def adjust_user_extra_quota(
         )
     except Exception as e:
         logger.error(
-            f"audit log 寫入失敗（額度已調整）: admin={admin.get('_id')} "
-            f"user={user_id} delta_duration={body.duration_minutes} "
-            f"delta_summaries={body.ai_summaries} reason={body.reason} err={e}"
+            "admin.quota_adjust.audit_log_failed",
+            admin_id=str(admin.get("_id")),
+            user_id=user_id,
+            delta_duration=body.duration_minutes,
+            delta_summaries=body.ai_summaries,
+            reason=body.reason,
+            error=str(e),
         )
 
     # 通知用戶（補償或扣除都通知，避免出現「我額度怎麼少了」的客訴）
@@ -941,11 +945,25 @@ async def admin_batch_delete_tasks(
 
 @router.get("/statistics")
 async def get_admin_statistics(
+    request: Request,
     admin: dict = Depends(get_current_admin),
     db = Depends(get_database)
 ):
     """獲取後台統計資料"""
     try:
+        # 記錄 audit log（查看後台統計）
+        try:
+            from ..utils.audit_logger import get_audit_logger
+            await get_audit_logger().log_admin_operation(
+                request=request,
+                action="view_statistics",
+                user_id=str(admin["_id"]),
+                status_code=200,
+                message="查看後台統計資料",
+            )
+        except Exception as e:
+            logger.warning("audit_log.write_failed", error=str(e))
+
         # 1. 總體統計
         total_tasks = await db.tasks.count_documents({})
         completed_tasks = await db.tasks.count_documents({"status": "completed"})
@@ -1258,7 +1276,7 @@ async def get_admin_statistics(
         }
 
     except Exception as e:
-        print(f"❌ 獲取統計資料失敗：{e}")
+        logger.error("admin.statistics.failed", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"獲取統計資料失敗：{str(e)}"

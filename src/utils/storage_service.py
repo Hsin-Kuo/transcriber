@@ -22,6 +22,10 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
+
 
 DEPLOY_ENV = os.getenv("DEPLOY_ENV", "local")
 S3_BUCKET = os.getenv("S3_BUCKET", "")
@@ -237,10 +241,10 @@ def delete_audio(task_id: str, tier: str = "free") -> None:
             if error_code == "NoSuchKey":
                 pass  # 檔案本來就不存在，不需要報錯
             else:
-                print(f"⚠️ S3 刪除音檔失敗 ({error_code}): {e}")
+                log.error("storage.audio_delete_failed", error_code=error_code, error=str(e))
                 raise
         except Exception as e:
-            print(f"⚠️ S3 刪除音檔失敗: {e}")
+            log.error("storage.audio_delete_failed", error=str(e))
             raise
     else:
         path = Path("uploads") / f"{task_id}.mp3"
@@ -264,7 +268,7 @@ def delete_audio_by_path(audio_file_path: str) -> None:
             try:
                 _get_s3().delete_object(Bucket=S3_BUCKET, Key=key)
             except Exception as e:
-                print(f"⚠️ S3 刪除音檔失敗: {e}")
+                log.error("storage.audio_delete_failed", error=str(e))
     else:
         path = Path(audio_file_path)
         path.unlink(missing_ok=True)
@@ -372,7 +376,7 @@ def move_audio(task_id: str, from_tier: str, to_tier: str) -> str:
             Key=dst_key,
         )
         s3.delete_object(Bucket=S3_BUCKET, Key=src_key)
-        print(f"📦 音檔已搬移: {src_key} → {dst_key}")
+        log.info("storage.audio_moved", src_key=src_key, dst_key=dst_key)
         return f"s3://{S3_BUCKET}/{dst_key}"
     else:
         # local 模式不分資料夾
@@ -478,7 +482,7 @@ def delete_handoff(task_id: str, ext: str) -> None:
         error_code = e.response["Error"]["Code"]
         if error_code == "NoSuchKey":
             return
-        print(f"⚠️ S3 刪除 handoff 音檔失敗 ({error_code}): {e}")
+        log.error("storage.handoff_delete_failed", error_code=error_code, error=str(e))
         raise
 
 
@@ -517,7 +521,7 @@ def sweep_handoff_orphans(older_than_hours: int = 24) -> int:
         )
         deleted += len(stale_keys)
         for err in resp.get("Errors") or []:
-            print(f"⚠️ sweep_handoff_orphans 刪除失敗: {err}")
+            log.warning("storage.handoff_sweep_delete_failed", error=str(err))
     return deleted
 
 

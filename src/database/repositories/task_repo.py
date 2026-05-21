@@ -4,6 +4,9 @@ from typing import Optional, Dict, Any, List
 from bson import ObjectId
 
 from ...utils.time_utils import get_utc_timestamp
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
 
 
 # 允許的查詢參數值（白名單）
@@ -292,7 +295,7 @@ class TaskRepository:
         await self.collection.create_index([("user_id", 1), ("status", 1)])
         await self.collection.create_index("status")
         await self.collection.create_index("share_token", sparse=True)
-        print("✅ 任務索引已建立")
+        log.info("task.indexes.created")
 
     async def bulk_update_tags_add(self, task_ids: List[str], user_id: str, tags_to_add: List[str]) -> int:
         """批次添加標籤"""
@@ -516,12 +519,19 @@ class TaskRepository:
 
         # 調試日誌
         if user_id:
-            print(f"   📊 [find_tasks_with_audio] 查詢條件包含 user_id={user_id}, 返回 {len(tasks)} 個任務")
-            if tasks:
-                # 顯示前幾個任務的用戶信息
-                for task in tasks[:3]:
-                    task_user_id = task.get("user", {}).get("user_id") or task.get("user_id", "未知")
-                    print(f"      - 任務 {task.get('task_id', 'unknown')[:8]}: user_id={task_user_id}")
+            sample = [
+                {
+                    "task_id": task.get("task_id", "unknown")[:8],
+                    "user_id": task.get("user", {}).get("user_id") or task.get("user_id", "unknown"),
+                }
+                for task in tasks[:3]
+            ]
+            log.debug(
+                "task.find_tasks_with_audio",
+                user_id=user_id,
+                count=len(tasks),
+                sample=sample,
+            )
 
         return tasks
 

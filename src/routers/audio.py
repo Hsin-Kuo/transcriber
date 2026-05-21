@@ -10,9 +10,11 @@ import shutil
 from ..auth.dependencies import get_current_user
 from ..services.audio_service import AudioService
 from ..utils.config_loader import get_temp_dir
+from ..utils.logger import get_logger
 
 
 router = APIRouter(prefix="/audio", tags=["Audio"])
+log = get_logger(__name__)
 
 
 # 全域 AudioService 實例（用於管理片段）
@@ -302,7 +304,7 @@ async def merge_audio_files(
                 f.write(content)
 
             saved_files.append(temp_path)
-            print(f"📁 保存檔案 {idx + 1}/{len(files)}: {file.filename}")
+            log.debug("merge.file.saved", index=idx + 1, total=len(files), filename=file.filename)
 
         # 合併音檔（固定MP3格式）
         audio_service = AudioService(output_dir=Path("output/merged"))
@@ -314,9 +316,12 @@ async def merge_audio_files(
         duration_seconds = duration_ms / 1000.0
         size_mb = merged_path.stat().st_size / 1024 / 1024
 
-        print(f"✅ 合併完成：{merged_path.name}")
-        print(f"   時長：{duration_seconds:.2f} 秒")
-        print(f"   大小：{size_mb:.2f} MB")
+        log.info(
+            "merge.completed",
+            filename=merged_path.name,
+            duration_seconds=round(duration_seconds, 2),
+            size_mb=round(size_mb, 2),
+        )
 
         return {
             "merged_id": merged_path.stem,
@@ -327,7 +332,7 @@ async def merge_audio_files(
         }
 
     except Exception as e:
-        print(f"❌ 合併失敗：{e}")
+        log.error("merge.failed", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"音檔合併失敗：{str(e)}"

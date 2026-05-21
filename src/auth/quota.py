@@ -4,6 +4,9 @@ from fastapi import HTTPException, status
 
 from src.models.quota import QUOTA_TIERS, QuotaTier
 from src.utils.time_utils import get_utc_timestamp, timestamp_to_datetime
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
 
 
 def _get_tier_default(user: dict, field: str, fallback):
@@ -242,7 +245,7 @@ class QuotaManager:
                         try:
                             await QuotaManager._expire_subscription(db, user)
                         except Exception as e:
-                            print(f"⚠️ 訂閱到期降級寫入失敗：{e}")
+                            log.warning("quota.subscription.expire.writeback_failed", error=str(e))
                     # 繼續走免費用戶邏輯
                     sub_status = "expired"
 
@@ -289,7 +292,7 @@ class QuotaManager:
                         }
                     )
                 except Exception as e:
-                    print(f"⚠️ 自動重置配額寫回 DB 失敗：{e}")
+                    log.warning("quota.monthly_reset.writeback_failed", error=str(e))
             return new_usage
 
         return usage
@@ -319,7 +322,7 @@ class QuotaManager:
                 }
             }
         )
-        print(f"🔻 用戶 {user_id} 訂閱到期，已降為 free", flush=True)
+        log.warning("quota.subscription.expired", user_id=user_id, downgraded_to="free")
 
     @staticmethod
     async def reset_user_monthly_quota(db, user_id: str):

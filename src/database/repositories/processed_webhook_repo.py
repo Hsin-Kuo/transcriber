@@ -11,6 +11,10 @@ from typing import Optional
 
 from pymongo.errors import DuplicateKeyError
 
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
+
 
 class ProcessedWebhookRepository:
     """跨 webhook provider 共用的冪等性記錄"""
@@ -66,4 +70,4 @@ class ProcessedWebhookRepository:
         try:
             await self.collection.delete_one({"_id": key})
         except Exception as e:
-            print(f"⚠️ release claim failed for {key}: {e}", flush=True)
+            log.warning("webhook.release.failed", key=key, error=str(e))

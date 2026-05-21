@@ -15,8 +15,10 @@ from ..services.utils.audio_validator import (
     validate_magic_bytes,
 )
 from ..utils.config_loader import get_temp_dir
+from ..utils.logger import get_logger
 
 router = APIRouter(prefix="/uploads", tags=["Uploads"])
+log = get_logger(__name__)
 
 # 進行中的上傳 (upload_id → metadata)
 _active_uploads: dict[str, dict] = {}
@@ -192,4 +194,4 @@ async def _cleanup_expired_uploads():
             meta = _active_uploads.pop(uid, None)
             if meta and meta["temp_dir"].exists():
                 shutil.rmtree(meta["temp_dir"], ignore_errors=True)
-                print(f"🧹 清理過期分片上傳: {uid}")
+                log.info("upload.expired.cleaned", upload_id=uid)

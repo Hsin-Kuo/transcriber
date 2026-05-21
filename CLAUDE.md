@@ -17,7 +17,7 @@ src/                  # 後端 (FastAPI)
   main.py             # 應用入口（uvicorn）
   worker.py           # GPU Worker 入口（薄殼，APP_ROLE=worker 時啟動）
   worker_core/        # Worker 拆出的元件：sqs_consumer / transcription_job /
-                      # spot_monitor / heartbeat / model_cache / audio_converter
+                      # spot_monitor / heartbeat / model_cache
   routers/            # API 路由
     auth.py           # 認證（註冊/登入/email驗證/密碼重設）
     oauth.py          # Google OAuth
@@ -32,8 +32,7 @@ src/                  # 後端 (FastAPI)
     admin.py          # 管理後台 API（prefix=/api/admin）
   services/           # 業務邏輯
     task_service.py             # 任務狀態管理
-    transcription_service.py    # 轉錄 service 入口（協調用）
-    transcription_orchestrator.py # 單次 transcription run 的 Phase 狀態機
+    transcription_service.py    # 本地模式轉錄入口（包 LocalFileSource、submit Orchestrator）
     worker_dispatch.py          # AWS 模式下把 task 派發給 Worker（S3+HMAC+SQS）
     progress_store.py           # transient progress state（task_progress collection）
     tag_service.py / summary_service.py / audio_service.py
@@ -42,6 +41,9 @@ src/                  # 後端 (FastAPI)
       punctuation_processor.py  # Gemini 標點強化
       diarization_processor.py  # pyannote 說話者辨識
       audio_validator.py        # 上傳副檔名 / magic bytes 白名單
+  transcription/      # 轉錄 pipeline（Web Server 與 Worker 共用同一份）
+    orchestrator.py   # 單次 run 的 Phase 狀態機 + 取消 + 終態
+    audio_source.py   # AudioSource：LocalFileSource（本地）/ S3Source（Worker）
   utils/              # 跨層共用工具
     storage_service.py          # 檔案存取（local/S3 自動切換）
     config_loader.py            # 密鑰讀取（SSM / .env fallback）

@@ -2,10 +2,11 @@
 
 未設定 SENTRY_DSN 時 no-op，本地開發不會送資料。
 """
-import logging
 import os
 
-logger = logging.getLogger(__name__)
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 # before_send 用 substring 比對遞迴遮蔽欄位
 # 用 substring 是因為實際 key 常帶後綴（如 GOOGLE_API_KEY_1、Set-Cookie）
@@ -55,7 +56,7 @@ def init_sentry(component: str = "server") -> None:
         from sentry_sdk.integrations.fastapi import FastApiIntegration
         from sentry_sdk.integrations.starlette import StarletteIntegration
     except ImportError:
-        logger.warning("SENTRY_DSN 已設定但未安裝 sentry-sdk，略過初始化")
+        logger.warning("sentry.sdk_not_installed")
         return
 
     deploy_env = os.getenv("DEPLOY_ENV", "local")
@@ -89,5 +90,7 @@ def init_sentry(component: str = "server") -> None:
     )
     sentry_sdk.set_tag("component", component)
     logger.info(
-        "Sentry initialized (env=%s, traces=%s)", environment, traces_sample_rate
+        "sentry.initialized",
+        environment=environment,
+        traces_sample_rate=traces_sample_rate,
     )

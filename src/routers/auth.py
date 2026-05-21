@@ -37,7 +37,10 @@ from ..utils.audit_logger import get_audit_logger
 from ..utils.email_service import get_email_service
 from ..models.quota import QUOTA_TIERS, QuotaTier
 
+from ..utils.logger import get_logger
+
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+log = get_logger(__name__)
 
 
 @router.post("/register")
@@ -894,7 +897,7 @@ async def delete_account(
             try:
                 delete_audio_by_path(audio_path)
             except Exception as e:
-                print(f"⚠️ 刪除音檔失敗 (task {task['_id']}): {e}")
+                log.warning("audio.delete_failed", task_id=str(task["_id"]), error=str(e))
 
     # 3. 刪除關聯資料
     if task_ids:

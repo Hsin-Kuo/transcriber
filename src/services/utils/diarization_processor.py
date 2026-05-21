@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Optional, List, Dict
 import os
 
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
+
 
 class DiarizationProcessor:
     """說話者辨識處理器
@@ -53,11 +57,11 @@ class DiarizationProcessor:
             如果失敗則返回 None
         """
         if not self.pipeline:
-            print("⚠️ Diarization pipeline 未初始化")
+            log.warning("diarization.pipeline_not_initialized")
             return None
 
         try:
-            print("🔊 正在分析說話者...")
+            log.debug("diarization.started")
 
             # 準備 diarization 參數
             diarization_kwargs = {}
@@ -65,9 +69,8 @@ class DiarizationProcessor:
                 # pyannote.audio 需要同時設定 min_speakers 和 max_speakers
                 diarization_kwargs["min_speakers"] = 1
                 diarization_kwargs["max_speakers"] = max_speakers
-                print(f"   設定講者人數範圍：1-{max_speakers} 人")
 
-            print(f"   Diarization 參數：{diarization_kwargs}")
+            log.debug("diarization.params", max_speakers=max_speakers, diarization_kwargs=diarization_kwargs)
             diarization = self.pipeline(str(audio_path), **diarization_kwargs)
 
             segments = []
@@ -79,11 +82,11 @@ class DiarizationProcessor:
                 })
 
             num_speakers = len(set(s['speaker'] for s in segments))
-            print(f"✅ 說話者分析完成，識別到 {num_speakers} 位說話者")
+            log.info("diarization.completed", num_speakers=num_speakers)
             return segments
 
         except Exception as e:
-            print(f"⚠️ Speaker diarization 失敗：{e}")
+            log.error("diarization.failed", error=str(e), exc_info=True)
             return None
 
     def perform_diarization_in_process(
@@ -113,28 +116,27 @@ class DiarizationProcessor:
             if self.hf_token:
                 login(token=self.hf_token, add_to_git_credential=False)
 
-            print("🔊 [進程] 正在載入 diarization pipeline...")
+            log.debug("diarization.pipeline_loading", in_process=True)
             import torch
             pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1")
 
             # GPU 加速：優先 CUDA，其次 MPS
             if torch.cuda.is_available():
                 pipeline.to(torch.device("cuda"))
-                print(f"🔊 [進程] 使用 CUDA 加速: {torch.cuda.get_device_name(0)}")
+                log.debug("diarization.device_selected", in_process=True, device="cuda", device_name=torch.cuda.get_device_name(0))
             elif torch.backends.mps.is_available():
                 pipeline.to(torch.device("mps"))
-                print("🔊 [進程] 使用 MPS 加速")
+                log.debug("diarization.device_selected", in_process=True, device="mps")
 
-            print("🔊 [進程] 正在分析說話者...")
+            log.debug("diarization.started", in_process=True)
 
             # 準備 diarization 參數
             diarization_kwargs = {}
             if max_speakers is not None and 2 <= max_speakers <= 10:
                 diarization_kwargs["min_speakers"] = 1
                 diarization_kwargs["max_speakers"] = max_speakers
-                print(f"   [進程] 設定講者人數範圍：1-{max_speakers} 人")
 
-            print(f"   [進程] Diarization 參數：{diarization_kwargs}")
+            log.debug("diarization.params", in_process=True, max_speakers=max_speakers, diarization_kwargs=diarization_kwargs)
             diarization = pipeline(str(audio_path), **diarization_kwargs)
 
             segments = []
@@ -146,11 +148,11 @@ class DiarizationProcessor:
                 })
 
             num_speakers = len(set(s['speaker'] for s in segments))
-            print(f"✅ [進程] 說話者分析完成，識別到 {num_speakers} 位說話者")
+            log.info("diarization.completed", in_process=True, num_speakers=num_speakers)
             return segments
 
         except Exception as e:
-            print(f"⚠️ [進程] Speaker diarization 失敗：{e}")
+            log.error("diarization.failed", in_process=True, error=str(e), exc_info=True)
             return None
 
     @staticmethod
@@ -171,31 +173,35 @@ class DiarizationProcessor:
             hf_token = hf_token or os.getenv("HF_TOKEN")
 
             if not hf_token:
-                print("ℹ️ 未設定 HF_TOKEN，speaker diarization 功能不可用")
+                log.warning("diarization.hf_token_missing")
                 return None
 
             # 使用 huggingface_hub 登入
             login(token=hf_token, add_to_git_credential=False)
 
-            print("🔊 正在載入 Speaker Diarization 模型...")
+            log.debug("diarization.model_loading")
             pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1")
 
             # GPU 加速：優先 CUDA，其次 MPS
             if torch.cuda.is_available():
                 pipeline.to(torch.device("cuda"))
-                print(f"✅ Speaker Diarization 模型載入完成（使用 CUDA: {torch.cuda.get_device_name(0)}）！")
+                log.info("diarization.model_loaded", device="cuda", device_name=torch.cuda.get_device_name(0))
             elif torch.backends.mps.is_available():
                 pipeline.to(torch.device("mps"))
-                print("✅ Speaker Diarization 模型載入完成（使用 MPS 加速）！")
+                log.info("diarization.model_loaded", device="mps")
             else:
-                print("⚠️ Speaker Diarization 模型載入完成（使用 CPU，速度較慢）！")
+                log.warning("diarization.model_loaded", device="cpu")
 
             return pipeline
 
         except ImportError:
-            print("⚠️ pyannote.audio 未安裝，speaker diarization 功能不可用")
+            log.warning("diarization.pyannote_not_installed")
             return None
         except Exception as e:
-            print(f"⚠️ Speaker Diarization 模型載入失敗：{e}")
-            print("   請確認已在 Hugging Face 同意使用條款：https://huggingface.co/pyannote/speaker-diarization-3.1")
+            log.error(
+                "diarization.model_load_failed",
+                error=str(e),
+                hint="請確認已在 Hugging Face 同意使用條款：https://huggingface.co/pyannote/speaker-diarization-3.1",
+                exc_info=True,
+            )
             return None

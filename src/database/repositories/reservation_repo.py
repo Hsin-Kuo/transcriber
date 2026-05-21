@@ -14,6 +14,9 @@ from fastapi import HTTPException, status
 from pymongo.errors import OperationFailure
 
 from ...utils.time_utils import get_utc_timestamp
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
 
 
 # 預扣類型
@@ -35,7 +38,7 @@ class ReservationRepository:
         """建立索引"""
         await self.collection.create_index([("user_id", 1), ("type", 1)])
         await self.collection.create_index("task_id")
-        print("✅ 預扣配額索引已建立")
+        log.info("reservation.indexes.created")
 
     async def reserve_transcription(
         self,
@@ -259,11 +262,11 @@ async def periodic_reservation_cleanup(db, interval_seconds: int = 1800) -> None
 
             removed = await reservation_repo.sweep_orphaned_reservations()
             if removed:
-                print(f"♻️  清掃孤兒轉錄預扣：{removed} 筆")
+                log.info("reservation.sweep.transcription.completed", removed=removed)
 
             from src.auth.quota import QuotaManager
             fixed = await QuotaManager.sweep_stale_ai_summary_reservations(db)
             if fixed:
-                print(f"♻️  清掃孤兒 AI 摘要預扣：{fixed} 位用戶")
+                log.info("reservation.sweep.ai_summary.completed", fixed=fixed)
         except Exception as e:
-            print(f"⚠️ 預扣清掃任務發生錯誤：{e}")
+            log.error("reservation.sweep.failed", error=str(e), exc_info=True)

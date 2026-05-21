@@ -29,6 +29,7 @@ from ..services.utils.punctuation_processor import PunctuationProcessor
 from ..services.utils.diarization_processor import DiarizationProcessor
 from ..utils.storage_service import is_aws
 from ..utils.config_loader import get_parameter, get_temp_dir
+from ..utils.logger import get_logger
 from ..database.sync_client import get_sync_db
 from ..services.worker_dispatch import get_worker_dispatch
 from ..models.worker_job import TranscriptionWorkerJob
@@ -37,6 +38,7 @@ import asyncio
 
 
 router = APIRouter(prefix="/transcriptions", tags=["Transcriptions"])
+log = get_logger(__name__)
 
 
 # 全域服務單例（在啟動時初始化）
@@ -366,7 +368,7 @@ async def create_transcription(
     # 字幕類型強制不使用標點符號
     if task_type == "subtitle":
         punct_provider = "none"
-        print("ℹ️  字幕模式：已自動停用標點符號處理")
+        log.debug("transcription.create.punctuation_disabled", task_type=task_type)
     # 獲取服務（AWS 模式下 TranscriptionService 可能為 None）
     transcription_service = _transcription_service
     if not is_aws() and transcription_service is None:
@@ -395,12 +397,21 @@ async def create_transcription(
             # ── 分片上傳：檔案已組裝好，直接使用 ──
             temp_audio = chunked_audio_path
             original_filename = custom_name.strip() if custom_name and custom_name.strip() else chunked_audio_path.name
-            print(f"📁 分片上傳模式：使用已組裝檔案 {chunked_audio_path.name} ({chunked_audio_path.stat().st_size / 1024 / 1024:.2f} MB)")
+            log.info(
+                "upload.chunked.assembled",
+                filename=chunked_audio_path.name,
+                size_mb=round(chunked_audio_path.stat().st_size / 1024 / 1024, 2),
+            )
         elif use_merge_chunked:
             # ── 合併模式（分片上傳）：多個已組裝檔案合併 ──
-            print(f"🔄 合併模式（分片）：{len(merge_chunked_paths)} 個檔案")
+            log.info("transcription.merge.started", mode="chunked", file_count=len(merge_chunked_paths))
             for idx, p in enumerate(merge_chunked_paths):
-                print(f"  📁 {idx + 1}. {p.name} ({p.stat().st_size / 1024 / 1024:.2f} MB)")
+                log.debug(
+                    "transcription.merge.file",
+                    index=idx + 1,
+                    filename=p.name,
+                    size_mb=round(p.stat().st_size / 1024 / 1024, 2),
+                )
 
             audio_service = AudioService()
             unique_id = str(uuid.uuid4())[:8]
@@ -416,15 +427,19 @@ async def create_transcription(
             else:
                 original_filename = merge_chunked_paths[0].name.rsplit('.', 1)[0] + '.mp3'
 
-            print(f"✅ 合併完成：{merged_audio_path}")
-            print(f"   任務名稱：{original_filename}")
+            log.info(
+                "transcription.merge.completed",
+                mode="chunked",
+                merged_path=str(merged_audio_path),
+                filename=original_filename,
+            )
 
             # 清理分片上傳的暫存目錄（合併結果已在 temp_dir 中）
             for d in merge_temp_dirs:
                 if d.exists():
                     shutil.rmtree(d, ignore_errors=True)
         elif len(uploaded_files) > 1:
-            print(f"🔄 合併模式：{len(uploaded_files)} 個檔案")
+            log.info("transcription.merge.started", mode="direct", file_count=len(uploaded_files))
 
             # 保存上傳的檔案到臨時目錄
             saved_files = []
@@ -442,7 +457,7 @@ async def create_transcription(
                     shutil.rmtree(temp_dir, ignore_errors=True)
                     raise
                 saved_files.append(temp_path)
-                print(f"  📁 {idx + 1}. {upload_file.filename}")
+                log.debug("transcription.merge.file", index=idx + 1, filename=upload_file.filename)
 
             # 合併音檔到臨時目錄（固定MP3格式：16kHz, mono, 192kbps）
             audio_service = AudioService()
@@ -469,8 +484,12 @@ async def create_transcription(
                 first_filename = uploaded_files[0].filename
                 original_filename = first_filename.rsplit('.', 1)[0] + '.mp3'
 
-            print(f"✅ 合併完成：{merged_audio_path}")
-            print(f"   任務名稱：{original_filename}")
+            log.info(
+                "transcription.merge.completed",
+                mode="direct",
+                merged_path=str(merged_audio_path),
+                filename=original_filename,
+            )
 
             # ⚠️ 重要：合併後的音檔會經歷與單檔相同的生命週期：
             # 1. 轉錄成功 → 移動到 uploads/{task_id}.mp3
@@ -492,7 +511,11 @@ async def create_transcription(
                 raise
 
             original_filename = upload_file.filename
-            print(f"📁 收到檔案：{upload_file.filename} ({len(content) / 1024 / 1024:.2f} MB)")
+            log.info(
+                "upload.file.received",
+                filename=upload_file.filename,
+                size_mb=round(len(content) / 1024 / 1024, 2),
+            )
 
         # 獲取音檔時長和大小
         audio_service = AudioService()
@@ -500,10 +523,13 @@ async def create_transcription(
             audio_duration_ms = audio_service.get_audio_duration(temp_audio)
             audio_duration_seconds = audio_duration_ms / 1000.0
             audio_size_mb = round(temp_audio.stat().st_size / 1024 / 1024, 2)
-            print(f"⏱️ 音檔時長：{audio_duration_seconds:.2f} 秒")
-            print(f"📦 音檔大小：{audio_size_mb} MB")
+            log.debug(
+                "transcription.audio.info",
+                duration_seconds=round(audio_duration_seconds, 2),
+                size_mb=audio_size_mb,
+            )
         except Exception as e:
-            print(f"⚠️ 獲取音檔資訊失敗：{e}")
+            log.warning("transcription.audio.info_failed", error=str(e))
             shutil.rmtree(temp_dir)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -557,7 +583,11 @@ async def create_transcription(
             should_queue = processing_count >= MAX_CONCURRENT_TASKS
 
             if should_queue:
-                print(f"⚠️  系統忙碌中（{processing_count} 個任務處理中，{pending_count} 個任務排隊中），新任務加入隊列")
+                log.info(
+                    "task.queued.system_busy",
+                    processing_count=processing_count,
+                    pending_count=pending_count,
+                )
 
         # 解析標籤
         task_tags = []
@@ -582,7 +612,7 @@ async def create_transcription(
                         except (ValueError, Exception):
                             pass
             except Exception as e:
-                print(f"⚠️ 上傳時自動建立標籤記錄失敗（不影響任務建立）：{e}")
+                log.warning("tag.auto_create.failed", error=str(e))
 
         # 創建任務記錄
         from ..utils.time_utils import get_utc_timestamp
@@ -710,10 +740,10 @@ async def create_transcription(
                     ui_language=ui_language,
                 )
 
-                print(f"✅ 任務 {task_id} 已建立，正在背景執行轉錄...")
+                log.info("task.created", task_id=task_id, dispatched=True)
             else:
                 # 系統忙碌，加入隊列（保持 pending 狀態）
-                print(f"📋 任務 {task_id} 已加入隊列，等待處理...（隊列中有 {pending_count + 1} 個任務）")
+                log.info("task.created", task_id=task_id, queued=True, queue_size=pending_count + 1)
 
         # 記錄 audit log（創建轉錄任務）
         try:
@@ -738,7 +768,7 @@ async def create_transcription(
                 }
             )
         except Exception as e:
-            print(f"⚠️ 記錄 audit log 失敗：{e}")
+            log.warning("transcription.audit_log.failed", action="create", error=str(e))
 
         # 返回結果（根據是否排隊調整消息）
         if should_queue:
@@ -774,7 +804,7 @@ async def create_transcription(
             try:
                 await reservation_repo.release_by_task_id(task_id)
             except Exception as release_err:
-                print(f"⚠️ 釋放預扣失敗：{release_err}")
+                log.warning("transcription.reservation.release_failed", task_id=task_id, error=str(release_err))
         raise
     except Exception as e:
         # 清理臨時檔案
@@ -785,8 +815,8 @@ async def create_transcription(
             try:
                 await reservation_repo.release_by_task_id(task_id)
             except Exception as release_err:
-                print(f"⚠️ 釋放預扣失敗：{release_err}")
-        print(f"❌ 建立轉錄任務失敗：{e}")
+                log.warning("transcription.reservation.release_failed", task_id=task_id, error=str(release_err))
+        log.error("transcription.create.failed", task_id=task_id, error=str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"建立轉錄任務失敗：{str(e)}"
@@ -879,16 +909,16 @@ async def download_transcription(
     try:
         from ..utils.audit_logger import get_audit_logger
         audit_logger = get_audit_logger()
-        await audit_logger.log_task_operation(
+        await audit_logger.log_transcription_operation(
             request=request,
-            action="view_transcript",
+            action="download",
             user_id=str(current_user["_id"]),
             task_id=task_id,
             status_code=200,
-            message=f"檢視轉錄結果：{download_filename}"
+            message=f"下載轉錄結果：{download_filename}"
         )
     except Exception as e:
-        print(f"⚠️ 記錄 audit log 失敗：{e}")
+        log.warning("transcription.audit_log.failed", action="download", error=str(e))
 
     return StreamingResponse(
         BytesIO(content.encode('utf-8')),
@@ -1181,10 +1211,10 @@ async def update_content(
             exists = await transcription_repo.exists(task_id)
             if exists:
                 await transcription_repo.update(task_id, new_text)
-                print(f"✅ 已更新 transcriptions collection (task_id: {task_id})")
+                log.debug("transcription.content.updated", task_id=task_id, created=False)
             else:
                 await transcription_repo.create(task_id, new_text)
-                print(f"✅ 已建立 transcriptions collection (task_id: {task_id})")
+                log.debug("transcription.content.updated", task_id=task_id, created=True)
 
         # 2. 更新 segments collection
         new_segments = content.get("segments")
@@ -1194,14 +1224,14 @@ async def update_content(
             exists = await segment_repo.exists(task_id)
             if exists:
                 await segment_repo.update(task_id, new_segments)
-                print(f"✅ 已更新 segments collection (task_id: {task_id}, count: {len(new_segments)})")
+                log.debug("transcription.segments.updated", task_id=task_id, count=len(new_segments), created=False)
             else:
                 await segment_repo.create(task_id, new_segments)
-                print(f"✅ 已建立 segments collection (task_id: {task_id}, count: {len(new_segments)})")
+                log.debug("transcription.segments.updated", task_id=task_id, count=len(new_segments), created=True)
 
         # 3. 更新 tasks collection 的時間戳（task_repo.update 會自動同步 updated_at 和 timestamps.updated_at）
         await task_repo.update(task_id, {})
-        print(f"✅ 已更新 tasks 時間戳 (task_id: {task_id})")
+        log.debug("task.timestamp.updated", task_id=task_id)
 
         response_message = "轉錄內容已更新"
         if new_segments is not None:
@@ -1211,7 +1241,7 @@ async def update_content(
         try:
             from ..utils.audit_logger import get_audit_logger
             audit_logger = get_audit_logger()
-            await audit_logger.log_task_operation(
+            await audit_logger.log_transcription_operation(
                 request=request,
                 action="update_content",
                 user_id=str(current_user["_id"]),
@@ -1220,7 +1250,7 @@ async def update_content(
                 message=response_message
             )
         except Exception as e:
-            print(f"⚠️ 記錄 audit log 失敗：{e}")
+            log.warning("transcription.audit_log.failed", action="update_content", error=str(e))
 
         return {
             "message": response_message,
@@ -1290,13 +1320,13 @@ async def update_metadata(
             detail="更新元數據失敗"
         )
 
-    print(f"✅ 已更新任務 {task_id} 的元數據: {updates}")
+    log.info("task.metadata.updated", task_id=task_id, updates=updates)
 
     # 記錄 audit log（更新元數據）
     try:
         from ..utils.audit_logger import get_audit_logger
         audit_logger = get_audit_logger()
-        await audit_logger.log_task_operation(
+        await audit_logger.log_transcription_operation(
             request=request,
             action="update_metadata",
             user_id=str(current_user["_id"]),
@@ -1305,7 +1335,7 @@ async def update_metadata(
             message=f"更新任務名稱：{updates.get('custom_name')}"
         )
     except Exception as e:
-        print(f"⚠️ 記錄 audit log 失敗：{e}")
+        log.warning("transcription.audit_log.failed", action="update_metadata", error=str(e))
 
     return {
         "message": "任務名稱已更新",
@@ -1354,7 +1384,7 @@ async def update_speaker_names(
             detail="更新講者名稱失敗"
         )
 
-    print(f"✅ 已更新任務 {task_id} 的講者名稱: {speaker_names}")
+    log.info("task.speaker_names.updated", task_id=task_id, speaker_names=speaker_names)
 
     return {
         "message": "講者名稱已更新",
@@ -1417,7 +1447,7 @@ async def update_subtitle_settings(
             detail="更新字幕設定失敗"
         )
 
-    print(f"✅ 已更新任務 {task_id} 的字幕設定: {subtitle_settings}")
+    log.info("task.subtitle_settings.updated", task_id=task_id, subtitle_settings=subtitle_settings)
 
     return {
         "message": "字幕設定已更新",
@@ -1535,7 +1565,7 @@ async def create_batch_transcriptions(
                     except (ValueError, Exception):
                         pass
         except Exception as e:
-            print(f"⚠️ 批次上傳時自動建立標籤記錄失敗（不影響任務建立）：{e}")
+            log.warning("tag.auto_create.failed", mode="batch", error=str(e))
 
     # 驗證任務類型
     if task_type not in ["paragraph", "subtitle"]:
@@ -1762,7 +1792,14 @@ async def create_batch_transcriptions(
                 file_result["status"] = "pending"
                 file_result["queue_position"] = created_count + 1
                 created_count += 1
-                print(f"☁️  批次任務 [{idx + 1}/{total_files}] {original_filename} -> {task_id} (SQS)")
+                log.info(
+                    "task.batch.created",
+                    index=idx + 1,
+                    total=total_files,
+                    filename=original_filename,
+                    task_id=task_id,
+                    dispatch="sqs",
+                )
             else:
                 # ===== 本地模式：現有行為 =====
                 # 初始化進度
@@ -1804,7 +1841,14 @@ async def create_batch_transcriptions(
                 file_result["queue_position"] = queue_position
                 created_count += 1
 
-                print(f"✅ 批次任務 [{idx + 1}/{total_files}] {original_filename} -> {task_id}")
+                log.info(
+                    "task.batch.created",
+                    index=idx + 1,
+                    total=total_files,
+                    filename=original_filename,
+                    task_id=task_id,
+                    dispatch="local",
+                )
 
         except Exception as e:
             file_result["status"] = "failed"
@@ -1820,9 +1864,16 @@ async def create_batch_transcriptions(
                 try:
                     await reservation_repo.release_by_task_id(task_id)
                 except Exception as release_err:
-                    print(f"⚠️ 釋放預扣失敗：{release_err}")
+                    log.warning("transcription.reservation.release_failed", task_id=task_id, error=str(release_err))
 
-            print(f"❌ 批次任務 [{idx + 1}/{total_files}] {display_name} 失敗: {e}")
+            log.error(
+                "task.batch.failed",
+                index=idx + 1,
+                total=total_files,
+                filename=display_name,
+                error=str(e),
+                exc_info=True,
+            )
 
         results.append(file_result)
 
@@ -1847,7 +1898,7 @@ async def create_batch_transcriptions(
             }
         )
     except Exception as e:
-        print(f"⚠️ 記錄 audit log 失敗：{e}")
+        log.warning("transcription.audit_log.failed", action="batch_create", error=str(e))
 
     return {
         "batch_id": batch_id,

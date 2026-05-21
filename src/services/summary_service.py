@@ -13,6 +13,9 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from ..database.repositories.summary_repo import SummaryRepository
 from ..database.repositories.task_repo import TaskRepository
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
 
 
 def _gemini_generate_sync(api_key: str, model_name: str, prompt: str):
@@ -127,7 +130,7 @@ class SummaryService:
                     "prompt": token_usage.get("prompt", 0),
                     "completion": token_usage.get("completion", 0)
                 }
-                print(f"📊 保存摘要 Token 使用量: {token_usage}")
+                log.debug("summary.token_usage_saved", token_usage=token_usage)
 
             doc = await self.summary_repo.upsert(task_id, summary_data, metadata)
 
@@ -151,7 +154,7 @@ class SummaryService:
             }
 
         except Exception as e:
-            print(f"❌ 生成摘要失敗: {e}")
+            log.error("summary.generate_failed", task_id=task_id, error=str(e), exc_info=True)
             # 更新任務狀態為失敗
             try:
                 await self.task_repo.update(task_id, {"summary_status": "failed"})
@@ -353,7 +356,7 @@ class SummaryService:
 
                 if summary_data:
                     if fallback_index >= 0:
-                        print(f"✅ 使用備援模型 {current_model} 成功生成摘要")
+                        log.info("summary.fallback_model_succeeded", model=current_model)
 
                     # 提取 token 使用量
                     token_usage = None
@@ -366,7 +369,12 @@ class SummaryService:
                             "prompt": prompt_tokens,
                             "completion": completion
                         }
-                        print(f"📊 Token 使用: {total} (輸入: {prompt_tokens}, 輸出: {completion})")
+                        log.debug(
+                            "summary.token_usage",
+                            total=total,
+                            prompt=prompt_tokens,
+                            completion=completion,
+                        )
 
                     return summary_data, current_model, token_usage
 
@@ -382,7 +390,11 @@ class SummaryService:
 
                 if is_quota_error:
                     quota_exceeded_count += 1
-                    print(f"⚠️ Google API Key 配額已用完 (嘗試 {attempt + 1}，模型: {current_model})")
+                    log.warning(
+                        "summary.quota_exceeded",
+                        attempt=attempt + 1,
+                        model=current_model,
+                    )
 
                     # 如果所有 keys 都配額耗盡，嘗試切換模型
                     if quota_exceeded_count >= len(api_keys):
@@ -390,20 +402,24 @@ class SummaryService:
 
                         if fallback_index < len(self.fallback_models):
                             current_model = self.fallback_models[fallback_index]
-                            print(f"💡 切換到備用模型 {current_model}")
+                            log.info("summary.switch_fallback_model", model=current_model)
                             tried_models.append(current_model)
                             quota_exceeded_count = 0
                             continue
                         else:
-                            print("❌ 所有模型的配額都已用完")
+                            log.warning("summary.all_models_quota_exceeded")
                             break
                 else:
-                    print(f"⚠️ API 調用失敗 (嘗試 {attempt + 1}): {error_msg}")
+                    log.warning(
+                        "summary.api_call_failed",
+                        attempt=attempt + 1,
+                        error=error_msg,
+                    )
 
                 if attempt < max_attempts - 1:
                     continue
 
-        print(f"❌ 無法生成摘要。已嘗試模型: {', '.join(tried_models)}")
+        log.error("summary.generation_exhausted", tried_models=tried_models)
         return None, "", None
 
     def _get_summary_prompt(self, language: str, text: str) -> str:
@@ -729,11 +745,14 @@ Output only a valid JSON object. Do not include Markdown markers (such as ```jso
             }
 
         except json.JSONDecodeError as e:
-            print(f"❌ JSON 解析失敗: {e}")
-            print(f"回應內容: {response[:200]}...")
+            log.error(
+                "summary.json_parse_failed",
+                error=str(e),
+                response_preview=response[:200],
+            )
             return None
         except Exception as e:
-            print(f"❌ 解析回應失敗: {e}")
+            log.error("summary.response_parse_failed", error=str(e), exc_info=True)
             return None
 
     def _load_google_api_keys(self) -> List[str]:

@@ -30,6 +30,7 @@ select = [
     "B",    # bugbear：常見 bug pattern（mutable default、broad except 等）
     "S",    # bandit：基本資安檢查
     "W6",   # invalid escape sequence
+    "T20",  # flake8-print：禁 print()，統一走 structlog（CLI 腳本除外，見 per-file-ignores）
 ]
 ignore = [
     "B008",   # do not perform function call in argument defaults — FastAPI Depends 大量使用
@@ -47,7 +48,10 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S", "F401", "B011"]   # 測試放寬
+"tests/**" = ["S", "F401", "B011", "T20"]   # 測試放寬（print 在測試可接受）
+# CLI 腳本：print 是給執行腳本的人看的 stdout 輸出，T20 不適用
+"src/database/migrations/*" = ["T20"]
+"src/refine_transcript.py" = ["T20"]
 # IMDSv2 metadata endpoint 固定為 169.254.169.254，S310 false positive
 "src/worker_core/spot_monitor.py" = ["S310"]
 "src/worker_core/heartbeat.py" = ["S310"]

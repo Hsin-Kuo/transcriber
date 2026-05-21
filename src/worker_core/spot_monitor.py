@@ -14,7 +14,10 @@ import boto3
 
 from src.worker_core.config import SQS_QUEUE_URL, S3_REGION, SPOT_CHECK_INTERVAL_SECONDS, SPOT_INTERRUPT_VISIBILITY_TIMEOUT
 from src.worker_core.db import get_db, update_task
+from src.utils.logger import get_logger
 import src.worker_core.state as state
+
+log = get_logger(__name__)
 
 
 def _check_spot_interruption() -> bool:
@@ -38,7 +41,7 @@ def _check_spot_interruption() -> bool:
 
 def _handle_spot_interruption(sqs) -> None:
     """偵測到中斷後：重置任務狀態、縮短 SQS visibility timeout"""
-    print("⚠️ [Spot] 收到中斷預警！開始清理，約 2 分鐘後關機...")
+    log.warning("spot.interruption.detected")
 
     if state.current_task_id:
         try:
@@ -47,9 +50,9 @@ def _handle_spot_interruption(sqs) -> None:
                 "status": "pending",
                 "progress": "Worker 被 Spot 中斷，重新排隊等待處理...",
             })
-            print(f"🔄 [Spot] 已將任務 {state.current_task_id} 重置為 pending")
+            log.info("spot.task.requeued", task_id=state.current_task_id)
         except Exception as e:
-            print(f"⚠️ [Spot] 無法重置任務狀態: {e}")
+            log.error("spot.task.requeue_failed", task_id=state.current_task_id, error=str(e))
 
     if state.current_receipt_handle and SQS_QUEUE_URL:
         try:
@@ -58,9 +61,9 @@ def _handle_spot_interruption(sqs) -> None:
                 ReceiptHandle=state.current_receipt_handle,
                 VisibilityTimeout=SPOT_INTERRUPT_VISIBILITY_TIMEOUT,
             )
-            print(f"📨 [Spot] SQS 消息可見時間已縮短，其他 Worker {SPOT_INTERRUPT_VISIBILITY_TIMEOUT} 秒後可接手")
+            log.info("spot.sqs.visibility_shortened", timeout_seconds=SPOT_INTERRUPT_VISIBILITY_TIMEOUT)
         except Exception as e:
-            print(f"⚠️ [Spot] 無法修改 SQS 可見時間: {e}")
+            log.error("spot.sqs.visibility_change_failed", error=str(e))
 
 
 def shutdown_instance() -> None:
@@ -78,12 +81,12 @@ def shutdown_instance() -> None:
         )
         instance_id = urllib.request.urlopen(instance_req, timeout=2).read().decode()
 
-        print(f"🔌 正在關閉實例 {instance_id}...")
+        log.info("worker.instance.stopping", instance_id=instance_id)
         ec2 = boto3.client("ec2", region_name=S3_REGION)
         ec2.stop_instances(InstanceIds=[instance_id])
-        print("✅ 已發送關機指令")
+        log.info("worker.instance.stop_sent")
     except Exception as e:
-        print(f"⚠️ 無法自動關機: {e}")
+        log.error("worker.instance.stop_failed", error=str(e))
 
 
 def run_spot_monitor(sqs) -> None:
@@ -95,4 +98,4 @@ def run_spot_monitor(sqs) -> None:
             state.shutdown = True
             _handle_spot_interruption(sqs)
             break
-    print("🛑 [Spot Monitor] 執行緒已結束")
+    log.info("spot.monitor.stopped")

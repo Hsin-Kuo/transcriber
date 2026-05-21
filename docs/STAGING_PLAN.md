@@ -139,12 +139,17 @@ aws ec2 run-instances \
 |------|------|
 | `src/worker_core/config.py` | 載入雙環境 `MONGODB_URL_PROD/STAGING`、`S3_BUCKET_PROD/STAGING`、`SQS_QUEUE_URL_PROD/STAGING` |
 | `src/worker_core/sqs_consumer.py` | 同時 poll 兩個 queue（receive_message 輪流，long-poll 縮短至 10s） |
-| `src/worker_core/transcription_job.py` | 收到 task 時 `env = payload["env"]`，後續所有 DB/S3 操作依 env 決定 client |
+| `src/worker_core/transcription_job.py` | 薄殼:依 `payload["env"]` 取對應環境的 `db`，注入共用的 `TranscriptionOrchestrator` |
 | `src/worker_core/db.py` | `get_db(env)`：cache 兩個 client |
 | `src/routers/transcriptions.py` | SQS payload 加 `"env": APP_ENV`（透過環境變數設） |
 | `src/utils/config_loader.py` | 支援 `get_parameter(name, env_prefix)`，預設讀目前 env |
 | `deploy/nginx-ec2.conf` | 加 `staging.soundlite.app` server block；同 prod 但反代 staging EC2 內部 IP |
 | `.env.example` | 加 `APP_ENV=staging` 文件 |
+
+> ⚠️ 轉錄 pipeline 已於 2026-05 重構（見 `src/transcription/`）：Web Server
+> 與 Worker 共用 `TranscriptionOrchestrator`，`transcription_job.py` 收斂成
+> 薄殼。env 路由只需在薄殼依 `env` 挑對 `db` / S3 後注入 orchestrator——
+> orchestrator 本身 env-agnostic，pipeline 本體不必改。
 
 ### 2-C. 新增環境變數
 

@@ -20,13 +20,16 @@ from src.database.repositories.task_repo import TaskRepository
 from src.utils.time_utils import get_current_time, get_utc_timestamp
 from src.utils.shared_state import TaskStateStore
 from src.services.progress_store import Phase, ProgressStore
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
 
 try:
     import psutil
     PSUTIL_AVAILABLE = True
 except ImportError:
     PSUTIL_AVAILABLE = False
-    print("⚠️ psutil 未安裝，孤立進程清理功能不可用")
+    log.warning("task.psutil.unavailable")
 
 # 時區設定 (UTC+8 台北時間)
 TZ_UTC8 = timezone(timedelta(hours=8))
@@ -360,9 +363,9 @@ class TaskService:
         try:
             if temp_dir.exists():
                 shutil.rmtree(temp_dir)
-                print(f"🗑️ 已清理臨時目錄：{temp_dir.name}")
+                log.debug("task.temp_dir.cleaned", temp_dir=temp_dir.name)
         except Exception as e:
-            print(f"⚠️ 清理臨時目錄失敗：{e}")
+            log.warning("task.temp_dir.cleanup_failed", error=str(e))
 
     # ========== 背景清理任務 ==========
 
@@ -376,7 +379,7 @@ class TaskService:
                 # 每 10 分鐘執行一次
                 await asyncio.sleep(600)
 
-                print("🧹 執行定期記憶體清理...")
+                log.debug("task.memory_cleanup.started")
 
                 # 從資料庫查詢所有進行中的任務
                 # 記憶體優化：減少查詢數量（100 → 20）並只查詢 task_id
@@ -406,12 +409,12 @@ class TaskService:
                 gc.collect()
 
                 if orphaned_temp_dirs:
-                    print(f"✅ 記憶體清理完成，清除 {len(orphaned_temp_dirs)} 個孤立臨時目錄")
+                    log.info("task.memory_cleanup.done", orphaned_temp_dirs=len(orphaned_temp_dirs))
                 else:
-                    print("✅ 記憶體清理完成，無孤立資料")
+                    log.info("task.memory_cleanup.done", orphaned_temp_dirs=0)
 
             except Exception as e:
-                print(f"⚠️  定期記憶體清理失敗: {e}")
+                log.error("task.memory_cleanup.failed", error=str(e), exc_info=True)
 
     async def cleanup_orphaned_tasks(self) -> None:
         """清理異常中斷的任務（Web Server 啟動時執行）
@@ -434,7 +437,7 @@ class TaskService:
             ).limit(50).to_list(length=50)
 
             if not orphaned_tasks:
-                print("✅ 沒有發現異常中斷的任務")
+                log.debug("task.orphan.none_found")
                 return
 
             # MongoProgressStore 寫入 updated_at=datetime.now(timezone.utc)，
@@ -455,13 +458,13 @@ class TaskService:
                     truly_orphaned.append(task)
 
             if alive_task_ids:
-                print(f"ℹ️  跳過 {len(alive_task_ids)} 個 Worker 仍在處理的任務: {alive_task_ids[:5]}")
+                log.info("task.orphan.skipped_alive", alive_count=len(alive_task_ids), task_ids=alive_task_ids[:5])
 
             if not truly_orphaned:
-                print("✅ 沒有真正異常中斷的任務")
+                log.debug("task.orphan.none_truly_orphaned")
                 return
 
-            print(f"⚠️  發現 {len(truly_orphaned)} 個異常中斷的任務，正在清理...")
+            log.info("task.orphan.sweep_started", orphan_count=len(truly_orphaned))
 
             current_time = get_current_time()
             for task in truly_orphaned:
@@ -481,12 +484,12 @@ class TaskService:
                     {"_id": task["_id"]},
                     {"$set": update_data}
                 )
-                print(f"   ✓ 任務 {task_id} 已標記為失敗")
+                log.debug("task.orphan.marked_failed", task_id=task_id)
 
-            print(f"✅ 清理完成，共處理 {len(truly_orphaned)} 個任務")
+            log.info("task.orphan.swept", orphan_count=len(truly_orphaned))
 
         except Exception as e:
-            print(f"⚠️  清理孤立任務失敗: {e}")
+            log.error("task.orphan.sweep_failed", error=str(e), exc_info=True)
 
     async def cleanup_orphaned_processes(self) -> None:
         """清理孤立的 multiprocessing worker 進程
@@ -528,7 +531,7 @@ class TaskService:
                     continue
 
             if orphaned_workers:
-                print(f"⚠️  發現 {len(orphaned_workers)} 個孤立的 worker 進程（無活動任務）")
+                log.warning("task.orphan_process.found", worker_count=len(orphaned_workers))
 
                 for worker in orphaned_workers:
                     try:
@@ -536,7 +539,7 @@ class TaskService:
                         cpu_percent = worker.cpu_percent()
                         memory_mb = worker.memory_info().rss / 1024 / 1024
 
-                        print(f"   🗑️  終止孤立 worker: PID {pid} (CPU: {cpu_percent:.1f}%, Memory: {memory_mb:.1f}MB)")
+                        log.debug("task.orphan_process.terminating", pid=pid, cpu_percent=cpu_percent, memory_mb=memory_mb)
 
                         # 先嘗試優雅終止
                         worker.terminate()
@@ -544,21 +547,21 @@ class TaskService:
                         # 等待最多 3 秒
                         try:
                             worker.wait(timeout=3)
-                            print(f"   ✓ Worker {pid} 已終止")
+                            log.debug("task.orphan_process.terminated", pid=pid)
                         except psutil.TimeoutExpired:
                             # 強制殺掉
-                            print(f"   ⚠️  Worker {pid} 未響應，強制終止...")
+                            log.warning("task.orphan_process.unresponsive", pid=pid)
                             worker.kill()
                             worker.wait(timeout=1)
-                            print(f"   ✓ Worker {pid} 已強制終止")
+                            log.debug("task.orphan_process.killed", pid=pid)
 
                     except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-                        print(f"   ⚠️  無法終止進程 {worker.pid}: {e}")
+                        log.warning("task.orphan_process.terminate_failed", pid=worker.pid, error=str(e))
 
-                print(f"✅ 孤立進程清理完成，共終止 {len(orphaned_workers)} 個 worker")
+                log.info("task.orphan_process.swept", worker_count=len(orphaned_workers))
 
         except Exception as e:
-            print(f"⚠️  清理孤立進程失敗: {e}")
+            log.error("task.orphan_process.sweep_failed", error=str(e), exc_info=True)
 
     async def periodic_orphaned_process_cleanup(self) -> None:
         """定期清理孤立的 worker 進程（背景任務）
@@ -566,21 +569,21 @@ class TaskService:
         每 5 分鐘執行一次
         """
         if not PSUTIL_AVAILABLE:
-            print("⚠️  psutil 不可用，跳過孤立進程清理")
+            log.warning("task.orphan_process.cleanup_skipped_no_psutil")
             return
 
-        print("🚀 啟動孤立進程定期清理器...")
+        log.info("task.orphan_process.cleaner_started")
 
         while True:
             try:
                 # 每 5 分鐘執行一次
                 await asyncio.sleep(300)
 
-                print("🧹 執行定期孤立進程清理...")
+                log.debug("task.orphan_process.cleanup_tick")
                 await self.cleanup_orphaned_processes()
 
             except Exception as e:
-                print(f"⚠️  定期孤立進程清理失敗: {e}")
+                log.error("task.orphan_process.periodic_cleanup_failed", error=str(e), exc_info=True)
 
     # ========== 任務隊列管理 ==========
 
@@ -596,7 +599,7 @@ class TaskService:
             )
             return count
         except Exception as e:
-            print(f"⚠️  計算處理中任務數量失敗: {e}")
+            log.error("task.count_processing.failed", error=str(e), exc_info=True)
             return 0
 
     async def count_pending_tasks(self) -> int:
@@ -611,7 +614,7 @@ class TaskService:
             )
             return count
         except Exception as e:
-            print(f"⚠️  計算等待中任務數量失敗: {e}")
+            log.error("task.count_pending.failed", error=str(e), exc_info=True)
             return 0
 
     async def get_next_pending_task(self) -> Optional[Dict[str, Any]]:
@@ -627,7 +630,7 @@ class TaskService:
             )
             return task
         except Exception as e:
-            print(f"⚠️  獲取下一個待處理任務失敗: {e}")
+            log.error("task.get_next_pending.failed", error=str(e), exc_info=True)
             return None
 
     async def process_pending_queue(self, transcription_service, max_concurrent: int = 2):
@@ -639,7 +642,7 @@ class TaskService:
             transcription_service: TranscriptionService 實例
             max_concurrent: 最大並發數（默認 2）
         """
-        print("🚀 啟動任務隊列處理器...")
+        log.info("task.queue.processor_started", max_concurrent=max_concurrent)
 
         while True:
             try:
@@ -655,21 +658,20 @@ class TaskService:
 
                     if pending_task:
                         task_id = pending_task.get("task_id")
-                        print(f"📋 從隊列取出任務：{task_id}")
 
                         # 立即將任務標記為 processing，防止被重複取出
                         await self.task_repo.update(task_id, {
                             "status": "processing",
                             "updated_at": get_current_time()
                         })
-                        print(f"🔄 任務 {task_id} 狀態已更新為 processing")
+                        log.info("task.queue.dequeued", task_id=task_id)
 
                         # 獲取任務配置和文件路徑
                         config = pending_task.get("config", {})
                         temp_dir_path = self._temp_dirs.get(task_id)
 
                         if not temp_dir_path or not temp_dir_path.exists():
-                            print(f"⚠️  任務 {task_id} 的臨時文件不存在，標記為失敗")
+                            log.warning("task.queue.temp_dir_missing", task_id=task_id)
                             await self.task_repo.update(task_id, {
                                 "status": "failed",
                                 "error": {"code": "AUDIO_MISSING", "message": "音檔文件已遺失"},
@@ -680,7 +682,7 @@ class TaskService:
                         # 找到音檔文件
                         audio_files = list(temp_dir_path.glob("input.*"))
                         if not audio_files:
-                            print(f"⚠️  任務 {task_id} 找不到音檔文件")
+                            log.warning("task.queue.audio_file_missing", task_id=task_id)
                             await self.task_repo.update(task_id, {
                                 "status": "failed",
                                 "error": {"code": "AUDIO_MISSING", "message": "音檔文件已遺失"},
@@ -708,9 +710,9 @@ class TaskService:
                                 max_speakers=config.get("max_speakers")
                             )
 
-                            print(f"✅ 任務 {task_id} 已從隊列啟動處理")
+                            log.info("task.queue.started", task_id=task_id)
                         except Exception as e:
-                            print(f"❌ 啟動任務 {task_id} 失敗: {e}")
+                            log.error("task.queue.start_failed", task_id=task_id, error=str(e), exc_info=True)
                             await self.task_repo.update(task_id, {
                                 "status": "failed",
                                 "error": {"code": "SYSTEM_ERROR", "message": f"啟動失敗: {str(e)}"},
@@ -718,4 +720,4 @@ class TaskService:
                             })
 
             except Exception as e:
-                print(f"⚠️  隊列處理器錯誤: {e}")
+                log.error("task.queue.processor_error", error=str(e), exc_info=True)

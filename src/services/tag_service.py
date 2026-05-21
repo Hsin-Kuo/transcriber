@@ -12,6 +12,9 @@ from datetime import datetime
 
 from src.database.repositories.tag_repo import TagRepository
 from src.database.repositories.task_repo import TaskRepository
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
 
 
 class TagService:
@@ -187,19 +190,18 @@ class TagService:
         Returns:
             是否更新成功
         """
-        print(f"🔍 [tag_service.update_tag_order] user_id: {user_id}, tag_ids: {tag_ids}")
+        log.debug("tag.update_order_start", user_id=user_id, tag_ids=tag_ids)
 
         # 驗證所有標籤都屬於該用戶
         for tag_id in tag_ids:
             tag = await self.get_tag(user_id, tag_id)
-            print(f"🔍 [tag_service.update_tag_order] 驗證 tag_id={tag_id}, found={tag is not None}")
+            log.debug("tag.update_order_verify", tag_id=tag_id, found=tag is not None)
             if not tag:
                 raise ValueError(f"標籤 {tag_id} 不存在或無權訪問")
 
         # 更新順序（使用 repository 的 update_order 方法）
-        print("🔍 [tag_service.update_tag_order] 開始調用 tag_repo.update_order")
         updated_count = await self.tag_repo.update_order(user_id, tag_ids)
-        print(f"✅ [tag_service.update_tag_order] 更新完成，updated_count={updated_count}")
+        log.debug("tag.update_order_done", updated_count=updated_count)
 
         return updated_count > 0
 

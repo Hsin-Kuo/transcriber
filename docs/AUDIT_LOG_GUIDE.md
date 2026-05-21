@@ -10,7 +10,7 @@ Audit Log 系統會自動記錄所有重要操作到 MongoDB `audit_logs` collec
 {
   "_id": ObjectId,
   "user_id": String,              // 用戶 ID（可為 null，如登入失敗）
-  "log_type": String,             // 日誌類型：auth, task, transcription, tag, admin, file
+  "log_type": String,             // 日誌類型：auth, task, transcription, tag, admin
   "action": String,               // 操作動作
   "ip_address": String,           // IP 地址
   "path": String,                 // 請求路徑
@@ -84,19 +84,6 @@ await audit_logger.log_transcription_operation(
     task_id=task_id,
     status_code=200,
     message="下載轉錄結果"
-)
-```
-
-#### 檔案相關操作
-
-```python
-await audit_logger.log_file_operation(
-    request=request,
-    action="download",          # download, upload, delete
-    user_id=str(current_user["_id"]),
-    resource_id=file_id,
-    status_code=200,
-    message="下載音檔"
 )
 ```
 
@@ -230,7 +217,7 @@ GET /api/admin/audit-logs/resource/{resource_id}?limit=50
 ### 應該記錄（中優先級）
 
 - 🔸 **資料建立**：建立任務、建立標籤、上傳檔案
-- 🔸 **檔案下載**：下載轉錄結果、下載音檔
+- 🔸 **檔案下載**：下載轉錄結果
 - 🔸 **批次操作**：批次刪除、批次更新標籤
 
 ### 可選記錄（低優先級）

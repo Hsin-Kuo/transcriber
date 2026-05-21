@@ -5,6 +5,10 @@ from typing import Optional, Dict, Any
 from fastapi import Request
 import time
 
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
+
 
 class AuditLogger:
     """操作記錄工具類"""
@@ -140,38 +144,6 @@ class AuditLogger:
             method=request.method,
             status_code=status_code,
             resource_id=task_id,
-            response_message=message,
-            user_agent=request.headers.get("User-Agent")
-        )
-
-    async def log_file_operation(
-        self,
-        request: Request,
-        action: str,
-        user_id: str,
-        resource_id: Optional[str],
-        status_code: int,
-        message: Optional[str] = None
-    ):
-        """記錄檔案相關操作
-
-        Args:
-            request: FastAPI Request 對象
-            action: 操作動作 (download, upload, delete)
-            user_id: 用戶 ID
-            resource_id: 資源 ID
-            status_code: HTTP 狀態碼
-            message: 訊息
-        """
-        await self.repo.log(
-            user_id=user_id,
-            log_type="file",
-            action=action,
-            ip_address=self.get_client_ip(request),
-            path=request.url.path,
-            method=request.method,
-            status_code=status_code,
-            resource_id=resource_id,
             response_message=message,
             user_agent=request.headers.get("User-Agent")
         )
@@ -319,7 +291,7 @@ async def log_admin_action(
             而非舊版預設的 "admin-panel" / "AdminPanel"
     """
     if _audit_logger is None:
-        print(f"⚠️  AuditLogger 尚未初始化，跳過記錄: {action}")
+        log.warning("audit.logger_not_initialized", action=action)
         return
 
     message = f"{action} on {resource_type}"

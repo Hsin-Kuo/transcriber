@@ -88,9 +88,9 @@ if SHOULD_LOAD_MODELS:
         from pyannote.audio import Pipeline
         DIARIZATION_AVAILABLE = True
     except ImportError:
-        print("⚠️  pyannote.audio 未安裝，speaker diarization 功能不可用")
+        logger.warning("app.diarization.unavailable")
 else:
-    print(f"ℹ️  DEPLOY_ENV={DEPLOY_ENV}, APP_ROLE={APP_ROLE}：跳過 ML 模型載入")
+    logger.info("app.models.load_skipped", deploy_env=DEPLOY_ENV, app_role=APP_ROLE)
 
 
 # ========== 創建 FastAPI 應用 ==========
@@ -123,7 +123,7 @@ else:
             "http://127.0.0.1:5173",
         ]
         allow_credentials = True
-        print("⚠️  CORS: 開發模式，允許本地來源", flush=True)
+        logger.warning("app.cors.dev_mode", origins=cors_origins)
     else:
         # AWS 生產環境必須設定 CORS_ORIGINS
         raise RuntimeError(
@@ -168,21 +168,21 @@ def cleanup_worker_processes():
         )
         if result.stdout.strip():
             pids = result.stdout.strip().split('\n')
-            print(f"🧹 清理 {len(pids)} 個 worker 進程...")
+            logger.info("app.worker_processes.cleanup", count=len(pids))
             subprocess.run(["pkill", "-9", "-f", "multiprocessing.spawn"], check=False)
             subprocess.run(["pkill", "-9", "-f", "multiprocessing.resource_tracker"], check=False)
             return len(pids)
         return 0
     except Exception as e:
-        print(f"⚠️  清理 worker 進程時發生錯誤: {e}")
+        logger.warning("app.worker_processes.cleanup_failed", error=str(e))
         return 0
 
 
 def signal_handler(signum, frame):
     """處理終止信號，確保清理所有資源"""
-    print(f"\n⚠️  收到終止信號 ({signal.Signals(signum).name})，正在清理...")
+    logger.info("app.signal.received", signal=signal.Signals(signum).name)
     cleanup_worker_processes()
-    print("✅ 清理完成，退出程序")
+    logger.info("app.signal.cleanup_done")
     exit(0)
 
 
@@ -198,54 +198,44 @@ async def startup_event():
     """應用啟動時的初始化"""
     global whisper_model, current_model_name, task_repo, tag_repo, audit_log_repo, main_loop, diarization_pipeline
 
-    print("🚀 啟動 Sound Lite 轉錄服務 v3.0.0", flush=True)
-    print("=" * 50, flush=True)
+    logger.info("app.startup.began", version="3.0.0", deploy_env=DEPLOY_ENV, app_role=APP_ROLE)
 
     # AWS 模式：驗證必要的環境變數
     if DEPLOY_ENV == "aws":
         from src.utils.storage_service import validate_aws_config
         validate_aws_config()
-        print("✅ AWS 設定驗證通過", flush=True)
+        logger.info("app.startup.aws_config_validated")
 
     # 清理殘留的暫存目錄（處理 crash/重啟後的孤兒檔案）
     from src.utils.config_loader import cleanup_stale_temp_dirs
     cleanup_stale_temp_dirs()
 
     # 清理殘留的 ProcessPoolExecutor worker 進程
-    print("🧹 清理殘留的 worker 進程...", flush=True)
     try:
         cleaned = cleanup_worker_processes()
-        if cleaned > 0:
-            print(f"   ✅ 已清理 {cleaned} 個殘留進程", flush=True)
-        else:
-            print("   ✅ 沒有發現殘留的 worker 進程", flush=True)
+        logger.info("app.startup.stale_processes_cleaned", count=cleaned)
     except Exception as e:
-        print(f"   ⚠️  清理進程時出錯: {e}", flush=True)
+        logger.warning("app.startup.stale_processes_cleanup_failed", error=str(e))
 
     # 獲取主事件循環
-    print("📡 獲取事件循環...", flush=True)
     main_loop = asyncio.get_running_loop()
-    print("✅ 事件循環已就緒", flush=True)
+    logger.info("app.startup.event_loop_ready")
 
     # 1. 連接 MongoDB
     mongodb_db = os.getenv('MONGODB_DB_NAME', 'whisper_transcriber')
-    print("🔌 正在連接 MongoDB...", flush=True)
-    print(f"   Mode: {DEPLOY_ENV}", flush=True)
-    print(f"   Database: {mongodb_db}", flush=True)
+    logger.info("app.db.connecting", mode=DEPLOY_ENV, database=mongodb_db)
     try:
         await asyncio.wait_for(MongoDB.connect(), timeout=10.0)
-        print(f"✅ 已連接到 MongoDB: {mongodb_db}", flush=True)
+        logger.info("app.db.connected", database=mongodb_db)
     except asyncio.TimeoutError:
-        print("❌ MongoDB 連接超時（10秒）", flush=True)
-        print("   請確保 MongoDB 正在運行", flush=True)
+        logger.error("app.db.connect_timeout", timeout_seconds=10.0)
         raise
     except Exception as e:
-        print(f"❌ MongoDB 連接失敗: {e}", flush=True)
-        print("   請確保 MongoDB 正在運行並檢查配置", flush=True)
+        logger.error("app.db.connect_failed", error=str(e))
         raise
 
     # 2. 初始化 Repositories
-    print("📂 正在初始化 Repositories...")
+    logger.info("app.repositories.initializing")
     db = MongoDB.get_db()
     task_repo = TaskRepository(db)
     tag_repo = TagRepository(db)
@@ -279,18 +269,17 @@ async def startup_event():
         from src.database.repositories.processed_webhook_repo import ProcessedWebhookRepository
         processed_webhook_repo_init = ProcessedWebhookRepository(db)
         await processed_webhook_repo_init.create_indexes()
-        print("✅ 資料庫索引建立完成")
+        logger.info("app.db.indexes_created")
     except Exception as e:
-        print(f"⚠️  索引建立失敗: {e}")
+        logger.warning("app.db.index_creation_failed", error=str(e))
 
     # 統計任務數量
     task_count = await db.tasks.count_documents({})
-    print(f"✅ 資料庫已就緒（共 {task_count} 個任務）")
+    logger.info("app.db.ready", task_count=task_count)
 
     # 初始化 AuditLogger
-    print("📝 正在初始化 AuditLogger...")
     init_audit_logger(audit_log_repo)
-    print("✅ AuditLogger 初始化完成")
+    logger.info("app.audit_logger.initialized")
 
     # 3. 初始化 ProgressStore
     # Local 模式：InMemory adapter（同進程的 TranscriptionService 寫，TaskService.get_task 讀）
@@ -298,20 +287,19 @@ async def startup_event():
     if DEPLOY_ENV == "aws":
         from src.worker_core.db import get_db as _get_sync_db
         progress_store = MongoProgressStore(_get_sync_db().task_progress)
-        print("🔧 ProgressStore: MongoProgressStore (AWS mode, task_progress collection)")
+        logger.info("app.progress_store.initialized", adapter="mongo", mode="aws")
     else:
         progress_store = InMemoryProgressStore()
-        print("🔧 ProgressStore: InMemoryProgressStore (local mode)")
+        logger.info("app.progress_store.initialized", adapter="in_memory", mode="local")
 
     # 3.1. 初始化 TaskService
-    print("🔧 正在初始化 TaskService...")
     task_service = tasks_router.init_task_service(
         db, state_store=task_state_store, progress_store=progress_store
     )
-    print("✅ TaskService 初始化完成")
+    logger.info("app.task_service.initialized")
 
     # 4. 清理異常中斷的任務
-    print("🧹 清理異常中斷的任務...")
+    logger.info("app.orphaned_tasks.cleaning")
     await task_service.cleanup_orphaned_tasks()
 
     # 5. 啟動定期記憶體清理
@@ -336,8 +324,12 @@ async def startup_event():
     # 6. 載入 Whisper 模型（條件式）
     if SHOULD_LOAD_MODELS:
         from faster_whisper import WhisperModel
-        print(f"🎙 正在載入 Whisper 模型：{DEFAULT_MODEL}...")
-        print("🔧 配置：device=auto, compute_type=int8")
+        logger.info(
+            "app.whisper.loading",
+            model=DEFAULT_MODEL,
+            device="auto",
+            compute_type="int8",
+        )
         current_model_name = DEFAULT_MODEL
         whisper_model = WhisperModel(
             current_model_name,
@@ -346,9 +338,9 @@ async def startup_event():
             cpu_threads=2,  # 優化：配合 ProcessPoolExecutor，降低單進程並行度
             num_workers=1   # 優化：避免進程內過度並行（外部已有 ProcessPoolExecutor）
         )
-        print("✅ Whisper 模型載入完成！")
+        logger.info("app.whisper.loaded", model=current_model_name)
     else:
-        print("ℹ️  AWS Web Server 模式：跳過 Whisper 模型載入")
+        logger.info("app.whisper.load_skipped")
         whisper_model = None
         current_model_name = None
 
@@ -358,14 +350,13 @@ async def startup_event():
         if hf_token:
             diarization_pipeline = DiarizationProcessor.load_pipeline(hf_token)
         else:
-            print("ℹ️  未設定 HF_TOKEN，speaker diarization 功能不可用")
+            logger.warning("app.diarization.hf_token_missing")
     elif not SHOULD_LOAD_MODELS:
-        print("ℹ️  AWS Web Server 模式：跳過 Diarization 模型載入")
+        logger.info("app.diarization.load_skipped")
 
     # 9. 初始化 TranscriptionService（僅在有 Whisper 模型時）
     transcription_service = None
     if SHOULD_LOAD_MODELS and whisper_model is not None:
-        print("🔧 正在初始化 TranscriptionService...")
         transcription_service = transcriptions_router.init_transcription_service(
             whisper_model=whisper_model,
             task_service=task_service,
@@ -374,17 +365,16 @@ async def startup_event():
             executor=executor,
             progress_store=progress_store,
         )
-        print("✅ TranscriptionService 初始化完成")
+        logger.info("app.transcription_service.initialized")
 
         # 10. 啟動任務隊列處理器
-        print("🚀 正在啟動任務隊列處理器...")
         create_background_task(
             task_service.process_pending_queue(transcription_service, max_concurrent=2),
             name="task_queue_processor",
         )
-        print("✅ 任務隊列處理器已啟動")
+        logger.info("app.task_queue.started", max_concurrent=2)
     else:
-        print("ℹ️  AWS Web Server 模式：跳過 TranscriptionService 初始化和任務隊列")
+        logger.info("app.transcription_service.skipped")
 
         # AWS 模式：建立 WorkerDispatch（boto3 client + S3 uploader 注入）
         # local 模式不需要——任務直接走 in-process executor 不送 SQS
@@ -404,36 +394,31 @@ async def startup_event():
             worker_secret=worker_secret,
             handoff_uploader=upload_to_handoff,
         ))
-        print("✅ WorkerDispatch 初始化完成")
+        logger.info("app.worker_dispatch.initialized")
 
-    print("=" * 50)
-    print("✨ 服務已就緒！")
-    print("📚 API 文檔：http://localhost:8000/docs")
-    print("🔗 健康檢查：http://localhost:8000/health")
-    print("📋 任務隊列：最多 2 個並發任務")
-    print("=" * 50)
+    logger.info("app.startup.ready", version="3.0.0")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """應用關閉時的清理"""
-    print("👋 正在關閉服務...")
+    logger.info("app.shutdown.began")
 
     # 關閉線程池
     if executor:
         executor.shutdown(wait=True)
-        print("✅ 線程池已關閉")
+        logger.info("app.shutdown.executor_closed")
 
     # 清理所有 ProcessPoolExecutor worker 進程
     cleaned = cleanup_worker_processes()
     if cleaned > 0:
-        print(f"✅ 已清理 {cleaned} 個 worker 進程")
+        logger.info("app.shutdown.worker_processes_cleaned", count=cleaned)
 
     # 斷開 MongoDB
     await MongoDB.close()
-    print("✅ MongoDB 連接已關閉")
+    logger.info("app.shutdown.db_closed")
 
-    print("👋 服務已關閉")
+    logger.info("app.shutdown.done")
 
 
 # ========== 基本端點 ==========

@@ -12,6 +12,10 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
+
 
 # 標準 MP3 支援的 sample rate（MPEG-1/2/2.5 全部合法值）
 VALID_MP3_SAMPLE_RATES = (8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000)
@@ -38,12 +42,14 @@ def convert_to_mp3(audio_path: Path) -> tuple[Path, bool]:
     if _is_compact(probe):
         if audio_path != mp3_path:
             audio_path.rename(mp3_path)
-        print("✅ 音檔已符合 Compact audio 契約，無需重編")
+        log.info("audio_converter.skip_reencode")
         return mp3_path, False
 
     sample_rate, bit_rate = _adaptive_target(probe)
-    print(
-        f"🔄 音檔不符契約，re-encode 到 mono {sample_rate}Hz {bit_rate // 1000}kbps MP3"
+    log.info(
+        "audio_converter.reencode",
+        sample_rate=sample_rate,
+        bitrate_kbps=bit_rate // 1000,
     )
 
     tmp_path = mp3_path.with_name(f"_tmp_{mp3_path.name}")
@@ -96,7 +102,7 @@ def convert_to_wav(audio_path: Path, wav_path: Path) -> Path:
             ["ffmpeg", "-y", "-i", str(audio_path), "-ar", "16000", "-ac", "1", str(wav_path)],
             check=True, capture_output=True,
         )
-        print(f"🔄 已轉換為 WAV: {wav_path}")
+        log.info("audio_converter.wav_converted", wav_path=str(wav_path))
         return wav_path
     except subprocess.CalledProcessError as e:
         stderr_tail = (
@@ -104,7 +110,7 @@ def convert_to_wav(audio_path: Path, wav_path: Path) -> Path:
             if isinstance(e.stderr, (bytes, bytearray))
             else ""
         )
-        print(f"⚠️ WAV 轉換失敗，回退使用原始音檔。ffmpeg: {stderr_tail}")
+        log.warning("audio_converter.wav_convert_failed", ffmpeg_stderr=stderr_tail)
         return audio_path
 
 

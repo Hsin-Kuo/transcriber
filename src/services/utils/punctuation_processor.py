@@ -7,6 +7,10 @@ from typing import Optional, Tuple, Dict, Any, Callable
 import os
 import re
 
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
+
 
 class PunctuationProcessor:
     """標點符號處理器
@@ -144,7 +148,13 @@ class PunctuationProcessor:
                 "prompt": resp.usage.prompt_tokens,
                 "completion": resp.usage.completion_tokens
             }
-            print(f"📊 Token 使用: {token_usage['total']} (輸入: {token_usage['prompt']}, 輸出: {token_usage['completion']})")
+            log.debug(
+                "punctuation.token_usage",
+                provider="openai",
+                total=token_usage["total"],
+                prompt=token_usage["prompt"],
+                completion=token_usage["completion"],
+            )
 
         return result, self.openai_model, token_usage
 
@@ -184,10 +194,10 @@ class PunctuationProcessor:
                 prompt, max_output_tokens=max_out
             )
             if self._is_output_exploded(text, result):
-                print(
-                    f"⚠️ Gemini 輸出異常膨脹（輸入 {len(text)} 字 → 輸出 {len(result)} 字），"
-                    f"疑似 LLM 重複迴圈，回退為未處理原文",
-                    flush=True,
+                log.warning(
+                    "punctuation.output_exploded",
+                    input_chars=len(text),
+                    output_chars=len(result),
                 )
                 result = text
             if language in ("zh", "zh-TW", "zh-CN"):
@@ -195,11 +205,14 @@ class PunctuationProcessor:
             return result, model_used, token_usage
 
         # 長文本：分段處理
-        print(f"📝 文字較長（{len(text)} 字），將分段處理（每段約 {chunk_size} 字）...")
-
         chunks = self._split_text_into_chunks(text, chunk_size)
         total_chunks = len(chunks)
-        print(f"🔄 分為 {total_chunks} 段處理...")
+        log.info(
+            "punctuation.chunking",
+            input_chars=len(text),
+            chunk_size=chunk_size,
+            total_chunks=total_chunks,
+        )
 
         results = []
         model_used = None
@@ -207,7 +220,7 @@ class PunctuationProcessor:
         total_token_usage = {"total": 0, "prompt": 0, "completion": 0}
 
         for chunk_idx, chunk_text in enumerate(chunks, start=1):
-            print(f"🎯 處理第 {chunk_idx}/{total_chunks} 段...")
+            log.debug("punctuation.chunk_processing", chunk_idx=chunk_idx, total_chunks=total_chunks)
 
             # 進度回調
             if progress_callback:
@@ -225,11 +238,12 @@ class PunctuationProcessor:
                 prompt, max_output_tokens=max_out
             )
             if self._is_output_exploded(chunk_text, result):
-                print(
-                    f"⚠️ Gemini 第 {chunk_idx}/{total_chunks} 段輸出異常膨脹"
-                    f"（輸入 {len(chunk_text)} 字 → 輸出 {len(result)} 字），"
-                    f"疑似 LLM 重複迴圈，該段回退為未處理原文",
-                    flush=True,
+                log.warning(
+                    "punctuation.output_exploded",
+                    chunk_idx=chunk_idx,
+                    total_chunks=total_chunks,
+                    input_chars=len(chunk_text),
+                    output_chars=len(result),
                 )
                 result = chunk_text
             if language in ("zh", "zh-TW", "zh-CN"):
@@ -248,7 +262,13 @@ class PunctuationProcessor:
 
         # 如果有累計的 token 使用量，輸出總量
         if total_token_usage["total"] > 0:
-            print(f"📊 總 Token 使用: {total_token_usage['total']} (輸入: {total_token_usage['prompt']}, 輸出: {total_token_usage['completion']})")
+            log.info(
+                "punctuation.token_usage_total",
+                provider="gemini",
+                total=total_token_usage["total"],
+                prompt=total_token_usage["prompt"],
+                completion=total_token_usage["completion"],
+            )
 
         # 合併結果
         final_token_usage = total_token_usage if total_token_usage["total"] > 0 else None
@@ -310,7 +330,7 @@ class PunctuationProcessor:
                 result = (resp.text or "").strip()
 
                 if fallback_index >= 0:
-                    print(f"✅ 使用備援模型 {current_model} 成功")
+                    log.info("punctuation.fallback_model_succeeded", model=current_model)
 
                 # 提取 token 使用量
                 token_usage = None
@@ -323,7 +343,14 @@ class PunctuationProcessor:
                         "prompt": prompt_tokens,
                         "completion": completion
                     }
-                    print(f"📊 Token 使用: {total} (輸入: {prompt_tokens}, 輸出: {completion})")
+                    log.debug(
+                        "punctuation.token_usage",
+                        provider="gemini",
+                        model=current_model,
+                        total=total,
+                        prompt=prompt_tokens,
+                        completion=completion,
+                    )
 
                 return result, current_model, token_usage
 
@@ -340,7 +367,7 @@ class PunctuationProcessor:
 
                 if is_quota_error:
                     quota_exceeded_count += 1
-                    print(f"⚠️ Google API Key 配額已用完 (嘗試 {attempt + 1}，模型: {current_model})")
+                    log.warning("punctuation.quota_exceeded", attempt=attempt + 1, model=current_model)
 
                     # 如果所有 keys 都配額耗盡，嘗試切換到下一個備援模型
                     if quota_exceeded_count >= len(google_api_keys):
@@ -348,25 +375,25 @@ class PunctuationProcessor:
 
                         if fallback_index < len(self.gemini_fallback_models):
                             current_model = self.gemini_fallback_models[fallback_index]
-                            print(f"💡 切換到備用模型 {current_model}")
+                            log.warning("punctuation.switching_fallback_model", model=current_model)
                             tried_models.append(current_model)
                             quota_exceeded_count = 0
                             current_key_index = 0  # 重置 key 索引
                             continue
                         else:
                             # 所有備援模型都用完了
-                            print("❌ 所有模型的配額都已用完")
+                            log.error("punctuation.all_models_quota_exceeded", tried_models=tried_models)
                             raise RuntimeError(
                                 f"所有 Google API Keys 都調用失敗。"
                                 f"已嘗試模型: {', '.join(tried_models)}。"
                                 f"最後錯誤: {error_msg}"
                             ) from last_error
                 else:
-                    print(f"⚠️ Google API Key 調用失敗 (嘗試 {attempt + 1}): {error_msg}")
+                    log.warning("punctuation.api_call_failed", attempt=attempt + 1, error=error_msg)
 
                 # 如果還有 key 可用，繼續嘗試
                 if attempt < max_attempts - 1:
-                    print("🔄 切換到下一個 API Key...")
+                    log.debug("punctuation.switching_api_key")
                     continue
                 else:
                     raise RuntimeError(
