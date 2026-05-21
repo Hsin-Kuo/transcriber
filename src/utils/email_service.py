@@ -6,6 +6,11 @@ from typing import Optional
 import os
 from jinja2 import Template
 
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
+
+
 class EmailService:
     """Email 發送服務類"""
 
@@ -273,17 +278,16 @@ class EmailService:
                 return self._send_via_smtp(to_email, subject, html_content, text_content)
             else:
                 # console 模式：印到終端（開發環境）
-                print(f"\n{'='*60}")
-                print("📧 Email 發送（開發模式）")
-                print(f"{'='*60}")
-                print(f"收件人: {to_email}")
-                print(f"主題: {subject}")
-                print(f"\n{text_content if text_content else '(HTML only)'}")
-                print(f"{'='*60}\n")
+                log.info(
+                    "email.console_mode",
+                    to_email=to_email,
+                    subject=subject,
+                    body=text_content if text_content else "(HTML only)",
+                )
                 return True
 
         except Exception as e:
-            print(f"❌ Email 發送失敗: {str(e)}")
+            log.error("email.send_failed", error=str(e))
             return False
 
     def _send_via_smtp(
@@ -311,7 +315,7 @@ class EmailService:
             server.login(self.smtp_user, self.smtp_password)
             server.send_message(msg)
 
-        print(f"✅ Email 已發送到 {to_email} (SMTP)")
+        log.info("email.sent", to_email=to_email, provider="smtp")
         return True
 
     def _send_via_ses(
@@ -339,7 +343,7 @@ class EmailService:
             },
         )
 
-        print(f"✅ Email 已發送到 {to_email} (SES)")
+        log.info("email.sent", to_email=to_email, provider="ses")
         return True
 
     def _send_via_resend(
@@ -373,7 +377,7 @@ class EmailService:
 
         resend.Emails.send(params)
 
-        print(f"✅ Email 已發送到 {to_email} (Resend)")
+        log.info("email.sent", to_email=to_email, provider="resend")
         return True
 
 

@@ -10,12 +10,11 @@ request 路徑，背景 task 默默吞掉的錯誤抓不到。
 - 同時印 stderr，保留原始除錯資訊
 """
 import asyncio
-import logging
-import sys
-import traceback
 from typing import Any, Coroutine, Optional
 
-logger = logging.getLogger(__name__)
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def _capture_task_exception(task: "asyncio.Task[Any]") -> None:
@@ -25,14 +24,15 @@ def _capture_task_exception(task: "asyncio.Task[Any]") -> None:
     if exc is None:
         return
 
-    # 印 stderr，無論 Sentry 是否啟用都看得到
+    # 記錄背景 task 例外，無論 Sentry 是否啟用都看得到
     name = task.get_name()
-    print(
-        f"❌ Background task '{name}' raised {type(exc).__name__}: {exc}",
-        file=sys.stderr,
-        flush=True,
+    logger.error(
+        "sentry.background_task_failed",
+        task_name=name,
+        error_type=type(exc).__name__,
+        error=str(exc),
+        exc_info=exc,
     )
-    traceback.print_exception(type(exc), exc, exc.__traceback__, file=sys.stderr)
 
     # Sentry capture（未初始化時為 no-op）
     try:
@@ -45,7 +45,7 @@ def _capture_task_exception(task: "asyncio.Task[Any]") -> None:
         pass
     except Exception as e:
         # Sentry 自己壞掉也不能影響主流程
-        logger.warning("sentry capture failed: %s", e)
+        logger.warning("sentry.capture_failed", error=str(e))
 
 
 def create_background_task(

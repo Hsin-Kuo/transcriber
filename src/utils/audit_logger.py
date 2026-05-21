@@ -5,6 +5,10 @@ from typing import Optional, Dict, Any
 from fastapi import Request
 import time
 
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
+
 
 class AuditLogger:
     """操作記錄工具類"""
@@ -319,7 +323,7 @@ async def log_admin_action(
             而非舊版預設的 "admin-panel" / "AdminPanel"
     """
     if _audit_logger is None:
-        print(f"⚠️  AuditLogger 尚未初始化，跳過記錄: {action}")
+        log.warning("audit.logger_not_initialized", action=action)
         return
 
     message = f"{action} on {resource_type}"

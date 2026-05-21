@@ -18,6 +18,10 @@ from pathlib import Path
 from typing import Optional
 from functools import lru_cache
 
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
+
 
 DEPLOY_ENV = os.getenv("DEPLOY_ENV", "local")
 
@@ -65,7 +69,7 @@ def cleanup_stale_temp_dirs(max_age_hours: int = 2):
             pass
 
     if cleaned:
-        print(f"🧹 啟動清理：移除 {cleaned} 個過期暫存目錄（>{max_age_hours}h）")
+        log.info("config.stale_temp_cleaned", count=cleaned, max_age_hours=max_age_hours)
 
 # Lazy-init SSM client
 _ssm_client = None
@@ -103,7 +107,7 @@ def get_parameter(name: str, fallback_env: Optional[str] = None, default: str = 
             resp = _get_ssm().get_parameter(Name=name, WithDecryption=True)
             return resp["Parameter"]["Value"]
         except Exception as e:
-            print(f"⚠️ SSM 讀取 {name} 失敗: {e}")
+            log.warning("config.ssm_read_failed", parameter=name, error=str(e))
             # Fallback 到環境變數
             if fallback_env:
                 return os.getenv(fallback_env, default)

@@ -6,6 +6,9 @@ from datetime import datetime, timezone, timedelta
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from ...utils.time_utils import get_utc_timestamp
+from ...utils.logger import get_logger
+
+log = get_logger(__name__)
 
 
 class AuditLogRepository:
@@ -22,7 +25,7 @@ class AuditLogRepository:
         await self.collection.create_index("timestamp")
         await self.collection.create_index([("user_id", 1), ("timestamp", -1)])
         await self.collection.create_index("resource_id")
-        print("✅ 操作記錄索引已建立")
+        log.info("audit_log.indexes.created")
 
     async def log(
         self,
@@ -84,6 +87,16 @@ class AuditLogRepository:
             log_entry["duration_ms"] = duration_ms
 
         result = await self.collection.insert_one(log_entry)
+        # 每筆 audit 寫入也 emit 一條 app log——audit 事件在 CloudWatch 也追得到、
+        # 能用 request_id 與前後 log 串起來。兩套系統各自獨立,這只是 app-log 端的可見性。
+        log.info(
+            "audit.recorded",
+            log_type=log_type,
+            action=action,
+            user_id=user_id,
+            resource_id=resource_id,
+            status_code=status_code,
+        )
         return str(result.inserted_id)
 
     async def get_by_user(
