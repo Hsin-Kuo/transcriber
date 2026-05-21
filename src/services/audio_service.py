@@ -13,6 +13,9 @@ import pytz
 import json
 import uuid
 
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
 
 TZ_UTC8 = pytz.timezone('Asia/Taipei')
 
@@ -88,7 +91,7 @@ class AudioService:
                 str(output_path)
             ]
 
-            print(f"🔧 執行 ffmpeg 合併：{len(audio_paths)} 個檔案")
+            log.debug("audio.merge_start", file_count=len(audio_paths))
 
             subprocess.run(
                 cmd,
@@ -97,7 +100,7 @@ class AudioService:
                 timeout=600  # 10分鐘超時
             )
 
-            print(f"✅ 合併成功：{output_path}")
+            log.info("audio.merge_succeeded", output_path=str(output_path))
             return output_path
 
         except subprocess.CalledProcessError as e:
@@ -132,5 +135,5 @@ class AudioService:
                 return 0
 
         except Exception as e:
-            print(f"⚠️ 獲取音檔時長失敗：{e}")
+            log.warning("audio.get_duration_failed", error=str(e))
             return 0

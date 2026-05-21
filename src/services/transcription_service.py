@@ -11,6 +11,9 @@ from typing import Optional
 from src.database.sync_client import get_sync_db
 from src.transcription.audio_source import LocalFileSource
 from src.transcription.orchestrator import TranscriptionOrchestrator
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
 
 
 class TranscriptionService:
@@ -52,7 +55,7 @@ class TranscriptionService:
         """啟動轉錄任務(非阻擋)。submit orchestrator.run 進 executor,立即返回。"""
         if max_speakers == 1:
             use_diarization = False
-            print("ℹ️  [start_transcription] max_speakers=1，停用說話者辨識")
+            log.info("transcription.diarization_disabled", reason="max_speakers_1")
 
         audio_source = LocalFileSource(audio_file_path)
         try:
@@ -61,8 +64,11 @@ class TranscriptionService:
                 task_id, audio_source, language, use_chunking, use_punctuation,
                 punctuation_provider, use_diarization, max_speakers, ui_language,
             )
-            print(f"✅ [start_transcription] 任務 {task_id} 已提交線程池")
+            log.info("transcription.task_submitted", task_id=task_id)
         except Exception as e:
-            print(f"❌ [start_transcription] 提交任務到線程池失敗：{e}")
-            import traceback
-            traceback.print_exc()
+            log.error(
+                "transcription.task_submit_failed",
+                task_id=task_id,
+                error=str(e),
+                exc_info=True,
+            )

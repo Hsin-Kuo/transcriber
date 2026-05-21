@@ -21,6 +21,10 @@ try:
 except ImportError:
     WhisperModel = None
 
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
+
 
 def _normalize_language(language: Optional[str]) -> Optional[str]:
     """Map zh-TW/zh-CN to zh for Whisper (which only supports 'zh')."""
@@ -63,9 +67,11 @@ def _collapse_repeated_segments(segments: List[Dict], max_repeat: int = 2) -> Li
             kept = [dict(seg) for seg in segments[i:i + max_repeat]]
             kept[-1]["end"] = segments[j - 1]["end"]
             result.extend(kept)
-            print(
-                f"⚠️ 偵測到 segment 重複幻覺：「{current_text}」x {run_length}，壓縮為 x {max_repeat}",
-                flush=True,
+            log.warning(
+                "whisper.hallucination.collapsed",
+                text=current_text,
+                run_length=run_length,
+                max_repeat=max_repeat,
             )
         i = j
     return result
@@ -99,12 +105,12 @@ def transcribe_chunk_worker(
     from pathlib import Path
     import re
 
-    print(f"[Worker] 進程啟動，處理 chunk: {chunk_path}", flush=True)
+    log.debug("whisper.worker.started", chunk_path=chunk_path)
 
     # 從文件名提取 chunk_idx（例如：_temp_input_chunk_3.wav → 3）
     chunk_idx = int(re.search(r'chunk_(\d+)', chunk_path).group(1))
 
-    print(f"[Worker {chunk_idx}] 載入 Whisper 模型: {model_name}", flush=True)
+    log.debug("whisper.worker.model.loading", chunk_idx=chunk_idx, model_name=model_name)
 
     # 在進程內獨立創建 Whisper 模型實例
     model = WhisperModel(
@@ -115,7 +121,7 @@ def transcribe_chunk_worker(
         num_workers=num_workers
     )
 
-    print(f"[Worker {chunk_idx}] 開始轉錄", flush=True)
+    log.debug("whisper.worker.transcribe.started", chunk_idx=chunk_idx)
 
     normalized_lang = _normalize_language(language)
     segments_list, info = model.transcribe(
@@ -146,14 +152,14 @@ def transcribe_chunk_worker(
     full_text = " ".join(seg["text"] for seg in segments)
     detected_language = info.language
 
-    print(f"[Worker {chunk_idx}] 轉錄完成，文字長度: {len(full_text)}", flush=True)
+    log.debug("whisper.worker.transcribe.completed", chunk_idx=chunk_idx, text_length=len(full_text))
 
     # 清理臨時文件
     try:
         Path(chunk_path).unlink()
-        print(f"[Worker {chunk_idx}] 已刪除臨時文件", flush=True)
+        log.debug("whisper.worker.tempfile.deleted", chunk_idx=chunk_idx)
     except Exception as e:
-        print(f"[Worker {chunk_idx}] 清理臨時文件失敗: {e}", flush=True)
+        log.warning("whisper.worker.tempfile.cleanup_failed", chunk_idx=chunk_idx, error=str(e))
 
     return chunk_idx, full_text, segments, detected_language
 
@@ -261,11 +267,11 @@ class WhisperProcessor:
         total_duration_ms = self._get_audio_duration(audio_path)
         total_minutes = total_duration_ms / 1000 / 60
         total_seconds = total_duration_ms / 1000
-        print(f"📊 音檔總長度：{total_minutes:.1f} 分鐘")
+        log.debug("transcribe.audio.duration", total_minutes=round(total_minutes, 1))
 
         # 如果音檔不長，直接轉錄（audio_path 已 normalize，跳過重複 probe）
         if total_duration_ms <= chunk_duration_ms:
-            print(f"📝 音檔長度在 {chunk_duration_ms/1000/60:.0f} 分鐘內，直接轉錄...")
+            log.debug("transcribe.direct.started", chunk_threshold_minutes=chunk_duration_ms / 1000 / 60)
             segments_list, detected_language = self._transcribe_with_timestamps(
                 audio_path, language, progress_callback=progress_callback,
             )
@@ -283,7 +289,7 @@ class WhisperProcessor:
         detected_language = None
 
         for chunk_idx, (chunk_path, time_offset) in enumerate(chunk_entries, start=1):
-            print(f"🎙 轉錄第 {chunk_idx}/{num_chunks} 段...")
+            log.debug("transcribe.serial.chunk.started", chunk_idx=chunk_idx, num_chunks=num_chunks)
 
             # 包裝 callback：chunk 內部 segment 時間（相對 chunk）→ 加 time_offset → 轉成「整段音檔」的時間軸
             chunk_callback = None
@@ -311,10 +317,14 @@ class WhisperProcessor:
             try:
                 chunk_path.unlink()
             except Exception as e:
-                print(f"⚠️ 清理 chunk 檔案失敗：{e}")
+                log.warning("transcribe.serial.chunk.cleanup_failed", error=str(e))
 
         full_text = " ".join(all_text_parts)
-        print(f"✅ 順序轉錄完成！總共 {num_chunks} 段，{len(all_segments)} 個 segments（時間戳已調整）")
+        log.info(
+            "transcribe.serial.completed",
+            num_chunks=num_chunks,
+            segment_count=len(all_segments),
+        )
         return full_text, all_segments, detected_language
 
     def transcribe_in_chunks_parallel(
@@ -339,17 +349,17 @@ class WhisperProcessor:
         Returns:
             (完整文字, segments 列表, 偵測到的語言)
         """
-        print("🚀 [並行轉錄] 開始並行轉錄流程（ProcessPoolExecutor）", flush=True)
+        log.debug("transcribe.parallel.started")
 
         audio_path = self._ensure_valid_audio(audio_path)
 
         # 1. 獲取音檔長度並分割
         total_duration_ms = self._get_audio_duration(audio_path)
         total_minutes = total_duration_ms / 1000 / 60
-        print(f"📊 音檔總長度：{total_minutes:.1f} 分鐘", flush=True)
+        log.debug("transcribe.audio.duration", total_minutes=round(total_minutes, 1))
 
         if total_duration_ms <= chunk_duration_ms:
-            print(f"📝 音檔長度在 {chunk_duration_ms/1000/60:.0f} 分鐘內，直接轉錄...", flush=True)
+            log.debug("transcribe.direct.started", chunk_threshold_minutes=chunk_duration_ms / 1000 / 60)
             # audio_path 已 normalize，跳過重複 probe
             segments_list, detected_language = self._transcribe_with_timestamps(audio_path, language)
             full_text = " ".join(seg["text"] for seg in segments_list)
@@ -369,13 +379,13 @@ class WhisperProcessor:
         completed_count = 0
         executor = None
 
-        print(f"🔧 [並行轉錄] 創建進程池，max_workers={max_workers}", flush=True)
+        log.debug("transcribe.parallel.pool.created", max_workers=max_workers)
 
         try:
             executor = ProcessPoolExecutor(max_workers=max_workers)
 
             # 提交所有任務
-            print(f"🔧 [並行轉錄] 準備提交 {num_chunks} 個任務...", flush=True)
+            log.debug("transcribe.parallel.tasks.submitting", num_chunks=num_chunks)
 
             # 準備參數（從當前模型實例獲取配置）
             future_to_idx = {}
@@ -393,7 +403,7 @@ class WhisperProcessor:
                 chunk_idx = int(re.search(r'chunk_(\d+)', str(chunk_path)).group(1))
                 future_to_idx[future] = chunk_idx
 
-            print("✅ [並行轉錄] 所有任務已提交到進程池", flush=True)
+            log.debug("transcribe.parallel.tasks.submitted", num_chunks=num_chunks)
 
             # 計算初始正在處理中的 chunk 數量（worker 會立即拿走任務）
             processing_count = min(max_workers, num_chunks)
@@ -405,12 +415,12 @@ class WhisperProcessor:
             for future in as_completed(future_to_idx.keys()):
                 # 檢查取消
                 if cancel_check and cancel_check():
-                    print("⚠️ 用戶取消，終止所有任務", flush=True)
+                    log.warning("transcribe.parallel.cancelled")
                     # 取消所有未完成的 future
                     for f in future_to_idx.keys():
                         f.cancel()
                     # 強制關閉 executor（不等待）
-                    print("🛑 強制關閉進程池...", flush=True)
+                    log.debug("transcribe.parallel.pool.force_shutdown")
                     executor.shutdown(wait=False, cancel_futures=True)
                     raise Exception("任務被取消")
 
@@ -424,7 +434,13 @@ class WhisperProcessor:
                     remaining = num_chunks - completed_count
                     processing_count = min(max_workers, remaining)
 
-                    print(f"✅ Chunk {chunk_idx} 完成（已完成 {completed_count}/{num_chunks}，處理中 {processing_count}）", flush=True)
+                    log.debug(
+                        "whisper.chunk.transcribed",
+                        chunk_idx=chunk_idx,
+                        completed_count=completed_count,
+                        num_chunks=num_chunks,
+                        processing_count=processing_count,
+                    )
 
                     # 更新進度
                     if progress_callback:
@@ -432,12 +448,12 @@ class WhisperProcessor:
 
                 except Exception as e:
                     chunk_idx = future_to_idx[future]
-                    print(f"❌ Chunk {chunk_idx} 轉錄失敗：{e}", flush=True)
+                    log.error("whisper.chunk.transcribe_failed", chunk_idx=chunk_idx, error=str(e))
                     # 立即失敗：取消所有剩餘任務
                     for f in future_to_idx.keys():
                         f.cancel()
                     # 強制關閉 executor
-                    print("🛑 轉錄失敗，強制關閉進程池...", flush=True)
+                    log.debug("transcribe.parallel.pool.force_shutdown")
                     executor.shutdown(wait=False, cancel_futures=True)
                     raise Exception(f"並行轉錄失敗：{e}")
 
@@ -453,13 +469,13 @@ class WhisperProcessor:
         finally:
             # 確保 executor 被正確清理
             if executor is not None:
-                print("🧹 [並行轉錄] 清理進程池...", flush=True)
+                log.debug("transcribe.parallel.pool.cleanup")
                 try:
                     # 優雅關閉，最多等待 10 秒
                     executor.shutdown(wait=True, cancel_futures=False)
-                    print("✅ [並行轉錄] 進程池已關閉", flush=True)
+                    log.debug("transcribe.parallel.pool.closed")
                 except Exception as cleanup_error:
-                    print(f"⚠️ [並行轉錄] 進程池關閉失敗：{cleanup_error}", flush=True)
+                    log.warning("transcribe.parallel.pool.cleanup_failed", error=str(cleanup_error))
 
         # 3. 檢查並合併結果
         if len(results) != num_chunks:
@@ -488,7 +504,11 @@ class WhisperProcessor:
         full_text = " ".join(all_text_parts)
         detected_language = sorted_results[0][2] if sorted_results else None
 
-        print(f"✅ 並行轉錄完成！總共 {num_chunks} 段，{len(all_segments)} 個 segments（時間戳已調整）", flush=True)
+        log.info(
+            "transcribe.parallel.completed",
+            num_chunks=num_chunks,
+            segment_count=len(all_segments),
+        )
         return full_text, all_segments, detected_language
 
     def transcribe_with_diarization(
@@ -553,21 +573,28 @@ class WhisperProcessor:
             if expected_codec and actual_codec.startswith(expected_codec):
                 return audio_path  # 格式正確，不需轉換
 
-            print(f"⚠️  格式不符：副檔名={suffix}, 實際 codec={actual_codec}，重新轉碼…")
+            log.warning(
+                "whisper.audio.codec_mismatch",
+                suffix=suffix,
+                actual_codec=actual_codec,
+            )
             converted_path = audio_path.with_name(audio_path.stem + '_fixed' + suffix)
             convert_result = subprocess.run(
                 ['ffmpeg', '-y', '-i', str(audio_path), str(converted_path)],
                 capture_output=True, timeout=120
             )
             if convert_result.returncode == 0:
-                print(f"✅  轉碼完成：{converted_path.name}")
+                log.debug("whisper.audio.reencoded", converted_path=converted_path.name)
                 return converted_path
             else:
-                print(f"⚠️  轉碼失敗，使用原始檔案：{convert_result.stderr.decode()[-200:]}")
+                log.warning(
+                    "whisper.audio.reencode_failed",
+                    error=convert_result.stderr.decode()[-200:],
+                )
                 return audio_path
 
         except Exception as e:
-            print(f"⚠️  _ensure_valid_audio 失敗，使用原始檔案：{e}")
+            log.warning("whisper.audio.validate_failed", error=str(e))
             return audio_path
 
     def _transcribe_with_timestamps(
@@ -588,12 +615,9 @@ class WhisperProcessor:
         Returns:
             (segments 列表, 偵測到的語言)
         """
-        print("🎯 [_transcribe_with_timestamps] 開始 Whisper 模型轉錄")
-        print(f"🎯 [_transcribe_with_timestamps] 音檔路徑: {audio_path}")
-        print(f"🎯 [_transcribe_with_timestamps] 語言: {language}")
+        log.debug("whisper.transcribe.started", audio_path=str(audio_path), language=language)
 
         segments_list = []
-        print("⏳ [_transcribe_with_timestamps] 調用 model.transcribe()...")
         normalized_lang = _normalize_language(language)
         segments, info = self.model.transcribe(
             str(audio_path),
@@ -608,7 +632,7 @@ class WhisperProcessor:
             hallucination_silence_threshold=2.0,
             initial_prompt="以下是繁體中文的逐字稿。" if normalized_lang == "zh" else None,
         )
-        print("✅ [_transcribe_with_timestamps] model.transcribe() 完成！")
+        log.debug("whisper.transcribe.model_returned")
 
         # 獲取 Whisper 偵測到的語言與總時長
         detected_language = info.language if hasattr(info, 'language') else None
@@ -626,7 +650,7 @@ class WhisperProcessor:
                     progress_callback(segment.end, total_duration)
                 except Exception as cb_err:
                     # 進度回報不該打斷轉錄本身
-                    print(f"⚠️ progress_callback 失敗（忽略）：{cb_err}")
+                    log.warning("whisper.progress_callback.failed", error=str(cb_err))
 
         segments_list = _collapse_repeated_segments(segments_list)
         return segments_list, detected_language
@@ -655,7 +679,7 @@ class WhisperProcessor:
                 return int(total_duration_seconds * 1000)
 
         except Exception as e:
-            print(f"⚠️ ffprobe 失敗，回退到 pydub: {e}")
+            log.warning("whisper.duration.ffprobe_failed", error=str(e))
 
         # 回退到 pydub
         audio = AudioSegment.from_file(audio_path)
@@ -714,11 +738,15 @@ class WhisperProcessor:
 
             # 選離目標切點最近的靜音中點
             best = min(silences, key=lambda s: abs(s - target_ms))
-            print(f"   🔇 切點調整: {target_ms/1000/60:.1f}min → {best/1000/60:.1f}min（靜音段）")
+            log.debug(
+                "whisper.split.cutpoint_adjusted",
+                target_minutes=round(target_ms / 1000 / 60, 1),
+                adjusted_minutes=round(best / 1000 / 60, 1),
+            )
             return best
 
         except Exception as e:
-            print(f"   ⚠️ 靜音偵測失敗，使用原始切點: {e}")
+            log.warning("whisper.split.silence_detect_failed", error=str(e))
             return target_ms
 
     def _split_audio_into_chunks(
@@ -757,12 +785,16 @@ class WhisperProcessor:
             last_segment_ms = total_duration_ms - cut_points[-1]
             if last_segment_ms < chunk_duration_ms * 0.2:
                 removed = cut_points.pop()
-                print(f"   📎 最後一段僅 {last_segment_ms/1000/60:.1f}min，併入前一段（移除切點 {removed/1000/60:.1f}min）")
+                log.debug(
+                    "whisper.split.short_tail_merged",
+                    last_segment_minutes=round(last_segment_ms / 1000 / 60, 1),
+                    removed_cutpoint_minutes=round(removed / 1000 / 60, 1),
+                )
 
         # 3. 建立分段區間
         boundaries = [0] + cut_points + [total_duration_ms]
         num_chunks = len(boundaries) - 1
-        print(f"🔄 智慧分段：共 {num_chunks} 段")
+        log.debug("whisper.split.planned", num_chunks=num_chunks)
 
         # 4. 依據切點切割
         chunk_files = []
@@ -770,7 +802,12 @@ class WhisperProcessor:
             start_ms = boundaries[chunk_idx]
             end_ms = boundaries[chunk_idx + 1]
 
-            print(f"   準備第 {chunk_idx + 1} 段 ({start_ms/1000/60:.1f}-{end_ms/1000/60:.1f} 分鐘)...")
+            log.debug(
+                "whisper.split.chunk.preparing",
+                chunk_idx=chunk_idx + 1,
+                start_minutes=round(start_ms / 1000 / 60, 1),
+                end_minutes=round(end_ms / 1000 / 60, 1),
+            )
 
             temp_path = audio_path.parent / f"_temp_{audio_path.stem}_chunk_{chunk_idx + 1}.mp3"
             start_seconds = start_ms / 1000.0
@@ -789,14 +826,14 @@ class WhisperProcessor:
                 ], check=True, capture_output=True, timeout=120)
 
             except subprocess.TimeoutExpired:
-                print(f"   ⚠️ 切分第 {chunk_idx + 1} 段超時，嘗試使用 pydub")
+                log.warning("whisper.split.chunk.ffmpeg_timeout", chunk_idx=chunk_idx + 1)
                 audio = AudioSegment.from_file(audio_path)
                 chunk_audio = audio[start_ms:end_ms]
                 chunk_audio.export(temp_path, format="mp3", bitrate="128k")
                 del audio, chunk_audio
 
             except Exception as e:
-                print(f"   ⚠️ ffmpeg 切分失敗，回退到 pydub: {e}")
+                log.warning("whisper.split.chunk.ffmpeg_failed", chunk_idx=chunk_idx + 1, error=str(e))
                 audio = AudioSegment.from_file(audio_path)
                 chunk_audio = audio[start_ms:end_ms]
                 chunk_audio.export(temp_path, format="mp3", bitrate="128k")

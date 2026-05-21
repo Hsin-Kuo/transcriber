@@ -20,7 +20,10 @@ from typing import Any, Callable, Optional
 
 from src.database.sync_client import get_sync_db
 from src.models.worker_job import TranscriptionWorkerJob
+from src.utils.logger import get_logger
 from src.utils.sentry_helpers import create_background_task
+
+log = get_logger(__name__)
 
 
 class WorkerDispatch:
@@ -100,21 +103,18 @@ class WorkerDispatch:
             await loop.run_in_executor(
                 None, self._handoff_uploader, task_id, audio_local_path, ext
             )
-            print(f"☁️  音檔已上傳到 S3: handoff/{task_id}.{ext}", flush=True)
+            log.debug("dispatch.handoff_uploaded", task_id=task_id, ext=ext)
 
             # 2. SQS 送出（model_dump → sign envelope → JSON）
             if self._sqs_queue_url:
                 payload = self._sign(job.model_dump())
                 await loop.run_in_executor(None, self._send_sqs_blocking, payload)
-                print(f"📨 已發送 SQS 訊息: {task_id}", flush=True)
+                log.info("dispatch.sqs_message_sent", task_id=task_id)
             else:
-                print(
-                    f"⚠️  SQS_QUEUE_URL 未設定，任務 {task_id} 保持 pending 狀態",
-                    flush=True,
-                )
+                log.warning("dispatch.sqs_queue_url_missing", task_id=task_id)
 
         except Exception as e:
-            print(f"❌ Worker dispatch 失敗: {task_id}: {e}", flush=True)
+            log.error("dispatch.failed", task_id=task_id, error=str(e), exc_info=True)
             self._mark_task_failed(task_id, str(e))
             raise  # 讓 create_background_task 的 Sentry hook 抓到
         finally:
@@ -152,7 +152,12 @@ class WorkerDispatch:
                 },
             )
         except Exception as db_err:
-            print(f"❌ 更新任務狀態失敗: {task_id}: {db_err}", flush=True)
+            log.error(
+                "dispatch.mark_failed_error",
+                task_id=task_id,
+                error=str(db_err),
+                exc_info=True,
+            )
 
 
 # ── module-level singleton（與既有 _transcription_service 同 pattern）──
