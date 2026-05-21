@@ -941,11 +941,25 @@ async def admin_batch_delete_tasks(
 
 @router.get("/statistics")
 async def get_admin_statistics(
+    request: Request,
     admin: dict = Depends(get_current_admin),
     db = Depends(get_database)
 ):
     """獲取後台統計資料"""
     try:
+        # 記錄 audit log（查看後台統計）
+        try:
+            from ..utils.audit_logger import get_audit_logger
+            await get_audit_logger().log_admin_operation(
+                request=request,
+                action="view_statistics",
+                user_id=str(admin["_id"]),
+                status_code=200,
+                message="查看後台統計資料",
+            )
+        except Exception as e:
+            print(f"⚠️ 記錄 audit log 失敗：{e}")
+
         # 1. 總體統計
         total_tasks = await db.tasks.count_documents({})
         completed_tasks = await db.tasks.count_documents({"status": "completed"})
