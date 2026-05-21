@@ -1,21 +1,25 @@
-"""Worker job 訊息合約。
+"""Task dispatch payload — 對應 CONTEXT.md「TranscriptionJob」。
 
-Web Server 與 Worker 之間透過 SQS 傳遞的 typed payload。簽章
-（`_signature`）是 envelope concern，不在本 model 內——見 WorkerDispatch。
+[[Task dispatch]] 的 typed payload。Web Server 建構，AWS 模式序列化成 SQS body、
+local 模式直接交給 LocalDispatch。簽章（`_signature`）是 envelope concern，不在
+本 model 內——見 WorkerDispatch。
+
+class 名為 `TranscriptionJob`，但檔案維持 `worker_job.py`（不改檔名，避免跟
+worker 薄殼 `src/worker_core/transcription_job.py` 撞名）。
 
 Forward compat：`extra="ignore"`，舊 Worker 可安全消費新 Server 多送的欄位。
 """
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-class TranscriptionWorkerJob(BaseModel):
-    """Worker 收到的單一轉錄任務指令。
+class TranscriptionJob(BaseModel):
+    """[[Task dispatch]] 的單一轉錄任務指令。
 
-    從 Web Server 端建構（router 收到 HTTP 後）、序列化成 JSON 發進 SQS、
-    Worker 端反序列化執行。Field 名稱直接對應 SQS body key，已部署的 worker
-    向後相容無痛。
+    從 Web Server 端建構（router 收到 HTTP 後）。AWS 模式序列化成 JSON 發進
+    SQS、Worker 端反序列化執行；local 模式直接交給 LocalDispatch。Field 名稱
+    直接對應 SQS body key，已部署的 worker 向後相容無痛。
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -39,9 +43,23 @@ class TranscriptionWorkerJob(BaseModel):
     """是否啟用 speaker diarization (pyannote)"""
 
     max_speakers: Optional[int] = None
-    """diarization 最大說話者數；None = 自動"""
+    """diarization 最大說話者數；None = 自動。為 1 時 diarization 無意義，
+    `_normalize_single_speaker` 會強制 use_diarization=False。"""
+
+    ui_language: Optional[str] = None
+    """使用者介面語言；影響繁/簡標點與訊息語系。None = 預設。"""
 
     handoff_ext: Optional[str] = None
     """Handoff audio 副檔名（不含 dot），例如 "wav"。Worker 用此推 S3 key
-    `handoff/{task_id}.{ext}`。None = 來自舊版 Server（Layer 2 前），Worker
-    fallback 到 `uploads/{tier}/{task_id}.mp3` 下載——SQS 排空後可拔。"""
+    `handoff/{task_id}.{ext}`。local 模式不使用。None = 來自舊版 Server（Layer
+    2 前），Worker fallback 到 `uploads/{tier}/{task_id}.mp3` 下載——SQS 排空後可拔。"""
+
+    @model_validator(mode="after")
+    def _normalize_single_speaker(self) -> "TranscriptionJob":
+        """max_speakers == 1 時 diarization 無意義，強制關閉。
+
+        放在 model 層讓兩個 dispatch adapter 行為一致（舊版只有 local 端做）。
+        """
+        if self.max_speakers == 1:
+            self.use_diarization = False
+        return self

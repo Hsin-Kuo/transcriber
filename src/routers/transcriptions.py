@@ -17,8 +17,6 @@ from ..database.mongodb import get_database
 from ..database.repositories.task_repo import TaskRepository
 from ..database.repositories.tag_repo import TagRepository
 from ..services.task_service import TaskService
-from ..services.transcription_service import TranscriptionService
-from ..services.progress_store import Phase
 from ..services.tag_service import TagService
 from ..services.utils.audio_validator import (
     validate_filename_extension,
@@ -30,9 +28,12 @@ from ..services.utils.diarization_processor import DiarizationProcessor
 from ..utils.storage_service import is_aws
 from ..utils.config_loader import get_parameter, get_temp_dir
 from ..utils.logger import get_logger
-from ..database.sync_client import get_sync_db
-from ..services.worker_dispatch import get_worker_dispatch
-from ..models.worker_job import TranscriptionWorkerJob
+from ..services.task_dispatch import (
+    LocalDispatch,
+    get_task_dispatch,
+    init_task_dispatch,
+)
+from ..models.worker_job import TranscriptionJob
 import os
 import asyncio
 
@@ -41,22 +42,21 @@ router = APIRouter(prefix="/transcriptions", tags=["Transcriptions"])
 log = get_logger(__name__)
 
 
-# 全域服務單例（在啟動時初始化）
+# 全域處理器單例（在啟動時初始化；router 用 _diarization_processor 檢查可用性）
 _whisper_processor: Optional[WhisperProcessor] = None
 _punctuation_processor: Optional[PunctuationProcessor] = None
 _diarization_processor: Optional[DiarizationProcessor] = None
-_transcription_service: Optional[TranscriptionService] = None
 
 
-def init_transcription_service(
+def init_local_dispatch(
     whisper_model,
     task_service: TaskService,
     progress_store,
     model_name: str = "medium",
     diarization_pipeline=None,
     executor=None,
-):
-    """初始化全域 TranscriptionService 單例
+) -> LocalDispatch:
+    """建立處理器 + LocalDispatch，註冊為 Task dispatch 單例（local 模式 startup 呼叫）。
 
     Args:
         whisper_model: Whisper 模型實例
@@ -66,38 +66,24 @@ def init_transcription_service(
         diarization_pipeline: Diarization pipeline（可選）
         executor: 線程池執行器（可選）
     """
-    global _whisper_processor, _punctuation_processor, _diarization_processor, _transcription_service
+    global _whisper_processor, _punctuation_processor, _diarization_processor
 
-    # 初始化處理器
     _whisper_processor = WhisperProcessor(whisper_model, model_name)
     _punctuation_processor = PunctuationProcessor()
-    _diarization_processor = DiarizationProcessor(diarization_pipeline) if diarization_pipeline else None
-
-    # 初始化 TranscriptionService
-    _transcription_service = TranscriptionService(
-        task_service=task_service,
-        whisper_processor=_whisper_processor,
-        punctuation_processor=_punctuation_processor,
-        diarization_processor=_diarization_processor,
-        executor=executor,
-        progress_store=progress_store,
+    _diarization_processor = (
+        DiarizationProcessor(diarization_pipeline) if diarization_pipeline else None
     )
 
-    return _transcription_service
-
-
-def get_transcription_service() -> TranscriptionService:
-    """獲取 TranscriptionService 實例
-
-    Returns:
-        TranscriptionService 實例
-
-    Raises:
-        RuntimeError: 如果服務尚未初始化
-    """
-    if _transcription_service is None:
-        raise RuntimeError("TranscriptionService 尚未初始化")
-    return _transcription_service
+    dispatch = LocalDispatch(
+        task_service=task_service,
+        progress_store=progress_store,
+        whisper=_whisper_processor,
+        punctuation=_punctuation_processor,
+        diarization=_diarization_processor,
+        executor=executor,
+    )
+    init_task_dispatch(dispatch)
+    return dispatch
 
 
 def get_task_field(task: dict, field: str):
@@ -369,13 +355,6 @@ async def create_transcription(
     if task_type == "subtitle":
         punct_provider = "none"
         log.debug("transcription.create.punctuation_disabled", task_type=task_type)
-    # 獲取服務（AWS 模式下 TranscriptionService 可能為 None）
-    transcription_service = _transcription_service
-    if not is_aws() and transcription_service is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="轉錄服務尚未初始化"
-        )
 
     # 生成任務 ID
     task_id = str(uuid.uuid4())
@@ -572,23 +551,6 @@ async def create_transcription(
                 detail="Speaker diarization 功能未啟用。請設定 HF_TOKEN 環境變數並重啟服務。"
             )
 
-        # 檢查當前處理中的任務數量（限流機制，僅本地模式）
-        should_queue = False
-        if not is_aws() and transcription_service:
-            MAX_CONCURRENT_TASKS = 2  # 最多同時處理 2 個任務
-            processing_count = await transcription_service.task_service.count_processing_tasks()
-            pending_count = await transcription_service.task_service.count_pending_tasks()
-
-            # 判斷是否需要排隊
-            should_queue = processing_count >= MAX_CONCURRENT_TASKS
-
-            if should_queue:
-                log.info(
-                    "task.queued.system_busy",
-                    processing_count=processing_count,
-                    pending_count=pending_count,
-                )
-
         # 解析標籤
         task_tags = []
         if tags:
@@ -684,66 +646,25 @@ async def create_transcription(
         task_repo = TaskRepository(db)
         await task_repo.create(task_data)
 
-        if is_aws():
-            # ===== AWS 模式：背景上傳 S3 + 發送 SQS =====
-            # 委派給 Worker dispatch seam：背景上傳 S3 + 簽章 + 送 SQS
-            # 失敗會把 Task 標 failed、清 temp_dir、送 Sentry
-            get_worker_dispatch().fire_and_forget(
-                job=TranscriptionWorkerJob(
-                    task_id=task_id,
-                    language=None if language == "auto" else language,
-                    use_chunking=chunk_audio,
-                    use_punctuation=punct_provider != "none",
-                    punctuation_provider=punct_provider,
-                    use_diarization=diarize,
-                    max_speakers=max_speakers,
-                    handoff_ext=temp_audio.suffix.lstrip(".").lower(),
-                ),
-                audio_local_path=temp_audio,
-                temp_dir=temp_dir,
-                user_tier=full_user_data.get("quota", {}).get("tier", "free"),
-            )
-        else:
-            # ===== 本地模式：現有行為 =====
-            # 初始化進度（讓 SSE 立即看到「等待處理中」）
-            transcription_service.task_service.progress_store.set_phase(
-                task_id, Phase.PREPARATION, 0.0, message="等待處理中..."
-            )
-
-            # 記錄臨時目錄
-            transcription_service.task_service.set_temp_dir(task_id, temp_dir)
-
-            # 根據系統負載決定是否立即啟動或加入隊列
-            if not should_queue:
-                # 系統空閒，立即啟動轉錄（異步執行）
-                use_punctuation = punct_provider != "none"
-                language_code = None if language == "auto" else language
-
-                # 立即更新狀態為 processing，防止隊列處理器重複啟動
-                await task_repo.update(task_id, {
-                    "status": "processing"
-                    # updated_at 由 task_repo.update() 自動設置
-                })
-                transcription_service.task_service.progress_store.set_phase(
-                    task_id, Phase.PREPARATION, 0.0, message="準備開始轉錄..."
-                )
-
-                await transcription_service.start_transcription(
-                    task_id=task_id,
-                    audio_file_path=temp_audio,
-                    language=language_code,
-                    use_chunking=chunk_audio,
-                    use_punctuation=use_punctuation,
-                    punctuation_provider=punct_provider,
-                    use_diarization=diarize,
-                    max_speakers=max_speakers,
-                    ui_language=ui_language,
-                )
-
-                log.info("task.created", task_id=task_id, dispatched=True)
-            else:
-                # 系統忙碌，加入隊列（保持 pending 狀態）
-                log.info("task.created", task_id=task_id, queued=True, queue_size=pending_count + 1)
+        # 委派給 Task dispatch seam（adapter 決定走 SQS 還是 in-process executor；
+        # 失敗會把 Task 標 failed、清 temp_dir、送 Sentry）
+        dispatch_result = await get_task_dispatch().submit(
+            job=TranscriptionJob(
+                task_id=task_id,
+                language=None if language == "auto" else language,
+                use_chunking=chunk_audio,
+                use_punctuation=punct_provider != "none",
+                punctuation_provider=punct_provider,
+                use_diarization=diarize,
+                max_speakers=max_speakers,
+                ui_language=ui_language,
+                handoff_ext=temp_audio.suffix.lstrip(".").lower(),
+            ),
+            audio_local_path=temp_audio,
+            temp_dir=temp_dir,
+            user_tier=full_user_data.get("quota", {}).get("tier", "free"),
+        )
+        log.info("task.created", task_id=task_id, status=dispatch_result.status)
 
         # 記錄 audit log（創建轉錄任務）
         try:
@@ -770,19 +691,19 @@ async def create_transcription(
         except Exception as e:
             log.warning("transcription.audit_log.failed", action="create", error=str(e))
 
-        # 返回結果（根據是否排隊調整消息）
-        if should_queue:
-            message = f"轉錄任務已加入隊列，目前有 {processing_count} 個任務處理中，{pending_count + 1} 個任務等待中"
-            queue_position = pending_count + 1
+        # 返回結果（依 dispatch 結果調整消息）
+        queued = dispatch_result.status == "pending"
+        queue_position = dispatch_result.queue_position or 0
+        if queued and queue_position:
+            message = f"轉錄任務已加入隊列，目前有 {queue_position} 個任務等待中"
         else:
             message = "轉錄任務已建立，正在背景處理"
-            queue_position = 0
 
         return {
             "task_id": task_id,
-            "status": "pending",
+            "status": dispatch_result.status,
             "message": message,
-            "queued": should_queue,
+            "queued": queued,
             "queue_position": queue_position,
             "file": {
                 "filename": original_filename,
@@ -1531,14 +1452,6 @@ async def create_batch_transcriptions(
             detail="overrides 格式錯誤，必須是有效的 JSON"
         )
 
-    # 獲取服務（AWS 模式下 TranscriptionService 可能為 None）
-    transcription_service = _transcription_service
-    if not is_aws() and transcription_service is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="轉錄服務尚未初始化"
-        )
-
     # 從配置中提取參數
     task_type = config.get("taskType", "paragraph")
     diarize = config.get("diarize", True)
@@ -1629,14 +1542,6 @@ async def create_batch_transcriptions(
     # 預扣 repository（每檔 atomic reserve）
     from src.database.repositories.reservation_repo import ReservationRepository
     reservation_repo = ReservationRepository(db)
-
-    # 檢查當前處理中的任務數量（僅本地模式）
-    processing_count = 0
-    pending_count = 0
-    if not is_aws() and transcription_service:
-        MAX_CONCURRENT_TASKS = 2
-        processing_count = await transcription_service.task_service.count_processing_tasks()
-        pending_count = await transcription_service.task_service.count_pending_tasks()
 
     # 建立統一的處理列表：(global_idx, upload_file_or_None, chunked_meta_or_None)
     _batch_items = []
@@ -1768,87 +1673,37 @@ async def create_batch_transcriptions(
             # 保存到資料庫
             await task_repo.create(task_data)
 
-            if is_aws():
-                # ===== AWS 模式：背景上傳 S3 + 發送 SQS =====
-                # 委派給 Worker dispatch seam（批次：chunking 強制開）
-                get_worker_dispatch().fire_and_forget(
-                    job=TranscriptionWorkerJob(
-                        task_id=task_id,
-                        language=None if language == "auto" else language,
-                        use_chunking=True,
-                        use_punctuation=punct_provider != "none",
-                        punctuation_provider=punct_provider,
-                        use_diarization=diarize,
-                        max_speakers=max_speakers,
-                        handoff_ext=temp_audio.suffix.lstrip(".").lower(),
-                    ),
-                    audio_local_path=temp_audio,
-                    temp_dir=temp_dir,
-                    user_tier=full_user_data.get("quota", {}).get("tier", "free"),
-                )
-                temp_dir = None  # 避免 except 中重複清理
-
-                file_result["task_id"] = task_id
-                file_result["status"] = "pending"
-                file_result["queue_position"] = created_count + 1
-                created_count += 1
-                log.info(
-                    "task.batch.created",
-                    index=idx + 1,
-                    total=total_files,
-                    filename=original_filename,
+            # 委派給 Task dispatch seam（批次：chunking 強制開）
+            dispatch_result = await get_task_dispatch().submit(
+                job=TranscriptionJob(
                     task_id=task_id,
-                    dispatch="sqs",
-                )
-            else:
-                # ===== 本地模式：現有行為 =====
-                # 初始化進度
-                transcription_service.task_service.progress_store.set_phase(
-                    task_id, Phase.PREPARATION, 0.0, message="等待處理中..."
-                )
+                    language=None if language == "auto" else language,
+                    use_chunking=True,
+                    use_punctuation=punct_provider != "none",
+                    punctuation_provider=punct_provider,
+                    use_diarization=diarize,
+                    max_speakers=max_speakers,
+                    ui_language=ui_language,
+                    handoff_ext=temp_audio.suffix.lstrip(".").lower(),
+                ),
+                audio_local_path=temp_audio,
+                temp_dir=temp_dir,
+                user_tier=full_user_data.get("quota", {}).get("tier", "free"),
+            )
+            temp_dir = None  # dispatch 後 temp_dir 歸 adapter 負責，避免 except 重複清理
 
-                # 記錄臨時目錄
-                transcription_service.task_service.set_temp_dir(task_id, temp_dir)
-
-                # 計算隊列位置
-                should_queue = (processing_count + created_count) >= MAX_CONCURRENT_TASKS
-                queue_position = pending_count + created_count + 1 if should_queue else 0
-
-                # 如果系統空閒，立即啟動
-                if not should_queue:
-                    use_punctuation = punct_provider != "none"
-                    language_code = None if language == "auto" else language
-
-                    await task_repo.update(task_id, {"status": "processing"})
-                    transcription_service.task_service.progress_store.set_phase(
-                        task_id, Phase.PREPARATION, 0.0, message="準備開始轉錄..."
-                    )
-
-                    await transcription_service.start_transcription(
-                        task_id=task_id,
-                        audio_file_path=temp_audio,
-                        language=language_code,
-                        use_chunking=True,
-                        use_punctuation=use_punctuation,
-                        punctuation_provider=punct_provider,
-                        use_diarization=diarize,
-                        max_speakers=max_speakers,
-                        ui_language=ui_language,
-                    )
-
-                file_result["task_id"] = task_id
-                file_result["status"] = "pending" if should_queue else "processing"
-                file_result["queue_position"] = queue_position
-                created_count += 1
-
-                log.info(
-                    "task.batch.created",
-                    index=idx + 1,
-                    total=total_files,
-                    filename=original_filename,
-                    task_id=task_id,
-                    dispatch="local",
-                )
+            file_result["task_id"] = task_id
+            file_result["status"] = dispatch_result.status
+            file_result["queue_position"] = dispatch_result.queue_position or 0
+            created_count += 1
+            log.info(
+                "task.batch.created",
+                index=idx + 1,
+                total=total_files,
+                filename=original_filename,
+                task_id=task_id,
+                status=dispatch_result.status,
+            )
 
         except Exception as e:
             file_result["status"] = "failed"

@@ -4,13 +4,11 @@ Services layer - Business Logic Layer
 """
 
 from .task_service import TaskService
-from .transcription_service import TranscriptionService
 from .tag_service import TagService
 from .audio_service import AudioService
 
 __all__ = [
     "TaskService",
-    "TranscriptionService",
     "TagService",
     "AudioService",
 ]
