@@ -19,17 +19,18 @@ from ..auth.dependencies import get_current_user
 from ..database.mongodb import get_database
 from ..database.repositories.user_repo import UserRepository
 from ..models.quota import QUOTA_TIERS, QuotaTier
+from ..utils.logger import get_logger
 
 router = APIRouter(prefix="/auth", tags=["OAuth"])
+log = get_logger(__name__)
 
 # Google OAuth 設定（AWS 從 SSM 讀取，本地從環境變數）
 GOOGLE_CLIENT_ID = get_parameter("/transcriber/google-client-id", fallback_env="GOOGLE_CLIENT_ID", default="")
 
-# 啟動時印出設定狀態（除錯用）
 if GOOGLE_CLIENT_ID:
-    print(f"[OAuth] Google Client ID 已載入: {GOOGLE_CLIENT_ID[:20]}...")
+    log.info("oauth.client_id.loaded")
 else:
-    print("[OAuth] 警告: GOOGLE_CLIENT_ID 未設定")
+    log.warning("oauth.client_id.missing")
 
 
 def verify_google_token(credential: str) -> dict:
@@ -65,13 +66,13 @@ def verify_google_token(credential: str) -> dict:
         return idinfo
 
     except ValueError as e:
-        print(f"[OAuth] Google Token 驗證失敗: {e}")
+        log.warning("oauth.google_token.invalid", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Google Token 無效: {str(e)}"
         )
     except Exception as e:
-        print(f"[OAuth] Google Token 驗證異常: {type(e).__name__}: {e}")
+        log.warning("oauth.google_token.verify_error", error_type=type(e).__name__, error=str(e))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Google Token 驗證失敗: {str(e)}"

@@ -16,8 +16,10 @@ from ..database.repositories.processed_webhook_repo import ProcessedWebhookRepos
 from ..models.quota import QuotaTier, QUOTA_TIERS, is_upgrade
 from ..utils.newebpay_service import get_newebpay_service, NewebpayService
 from ..utils.time_utils import get_utc_timestamp
+from ..utils.logger import get_logger
 
 router = APIRouter(prefix="/subscriptions", tags=["Subscriptions"])
+log = get_logger(__name__)
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
@@ -213,7 +215,7 @@ async def cancel_subscription(
         svc = get_newebpay_service()
         ok, msg = await svc.terminate_period_contract(active_order_no, period_no)
         if not ok:
-            print(f"⚠️ 藍新合約取消失敗：{msg}", flush=True)
+            log.warning("subscription.cancel.contract_terminate_failed", message=msg)
 
     sub["cancel_at_period_end"] = True
     sub["canceled_at"] = get_utc_timestamp()
@@ -442,9 +444,9 @@ async def change_plan(
         if prev_order_no and prev_period_no:
             ok, msg = await svc.terminate_period_contract(prev_order_no, prev_period_no)
             if ok:
-                print(f"✅ 降級：已終止舊合約 {prev_period_no}", flush=True)
+                log.info("subscription.downgrade.old_contract_terminated", prev_period_no=prev_period_no)
             else:
-                print(f"⚠️ 降級：終止舊合約失敗（{msg}），將在 Notify 時重試", flush=True)
+                log.warning("subscription.downgrade.old_contract_terminate_failed", prev_period_no=prev_period_no, message=msg)
 
         sub["pending_plan_change"] = {
             "tier": request.tier,
@@ -578,7 +580,7 @@ async def period_notify(request: Request, db=Depends(get_database)):
     svc = get_newebpay_service()
     payload = svc.decrypt_period_notify(raw)
     if payload is None:
-        print("⚠️ 定期定額 Notify 解密/驗證失敗", flush=True)
+        log.warning("newebpay.period_notify.decrypt_failed")
         return {"status": "error"}
 
     notify_status = payload.get("Status", "")
@@ -602,7 +604,7 @@ async def period_notify(request: Request, db=Depends(get_database)):
         # 初次建立 Notify → 第一次付款
         is_first_payment = True
 
-    print(f"📩 定期定額 Notify: {merchant_order_no} status={notify_status} first={is_first_payment}", flush=True)
+    log.info("subscription.webhook.received", merchant_order_no=merchant_order_no, status=notify_status, is_first_payment=is_first_payment)
 
     # 冪等性：每期授權的 natural_id = order + already_times，重複到達直接略過
     # 避免重發 Notify 造成重複授信、period_end 多滾一期等問題
@@ -617,7 +619,7 @@ async def period_notify(request: Request, db=Depends(get_database)):
             "trade_no": trade_no,
         },
     ):
-        print(f"♻️ Notify 已處理過，略過：{natural_id}", flush=True)
+        log.warning("subscription.webhook.duplicate_skipped", natural_id=natural_id)
         return {"status": "ok"}
 
     # 已 claim → 進入處理。若中途失敗：釋放 claim + 送 Sentry，讓藍新重發能重做
@@ -625,12 +627,12 @@ async def period_notify(request: Request, db=Depends(get_database)):
         order_repo = OrderRepository(db)
         order = await order_repo.get_by_order_no(merchant_order_no)
         if not order:
-            print(f"⚠️ 找不到訂單 {merchant_order_no}", flush=True)
+            log.warning("subscription.webhook.order_not_found", merchant_order_no=merchant_order_no)
             return {"status": "ok"}
 
         # 冪等性保護：首次付款若 order 已是 paid，直接跳過避免重複處理
         if is_first_payment and order.get("status") == "paid":
-            print(f"ℹ️ 訂單 {merchant_order_no} 已處理，略過重複 Notify", flush=True)
+            log.warning("subscription.webhook.order_already_paid", merchant_order_no=merchant_order_no)
             return {"status": "ok"}
 
         user_repo = UserRepository(db)
@@ -666,7 +668,7 @@ async def period_notify(request: Request, db=Depends(get_database)):
     except Exception as e:
         # 處理失敗：釋放 claim 讓藍新下次重發能重做；送 Sentry 警示需人工檢查
         await webhook_repo.release(provider="newebpay-period", natural_id=natural_id)
-        print(f"❌ Period notify 處理失敗 {natural_id}: {e}", flush=True)
+        log.error("subscription.webhook.processing_failed", natural_id=natural_id, error=str(e), exc_info=True)
         try:
             import sentry_sdk
             with sentry_sdk.push_scope() as scope:
@@ -704,7 +706,7 @@ async def _handle_subscription_paid(
                 svc = get_newebpay_service()
                 ok, msg = await svc.terminate_period_contract(prev_order_no, prev_period_no)
                 if not ok:
-                    print(f"⚠️ 升級：終止舊合約失敗（{msg}）", flush=True)
+                    log.warning("subscription.upgrade.old_contract_terminate_failed", message=msg)
 
             extra_dur = order.get("extra_duration_minutes", 0)
             extra_ai = order.get("extra_ai_summaries", 0)
@@ -732,7 +734,7 @@ async def _handle_subscription_paid(
         await order_repo.update_by_order_no(
             order["merchant_order_no"], {"status": "paid", "paid_at": now.timestamp()}
         )
-        print(f"✅ 用戶 {user_id} 訂閱成功：{tier} ({billing_cycle})", flush=True)
+        log.info("subscription.activated", user_id=user_id, tier=tier, billing_cycle=billing_cycle)
 
     else:
         # ── 續扣成功：更新計費週期 ──────────────────────────────────────
@@ -745,7 +747,7 @@ async def _handle_subscription_paid(
         })
         await user_repo.update_subscription(user_id, sub)
         await _reset_monthly_usage(db, user_id, now)
-        print(f"🔄 用戶 {user_id} 續扣成功", flush=True)
+        log.info("subscription.renewed", user_id=user_id)
 
 
 async def _handle_downgrade_paid(
@@ -765,7 +767,7 @@ async def _handle_downgrade_paid(
             svc = get_newebpay_service()
             ok, msg = await svc.terminate_period_contract(prev_order_no, prev_period_no)
             if not ok:
-                print(f"⚠️ 降級：終止舊 Pro 合約失敗（{msg}）", flush=True)
+                log.warning("subscription.downgrade.old_pro_contract_terminate_failed", message=msg)
 
         subscription = {
             "status": "active",
@@ -787,7 +789,7 @@ async def _handle_downgrade_paid(
         await order_repo.update_by_order_no(
             order["merchant_order_no"], {"status": "paid", "paid_at": now.timestamp()}
         )
-        print(f"🔄 用戶 {user_id} 降級生效：{tier}", flush=True)
+        log.info("subscription.downgrade.activated", user_id=user_id, tier=tier)
 
     else:
         # ── 後續續扣：更新計費週期 ──────────────────────────────────────
@@ -800,7 +802,7 @@ async def _handle_downgrade_paid(
         })
         await user_repo.update_subscription(user_id, sub)
         await _reset_monthly_usage(db, user_id, now)
-        print(f"🔄 用戶 {user_id} 降級方案續扣成功", flush=True)
+        log.info("subscription.downgrade.renewed", user_id=user_id)
 
 
 async def _handle_payment_failed(db, user_repo: UserRepository, user_id: str):
@@ -818,7 +820,7 @@ async def _handle_payment_failed(db, user_repo: UserRepository, user_id: str):
 
     free_quota = _build_quota_from_tier("free")
     await user_repo.update_quota(user_id, free_quota)
-    print(f"⚠️ 用戶 {user_id} 續扣失敗，已降為 free", flush=True)
+    log.warning("subscription.renewal.payment_failed", user_id=user_id)
 
 
 # ── Notify Handler（MPG 一次性） ─────────────────────────────────────────────
@@ -833,14 +835,14 @@ async def mpg_notify(request: Request, db=Depends(get_database)):
     svc = get_newebpay_service()
     data = svc.verify_and_decrypt_mpg_notify(trade_info, trade_sha)
     if data is None:
-        print("⚠️ MPG Notify 驗證失敗", flush=True)
+        log.warning("newebpay.mpg_notify.verify_failed")
         return {"status": "error"}
 
     merchant_order_no = data.get("MerchantOrderNo", "")
     result = data.get("Status", "")
     trade_no = data.get("TradeNo", "")
 
-    print(f"📩 MPG Notify: {merchant_order_no} status={result}", flush=True)
+    log.info("payment.webhook.received", merchant_order_no=merchant_order_no, status=result)
 
     # 冪等性：一次性付款 natural_id 就是訂單號
     webhook_repo = ProcessedWebhookRepository(db)
@@ -849,19 +851,19 @@ async def mpg_notify(request: Request, db=Depends(get_database)):
         natural_id=merchant_order_no,
         metadata={"status": result, "trade_no": trade_no},
     ):
-        print(f"♻️ MPG Notify 已處理過，略過：{merchant_order_no}", flush=True)
+        log.warning("payment.webhook.duplicate_skipped", merchant_order_no=merchant_order_no)
         return {"status": "ok"}
 
     try:
         order_repo = OrderRepository(db)
         order = await order_repo.get_by_order_no(merchant_order_no)
         if not order:
-            print(f"⚠️ 找不到訂單 {merchant_order_no}", flush=True)
+            log.warning("payment.webhook.order_not_found", merchant_order_no=merchant_order_no)
             return {"status": "ok"}
 
         # 冪等性保護
         if order.get("status") == "paid":
-            print(f"ℹ️ 訂單 {merchant_order_no} 已處理，略過重複 Notify", flush=True)
+            log.warning("payment.webhook.order_already_paid", merchant_order_no=merchant_order_no)
             return {"status": "ok"}
 
         user_repo = UserRepository(db)
@@ -876,15 +878,15 @@ async def mpg_notify(request: Request, db=Depends(get_database)):
                 "newebpay_trade_no": trade_no,
                 "paid_at": datetime.utcnow().timestamp(),
             })
-            print(f"✅ 用戶 {user_id} 購買額外額度：+{extra_dur}分鐘 +{extra_ai}摘要", flush=True)
+            log.info("payment.extra_quota.purchased", user_id=user_id, extra_duration_minutes=extra_dur, extra_ai_summaries=extra_ai)
         else:
             await order_repo.update_by_order_no(merchant_order_no, {"status": "failed"})
-            print(f"⚠️ 用戶 {user_id} 額外額度購買失敗", flush=True)
+            log.warning("payment.extra_quota.purchase_failed", user_id=user_id)
 
         return {"status": "ok"}
     except Exception as e:
         await webhook_repo.release(provider="newebpay-mpg", natural_id=merchant_order_no)
-        print(f"❌ MPG notify 處理失敗 {merchant_order_no}: {e}", flush=True)
+        log.error("payment.webhook.processing_failed", merchant_order_no=merchant_order_no, error=str(e), exc_info=True)
         try:
             import sentry_sdk
             with sentry_sdk.push_scope() as scope:

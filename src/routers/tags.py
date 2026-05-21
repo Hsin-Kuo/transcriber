@@ -7,9 +7,11 @@ from ..dependencies import get_tag_service
 from ..services.tag_service import TagService
 from ..models.tag import TagCreate, TagUpdate, TagOrderUpdate, TagResponse
 from ..utils.audit_logger import get_audit_logger
+from ..utils.logger import get_logger
 
 
 router = APIRouter(prefix="/tags", tags=["Tags"])
+log = get_logger(__name__)
 
 
 @router.post("", response_model=TagResponse, status_code=status.HTTP_201_CREATED)
@@ -154,16 +156,10 @@ async def update_tag_order(
     """
     try:
         user_id = str(current_user["_id"])
-        print(f"\n{'='*60}")
-        print("🔍 [tags.py] 更新標籤順序")
-        print(f"   current_user['_id'] 類型: {type(current_user['_id'])}")
-        print(f"   current_user['_id'] 值: {current_user['_id']}")
-        print(f"   轉換後 user_id: {user_id}")
-        print(f"   tag_ids: {order_data.tag_ids}")
-        print(f"{'='*60}\n")
+        log.debug("tag.reorder.request", user_id=user_id, tag_ids=order_data.tag_ids)
 
         result = await tag_service.update_tag_order(user_id, order_data.tag_ids)
-        print(f"✅ [tags.py] 標籤順序更新成功, result={result}")
+        log.debug("tag.reorder.done", result=result)
 
         # 記錄 audit log
         from ..utils.audit_logger import get_audit_logger
@@ -179,7 +175,7 @@ async def update_tag_order(
 
         return {"message": "標籤順序已更新"}
     except ValueError as e:
-        print(f"❌ 更新標籤順序失敗: {e}")
+        log.warning("tag.reorder.failed", error=str(e))
 
         # 記錄失敗的 audit log
         from ..utils.audit_logger import get_audit_logger
@@ -198,9 +194,7 @@ async def update_tag_order(
             detail=str(e)
         )
     except Exception as e:
-        print(f"❌ 更新標籤順序時發生未預期的錯誤: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
+        log.error("tag.reorder.error", error=str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"更新標籤順序失敗: {str(e)}"

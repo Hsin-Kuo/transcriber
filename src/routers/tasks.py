@@ -17,6 +17,7 @@ from ..utils.shared_state import TaskStateStore
 from ..services.tag_service import TagService
 from ..services.utils.async_utils import get_current_time
 from ..utils.storage_service import is_aws, delete_audio_by_path as storage_delete_audio_by_path, move_audio, extract_tier_from_path
+from ..utils.logger import get_logger
 
 try:
     import psutil
@@ -26,6 +27,7 @@ except ImportError:
 
 
 router = APIRouter(prefix="/tasks", tags=["Tasks"])
+log = get_logger(__name__)
 
 
 # 允許刪除的目錄白名單（相對於工作目錄的絕對路徑）
@@ -697,11 +699,11 @@ async def task_status_events(
                 current_progress = enriched_data.get("progress")
 
                 # 調試：輸出當前進度
-                print(f"📡 [SSE {task_id}] status={current_status}, progress={current_progress}", flush=True)
+                log.debug("sse.poll.tick", task_id=task_id, status=current_status, progress=current_progress)
 
                 # 只在狀態或進度改變時推送
                 if current_status != previous_status or current_progress != previous_progress:
-                    print(f"📤 [SSE {task_id}] 推送更新: {current_progress}", flush=True)
+                    log.debug("sse.progress.pushed", task_id=task_id, progress=current_progress)
                     # 序列化數據（處理 datetime 等特殊類型）
                     serialized_data = serialize_for_json(enriched_data)
                     yield f"data: {json.dumps(serialized_data)}\n\n"
@@ -725,10 +727,10 @@ async def task_status_events(
 
         except asyncio.CancelledError:
             # 客戶端斷開連接
-            print(f"🔌 [{task_id}] SSE 連接已關閉")
+            log.debug("sse.stream.closed", task_id=task_id)
             raise
         except Exception as e:
-            print(f"❌ [{task_id}] SSE 錯誤：{e}")
+            log.error("sse.stream.error", task_id=task_id, error=str(e), exc_info=True)
             yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
 
     return StreamingResponse(
@@ -783,7 +785,7 @@ async def cancel_task(
         "status": "canceling",
         "progress": "正在取消任務..."
     })
-    print(f"🔄 任務 {task_id} 狀態已更新為 canceling")
+    log.info("task.cancel.requested", task_id=task_id)
 
     # 2. 標記任務為已取消（運行時狀態）
     task_service.cancel_task(task_id)
@@ -791,12 +793,11 @@ async def cancel_task(
     # 3. 立即終止 diarization 進程（如果正在運行）
     diarization_process = task_service.get_diarization_process(task_id)
     if diarization_process:
-        print("🛑 正在強制終止說話者辨識進程...")
         try:
             diarization_process.shutdown(wait=False, cancel_futures=True)
-            print("✅ 說話者辨識進程已終止")
+            log.debug("task.cancel.diarization_terminated", task_id=task_id)
         except Exception as e:
-            print(f"⚠️ 終止 diarization 進程失敗：{e}")
+            log.warning("task.cancel.diarization_terminate_failed", task_id=task_id, error=str(e))
 
     # 4. 清理臨時目錄
     temp_dir = task_service.get_temp_dir(task_id)
@@ -805,9 +806,9 @@ async def cancel_task(
             import shutil
             if temp_dir.exists():
                 shutil.rmtree(temp_dir)
-                print(f"🗑️ 已清理臨時目錄：{temp_dir.name}")
+                log.debug("task.cancel.temp_dir_cleaned", task_id=task_id, temp_dir=temp_dir.name)
         except Exception as e:
-            print(f"⚠️ 清理臨時目錄失敗：{e}")
+            log.warning("task.cancel.temp_dir_cleanup_failed", task_id=task_id, error=str(e))
 
     # 5. 更新資料庫中的任務狀態為「已取消」
     await task_service.update_task_status(task_id, {
@@ -815,7 +816,7 @@ async def cancel_task(
         "error": {"code": "USER_CANCELLED", "message": "用戶取消"}
     })
 
-    print(f"🛑 任務 {task_id} 已被標記為取消")
+    log.info("task.cancelled", task_id=task_id)
 
     # 6. 釋放預扣配額（idempotent）
     try:
@@ -824,9 +825,9 @@ async def cancel_task(
         reservation_repo = ReservationRepository(db)
         released = await reservation_repo.release_by_task_id(task_id)
         if released:
-            print(f"♻️  已釋放任務 {task_id} 的預扣配額")
+            log.debug("task.cancel.reservation_released", task_id=task_id)
     except Exception as e:
-        print(f"⚠️ 釋放預扣失敗：{e}")
+        log.warning("task.cancel.reservation_release_failed", task_id=task_id, error=str(e))
 
     # 記錄 audit log（取消任務）
     try:
@@ -841,7 +842,7 @@ async def cancel_task(
             message="取消任務"
         )
     except Exception as e:
-        print(f"⚠️ 記錄 audit log 失敗：{e}")
+        log.warning("task.cancel.audit_log_failed", task_id=task_id, error=str(e))
 
     return {
         "message": "任務取消指令已發送",
@@ -905,11 +906,11 @@ async def delete_task(
                 if result_file.exists():
                     result_file.unlink()
                     deleted_files.append(result_file.name)
-                    print(f"🗑️ 已刪除轉錄檔案：{result_file.name}")
+                    log.debug("task.delete.result_file_deleted", task_id=task_id, filename=result_file.name)
             except ValueError as e:
-                print(f"⚠️ 路徑驗證失敗，跳過刪除：{e}")
+                log.warning("task.delete.path_validation_failed", task_id=task_id, error=str(e))
             except Exception as e:
-                print(f"⚠️ 刪除轉錄檔案失敗：{e}")
+                log.warning("task.delete.result_file_failed", task_id=task_id, error=str(e))
 
         # 物理刪除 segments 檔案
         segments_file_path = get_task_field(task, "segments_file")
@@ -919,11 +920,11 @@ async def delete_task(
                 if segments_file.exists():
                     segments_file.unlink()
                     deleted_files.append(segments_file.name)
-                    print(f"🗑️ 已刪除 segments 檔案：{segments_file.name}")
+                    log.debug("task.delete.segments_file_deleted", task_id=task_id, filename=segments_file.name)
             except ValueError as e:
-                print(f"⚠️ 路徑驗證失敗，跳過刪除：{e}")
+                log.warning("task.delete.path_validation_failed", task_id=task_id, error=str(e))
             except Exception as e:
-                print(f"⚠️ 刪除 segments 檔案失敗：{e}")
+                log.warning("task.delete.segments_file_failed", task_id=task_id, error=str(e))
 
     # 物理刪除音檔（如果存在）
     # ⚠️ 手動刪除任務時，應刪除所有相關檔案（包括音檔）
@@ -933,9 +934,9 @@ async def delete_task(
         if audio_file_path:
             storage_delete_audio_by_path(audio_file_path)
         deleted_files.append(f"{task_id}.mp3")
-        print(f"🗑️ 已刪除音檔：{task_id}.mp3")
+        log.debug("task.delete.audio_deleted", task_id=task_id)
     except Exception as e:
-        print(f"⚠️ 刪除音檔失敗：{e}")
+        log.warning("task.delete.audio_failed", task_id=task_id, error=str(e))
 
     # 清理記憶體狀態
     task_service.cleanup_task_memory(task_id)
@@ -946,9 +947,9 @@ async def delete_task(
     try:
         deleted_transcription = await transcription_repo.delete(task_id)
         if deleted_transcription:
-            print(f"🗑️ 已刪除 MongoDB transcription 文檔：{task_id}")
+            log.debug("task.delete.transcription_doc_deleted", task_id=task_id)
     except Exception as e:
-        print(f"⚠️ 刪除 transcription 文檔失敗：{e}")
+        log.warning("task.delete.transcription_doc_failed", task_id=task_id, error=str(e))
 
     # 物理刪除 MongoDB 中的 segment 文檔
     from src.database.repositories.segment_repo import SegmentRepository
@@ -956,9 +957,9 @@ async def delete_task(
     try:
         deleted_segment = await segment_repo.delete(task_id)
         if deleted_segment:
-            print(f"🗑️ 已刪除 MongoDB segment 文檔：{task_id}")
+            log.debug("task.delete.segment_doc_deleted", task_id=task_id)
     except Exception as e:
-        print(f"⚠️ 刪除 segment 文檔失敗：{e}")
+        log.warning("task.delete.segment_doc_failed", task_id=task_id, error=str(e))
 
     # 在資料庫中標記為已刪除（軟刪除 tasks）
     from datetime import datetime
@@ -967,7 +968,7 @@ async def delete_task(
         "deleted_at": datetime.utcnow()
     })
 
-    print(f"🗑️ 任務 {task_id} 已被標記為已刪除")
+    log.info("task.deleted", task_id=task_id)
 
     # 記錄 audit log（刪除任務）- 詳細記錄
     try:
@@ -997,7 +998,7 @@ async def delete_task(
             }
         )
     except Exception as e:
-        print(f"⚠️ 記錄 audit log 失敗：{e}")
+        log.warning("task.delete.audit_log_failed", task_id=task_id, error=str(e))
 
     return {
         "message": "任務已刪除",
@@ -1053,17 +1054,17 @@ async def update_task_tags(
                 if tag_name and tag_name not in existing_tag_names:
                     try:
                         await tag_service.create_tag(user_id=user_id, name=tag_name)
-                        print(f"🏷️ 自動創建標籤記錄：{tag_name}")
+                        log.debug("tag.auto_created", tag_name=tag_name)
                     except ValueError as e:
                         # 標籤可能已存在（並發情況），忽略錯誤
-                        print(f"⚠️ 創建標籤 {tag_name} 時出現警告：{e}")
+                        log.warning("tag.auto_create_conflict", tag_name=tag_name, error=str(e))
         except Exception as tag_error:
             # 自動創建標籤失敗不應該阻止標籤更新
-            print(f"⚠️ 自動創建標籤時出錯（不影響標籤更新）：{tag_error}")
+            log.warning("tag.auto_create_failed", error=str(tag_error))
 
         await task_service.update_task_status(task_id, {"tags": tags})
 
-        print(f"🏷️ 已更新任務 {task_id} 的標籤：{tags}")
+        log.info("task.tags.updated", task_id=task_id, tags=tags)
 
         return {
             "message": "標籤已更新",
@@ -1073,9 +1074,7 @@ async def update_task_tags(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ 更新標籤時發生錯誤：{type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
+        log.error("task.tags.update_failed", error_type=type(e).__name__, error=str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"更新標籤失敗：{str(e)}"
@@ -1174,7 +1173,7 @@ async def update_keep_audio(
                 # 已過期，直接刪除
                 storage_delete_audio_by_path(audio_file_path)
                 new_audio_path = None
-                print(f"🗑️ 音檔已超過保留期限，直接刪除: {audio_file_path}")
+                log.debug("task.keep_audio.expired_deleted", task_id=task_id, audio_file=audio_file_path)
             else:
                 # 未過期，搬回原本的 tier 資料夾（重新受 Lifecycle 管理）
                 new_audio_path = move_audio(task_id, "kept", user_tier)
@@ -1185,7 +1184,7 @@ async def update_keep_audio(
         update_fields["result.audio_file"] = new_audio_path
     await task_service.update_task_status(task_id, update_fields)
 
-    print(f"🎵 已更新任務 {task_id} 的保留音檔設定：{new_keep_audio}")
+    log.info("task.keep_audio.updated", task_id=task_id, keep_audio=new_keep_audio)
 
     return {
         "message": "保留音檔設定已更新",
@@ -1251,11 +1250,11 @@ async def batch_delete_tasks(
                         result_file = _validate_file_path(result_file_path, _ALLOWED_OUTPUT_DIR)
                         if result_file.exists():
                             result_file.unlink()
-                            print(f"🗑️ [批次] 已刪除轉錄檔案：{result_file.name}")
+                            log.debug("task.batch_delete.result_file_deleted", task_id=task_id, filename=result_file.name)
                     except ValueError as e:
-                        print(f"⚠️ [批次] 路徑驗證失敗，跳過刪除：{e}")
+                        log.warning("task.batch_delete.path_validation_failed", task_id=task_id, error=str(e))
                     except Exception as e:
-                        print(f"⚠️ [批次] 刪除轉錄檔案失敗：{e}")
+                        log.warning("task.batch_delete.result_file_failed", task_id=task_id, error=str(e))
 
                 # 物理刪除 segments 檔案
                 segments_file_path = get_task_field(task, "segments_file")
@@ -1264,20 +1263,20 @@ async def batch_delete_tasks(
                         segments_file = _validate_file_path(segments_file_path, _ALLOWED_OUTPUT_DIR)
                         if segments_file.exists():
                             segments_file.unlink()
-                            print(f"🗑️ [批次] 已刪除 segments 檔案：{segments_file.name}")
+                            log.debug("task.batch_delete.segments_file_deleted", task_id=task_id, filename=segments_file.name)
                     except ValueError as e:
-                        print(f"⚠️ [批次] 路徑驗證失敗，跳過刪除：{e}")
+                        log.warning("task.batch_delete.path_validation_failed", task_id=task_id, error=str(e))
                     except Exception as e:
-                        print(f"⚠️ [批次] 刪除 segments 檔案失敗：{e}")
+                        log.warning("task.batch_delete.segments_file_failed", task_id=task_id, error=str(e))
 
             # 物理刪除音檔（使用 storage_service）
             try:
                 batch_audio_path = task.get("result", {}).get("audio_file") if task else None
                 if batch_audio_path:
                     storage_delete_audio_by_path(batch_audio_path)
-                print(f"🗑️ [批次] 已刪除音檔：{task_id}.mp3")
+                log.debug("task.batch_delete.audio_deleted", task_id=task_id)
             except Exception as e:
-                print(f"⚠️ [批次] 刪除音檔失敗：{e}")
+                log.warning("task.batch_delete.audio_failed", task_id=task_id, error=str(e))
 
             # 清理記憶體
             task_service.cleanup_task_memory(task_id)
@@ -1288,9 +1287,9 @@ async def batch_delete_tasks(
             try:
                 deleted_transcription = await transcription_repo.delete(task_id)
                 if deleted_transcription:
-                    print(f"🗑️ [批次] 已刪除 MongoDB transcription 文檔：{task_id}")
+                    log.debug("task.batch_delete.transcription_doc_deleted", task_id=task_id)
             except Exception as e:
-                print(f"⚠️ [批次] 刪除 transcription 文檔失敗：{e}")
+                log.warning("task.batch_delete.transcription_doc_failed", task_id=task_id, error=str(e))
 
             # 物理刪除 MongoDB 中的 segment 文檔
             from src.database.repositories.segment_repo import SegmentRepository
@@ -1298,9 +1297,9 @@ async def batch_delete_tasks(
             try:
                 deleted_segment = await segment_repo.delete(task_id)
                 if deleted_segment:
-                    print(f"🗑️ [批次] 已刪除 MongoDB segment 文檔：{task_id}")
+                    log.debug("task.batch_delete.segment_doc_deleted", task_id=task_id)
             except Exception as e:
-                print(f"⚠️ [批次] 刪除 segment 文檔失敗：{e}")
+                log.warning("task.batch_delete.segment_doc_failed", task_id=task_id, error=str(e))
 
             # 在資料庫中標記為已刪除（軟刪除 tasks）
             from datetime import datetime
@@ -1312,10 +1311,10 @@ async def batch_delete_tasks(
             deleted_count += 1
 
         except Exception as e:
-            print(f"❌ 刪除任務 {task_id} 失敗：{e}")
+            log.error("task.batch_delete.task_failed", task_id=task_id, error=str(e))
             failed_count += 1
 
-    print(f"🗑️ 批次刪除完成：成功 {deleted_count} 個，失敗 {failed_count} 個")
+    log.info("task.batch_delete.completed", deleted_count=deleted_count, failed_count=failed_count)
 
     return {
         "message": "批次刪除完成",
@@ -1367,10 +1366,10 @@ async def batch_add_tags(
         if tag_name and tag_name not in existing_tag_names:
             try:
                 await tag_service.create_tag(user_id=user_id, name=tag_name)
-                print(f"🏷️ 自動創建標籤記錄：{tag_name}")
+                log.debug("tag.auto_created", tag_name=tag_name)
             except ValueError as e:
                 # 標籤可能已存在（並發情況），忽略錯誤
-                print(f"⚠️ 創建標籤 {tag_name} 時出現警告：{e}")
+                log.warning("tag.auto_create_conflict", tag_name=tag_name, error=str(e))
 
     updated_count = 0
 
@@ -1393,9 +1392,9 @@ async def batch_add_tags(
             updated_count += 1
 
         except Exception as e:
-            print(f"❌ 更新任務 {task_id} 標籤失敗：{e}")
+            log.error("task.batch_add_tags.task_failed", task_id=task_id, error=str(e))
 
-    print(f"🏷️ 批次添加標籤完成：成功 {updated_count} 個")
+    log.info("task.batch_add_tags.completed", updated_count=updated_count)
 
     return {
         "message": "批次添加標籤完成",
@@ -1453,9 +1452,9 @@ async def batch_remove_tags(
             updated_count += 1
 
         except Exception as e:
-            print(f"❌ 更新任務 {task_id} 標籤失敗：{e}")
+            log.error("task.batch_remove_tags.task_failed", task_id=task_id, error=str(e))
 
-    print(f"🏷️ 批次移除標籤完成：成功 {updated_count} 個")
+    log.info("task.batch_remove_tags.completed", updated_count=updated_count)
 
     return {
         "message": "批次移除標籤完成",
@@ -1543,7 +1542,7 @@ async def check_system_processes(
         }
 
     except Exception as e:
-        print(f"❌ 檢查進程健康狀態失敗：{e}")
+        log.error("task.system.health_check_failed", error=str(e), exc_info=True)
         return {
             "status": "error",
             "message": f"檢查失敗: {str(e)}"
@@ -1573,7 +1572,7 @@ async def cleanup_orphaned_processes_endpoint(
         )
 
     try:
-        print(f"🧹 使用者 {current_user.get('email', 'unknown')} 手動觸發孤立進程清理")
+        log.info("task.system.cleanup.requested", user_email=current_user.get('email', 'unknown'))
         await task_service.cleanup_orphaned_processes()
 
         return {
@@ -1583,7 +1582,7 @@ async def cleanup_orphaned_processes_endpoint(
         }
 
     except Exception as e:
-        print(f"❌ 手動清理孤立進程失敗：{e}")
+        log.error("task.system.cleanup.failed", error=str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"清理失敗: {str(e)}"
