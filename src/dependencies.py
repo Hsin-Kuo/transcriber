@@ -13,6 +13,7 @@ from .database.repositories.user_repo import UserRepository
 from .services.task_service import TaskService
 from .services.tag_service import TagService
 from .services.audio_service import AudioService
+from .services.summary_service import SummaryService
 
 
 # ========== Repository 依賴注入 ==========
@@ -80,3 +81,45 @@ def get_audio_service() -> AudioService:
     # 使用預設的輸出目錄
     output_dir = Path(__file__).parent.parent / "output"
     return AudioService(output_dir)
+
+
+def get_summary_service(db=Depends(get_database)) -> SummaryService:
+    """獲取 SummaryService 實例（每請求建立；無狀態）"""
+    return SummaryService(db)
+
+
+# ========== TaskService 單例 ==========
+# TaskService 持有執行期狀態（取消標記 / temp_dir / diarization 進程），
+# 必須是單例——main.py startup 呼叫 init_task_service() 建立，routers 透過
+# Depends(get_task_service) 取同一實例。
+
+_task_service_singleton: TaskService = None
+
+
+def init_task_service(db, progress_store, state_store=None) -> TaskService:
+    """初始化全域 TaskService 單例（main.py startup 呼叫一次）。
+
+    Args:
+        db: 資料庫實例
+        progress_store: ProgressStore 實例（進度的單一介面）
+        state_store: TaskStateStore 實例（未提供時使用模組級單例）
+    """
+    global _task_service_singleton
+    from .utils.shared_state import store as _default_store
+    _task_service_singleton = TaskService(
+        TaskRepository(db),
+        progress_store=progress_store,
+        state_store=state_store or _default_store,
+    )
+    return _task_service_singleton
+
+
+def get_task_service() -> TaskService:
+    """依賴注入：獲取 TaskService 單例（確保執行期狀態共享）。
+
+    Raises:
+        RuntimeError: 若尚未 init（main.py startup 應呼叫 init_task_service()）
+    """
+    if _task_service_singleton is None:
+        raise RuntimeError("TaskService 尚未初始化，請先調用 init_task_service()")
+    return _task_service_singleton

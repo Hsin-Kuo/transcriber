@@ -293,7 +293,8 @@ async def startup_event():
         logger.info("app.progress_store.initialized", adapter="in_memory", mode="local")
 
     # 3.1. 初始化 TaskService
-    task_service = tasks_router.init_task_service(
+    from src.dependencies import init_task_service
+    task_service = init_task_service(
         db, state_store=task_state_store, progress_store=progress_store
     )
     logger.info("app.task_service.initialized")

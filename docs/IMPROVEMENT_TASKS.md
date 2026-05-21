@@ -47,10 +47,10 @@
   - [x] T6-a：擴充 `src/worker_core/config.py`，集中 SQS、Spot、MongoDB 常數
   - [x] T6-b：更新 `sqs_consumer.py`、`spot_monitor.py`、`db.py` 引用 config 常數
 
-- [ ] **T7** — Router DI 統一
-  - [ ] T7-a：審查所有 router，找出直接 instantiate service 的地方
-  - [ ] T7-b：統一改用 `Depends()` 注入 Service
-  - 註：跟 LAUNCH_READINESS_PLAN M1 #2（DeploymentMode adapter）一併考慮會比較自然
+- [x] **T7** — Router DI 統一
+  - [x] T7-a：審查所有 router，找出直接 instantiate service 的地方
+  - [x] T7-b：service provider 集中到 `dependencies.py`（新增 `get_summary_service`、TaskService 單例 `init_task_service` / `get_task_service`）；刪除 tasks.py / summaries.py / audio.py 內重複或死碼的 provider
+  - **2026-05-22**：service 注入統一為單一來源。transcriptions.py 內少數 inline `AudioService()`（ffprobe / merge 用、無狀態工具）屬 handler 內部用途，刻意保留——轉 Depends 無 DI 效益
 
 - [x] **T8** — 結構化 logging（由 LAUNCH_READINESS_PLAN M4 完成）
   - [x] T8-a：建立 `src/utils/logger.py`（structlog + request_id middleware）
@@ -78,7 +78,7 @@
 | T4 TranscriptDetailView 拆分 | 🟡 部分完成（M2 三刀） | 2026-05-17 |
 | T5 測試補充 | ✅ 完成（164 個測試；T5-a/b/c/d 全 ✅） | 2026-05-22 |
 | T6 Magic number 集中 | ✅ 完成 | 2026-04-30 |
-| T7 Router DI 統一 | ⏳ 待處理 | — |
+| T7 Router DI 統一 | ✅ 完成（service provider 集中至 dependencies.py） | 2026-05-22 |
 | T8 結構化 logging | ✅ 完成（M4） | 2026-05-17 |
 | T9 SSE 效能 | ⏳ 待處理 | — |
 | T10 前端型別安全 | ✅ 完成（M3） | 2026-05-17 |

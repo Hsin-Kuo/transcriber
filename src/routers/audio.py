@@ -17,25 +17,6 @@ router = APIRouter(prefix="/audio", tags=["Audio"])
 log = get_logger(__name__)
 
 
-# 全域 AudioService 實例（用於管理片段）
-_audio_service = None
-
-
-def get_audio_service() -> AudioService:
-    """依賴注入：獲取 AudioService 實例
-
-    Returns:
-        AudioService 實例
-    """
-    global _audio_service
-    if _audio_service is None:
-        # 使用 output 目錄作為片段儲存位置
-        output_dir = Path("output")
-        output_dir.mkdir(exist_ok=True)
-        _audio_service = AudioService(output_dir=output_dir)
-    return _audio_service
-
-
 # @router.post("/clip")
 # async def clip_audio(
 #     audio_file: UploadFile = File(...),

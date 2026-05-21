@@ -8,14 +8,10 @@ from ..database.repositories.user_repo import UserRepository
 from ..services.summary_service import SummaryService
 from ..models.summary import SummaryResponse, GenerateSummaryResponse
 from ..utils.audit_logger import get_audit_logger
+from ..dependencies import get_summary_service
 
 
 router = APIRouter(prefix="/summaries", tags=["Summaries"])
-
-
-def get_summary_service(db=Depends(get_database)) -> SummaryService:
-    """獲取 SummaryService 實例"""
-    return SummaryService(db)
 
 
 @router.post("/{task_id}", response_model=GenerateSummaryResponse)

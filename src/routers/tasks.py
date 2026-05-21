@@ -13,8 +13,8 @@ from ..database.mongodb import get_database
 from ..database.repositories.task_repo import TaskRepository
 from ..database.repositories.tag_repo import TagRepository
 from ..services.task_service import TaskService
-from ..utils.shared_state import TaskStateStore
 from ..services.tag_service import TagService
+from ..dependencies import get_task_service, get_tag_service
 from ..services.utils.async_utils import get_current_time
 from ..utils.storage_service import is_aws, delete_audio_by_path as storage_delete_audio_by_path, move_audio, extract_tier_from_path
 from ..utils.logger import get_logger
@@ -57,33 +57,6 @@ def _validate_file_path(file_path: str, allowed_dir: Path) -> Path:
         raise ValueError(f"路徑不在允許的目錄內: {file_path}")
 
     return resolved
-
-
-def get_task_service(db=Depends(get_database)) -> TaskService:
-    """依賴注入：獲取 TaskService 實例
-
-    Args:
-        db: 資料庫實例
-
-    Returns:
-        TaskService 單例實例（確保記憶體狀態共享）
-    """
-    # ✅ 返回單例而不是創建新實例
-    return get_task_service_singleton()
-
-
-def get_tag_service(db=Depends(get_database)) -> TagService:
-    """依賴注入：獲取 TagService 實例
-
-    Args:
-        db: 資料庫實例
-
-    Returns:
-        TagService 實例
-    """
-    tag_repo = TagRepository(db)
-    task_repo = TaskRepository(db)
-    return TagService(tag_repo, task_repo)
 
 
 @router.get("/recent")
@@ -287,43 +260,6 @@ async def get_tasks(
             "limit": limit,
             "skip": skip
         }
-
-
-# 全域 TaskService 單例（用於在非路由上下文中訪問）
-_task_service_singleton: TaskService = None
-
-
-def init_task_service(db, progress_store, state_store: TaskStateStore = None):
-    """初始化全域 TaskService 單例
-
-    Args:
-        db: 資料庫實例
-        progress_store: ProgressStore 實例（進度的單一介面）
-        state_store: TaskStateStore 實例（未提供時使用模組級單例）
-    """
-    global _task_service_singleton
-    from ..utils.shared_state import store as _default_store
-    task_repo = TaskRepository(db)
-    _task_service_singleton = TaskService(
-        task_repo,
-        progress_store=progress_store,
-        state_store=state_store or _default_store,
-    )
-    return _task_service_singleton
-
-
-def get_task_service_singleton() -> TaskService:
-    """獲取全域 TaskService 單例
-
-    Returns:
-        TaskService 實例
-
-    Raises:
-        RuntimeError: 如果 TaskService 尚未初始化
-    """
-    if _task_service_singleton is None:
-        raise RuntimeError("TaskService 尚未初始化，請先調用 init_task_service()")
-    return _task_service_singleton
 
 
 def get_task_field(task: Dict[str, Any], field: str) -> Any:
