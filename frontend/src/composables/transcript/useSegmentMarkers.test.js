@@ -163,12 +163,13 @@ describe('alignSegmentsToContent', () => {
       // Bug：兩段之間 ~1.5s 純停頓被 global cps 放大成 expected over-shoot，
       // expected 落在兩個「AI的課」中間、第二個略近 → 錯選後者。
       // 修法：未跳過任何內容段時直接取 firstHit（內容連續）。
-      // 註：content 需夠長讓 cps 接近真實長逐字稿（~4.5 字/秒）才能重現 over-shoot。
-      const filler = '無重複內容'.repeat(300) // 1500 chars，不含後續用到的詞
-      const content = '開場' + filler + '這個是AI的課，後面還有非常多的AI的課。'
-      const base = 2 + filler.length // 「這個是」起點 = 1502
+      // 註：head 段補到 ~1500 字，讓 cps 接近真實長逐字稿（~4.5 字/秒）才能
+      // 重現 over-shoot；head 段時長與字數成比例，expected 推估才有意義。
+      const head = '無重複內容'.repeat(300) // 1500 chars，不含後續用到的詞
+      const content = head + '這個是AI的課，後面還有非常多的AI的課。'
+      const base = head.length // 「這個是」起點 = 1500
       const segments = [
-        { text: '開場', start: 0, end: 330 },
+        { text: head, start: 0, end: 335 },
         { text: '這個是', start: 335.44, end: 335.8 },
         { text: 'AI的課', start: 337.34, end: 338.18 },
       ]
