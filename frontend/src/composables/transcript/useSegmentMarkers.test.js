@@ -372,6 +372,36 @@ describe('alignSegmentsToContent', () => {
       expect(seg2Result.textStartIndex).toBe(206)
     })
 
+    it('失配段後的 3 字段只能配到遠處：判失配不污染 anchor，後續段仍能對齊', () => {
+      // 使用者實測 case：seg1「現在有非常非常的多AI的」被 LLM 改寫過（content
+      // 是「多的」）→ 完全失配；seg2「課之前」在 content 對應處其實是「課。之前」
+      // （LLM 插了句號）→ 逐字找不到，indexOf 卻往後撈到很遠的巧合「課之前」
+      // → lastSearchIndex 被污染 → seg3 之後全部 cascade 失配。
+      // 修法：向後搜尋有「≈1 分鐘對話文字量」的範圍上限，遠處巧合匹配超出
+      // 範圍 → 判失配、不污染 anchor → seg3 仍能從 local anchor 對齊。
+      const head = '基礎鋪陳'.repeat(150) // 600 chars，不含後續 segment 文字
+      const farText = '上課之前要先預習一下' // 「課之前」唯一逐字出現處（很遠）
+      const content =
+        head +
+        '現在有非常非常多的AI的課。之前也有很多夥伴跟我分享，' + // 「課。之前」非「課之前」
+        '中間過渡內容'.repeat(60) +
+        farText
+      const base = head.length // = 600
+      const segments = [
+        { text: head, start: 0, end: 320 },
+        { text: '現在有非常非常的多AI的', start: 335, end: 337 }, // LLM 改寫 → 失配
+        { text: '課之前', start: 337, end: 338 }, // 只在 farText 逐字出現
+        { text: '也有很多夥伴跟我分享', start: 338, end: 340 },
+      ]
+      const result = alignSegmentsToContent(segments, content)
+      const byIdx = Object.fromEntries(result.map((m) => [m.segmentIndex, m]))
+      // seg2「課之前」遠處匹配超出搜尋範圍 → 判失配、無 marker
+      expect(byIdx[2]).toBeUndefined()
+      // 關鍵：seg3 沒被 cascade，仍對齊到 local 位置（「也」在 base+16）
+      expect(byIdx[3]).toBeDefined()
+      expect(byIdx[3].textStartIndex).toBe(base + 16)
+    })
+
     it('時間軸緊接的短 segment 對到緊接位置，不被「同字後出現」吸引（local-anchored expected）', () => {
       // 模擬使用者實測 case 2:「？有，因為」中那個「有」緊接前段尾巴,
       // 但 content 後面還有另一個「有」。若用 seg.start × global_cps 算 expected

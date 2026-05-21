@@ -4,14 +4,15 @@ import { ref } from 'vue'
 // \p{P} 含全形與半形標點、\p{S} 含符號、\s 含空白、\u200B 是 zero-width space
 const CONTENT_CHAR_RE = /[^\s\p{P}\p{S}\u200B]/u
 
-// \u77ED\u6587\u5B57 segment\uFF08\u22642 \u5B57\uFF09\u8996\u70BA\u300C\u4E0D\u53EF\u4FE1 anchor\u300D\u7684 drift \u9580\u6ABB\u3002LLM \u5F37\u5316\u904E\u7A0B
-// \u5076\u723E\u6703\u6084\u6084\u6539\u6389\u77ED\u5B57\uFF08\u4F8B\u5982\u300C\u90A3\u300D\u6D88\u5931\uFF09\uFF0C\u73FE\u6709 bidirectional \u6703\u88AB\u8FEB\u6311\u5F8C\u9762\u7684
-// \u540C\u5B57 \u2192 lastSearchIndex \u8DF3\u904E\u982D \u2192 \u4E4B\u5F8C segments \u5168\u90E8\u5931\u914D cascade\u3002
-// \u4FEE\u6CD5\uFF1A\u82E5\u77ED\u5B57 chosen \u8DDD local expected \u592A\u9060\uFF08> allowedDrift\uFF09\uFF0C\u8996\u70BA LLM
-// \u6539\u5B57\u5F8C\u7684 spurious match\uFF0C\u8DF3\u904E\u8A72\u6BB5\uFF08\u4E0D\u6C61\u67D3 anchor\uFF0C\u4FDD\u7559\u9577\u5B57 anchor \u7D66\u5F8C\u7E8C\uFF09\u3002
-const SHORT_TEXT_MAX_LEN = 2
-const SHORT_DRIFT_MIN = 20 // \u81F3\u5C11\u5BB9\u5FCD 20 chars\uFF08cps \u4F30\u7B97\u5076\u6709\u5FAE\u8AA4\u5DEE\uFF09
-const SHORT_DRIFT_TIME_FACTOR = 1.5 // \u984D\u5916\u5BB9\u5FCD timeDelta \u00D7 cps \u00D7 1.5
+// drift guard \u53C3\u6578\uFF1Achosen \u8DDD expected \u592A\u9060\u6642\uFF0C\u8996\u70BA\u300CLLM \u6539\u5BEB\u8A72\u6BB5\u5F8C indexOf
+// \u4E00\u8DEF\u5F80\u5F8C\u6488\u5230\u7684\u5DE7\u5408\u540C\u5B57\u300D\uFF0C\u8DF3\u904E\u8A72\u6BB5\uFF08\u4E0D\u6C61\u67D3 anchor\uFF0C\u5F8C\u7E8C segments \u4ECD\u80FD\u5C0D\u9F4A\uFF09\u3002
+// allowedDrift \u4F9D segment \u9577\u5EA6\u5206\u5169\u7D1A\uFF1A\u2264SHORT_TEXT_MAX_LEN \u5B57\u7684\u77ED\u6BB5\u6975\u6613\u5DE7\u5408
+// \u91CD\u8907\uFF0C\u9580\u6ABB\u6536\u7DCA\uFF1B\u8F03\u9577\u7684\u6BB5\u4EE5\u300C\u7D04 1 \u5206\u9418\u5C0D\u8A71\u7684\u6587\u5B57\u91CF\u300D(cps \u00D7 SEARCH_WINDOW_
+// SECONDS) \u4F5C\u70BA\u5411\u5F8C\u641C\u5C0B\u7684\u7BC4\u570D\u4E0A\u9650 \u2014\u2014 \u8D85\u51FA\u5373\u8996\u70BA\u627E\u4E0D\u5230\uFF0C\u800C\u975E\u7121\u9650\u641C\u5230\u6587\u672B\u3002
+const SHORT_TEXT_MAX_LEN = 2 // \u300C\u77ED\u6BB5\u300D\u4E0A\u9650\uFF1A\u22642 \u5B57\u8996\u70BA\u4E0D\u53EF\u4FE1 anchor
+const SHORT_DRIFT_MIN = 20 // drift \u4E0B\u9650\uFF08cps \u4F30\u7B97\u5FAE\u8AA4\u5DEE / tiny-cps \u515C\u5E95\uFF09
+const SHORT_DRIFT_TIME_FACTOR = 1.5 // \u96A8 timeDelta \u653E\u5BEC\uFF1AtimeDelta \u00D7 cps \u00D7 1.5
+const SEARCH_WINDOW_SECONDS = 60 // \u5411\u5F8C\u641C\u5C0B\u7BC4\u570D\u4E0A\u9650 \u2248 1 \u5206\u9418\u5C0D\u8A71\u7684\u6587\u5B57\u91CF
 
 /**
  * 把 segments 對齊到 content text，回傳 marker 陣列（純函數，方便測試）。
@@ -43,6 +44,11 @@ const SHORT_DRIFT_TIME_FACTOR = 1.5 // \u984D\u5916\u5BB9\u5FCD timeDelta \u00D7
  *
  * 失配 segment（content 沒這段文字）**不**推進 lastSearchIndex / lastSearchTime，
  * 避免污染後續錨點。
+ *
+ * 向後搜尋範圍上限：indexOf 預設會搜到文末，若某段被 LLM 改寫、其文字只在
+ * 很後面巧合出現，會撈到那個遠處位置 → lastSearchIndex 跳過頭 → 後續全部
+ * cascade 失配。因此 chosen 距 expected 超過 allowedDrift 時一律當失配
+ * （≤2 字短段門檻收緊；3 字以上以 ≈1 分鐘對話的文字量為搜尋範圍上限）。
  *
  * 同時拿掉舊版「跳過 ≤6 字 segment」的限制 —— 中文逐字稿大量短句
  * （「對」「好的」「是」），原本完全無法 Alt-click 跳轉，是功能缺口。
@@ -157,19 +163,29 @@ export function alignSegmentsToContent(segments, content) {
         }
       }
 
-      // 短字 spurious match 防護：當 ≤2 字段唯一找到的位置距 expected 過遠，
-      // 多半是 LLM 把該段原本的位置改掉（或改字）後，演算法被迫挑到很遠的
-      // 同字。直接視為失配以避免污染 anchor → 後續 segments 仍能用上次成功
-      // 匹配的長字 anchor 繼續對齊。
-      if (text.length <= SHORT_TEXT_MAX_LEN) {
-        const allowedDrift = Math.max(
-          SHORT_DRIFT_MIN,
-          timeDelta * charPerSecond * SHORT_DRIFT_TIME_FACTOR,
-        )
-        if (Math.abs(chosen - expected) > allowedDrift) {
-          skippedContentSinceMatch = true
-          continue
-        }
+      // spurious match 防護：chosen 距 expected 過遠 → 多半是 LLM 改寫該段
+      // 後，indexOf 一路往後撈到的巧合同字。視為失配（不污染 anchor），避免
+      // lastSearchIndex 跳到很後面、害後續 segments 全部 cascade 失配。
+      // allowedDrift 依長度分兩級：
+      //   - ≤2 字短段：極易巧合重複，門檻收緊（不吃 1 分鐘窗）。
+      //   - 3 字以上：加入「1 分鐘對話的文字量」(cps × SEARCH_WINDOW_SECONDS)
+      //     作為向後搜尋的範圍上限。
+      // 兩級都對 timeDelta × cps 取 max：一長串失配後 expected 外推誤差變大，
+      // 門檻同步放寬，真實位置被推遠的合法遠處匹配仍會被接受。
+      const allowedDrift =
+        text.length <= SHORT_TEXT_MAX_LEN
+          ? Math.max(
+              SHORT_DRIFT_MIN,
+              timeDelta * charPerSecond * SHORT_DRIFT_TIME_FACTOR,
+            )
+          : Math.max(
+              SHORT_DRIFT_MIN,
+              charPerSecond * SEARCH_WINDOW_SECONDS,
+              timeDelta * charPerSecond * SHORT_DRIFT_TIME_FACTOR,
+            )
+      if (Math.abs(chosen - expected) > allowedDrift) {
+        skippedContentSinceMatch = true
+        continue
       }
     }
 
