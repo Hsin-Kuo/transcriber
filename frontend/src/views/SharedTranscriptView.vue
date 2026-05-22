@@ -158,6 +158,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import axios from 'axios'
+import { API_BASE } from '../utils/api'
 import { NEW_ENDPOINTS } from '../api/endpoints'
 
 const { t, locale } = useI18n()
@@ -170,7 +171,6 @@ const audioError = ref(null)
 const audioEl = ref(null)
 const summaryExpanded = ref(false)
 
-const API_BASE = import.meta.env.VITE_API_URL ?? ''
 
 const audioUrl = computed(() => {
   if (!taskData.value.has_audio) return ''

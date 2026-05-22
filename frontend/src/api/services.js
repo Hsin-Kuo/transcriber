@@ -3,7 +3,7 @@
  * 封裝所有 API 調用，提供統一的介面
  */
 
-import api from '../utils/api.js'
+import api, { API_BASE } from '../utils/api.js'
 import { NEW_ENDPOINTS } from './endpoints.js'
 import { needsChunking, uploadChunked } from '../utils/chunkedUpload.js'
 
@@ -77,7 +77,6 @@ export const transcriptionService = {
    * @returns {string} 音檔 URL
    */
   getAudioUrl(taskId, token) {
-    const API_BASE = import.meta.env.VITE_API_URL ?? ''
     return `${API_BASE}${NEW_ENDPOINTS.transcriptions.audio(taskId)}?token=${encodeURIComponent(token)}`
   },
 
@@ -251,7 +250,6 @@ export const taskService = {
    * @returns {string} SSE URL
    */
   getEventsUrl(taskId, token) {
-    const API_BASE = import.meta.env.VITE_API_URL ?? ''
     return `${API_BASE}${NEW_ENDPOINTS.tasks.events(taskId)}?token=${token}`
   },
 

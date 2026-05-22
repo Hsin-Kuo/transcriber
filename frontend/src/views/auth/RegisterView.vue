@@ -167,6 +167,7 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
+import { API_BASE } from '../../utils/api'
 import GoogleSignInButton from '../../components/GoogleSignInButton.vue'
 
 const router = useRouter()
@@ -215,7 +216,7 @@ async function resendEmail() {
   error.value = ''
 
   try {
-    const response = await fetch(`${import.meta.env.VITE_API_URL ?? ''}/auth/resend-verification`, {
+    const response = await fetch(`${API_BASE}/auth/resend-verification`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
