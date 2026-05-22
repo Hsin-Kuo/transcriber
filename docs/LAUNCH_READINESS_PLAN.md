@@ -1,7 +1,7 @@
 # 上線前修改計畫（Launch Readiness）
 
 > 建立日期：2026-05-17
-> 最後更新：2026-05-17（休息暫停點）
+> 最後更新：2026-05-22
 > 目標：把 SoundLite 從「可運行」推到「可公開導流」的狀態
 > 範圍：資安、可維護性、開發/測試/運維三個維度的 launch blocker
 
@@ -175,6 +175,7 @@
 
 ## 部署現況
 
-- main / aws 兩 branch 同步至 `b31fd25`
+- main 最新 `fc57f25`（fix: 統一 API_BASE + SSE/auth/shared 回歸測試）
 - prod 自開工以來部署成功 8 次（不含 dependabot 自動）
 - CI gate（ruff / pytest / nginx -t / 兩前端 ESLint / 兩前端 type-check）全綠
+- 後端 165 tests / 前端 31 tests 全過

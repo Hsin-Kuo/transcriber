@@ -36,12 +36,14 @@
 
 - [x] **T5** — 補充測試（部分由 LAUNCH_READINESS_PLAN B2 完成）
   - **2026-05-17 進度**：121 個測試（base 31 + 新增 90）
-  - **2026-05-22 進度**：164 個測試（新增 TaskDispatch / 轉錄派發整合流程 / TaskRepository / QuotaManager）
-  - 新增覆蓋：JWT entropy / cookie helper / audio validator / WorkerDispatch / TranscriptionJob / TranscriptionOrchestrator / logger middleware / TaskDispatch / TaskRepository / QuotaManager
+  - **2026-05-22 進度**：165 後端 + 31 前端測試（新增 TaskDispatch / 轉錄派發整合流程 / TaskRepository / QuotaManager / SSE contract / API_BASE 回歸）
+  - 新增覆蓋：JWT entropy / cookie helper / audio validator / WorkerDispatch / TranscriptionJob / TranscriptionOrchestrator / logger middleware / TaskDispatch / TaskRepository / QuotaManager / SSE task-events contract / services API_BASE
   - [x] T5-a：建立 `tests/unit/test_task_repo.py`（2026-05-22）
   - [x] T5-b：建立 `tests/unit/test_quota.py`（2026-05-22）
   - [x] T5-c：JWT 測試已建（B5）
   - [x] T5-d：建立 `tests/integration/test_transcription_flow.py`（2026-05-22；LocalDispatch 整合測試）
+  - [x] T5-e：建立 `tests/routers/test_task_sse.py`（2026-05-22；SSE completed frame contract）
+  - [x] T5-f：建立 `frontend/src/api/services.test.js`（2026-05-22；API_BASE 回歸測試）
 
 - [x] **T6** — Magic number 集中管理
   - [x] T6-a：擴充 `src/worker_core/config.py`，集中 SQS、Spot、MongoDB 常數
@@ -76,7 +78,7 @@
 | T2 transcription_service 拆分 | 🟡 部分完成（M1.3 由協調者抽出） | 2026-05-17 |
 | T3 shared_state 封裝 | ✅ 完成 | 2026-04-30 |
 | T4 TranscriptDetailView 拆分 | 🟡 部分完成（M2 三刀） | 2026-05-17 |
-| T5 測試補充 | ✅ 完成（164 個測試；T5-a/b/c/d 全 ✅） | 2026-05-22 |
+| T5 測試補充 | ✅ 完成（165 後端 + 31 前端；T5-a~f 全 ✅） | 2026-05-22 |
 | T6 Magic number 集中 | ✅ 完成 | 2026-04-30 |
 | T7 Router DI 統一 | ✅ 完成（service provider 集中至 dependencies.py） | 2026-05-22 |
 | T8 結構化 logging | ✅ 完成（M4） | 2026-05-17 |
