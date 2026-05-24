@@ -53,8 +53,12 @@ _Avoid_: memory state（舊命名，已從程式碼移除）。
 實際跑轉錄 pipeline 的進程。`DEPLOY_ENV=local` 時是 Web Server 同進程的背景執行緒；`DEPLOY_ENV=aws` 時是獨立的 GPU EC2，從 SQS 取訊息。
 _Avoid_: GPU server、Processor（後者是 pipeline 內部的元件名稱）。
 
+**TranscriptionIntakeService**:
+「從音檔到 Task dispatch」的完整 workflow service。封裝 7 步驟：音檔資訊取得 → user fetch（含 tier）→ 配額預留（atomic reserve）→ diarization 可用性檢查 → tag 自動建立 → task DB 寫入 → [[Task dispatch]] submit。失敗時自動 rollback（release reservation + 清 temp_dir）。介面：`intake(user_id, user_email, file_path, filename, config: IntakeConfig, temp_dir) → IntakeResult`。Router 只負責 upload 組裝（把 HTTP multipart / chunked upload 轉成 `file_path`）和 response 格式化。封裝在 `src/services/intake_service.py`。
+_Avoid_: TranscriptionService（舊淺殼已重命名為 [[LocalDispatch]]）、upload service（upload 組裝留在 router，是正當的 HTTP 層責任）。
+
 **Task dispatch**:
-把新建 Task 移交給「會去跑它的 runner」的 seam。intake router 不再分支 `is_aws()`——只呼叫 `submit(job, audio_local_path, temp_dir, user_tier) -> DispatchResult`，由 adapter 決定走 SQS 還是 in-process executor。兩個 adapter：[[WorkerDispatch]]（AWS）、[[LocalDispatch]]（local）。`DispatchResult` 的硬合約只有 `status`（`pending` / `processing`）；`queue_position` 是 best-effort 顯示糖，adapter 能便宜算就算（WorkerDispatch 不算）。temp_dir 在 `submit()` 返回後即歸 adapter 負責清理。
+把新建 Task 移交給「會去跑它的 runner」的 seam。[[TranscriptionIntakeService]] 呼叫 `submit(job, audio_local_path, temp_dir, user_tier) -> DispatchResult`，由 adapter 決定走 SQS 還是 in-process executor。兩個 adapter：[[WorkerDispatch]]（AWS）、[[LocalDispatch]]（local）。`DispatchResult` 的硬合約只有 `status`（`pending` / `processing`）；`queue_position` 是 best-effort 顯示糖，adapter 能便宜算就算（WorkerDispatch 不算）。temp_dir 在 `submit()` 返回後即歸 adapter 負責清理。
 _Avoid_: 把這個 seam 叫「Worker dispatch」（那只是其中一個 adapter）、dispatcher（過泛）。
 
 **WorkerDispatch**:
