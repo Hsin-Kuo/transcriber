@@ -276,16 +276,14 @@ class="transcript-layout"
           v-show="!isEffectivelyCollapsed"
           ref="audioPlayerRef"
           class="desktop-audio-player"
+          :has-audio-element="true"
           :audio-url="audioUrl"
           :audio-error="audioError"
           :is-playing="isPlaying"
           :volume="volume"
           :is-muted="isMuted"
           :playback-rate="playbackRate"
-          :arc-path="arcPath"
-          :arc-length="arcLength"
-          :thumb-position="thumbPosition"
-          :display-progress="displayProgress"
+          :progress-percent="progressPercent"
           :display-time="displayTime"
           :duration="duration"
           @update:is-playing="isPlaying = $event"
@@ -296,13 +294,11 @@ class="transcript-layout"
           @toggle-mute="toggleMute"
           @set-volume="setVolume"
           @set-playback-rate="setPlaybackRate"
-          @start-drag-arc="startDragArc"
-          @drag-arc="dragArc"
-          @stop-drag-arc="stopDragArc"
+          @seek="seekToTime"
           @audio-loaded="handleAudioLoaded"
           @audio-error="handleAudioError"
           @update-progress="updateProgress"
-          @update-duration="(newDuration) => { duration = newDuration }"
+          @update-duration="updateDuration"
           @update-volume="updateVolume"
           @update-playback-rate="updatePlaybackRate"
         />
@@ -448,7 +444,7 @@ class="transcript-layout"
       <span>{{ $t('audioPlayer.audioExpiredTitle') }}</span>
     </div>
 
-    <!-- 手機版音訊播放器（固定在底部） -->
+    <!-- 手機版音訊播放器（固定在底部，純 UI，無 <audio> 元素） -->
     <AudioPlayer
       v-if="currentTranscript.hasAudio"
       class="mobile-audio-player"
@@ -458,10 +454,7 @@ class="transcript-layout"
       :volume="volume"
       :is-muted="isMuted"
       :playback-rate="playbackRate"
-      :arc-path="arcPath"
-      :arc-length="arcLength"
-      :thumb-position="thumbPosition"
-      :display-progress="displayProgress"
+      :progress-percent="progressPercent"
       :display-time="displayTime"
       :duration="duration"
       @update:is-playing="isPlaying = $event"
@@ -472,13 +465,11 @@ class="transcript-layout"
       @toggle-mute="toggleMute"
       @set-volume="setVolume"
       @set-playback-rate="setPlaybackRate"
-      @start-drag-arc="startDragArc"
-      @drag-arc="dragArc"
-      @stop-drag-arc="stopDragArc"
+      @seek="seekToTime"
       @audio-loaded="handleAudioLoaded"
       @audio-error="handleAudioError"
       @update-progress="updateProgress"
-      @update-duration="(newDuration) => { duration = newDuration }"
+      @update-duration="updateDuration"
       @update-volume="updateVolume"
       @update-playback-rate="updatePlaybackRate"
     />
@@ -555,6 +546,7 @@ import { useDisplayPreferences } from '../composables/transcript/useDisplayPrefe
 import { useTranscriptData } from '../composables/transcript/useTranscriptData'
 import { buildSearchRegex, findAllMatches } from '../utils/searchMatching'
 import { useAudioPlayer } from '../composables/transcript/useAudioPlayer'
+import { formatTime } from '../utils/formatTime'
 import { useSubtitleMode } from '../composables/transcript/useSubtitleMode'
 import { useTranscriptEditor } from '../composables/transcript/useTranscriptEditor'
 import { useSegmentMarkers } from '../composables/transcript/useSegmentMarkers'
@@ -567,6 +559,7 @@ import {
   useSegmentEditingOffsets,
 } from '../composables/transcript/useSegmentEditingOffsets'
 import { useKeyboardShortcuts } from '../composables/transcript/useKeyboardShortcuts'
+import { useSegmentNavigation } from '../composables/transcript/useSegmentNavigation'
 import { useTranscriptDownload } from '../composables/transcript/useTranscriptDownload'
 import { useTaskTags } from '../composables/task/useTaskTags'
 import { isModifierPressed } from '../utils/platform'
@@ -635,22 +628,22 @@ const displayMode = computed(() => {
 const {
   audioElement,
   isPlaying,
+  currentTime: audioCurrentTime,
   duration,
-  displayProgress,
+  progressPercent,
   displayTime,
   volume,
   isMuted,
   playbackRate,
-  arcPath,
-  arcLength,
-  thumbPosition,
   audioUrl,
   audioError,
   getAudioUrl,
+  initAudioUrl,
   reloadAudio,
   handleAudioLoaded,
   handleAudioError,
   updateProgress,
+  updateDuration,
   updateVolume,
   updatePlaybackRate,
   togglePlayPause,
@@ -660,13 +653,10 @@ const {
   setVolume,
   toggleMute,
   setPlaybackRate,
-  startDragArc,
-  dragArc,
-  stopDragArc,
   cleanup: cleanupAudioPlayer
 } = useAudioPlayer()
 
-// 同步 audioElement 引用（用於播放控制）
+// Sync audioElement ref from the desktop AudioPlayer component (which owns the <audio> element)
 watch(audioPlayerRef, (newRef) => {
   if (newRef?.audioElement) {
     audioElement.value = newRef.audioElement
@@ -674,7 +664,6 @@ watch(audioPlayerRef, (newRef) => {
 }, { immediate: true })
 
 onMounted(() => {
-  // 確保在組件掛載後設定引用
   nextTick(() => {
     if (audioPlayerRef.value?.audioElement) {
       audioElement.value = audioPlayerRef.value.audioElement
@@ -752,14 +741,32 @@ const {
   segmentMarkers,
   textareaRef,
   generateSegmentMarkers,
-  formatTime
 } = useSegmentMarkers()
 
 // 編輯期 segment offset 追蹤（純文字編輯模式下的 segment 對應）
 const segOffsets = useSegmentEditingOffsets()
 
-// 控制 Alt 鍵狀態（用於點擊句子跳轉）
-const isAltPressed = ref(false)
+// ========== Segment Navigation (Alt+Click seek, hover chip, highlight) ==========
+const {
+  isAltPressed,
+  hoverChipVisible,
+  hoverChipTime,
+  hoverChipStyle,
+  handleEditorMouseMove,
+  handleEditorClickInEditing,
+  handleEditorScroll,
+  handleMarkerClick,
+  handleTextClick,
+} = useSegmentNavigation({
+  textareaRef,
+  segOffsets,
+  isEditing,
+  displayMode,
+  hasAudio: computed(() => currentTranscript.value.hasAudio),
+  seekToTime,
+  headerRef,
+  isModifierPressed,
+})
 
 // 計算唯一講者列表（用於字幕模式設定）
 const uniqueSpeakers = computed(() => {
@@ -878,18 +885,20 @@ async function loadSummaryForDownload() {
 
 // ========== 鍵盤快捷鍵 ==========
 const hasAudio = computed(() => currentTranscript.value.hasAudio)
-useKeyboardShortcuts(
-  hasAudio,
-  audioElement,
-  isEditing,
-  isEditingTitle,
-  togglePlayPause,
-  skipBackward,
-  skipForward,
-  toggleMute,
-  setPlaybackRate,
-  playbackRate
-)
+
+// Expose audio controls via a ref-like interface for useKeyboardShortcuts
+const audioControls = computed(() => {
+  if (!hasAudio.value) return null
+  return {
+    togglePlayPause,
+    skipBackward,
+    skipForward,
+    toggleMute,
+    setPlaybackRate,
+    playbackRate,
+  }
+})
+useKeyboardShortcuts(audioControls, { isEditing, isEditingTitle })
 
 // ========== 頁面生命週期 ==========
 
@@ -905,11 +914,9 @@ async function loadTranscript(taskId) {
   )
 
   if (result) {
-    // 分享狀態現由 ShareDialog 元件以 props 直接讀 currentTranscript，
-    // 不再需要同步到 parent 的 ref。
+    // 初始化音訊 URL 及 token 自動刷新
     if (result.audioUrl) {
-      audioUrl.value = result.audioUrl
-      audioError.value = null
+      initAudioUrl(taskId)
     }
 
     // 生成segment標記（僅在段落模式下）
@@ -1478,220 +1485,8 @@ function applySearchHighlightsWithCSS() {
   }
 }
 
-// ========== A+ 編輯模式 Alt 視覺層 ==========
-
-// Hover chip 狀態
 const hoverChipRef = ref(null)
-const hoverChipVisible = ref(false)
-const hoverChipTime = ref('')
-const hoverChipStyle = ref({ left: '0px', top: '0px' })
-let segmentHighlightRafId = null
-let hoverChipRafId = null
-let pendingMouseEvent = null
-let scrollHighlightTimer = null
 
-function rebuildSegmentHighlight() {
-  segmentHighlightRafId = null
-  if (!window.CSS || !CSS.highlights) return
-  if (!textareaRef.value) return
-
-  // 只在 Alt 按住 + 編輯 + 段落模式時才顯示
-  const shouldShow =
-    isAltPressed.value &&
-    isEditing.value &&
-    displayMode.value === 'paragraph' &&
-    segOffsets.editSegmentRanges.value.length > 0
-  if (!shouldShow) {
-    CSS.highlights.delete('segment-highlight')
-    return
-  }
-
-  // Safari paint cost for CSS Custom Highlight 大致跟 range 數量線性
-  // （實測 ~2.5ms/range，長逐字稿 800+ ranges 會卡 2+ 秒才畫完）。
-  // 視窗外的高亮使用者反正看不到 —— 只 build 視窗 + buffer 範圍內的
-  // segment。用 scrollTop/scrollHeight 比例直接估算 canonical char 範圍，
-  // 完全不做 getBoundingClientRect（不然 force layout × N 一樣慢）。
-  // 滾動時由 handleEditorScroll debounce 80ms 重建。
-  // hit-testing 用 editSegmentRanges 不受影響。
-  const el = textareaRef.value
-  const segs = segOffsets.editSegmentRanges.value
-  // 用 snapshot length（canonical 文字長度，對應 scrollHeight 整段內容）作為 totalChars
-  // 而不是 segs[last].charEnd —— 若 applyDiff 因大區段 diff 把中後段 ranges 全 drop
-  // （例：Chrome execCommand 的 <div> wrap 觸發單區段 diff 把整段標成替換），
-  // 殘留 segs 只覆蓋前段，charEnd 變很小，viewport ratio × 小 totalChars 算出
-  // 的視窗只剩幾十 chars，連存活的前段 ranges 都被 filter 掉，highlight 表面消失。
-  const totalChars = segOffsets.snapshot.value.length || segs[segs.length - 1].charEnd
-  let startChar = 0
-  let endChar = totalChars
-  if (el.scrollHeight > 0 && totalChars > 0) {
-    const topRatio = el.scrollTop / el.scrollHeight
-    const bottomRatio = (el.scrollTop + el.clientHeight) / el.scrollHeight
-    const buffer = (bottomRatio - topRatio) * 1.5
-    startChar = Math.floor(Math.max(0, topRatio - buffer) * totalChars)
-    endChar = Math.ceil(Math.min(1, bottomRatio + buffer) * totalChars)
-  }
-
-  const map = buildCharIndexMap(el)
-  const ranges = []
-  for (const r of segs) {
-    if (r.charEnd < startChar || r.charStart > endChar) continue
-    const range = charOffsetToRange(map, r.charStart, r.charEnd)
-    if (range) ranges.push(range)
-  }
-
-  if (ranges.length > 0) {
-    CSS.highlights.set('segment-highlight', new Highlight(...ranges))
-  } else {
-    CSS.highlights.delete('segment-highlight')
-  }
-}
-
-function scheduleSegmentHighlightRebuild() {
-  if (segmentHighlightRafId !== null) return
-  segmentHighlightRafId = requestAnimationFrame(rebuildSegmentHighlight)
-}
-
-function clearSegmentHighlight() {
-  if (segmentHighlightRafId !== null) {
-    cancelAnimationFrame(segmentHighlightRafId)
-    segmentHighlightRafId = null
-  }
-  if (window.CSS && CSS.highlights) {
-    // wasSet: 只在真的清掉東西時才觸發 repaint hack，避免 watch 因 editSegmentRanges
-    // 隨打字更新而每個 keystroke 都對 contenteditable 套 transform 微擾
-    const wasSet = CSS.highlights.has('segment-highlight')
-    CSS.highlights.delete('segment-highlight')
-    if (wasSet) {
-      // Safari: 從 CSS.highlights registry 移除後不會自動重繪文字層
-      // 用 transform 微擾強制 repaint，translateZ(0) 不會造成視覺位移
-      const el = textareaRef.value
-      if (el) {
-        el.style.transform = 'translateZ(0)'
-        requestAnimationFrame(() => {
-          el.style.transform = ''
-        })
-      }
-    }
-  }
-}
-
-// 命中測試:給定 client 座標,回傳該位置對應的 segment range(或 null)
-function hitTestSegmentAt(clientX, clientY) {
-  if (!textareaRef.value) return null
-  let caret = null
-  if (document.caretPositionFromPoint) {
-    caret = document.caretPositionFromPoint(clientX, clientY)
-    if (caret) caret = { node: caret.offsetNode, offset: caret.offset }
-  } else if (document.caretRangeFromPoint) {
-    const range = document.caretRangeFromPoint(clientX, clientY)
-    if (range) caret = { node: range.startContainer, offset: range.startOffset }
-  }
-  if (!caret || !caret.node) return null
-
-  const map = buildCharIndexMap(textareaRef.value)
-  const charOffset = caretToCharOffset(map, caret.node, caret.offset)
-  if (charOffset == null) return null
-
-  for (const r of segOffsets.editSegmentRanges.value) {
-    if (charOffset >= r.charStart && charOffset < r.charEnd) return r
-  }
-  return null
-}
-
-function hideHoverChip() {
-  hoverChipVisible.value = false
-}
-
-// 滾動時：藏 hover chip + debounce 重建 viewport 內的 segment highlight
-// （rebuild 本身已 RAF throttle，但對長逐字稿 paint 仍貴；80ms debounce
-// 讓使用者連續滾動時不會每個 scroll frame 都 paint，停下來才更新）
-function handleEditorScroll() {
-  hideHoverChip()
-  if (!isAltPressed.value || !isEditing.value || displayMode.value !== 'paragraph') return
-  if (scrollHighlightTimer) clearTimeout(scrollHighlightTimer)
-  scrollHighlightTimer = setTimeout(() => {
-    scrollHighlightTimer = null
-    scheduleSegmentHighlightRebuild()
-  }, 80)
-}
-
-function updateHoverChipFromEvent(e) {
-  hoverChipRafId = null
-  if (!isAltPressed.value || !isEditing.value) {
-    hideHoverChip()
-    return
-  }
-  const hit = hitTestSegmentAt(e.clientX, e.clientY)
-  if (!hit) {
-    hideHoverChip()
-    return
-  }
-  const wrapper = textareaRef.value?.parentElement
-  if (!wrapper) {
-    hideHoverChip()
-    return
-  }
-  const map = buildCharIndexMap(textareaRef.value)
-  const segRange = charOffsetToRange(map, hit.charStart, hit.charEnd)
-  if (!segRange) {
-    hideHoverChip()
-    return
-  }
-  // 多行 segment 用 getClientRects() 取得每行各自的 rect,挑游標所在那一行
-  const rects = Array.from(segRange.getClientRects())
-  if (rects.length === 0) {
-    hideHoverChip()
-    return
-  }
-  const lineRect =
-    rects.find((r) => e.clientY >= r.top && e.clientY <= r.bottom) || rects[0]
-  const wrapperRect = wrapper.getBoundingClientRect()
-  hoverChipTime.value = formatTime(hit.start)
-  // chip 水平對齊游標,垂直貼在該行的上方,避免多行段時漂到無關位置
-  hoverChipStyle.value = {
-    left: `${e.clientX - wrapperRect.left}px`,
-    top: `${lineRect.top - wrapperRect.top}px`,
-  }
-  hoverChipVisible.value = true
-}
-
-function handleEditorMouseMove(e) {
-  if (!isAltPressed.value) return
-  pendingMouseEvent = { clientX: e.clientX, clientY: e.clientY }
-  if (hoverChipRafId !== null) return
-  hoverChipRafId = requestAnimationFrame(() => {
-    if (pendingMouseEvent) updateHoverChipFromEvent(pendingMouseEvent)
-  })
-}
-
-function handleEditorClickInEditing(e) {
-  // 只處理左鍵 + Alt,且有音檔時
-  if (e.button !== 0 || !e.altKey || !currentTranscript.value.hasAudio) return
-  const hit = hitTestSegmentAt(e.clientX, e.clientY)
-  if (!hit) return
-  e.preventDefault()
-  seekToTime(hit.start)
-}
-
-// 監聽 Alt / 編輯狀態 / segment ranges 變化,同步視覺層
-// 注意:不用 deep —— editSegmentRanges 永遠是 reassign 整個陣列,
-// 非 deep watch 就能偵測到變化,避免每次 deep walk 上百個物件的成本
-watch(
-  [
-    isAltPressed,
-    isEditing,
-    () => displayMode.value,
-    () => segOffsets.editSegmentRanges.value,
-  ],
-  () => {
-    if (isAltPressed.value && isEditing.value && displayMode.value === 'paragraph') {
-      scheduleSegmentHighlightRebuild()
-    } else {
-      clearSegmentHighlight()
-      hideHoverChip()
-    }
-  }
-)
 
 // 跳到上一個匹配項
 function goToPreviousMatch() {
@@ -2235,72 +2030,6 @@ function splitTextWithHighlight(text, segmentIndex) {
   return parts
 }
 
-// 處理標記點擊
-function handleMarkerClick(startTime) {
-  if (currentTranscript.value.hasAudio) {
-    seekToTime(startTime)
-  }
-
-}
-
-// 處理文字點擊（當 Alt 鍵按下時）
-function handleTextClick(startTime, event) {
-  // Alt 鍵按下 + 有音訊時才跳轉
-  if (isAltPressed.value && currentTranscript.value.hasAudio) {
-    // 在編輯模式下，阻止預設行為以避免游標移動
-    if (isEditing.value && event) {
-      event.preventDefault()
-    }
-    seekToTime(startTime)
-  }
-}
-
-// 鍵盤事件處理（Mac 使用 ⌘，Windows/Linux 使用 Ctrl）
-function handleKeyDown(e) {
-  // Ctrl/Cmd+F: 攔截瀏覽器搜尋，改為打開自訂搜尋浮窗（已開啟則聚焦並選取）
-  if (isModifierPressed(e) && e.key === 'f') {
-    e.preventDefault()
-    e.stopPropagation()
-    if (headerRef.value) {
-      headerRef.value.focusSearch()
-    }
-    return
-  }
-
-  if (e.altKey) {
-    // 停用 Alt 鍵的瀏覽器預設行為（Windows Chrome 會 focus 到瀏覽器選單）
-    e.preventDefault()
-    isAltPressed.value = true
-
-    // 防止 Alt 組合鍵的預設瀏覽器行為
-    // 只針對我們有定義快捷鍵的按鍵
-    const shortcutKeys = ['m', 'M', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']
-    if (shortcutKeys.includes(e.key)) {
-      e.stopPropagation() // 阻止事件繼續傳播，避免 contenteditable 插入字元
-    }
-  }
-}
-
-function handleKeyUp(e) {
-  // Safari/macOS: 在 contenteditable focus 時 Option(Alt) 的 keyup 不一定觸發；
-  // 多檢 e.key === 'Alt' 至少在事件確實送達時就放掉
-  if (!e.altKey || e.key === 'Alt') {
-    isAltPressed.value = false
-  }
-}
-
-// Safari 兜底：keyup 沒送到時，靠 mouse 事件同步 Alt 狀態
-// （mouse 事件在 Safari 可靠，且 isAltPressed=false 時 short-circuit，幾乎無成本）
-function syncAltFromMouse(e) {
-  if (isAltPressed.value && !e.altKey) {
-    isAltPressed.value = false
-  }
-}
-
-// 處理視窗失焦（確保 Ctrl 鍵狀態重置）
-function handleBlur() {
-  isAltPressed.value = false
-}
 
 // 處理貼上事件，只允許純文字
 function handlePaste(e) {
@@ -2489,12 +2218,7 @@ function handleSummaryUpdated({ taskId, status }) {
 onMounted(() => {
   document.body.classList.add('transcript-detail-page')
   window.addEventListener('beforeunload', handleBeforeUnload)
-  // 註冊 Alt 鍵監聯
-  window.addEventListener('keydown', handleKeyDown)
-  window.addEventListener('keyup', handleKeyUp)
-  window.addEventListener('mousemove', syncAltFromMouse)
-  window.addEventListener('mousedown', syncAltFromMouse)
-  window.addEventListener('blur', handleBlur)
+  // Alt key listeners + segment nav listeners: managed by useSegmentNavigation()
   // resize listener: 由 useDisplayPreferences() 內部 onMounted 註冊
 
   loadTranscript(route.params.taskId)
@@ -2513,22 +2237,8 @@ onUnmounted(() => {
   // 標記組件已卸載，防止異步操作更新狀態
   isMounted = false
 
-  // 取消 A+ 視覺層的 rAF 排程,並清掉 CSS Custom Highlight 註冊
-  // (CSS.highlights 是 global registry,不清會殘留 Range 物件指向已卸載的 DOM 節點)
-  if (segmentHighlightRafId !== null) {
-    cancelAnimationFrame(segmentHighlightRafId)
-    segmentHighlightRafId = null
-  }
-  if (hoverChipRafId !== null) {
-    cancelAnimationFrame(hoverChipRafId)
-    hoverChipRafId = null
-  }
-  if (scrollHighlightTimer) {
-    clearTimeout(scrollHighlightTimer)
-    scrollHighlightTimer = null
-  }
+  // segment-highlight cleanup: managed by useSegmentNavigation() onUnmounted
   if (window.CSS && CSS.highlights) {
-    CSS.highlights.delete('segment-highlight')
     CSS.highlights.delete('search-highlight')
     CSS.highlights.delete('search-highlight-current')
   }
@@ -2553,12 +2263,7 @@ onUnmounted(() => {
   removeScrollListeners()
 
   window.removeEventListener('beforeunload', handleBeforeUnload)
-  // 移除 Alt 鍵監聯
-  window.removeEventListener('keydown', handleKeyDown)
-  window.removeEventListener('keyup', handleKeyUp)
-  window.removeEventListener('mousemove', syncAltFromMouse)
-  window.removeEventListener('mousedown', syncAltFromMouse)
-  window.removeEventListener('blur', handleBlur)
+  // Alt key listeners: managed by useSegmentNavigation() onUnmounted
   // resize listener: 由 useDisplayPreferences() 內部 onUnmounted 移除
 
   document.body.classList.remove('editing-transcript')
