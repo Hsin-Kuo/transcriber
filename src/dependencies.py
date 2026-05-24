@@ -10,10 +10,12 @@ from .database.mongodb import get_database
 from .database.repositories.task_repo import TaskRepository
 from .database.repositories.tag_repo import TagRepository
 from .database.repositories.user_repo import UserRepository
+from .database.repositories.reservation_repo import ReservationRepository
 from .services.task_service import TaskService
 from .services.tag_service import TagService
 from .services.audio_service import AudioService
 from .services.summary_service import SummaryService
+from .services.intake_service import TranscriptionIntakeService
 
 
 # ========== Repository 依賴注入 ==========
@@ -86,6 +88,24 @@ def get_audio_service() -> AudioService:
 def get_summary_service(db=Depends(get_database)) -> SummaryService:
     """獲取 SummaryService 實例（每請求建立；無狀態）"""
     return SummaryService(db)
+
+
+def get_reservation_repository(db=Depends(get_database)) -> ReservationRepository:
+    return ReservationRepository(db)
+
+
+def get_intake_service(
+    task_repo: TaskRepository = Depends(get_task_repository),
+    user_repo: UserRepository = Depends(get_user_repository),
+    reservation_repo: ReservationRepository = Depends(get_reservation_repository),
+    tag_service: TagService = Depends(get_tag_service),
+) -> TranscriptionIntakeService:
+    return TranscriptionIntakeService(
+        task_repo=task_repo,
+        user_repo=user_repo,
+        reservation_repo=reservation_repo,
+        tag_service=tag_service,
+    )
 
 
 # ========== TaskService 單例 ==========

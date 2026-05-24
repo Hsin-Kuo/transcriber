@@ -6,18 +6,18 @@ from typing import Optional, List
 from pathlib import Path
 from urllib.parse import quote
 from datetime import datetime, timezone
-import tempfile
 import uuid
 import json
 import shutil
 import mimetypes
 
-from ..auth.dependencies import get_current_user, check_quota
+from ..auth.dependencies import get_current_user
 from ..database.mongodb import get_database
 from ..database.repositories.task_repo import TaskRepository
-from ..database.repositories.tag_repo import TagRepository
+from ..dependencies import get_intake_service
+from ..models.intake import IntakeConfig
+from ..services.intake_service import TranscriptionIntakeService
 from ..services.task_service import TaskService
-from ..services.tag_service import TagService
 from ..services.utils.audio_validator import (
     validate_filename_extension,
     validate_magic_bytes,
@@ -33,9 +33,6 @@ from ..services.task_dispatch import (
     get_task_dispatch,
     init_task_dispatch,
 )
-from ..models.worker_job import TranscriptionJob
-import os
-import asyncio
 
 
 router = APIRouter(prefix="/transcriptions", tags=["Transcriptions"])
@@ -163,6 +160,154 @@ def get_task_field(task: dict, field: str):
     return task.get(field)
 
 
+def _validate_create_params(task_type, chunk_minutes, max_speakers, language, punct_provider, custom_name):
+    """輸入驗證（純 HTTP 層白名單檢查）。"""
+    if task_type not in ("paragraph", "subtitle"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "任務類型必須是 'paragraph' 或 'subtitle'")
+    if chunk_minutes < 1 or chunk_minutes > 120:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "分段長度必須在 1-120 分鐘之間")
+    if max_speakers is not None and (max_speakers < 2 or max_speakers > 10):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "最大講者人數必須在 2-10 之間")
+    ALLOWED_LANGUAGES = {"zh", "zh-TW", "zh-CN", "en", "ja", "ko", "auto"}
+    if language not in ALLOWED_LANGUAGES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"不支援的語言：{language}，可選：{', '.join(ALLOWED_LANGUAGES)}")
+    ALLOWED_PUNCT = {"openai", "gemini", "none"}
+    if punct_provider not in ALLOWED_PUNCT:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"不支援的標點提供者：{punct_provider}")
+    if custom_name and len(custom_name) > 255:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "自訂名稱過長（最多 255 字元）")
+
+
+async def _assemble_upload(
+    *,
+    upload_id,
+    merge_upload_ids,
+    merge_files,
+    files,
+    file,
+    custom_name,
+    current_user,
+):
+    """把 HTTP upload 參數組裝成 (file_path, filename, temp_dir)。
+
+    這是正當的 router 責任：把原始 HTTP 請求轉成 service 可消費的 Path。
+    """
+    from .uploads import get_upload_meta, remove_upload, MAX_UPLOAD_SIZE, MAX_UPLOAD_SIZE_MB
+    from src.services.audio_service import AudioService
+
+    user_id = str(current_user["_id"])
+
+    # ── 單檔分片上傳 ──
+    if upload_id:
+        meta = get_upload_meta(upload_id)
+        if not meta:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "upload_id 無效或尚未完成組裝")
+        if meta["user_id"] != user_id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "無權使用此上傳")
+        remove_upload(upload_id)
+        temp_dir = meta["temp_dir"]
+        file_path = meta["assembled_path"]
+        filename = custom_name.strip() if custom_name and custom_name.strip() else file_path.name
+        log.info("upload.chunked.assembled", filename=file_path.name, size_mb=round(file_path.stat().st_size / 1024 / 1024, 2))
+        return file_path, filename, temp_dir
+
+    # ── 合併模式分片上傳 ──
+    if merge_upload_ids:
+        try:
+            uid_list = json.loads(merge_upload_ids)
+        except json.JSONDecodeError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "merge_upload_ids 格式錯誤")
+        if len(uid_list) < 2:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "合併模式至少需要 2 個檔案")
+
+        merge_paths = []
+        merge_temp_dirs = []
+        for uid in uid_list:
+            meta = get_upload_meta(uid)
+            if not meta:
+                for d in merge_temp_dirs:
+                    if d.exists(): shutil.rmtree(d)
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, f"upload_id {uid} 無效或尚未完成組裝")
+            if meta["user_id"] != user_id:
+                for d in merge_temp_dirs:
+                    if d.exists(): shutil.rmtree(d)
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "無權使用此上傳")
+            remove_upload(uid)
+            merge_paths.append(meta["assembled_path"])
+            merge_temp_dirs.append(meta["temp_dir"])
+
+        temp_dir = get_temp_dir()
+        audio_service = AudioService()
+        merged_output = temp_dir / f"merged_{uuid.uuid4().hex[:8]}.mp3"
+        file_path = audio_service.merge_audio_files(merge_paths, output_path=merged_output)
+
+        if custom_name and custom_name.strip():
+            filename = f"{custom_name.strip()}.mp3"
+        else:
+            filename = merge_paths[0].name.rsplit('.', 1)[0] + '.mp3'
+
+        for d in merge_temp_dirs:
+            if d.exists(): shutil.rmtree(d, ignore_errors=True)
+        return file_path, filename, temp_dir
+
+    # ── 直接上傳（可能多檔合併） ──
+    if merge_files and files and len(files) > 0:
+        uploaded_files = files
+        if len(uploaded_files) < 2:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "合併模式至少需要2個檔案")
+    elif file:
+        uploaded_files = [file]
+    else:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "請提供音檔或 upload_id")
+
+    total_size = sum(f.size or 0 for f in uploaded_files)
+    if total_size > 0 and total_size > MAX_UPLOAD_SIZE:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, f"檔案總大小超過限制（最大 {MAX_UPLOAD_SIZE_MB}MB）")
+
+    for uf in uploaded_files:
+        validate_filename_extension(uf.filename)
+
+    temp_dir = get_temp_dir()
+
+    if len(uploaded_files) > 1:
+        saved_files = []
+        for idx, uf in enumerate(uploaded_files):
+            suffix = Path(uf.filename).suffix
+            temp_path = temp_dir / f"input_{idx}{suffix}"
+            with temp_path.open("wb") as f:
+                f.write(await uf.read())
+            try:
+                validate_magic_bytes(temp_path)
+            except HTTPException:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                raise
+            saved_files.append(temp_path)
+
+        audio_service = AudioService()
+        merged_output = temp_dir / f"merged_{uuid.uuid4().hex[:8]}.mp3"
+        file_path = audio_service.merge_audio_files(saved_files, output_path=merged_output)
+
+        if custom_name and custom_name.strip():
+            filename = f"{custom_name.strip()}.mp3"
+        else:
+            filename = uploaded_files[0].filename.rsplit('.', 1)[0] + '.mp3'
+    else:
+        uf = uploaded_files[0]
+        suffix = Path(uf.filename).suffix
+        file_path = temp_dir / f"input{suffix}"
+        content = await uf.read()
+        with file_path.open("wb") as f:
+            f.write(content)
+        try:
+            validate_magic_bytes(file_path)
+        except HTTPException:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise
+        filename = uf.filename
+
+    return file_path, filename, temp_dir
+
+
 @router.post("")
 async def create_transcription(
     request: Request,
@@ -182,566 +327,106 @@ async def create_transcription(
     merge_upload_ids: Optional[str] = Form(None, description="合併模式分片上傳的 upload_id 陣列（JSON）"),
     ui_language: Optional[str] = Form(None, description="使用者介面語言（用於自動偵測中文時判斷繁簡體）"),
     current_user: dict = Depends(get_current_user),
-    db = Depends(get_database)
+    db = Depends(get_database),
+    intake_service: TranscriptionIntakeService = Depends(get_intake_service),
 ):
-    """建立轉錄任務（支援單檔或多檔合併）
+    """建立轉錄任務（支援單檔或多檔合併）"""
+    # ── 輸入驗證（HTTP 層責任） ──
+    _validate_create_params(task_type, chunk_minutes, max_speakers, language, punct_provider, custom_name)
 
-    上傳音檔進行轉錄（異步模式）
-    立即返回任務 ID，轉錄在背景執行
-
-    Args:
-        files: 多個音檔（合併模式）
-        file: 單個音檔（單檔模式）
-        merge_files: 是否為合併模式
-        custom_name: 自訂任務名稱
-        task_type: 任務類型 (paragraph=段落/subtitle=字幕)
-        punct_provider: 標點提供者 (openai/gemini/none)
-        chunk_audio: 是否使用分段模式
-        chunk_minutes: 分段長度（分鐘）
-        diarize: 是否啟用說話者辨識
-        max_speakers: 最大講者人數（2-10）
-        language: 轉錄語言
-        tags: 標籤
-        upload_id: 分片上傳的 upload_id（單檔）
-        merge_upload_ids: 合併模式分片上傳的 upload_id 陣列（JSON）
-        current_user: 當前用戶
-        db: 資料庫實例
-
-    Returns:
-        任務資訊
-
-    Raises:
-        HTTPException: 服務未就緒或參數錯誤
-    """
-    # ── 分片上傳模式：從已組裝的檔案讀取 ──
-    use_chunked_upload = False
-    chunked_temp_dir = None
-    chunked_audio_path = None
-
-    if upload_id:
-        from .uploads import get_upload_meta, remove_upload
-        meta = get_upload_meta(upload_id)
-        if not meta:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "upload_id 無效或尚未完成組裝")
-        if meta["user_id"] != str(current_user["_id"]):
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "無權使用此上傳")
-        use_chunked_upload = True
-        chunked_temp_dir = meta["temp_dir"]
-        chunked_audio_path = meta["assembled_path"]
-        # 從 active_uploads 移除（後續由本函數管理 temp_dir 生命週期）
-        remove_upload(upload_id)
-
-    # ── 合併模式分片上傳：多個 upload_id 組成合併任務 ──
-    use_merge_chunked = False
-    merge_chunked_paths = []
-    merge_temp_dirs = []
-
-    if merge_upload_ids:
-        from .uploads import get_upload_meta, remove_upload
-        try:
-            uid_list = json.loads(merge_upload_ids)
-        except json.JSONDecodeError:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "merge_upload_ids 格式錯誤")
-
-        if len(uid_list) < 2:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "合併模式至少需要 2 個檔案")
-
-        for uid in uid_list:
-            meta = get_upload_meta(uid)
-            if not meta:
-                # 清理已取出的 temp_dirs
-                for d in merge_temp_dirs:
-                    if d.exists():
-                        shutil.rmtree(d)
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, f"upload_id {uid} 無效或尚未完成組裝")
-            if meta["user_id"] != str(current_user["_id"]):
-                for d in merge_temp_dirs:
-                    if d.exists():
-                        shutil.rmtree(d)
-                raise HTTPException(status.HTTP_403_FORBIDDEN, "無權使用此上傳")
-            remove_upload(uid)
-            merge_chunked_paths.append(meta["assembled_path"])
-            merge_temp_dirs.append(meta["temp_dir"])
-
-        use_merge_chunked = True
-        merge_files = True  # 強制進入合併流程
-
-    # 處理檔案參數
-    if use_chunked_upload:
-        uploaded_files = []  # 不需要 UploadFile，後面會直接使用 chunked_audio_path
-    elif use_merge_chunked:
-        uploaded_files = []  # 合併分片模式，後面會直接使用 merge_chunked_paths
-    elif merge_files and files and len(files) > 0:
-        # 合併模式：多檔案
-        if len(files) < 2:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="合併模式至少需要2個檔案"
-            )
-        uploaded_files = files
-    elif file:
-        # 單檔模式
-        uploaded_files = [file]
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="請提供音檔或 upload_id"
-        )
-
-    # 檢查檔案總大小（注意：UploadFile.size 可能為 None）
-    if not use_chunked_upload:
-        from .uploads import MAX_UPLOAD_SIZE, MAX_UPLOAD_SIZE_MB
-        total_size = sum(f.size or 0 for f in uploaded_files)
-        if total_size > 0 and total_size > MAX_UPLOAD_SIZE:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"檔案總大小超過限制（最大 {MAX_UPLOAD_SIZE_MB}MB）"
-            )
-
-    # 直接上傳（非 chunked）：先驗證每個檔的副檔名屬於白名單
-    # chunked / merge_chunked 在 uploads.py init_upload 已驗證
-    if uploaded_files:
-        for upload_file in uploaded_files:
-            validate_filename_extension(upload_file.filename)
-
-    # 驗證任務類型
-    if task_type not in ["paragraph", "subtitle"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="任務類型必須是 'paragraph' 或 'subtitle'"
-        )
-
-    # 驗證 chunk_minutes（1-120 分鐘）
-    if chunk_minutes < 1 or chunk_minutes > 120:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="分段長度必須在 1-120 分鐘之間"
-        )
-
-    # 驗證 max_speakers（2-10，若有提供）
-    if max_speakers is not None and (max_speakers < 2 or max_speakers > 10):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="最大講者人數必須在 2-10 之間"
-        )
-
-    # 驗證 language（白名單）
-    ALLOWED_LANGUAGES = {"zh", "zh-TW", "zh-CN", "en", "ja", "ko", "auto"}
-    if language not in ALLOWED_LANGUAGES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"不支援的語言：{language}，可選：{', '.join(ALLOWED_LANGUAGES)}"
-        )
-
-    # 驗證 punct_provider（白名單）
-    ALLOWED_PUNCT_PROVIDERS = {"openai", "gemini", "none"}
-    if punct_provider not in ALLOWED_PUNCT_PROVIDERS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"不支援的標點提供者：{punct_provider}"
-        )
-
-    # 驗證 custom_name（長度和字元安全性）
-    if custom_name:
-        if len(custom_name) > 255:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="自訂名稱過長（最多 255 字元）"
-            )
-        # 移除可能導致路徑穿越的字元
-        custom_name = custom_name.replace("/", "").replace("\\", "").replace("..", "")
-
-    # 字幕類型強制不使用標點符號
     if task_type == "subtitle":
         punct_provider = "none"
-        log.debug("transcription.create.punctuation_disabled", task_type=task_type)
 
-    # 生成任務 ID
-    task_id = str(uuid.uuid4())
+    if custom_name:
+        custom_name = custom_name.replace("/", "").replace("\\", "").replace("..", "")
 
-    # 建立臨時目錄（分片上傳模式直接複用已有的 temp_dir）
-    if use_chunked_upload:
-        temp_dir = chunked_temp_dir
-    elif use_merge_chunked:
-        temp_dir = get_temp_dir()  # 合併結果輸出到新的暫存目錄
-    else:
-        temp_dir = get_temp_dir()
+    # ── Upload 組裝：把 HTTP 請求變成 (file_path, filename, temp_dir) ──
+    file_path, original_filename, temp_dir = await _assemble_upload(
+        upload_id=upload_id,
+        merge_upload_ids=merge_upload_ids,
+        merge_files=merge_files,
+        files=files,
+        file=file,
+        custom_name=custom_name,
+        current_user=current_user,
+    )
 
+    # ── 解析標籤 ──
+    task_tags = []
+    if tags:
+        try:
+            task_tags = json.loads(tags)
+        except (json.JSONDecodeError, TypeError):
+            task_tags = []
+
+    # ── 委派給 IntakeService ──
+    intake_service.set_diarization_available(bool(_diarization_processor))
+    result = await intake_service.intake(
+        user_id=str(current_user["_id"]),
+        user_email=current_user["email"],
+        file_path=file_path,
+        filename=original_filename,
+        config=IntakeConfig(
+            task_type=task_type,
+            punct_provider=punct_provider,
+            chunk_audio=chunk_audio,
+            chunk_minutes=chunk_minutes,
+            diarize=diarize,
+            max_speakers=max_speakers,
+            language=language,
+            ui_language=ui_language,
+            tags=task_tags,
+            custom_name=custom_name,
+        ),
+        temp_dir=temp_dir,
+    )
+
+    # ── Audit log ──
     try:
-        # 如果是多檔案，先合併
-        # 導入 AudioService（用於合併音檔和獲取時長）
-        from src.services.audio_service import AudioService
-
-        if use_chunked_upload:
-            # ── 分片上傳：檔案已組裝好，直接使用 ──
-            temp_audio = chunked_audio_path
-            original_filename = custom_name.strip() if custom_name and custom_name.strip() else chunked_audio_path.name
-            log.info(
-                "upload.chunked.assembled",
-                filename=chunked_audio_path.name,
-                size_mb=round(chunked_audio_path.stat().st_size / 1024 / 1024, 2),
-            )
-        elif use_merge_chunked:
-            # ── 合併模式（分片上傳）：多個已組裝檔案合併 ──
-            log.info("transcription.merge.started", mode="chunked", file_count=len(merge_chunked_paths))
-            for idx, p in enumerate(merge_chunked_paths):
-                log.debug(
-                    "transcription.merge.file",
-                    index=idx + 1,
-                    filename=p.name,
-                    size_mb=round(p.stat().st_size / 1024 / 1024, 2),
-                )
-
-            audio_service = AudioService()
-            unique_id = str(uuid.uuid4())[:8]
-            merged_output_path = temp_dir / f"merged_{unique_id}.mp3"
-            merged_audio_path = audio_service.merge_audio_files(
-                merge_chunked_paths,
-                output_path=merged_output_path
-            )
-            temp_audio = merged_audio_path
-
-            if custom_name and custom_name.strip():
-                original_filename = f"{custom_name.strip()}.mp3"
-            else:
-                original_filename = merge_chunked_paths[0].name.rsplit('.', 1)[0] + '.mp3'
-
-            log.info(
-                "transcription.merge.completed",
-                mode="chunked",
-                merged_path=str(merged_audio_path),
-                filename=original_filename,
-            )
-
-            # 清理分片上傳的暫存目錄（合併結果已在 temp_dir 中）
-            for d in merge_temp_dirs:
-                if d.exists():
-                    shutil.rmtree(d, ignore_errors=True)
-        elif len(uploaded_files) > 1:
-            log.info("transcription.merge.started", mode="direct", file_count=len(uploaded_files))
-
-            # 保存上傳的檔案到臨時目錄
-            saved_files = []
-            for idx, upload_file in enumerate(uploaded_files):
-                file_suffix = Path(upload_file.filename).suffix
-                temp_path = temp_dir / f"input_{idx}{file_suffix}"
-
-                with temp_path.open("wb") as f:
-                    content = await upload_file.read()
-                    f.write(content)
-
-                try:
-                    validate_magic_bytes(temp_path)
-                except HTTPException:
-                    shutil.rmtree(temp_dir, ignore_errors=True)
-                    raise
-                saved_files.append(temp_path)
-                log.debug("transcription.merge.file", index=idx + 1, filename=upload_file.filename)
-
-            # 合併音檔到臨時目錄（固定MP3格式：16kHz, mono, 192kbps）
-            audio_service = AudioService()
-
-            # ⭐ 使用唯一檔名避免多用戶衝突
-            unique_id = str(uuid.uuid4())[:8]  # 使用前8個字符
-            merged_filename = f"merged_{unique_id}.mp3"
-
-            # 輸出路徑在臨時目錄內
-            merged_output_path = temp_dir / merged_filename
-            merged_audio_path = audio_service.merge_audio_files(
-                saved_files,
-                output_path=merged_output_path
-            )
-
-            # 使用合併後的音檔作為 temp_audio
-            temp_audio = merged_audio_path
-
-            # ⭐ 使用用戶自訂的任務名稱
-            if custom_name and custom_name.strip():
-                original_filename = f"{custom_name.strip()}.mp3"
-            else:
-                # 預設使用第一個檔案的檔名（去掉副檔名）
-                first_filename = uploaded_files[0].filename
-                original_filename = first_filename.rsplit('.', 1)[0] + '.mp3'
-
-            log.info(
-                "transcription.merge.completed",
-                mode="direct",
-                merged_path=str(merged_audio_path),
-                filename=original_filename,
-            )
-
-            # ⚠️ 重要：合併後的音檔會經歷與單檔相同的生命週期：
-            # 1. 轉錄成功 → 移動到 uploads/{task_id}.mp3
-            # 2. 轉錄失敗/取消 → 隨臨時目錄一起刪除
-        else:
-            # 單檔案模式（現有邏輯）
-            upload_file = uploaded_files[0]
-            file_suffix = Path(upload_file.filename).suffix
-            temp_audio = temp_dir / f"input{file_suffix}"
-
-            with temp_audio.open("wb") as f:
-                content = await upload_file.read()
-                f.write(content)
-
-            try:
-                validate_magic_bytes(temp_audio)
-            except HTTPException:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-                raise
-
-            original_filename = upload_file.filename
-            log.info(
-                "upload.file.received",
-                filename=upload_file.filename,
-                size_mb=round(len(content) / 1024 / 1024, 2),
-            )
-
-        # 獲取音檔時長和大小
-        audio_service = AudioService()
-        try:
-            audio_duration_ms = audio_service.get_audio_duration(temp_audio)
-            audio_duration_seconds = audio_duration_ms / 1000.0
-            audio_size_mb = round(temp_audio.stat().st_size / 1024 / 1024, 2)
-            log.debug(
-                "transcription.audio.info",
-                duration_seconds=round(audio_duration_seconds, 2),
-                size_mb=audio_size_mb,
-            )
-        except Exception as e:
-            log.warning("transcription.audio.info_failed", error=str(e))
-            shutil.rmtree(temp_dir)
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"無法讀取音檔資訊：{str(e)}"
-            )
-
-        # 獲取完整用戶資料（包含配額）
-        from src.database.repositories.user_repo import UserRepository
-        user_repo = UserRepository(db)
-        full_user_data = await user_repo.get_by_id(str(current_user["_id"]))
-
-        if not full_user_data:
-            shutil.rmtree(temp_dir)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="無法獲取用戶資訊"
-            )
-
-        # 預扣轉錄配額（atomic check + reserve）
-        from src.database.repositories.reservation_repo import ReservationRepository
-        reservation_repo = ReservationRepository(db)
-        reservation_made = False
-        try:
-            await reservation_repo.reserve_transcription(
-                user_id=str(current_user["_id"]),
-                task_id=task_id,
-                duration_minutes=audio_duration_seconds / 60,
-            )
-            reservation_made = True
-        except HTTPException as quota_error:
-            # 清理臨時檔案
-            shutil.rmtree(temp_dir)
-            # 拋出配額不足異常
-            raise quota_error
-
-        # 檢查 diarization 可用性（僅在本地模式下檢查，AWS 模式由 GPU Worker 處理）
-        if diarize and not is_aws() and not _diarization_processor:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Speaker diarization 功能未啟用。請設定 HF_TOKEN 環境變數並重啟服務。"
-            )
-
-        # 解析標籤
-        task_tags = []
-        if tags:
-            try:
-                task_tags = json.loads(tags)
-            except:
-                task_tags = []
-
-        # 自動為新標籤建立 tags 集合記錄
-        if task_tags:
-            try:
-                tag_repo = TagRepository(db)
-                tag_service = TagService(tag_repo, TaskRepository(db))
-                user_id = str(current_user["_id"])
-                existing_tags = await tag_service.get_all_tags(user_id)
-                existing_names = {t["name"] for t in existing_tags}
-                for tag_name in task_tags:
-                    if tag_name and tag_name not in existing_names:
-                        try:
-                            await tag_service.create_tag(user_id=user_id, name=tag_name)
-                        except (ValueError, Exception):
-                            pass
-            except Exception as e:
-                log.warning("tag.auto_create.failed", error=str(e))
-
-        # 創建任務記錄
-        from ..utils.time_utils import get_utc_timestamp
-
-        current_time = get_utc_timestamp()
-        task_data = {
-            "_id": task_id,
-            "task_id": task_id,
-
-            # 任務類型（新增）
-            "task_type": task_type,
-
-            # 使用者資訊
-            "user": {
-                "user_id": str(current_user["_id"]),
-                "user_email": current_user["email"],
-                "tier": full_user_data.get("quota", {}).get("tier", "free")
-            },
-
-            # 檔案資訊
-            "file": {
+        from ..utils.audit_logger import get_audit_logger
+        audit_logger = get_audit_logger()
+        await audit_logger.log_task_operation(
+            request=request,
+            action="create",
+            user_id=str(current_user["_id"]),
+            task_id=result.task_id,
+            status_code=200,
+            message=f"創建轉錄任務：{original_filename}",
+            request_body={
                 "filename": original_filename,
-                "size_mb": audio_size_mb
-            },
-
-            # 轉錄配置
-            "config": {
+                "size_mb": result.size_mb,
                 "punct_provider": punct_provider,
                 "chunk_audio": chunk_audio,
-                "chunk_minutes": chunk_minutes,
                 "diarize": diarize,
-                "max_speakers": max_speakers,
                 "language": language,
-                "ui_language": ui_language,
-            },
-
-            # 狀態
-            "status": "pending",
-
-            # 統計資訊
-            "stats": {
-                "audio_duration_seconds": audio_duration_seconds,
-            },
-
-            # 使用者設定與標籤
-            "tags": task_tags,
-            # ⚠️ keep_audio 默認為 False
-            # 注意：False 不代表不保存音檔！所有音檔都會被保存到 uploads/
-            # False 的意思是「可以被自動清理機制刪除」
-            # True 的意思是「用戶手動勾選保留，不會被自動刪除」
-            "keep_audio": False,
-
-            # 講者名稱對應（用於字幕模式）
-            "speaker_names": {},
-
-            # 字幕模式設定
-            "subtitle_settings": {
-                "density_threshold": 3.0,  # 疏密度閾值（秒），範圍 0-120
-            },
-
-            # 時間戳記
-            "timestamps": {
-                "created_at": current_time,
-                "updated_at": current_time,
             }
-        }
-
-        # 保存到資料庫
-        task_repo = TaskRepository(db)
-        await task_repo.create(task_data)
-
-        # 委派給 Task dispatch seam（adapter 決定走 SQS 還是 in-process executor；
-        # 失敗會把 Task 標 failed、清 temp_dir、送 Sentry）
-        dispatch_result = await get_task_dispatch().submit(
-            job=TranscriptionJob(
-                task_id=task_id,
-                language=None if language == "auto" else language,
-                use_chunking=chunk_audio,
-                use_punctuation=punct_provider != "none",
-                punctuation_provider=punct_provider,
-                use_diarization=diarize,
-                max_speakers=max_speakers,
-                ui_language=ui_language,
-                handoff_ext=temp_audio.suffix.lstrip(".").lower(),
-            ),
-            audio_local_path=temp_audio,
-            temp_dir=temp_dir,
-            user_tier=full_user_data.get("quota", {}).get("tier", "free"),
         )
-        log.info("task.created", task_id=task_id, status=dispatch_result.status)
-
-        # 記錄 audit log（創建轉錄任務）
-        try:
-            from ..utils.audit_logger import get_audit_logger
-            audit_logger = get_audit_logger()
-            await audit_logger.log_task_operation(
-                request=request,
-                action="create",
-                user_id=str(current_user["_id"]),
-                task_id=task_id,
-                status_code=200,
-                message=f"創建轉錄任務：{original_filename}",
-                request_body={
-                    "filename": original_filename,
-                    "size_mb": audio_size_mb,
-                    "punct_provider": punct_provider,
-                    "chunk_audio": chunk_audio,
-                    "diarize": diarize,
-                    "language": language,
-                    "merge_mode": len(uploaded_files) > 1,
-                    "file_count": len(uploaded_files)
-                }
-            )
-        except Exception as e:
-            log.warning("transcription.audit_log.failed", action="create", error=str(e))
-
-        # 返回結果（依 dispatch 結果調整消息）
-        queued = dispatch_result.status == "pending"
-        queue_position = dispatch_result.queue_position or 0
-        if queued and queue_position:
-            message = f"轉錄任務已加入隊列，目前有 {queue_position} 個任務等待中"
-        else:
-            message = "轉錄任務已建立，正在背景處理"
-
-        return {
-            "task_id": task_id,
-            "status": dispatch_result.status,
-            "message": message,
-            "queued": queued,
-            "queue_position": queue_position,
-            "file": {
-                "filename": original_filename,
-                "size_mb": audio_size_mb
-            },
-            "config": {
-                "punct_provider": punct_provider,
-                "chunk_audio": chunk_audio,
-                "language": language
-            }
-        }
-
-    except HTTPException:
-        # 清理臨時檔案
-        if temp_dir.exists():
-            shutil.rmtree(temp_dir)
-        # 釋放預扣（若已建立）
-        if locals().get("reservation_made"):
-            try:
-                await reservation_repo.release_by_task_id(task_id)
-            except Exception as release_err:
-                log.warning("transcription.reservation.release_failed", task_id=task_id, error=str(release_err))
-        raise
     except Exception as e:
-        # 清理臨時檔案
-        if temp_dir.exists():
-            shutil.rmtree(temp_dir)
-        # 釋放預扣（若已建立）
-        if locals().get("reservation_made"):
-            try:
-                await reservation_repo.release_by_task_id(task_id)
-            except Exception as release_err:
-                log.warning("transcription.reservation.release_failed", task_id=task_id, error=str(release_err))
-        log.error("transcription.create.failed", task_id=task_id, error=str(e), exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"建立轉錄任務失敗：{str(e)}"
-        )
+        log.warning("transcription.audit_log.failed", action="create", error=str(e))
+
+    # ── Response ──
+    queued = result.status == "pending"
+    if queued and result.queue_position:
+        message = f"轉錄任務已加入隊列，目前有 {result.queue_position} 個任務等待中"
+    else:
+        message = "轉錄任務已建立，正在背景處理"
+
+    return {
+        "task_id": result.task_id,
+        "status": result.status,
+        "message": message,
+        "queued": queued,
+        "queue_position": result.queue_position,
+        "file": {
+            "filename": result.filename,
+            "size_mb": result.size_mb,
+        },
+        "config": {
+            "punct_provider": punct_provider,
+            "chunk_audio": chunk_audio,
+            "language": language,
+        }
+    }
 
 
 @router.get("/{task_id}/download")
@@ -1386,27 +1071,11 @@ async def create_batch_transcriptions(
     upload_ids: Optional[str] = Form(None, description="分片上傳的 upload_id JSON 陣列，格式：{索引: upload_id}"),
     ui_language: Optional[str] = Form(None, description="使用者介面語言（用於自動偵測中文時判斷繁簡體）"),
     current_user: dict = Depends(get_current_user),
-    db = Depends(get_database)
+    db = Depends(get_database),
+    intake_service: TranscriptionIntakeService = Depends(get_intake_service),
 ):
-    """批次建立轉錄任務
-
-    一次上傳多個音檔，建立多個獨立的轉錄任務。
-    每個檔案作為獨立任務加入佇列。
-
-    Args:
-        files: 多個音檔（最多10個）
-        default_config: 預設配置 JSON 字串，包含 taskType, diarize, maxSpeakers, language, tags
-        overrides: 單檔覆蓋設定 JSON 字串，格式：{"0": {"tags": [...], "customName": "..."}, ...}
-        current_user: 當前用戶
-        db: 資料庫實例
-
-    Returns:
-        批次建立結果
-
-    Raises:
-        HTTPException: 參數錯誤或服務未就緒
-    """
-    # 解析分片上傳的 upload_ids（格式：{"索引": "upload_id"}）
+    """批次建立轉錄任務"""
+    # ── 解析 upload_ids ──
     chunked_uploads_map = {}
     if upload_ids:
         try:
@@ -1414,325 +1083,136 @@ async def create_batch_transcriptions(
         except json.JSONDecodeError:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "upload_ids 格式錯誤")
 
-    # 確保 files 是 list（可能為 None）
     if files is None:
         files = []
 
-    # 計算總檔案數（直接上傳 + 分片上傳）
     total_files = len(files) + len(chunked_uploads_map)
-
-    # 檢查檔案數量
     MAX_BATCH_FILES = 10
     if total_files > MAX_BATCH_FILES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"批次上傳最多支援 {MAX_BATCH_FILES} 個檔案，您提供了 {total_files} 個"
-        )
-
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"批次上傳最多支援 {MAX_BATCH_FILES} 個檔案，您提供了 {total_files} 個")
     if total_files == 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="請至少上傳一個檔案"
-        )
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "請至少上傳一個檔案")
 
-    # 解析配置
+    # ── 解析配置 ──
     try:
         config = json.loads(default_config)
     except json.JSONDecodeError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="default_config 格式錯誤，必須是有效的 JSON"
-        )
-
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "default_config 格式錯誤，必須是有效的 JSON")
     try:
         file_overrides = json.loads(overrides)
     except json.JSONDecodeError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="overrides 格式錯誤，必須是有效的 JSON"
-        )
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "overrides 格式錯誤，必須是有效的 JSON")
 
-    # 從配置中提取參數
     task_type = config.get("taskType", "paragraph")
     diarize = config.get("diarize", True)
     max_speakers = config.get("maxSpeakers")
     language = config.get("language", "auto")
     default_tags = config.get("tags", [])
 
-    # 收集所有標籤（default + 各檔案覆蓋的）並自動建立 tags 集合記錄
-    all_upload_tags = set(default_tags)
-    for override in file_overrides.values():
-        if isinstance(override, dict):
-            all_upload_tags.update(override.get("tags", []))
-    if all_upload_tags:
-        try:
-            tag_repo = TagRepository(db)
-            tag_service = TagService(tag_repo, TaskRepository(db))
-            user_id = str(current_user["_id"])
-            existing_tags = await tag_service.get_all_tags(user_id)
-            existing_names = {t["name"] for t in existing_tags}
-            for tag_name in all_upload_tags:
-                if tag_name and tag_name not in existing_names:
-                    try:
-                        await tag_service.create_tag(user_id=user_id, name=tag_name)
-                    except (ValueError, Exception):
-                        pass
-        except Exception as e:
-            log.warning("tag.auto_create.failed", mode="batch", error=str(e))
+    _validate_create_params(task_type, 10, max_speakers, language, "gemini", None)
 
-    # 驗證任務類型
-    if task_type not in ["paragraph", "subtitle"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="任務類型必須是 'paragraph' 或 'subtitle'"
-        )
+    punct_provider = "none" if task_type == "subtitle" else "gemini"
 
-    # 驗證 max_speakers（2-10，若有提供）
-    if max_speakers is not None and (max_speakers < 2 or max_speakers > 10):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="最大講者人數必須在 2-10 之間"
-        )
-
-    # 驗證 language（白名單）
-    ALLOWED_LANGUAGES = {"zh", "zh-TW", "zh-CN", "en", "ja", "ko", "auto"}
-    if language not in ALLOWED_LANGUAGES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"不支援的語言：{language}"
-        )
-
-    # 字幕類型強制不使用標點符號
-    punct_provider = "gemini"
-    if task_type == "subtitle":
-        punct_provider = "none"
-
-    # 檢查 diarization 可用性（僅在本地模式下檢查，AWS 模式由 GPU Worker 處理）
     if diarize and not is_aws() and not _diarization_processor:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Speaker diarization 功能未啟用"
-        )
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Speaker diarization 功能未啟用")
 
-    # 獲取完整用戶資料
-    from src.database.repositories.user_repo import UserRepository
-    user_repo = UserRepository(db)
-    full_user_data = await user_repo.get_by_id(str(current_user["_id"]))
+    intake_service.set_diarization_available(bool(_diarization_processor))
 
-    if not full_user_data:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="無法獲取用戶資訊"
-        )
+    # ── 建立處理列表 ──
+    from .uploads import get_upload_meta, remove_upload
 
-    # 導入必要的服務
-    from src.services.audio_service import AudioService
-    from src.auth.quota import QuotaManager
-    from ..utils.time_utils import get_utc_timestamp
+    _batch_items = []
+    for i, uf in enumerate(files):
+        _batch_items.append((i, uf, None))
+    for str_idx, uid in chunked_uploads_map.items():
+        global_idx = int(str_idx)
+        meta = get_upload_meta(uid)
+        if meta and meta["user_id"] == str(current_user["_id"]):
+            remove_upload(uid)
+            _batch_items.append((global_idx, None, meta))
+        else:
+            _batch_items.append((global_idx, None, None))
+    _batch_items.sort(key=lambda x: x[0])
 
-    audio_service = AudioService()
-    task_repo = TaskRepository(db)
-
-    # 批次結果
+    # ── 逐檔呼叫 intake() ──
     batch_id = str(uuid.uuid4())
     results = []
     created_count = 0
     failed_count = 0
 
-    # 預扣 repository（每檔 atomic reserve）
-    from src.database.repositories.reservation_repo import ReservationRepository
-    reservation_repo = ReservationRepository(db)
-
-    # 建立統一的處理列表：(global_idx, upload_file_or_None, chunked_meta_or_None)
-    _batch_items = []
-    # 直接上傳的檔案
-    for i, uf in enumerate(files):
-        _batch_items.append((i, uf, None))
-    # 分片上傳的檔案
-    if chunked_uploads_map:
-        from .uploads import get_upload_meta, remove_upload
-        for str_idx, uid in chunked_uploads_map.items():
-            global_idx = int(str_idx)
-            meta = get_upload_meta(uid)
-            if meta and meta["user_id"] == str(current_user["_id"]):
-                remove_upload(uid)
-                _batch_items.append((global_idx, None, meta))
-            else:
-                _batch_items.append((global_idx, None, None))  # 無效，後續會報錯
-    # 按 global_idx 排序
-    _batch_items.sort(key=lambda x: x[0])
-
-    # 逐一處理每個檔案
     for idx, upload_file, chunked_meta in _batch_items:
         display_name = upload_file.filename if upload_file else (chunked_meta["filename"] if chunked_meta else "unknown")
-        file_result = {
-            "index": idx,
-            "filename": display_name,
-            "task_id": None,
-            "status": "pending",
-            "error": None,
-            "queue_position": None
-        }
-
+        file_result = {"index": idx, "filename": display_name, "task_id": None, "status": "pending", "error": None, "queue_position": None}
         temp_dir = None
-        task_id = None  # 預扣失敗時用來判斷是否需要釋放
+
         try:
             if chunked_meta is None and upload_file is None:
                 raise ValueError("upload_id 無效或尚未完成組裝")
 
             if chunked_meta:
-                # 分片上傳模式（uploads.py 已驗副檔名與 magic bytes）
                 temp_dir = chunked_meta["temp_dir"]
-                temp_audio = chunked_meta["assembled_path"]
+                file_path = chunked_meta["assembled_path"]
                 original_filename = chunked_meta["filename"]
             else:
-                # 直接上傳模式
                 validate_filename_extension(upload_file.filename)
                 temp_dir = get_temp_dir()
-                file_suffix = Path(upload_file.filename).suffix
-                temp_audio = temp_dir / f"input{file_suffix}"
-
+                suffix = Path(upload_file.filename).suffix
+                file_path = temp_dir / f"input{suffix}"
                 content = await upload_file.read()
-                with temp_audio.open("wb") as f:
+                with file_path.open("wb") as f:
                     f.write(content)
-                validate_magic_bytes(temp_audio)
+                validate_magic_bytes(file_path)
                 original_filename = upload_file.filename
 
-            # 獲取音檔資訊
-            try:
-                audio_duration_ms = audio_service.get_audio_duration(temp_audio)
-                audio_duration_seconds = audio_duration_ms / 1000.0
-                audio_size_mb = round(temp_audio.stat().st_size / 1024 / 1024, 2)
-            except Exception as e:
-                raise ValueError(f"無法讀取音檔資訊：{str(e)}")
-
-            # 生成任務 ID（須先於預扣，因為預扣會記錄 task_id）
-            task_id = str(uuid.uuid4())
-            current_time = get_utc_timestamp()
-
-            # 預扣轉錄配額（atomic check + reserve）
-            # 若不足會 raise 429，被外層 except 捕捉並把此檔標記為失敗，繼續處理後面的檔案
-            try:
-                await reservation_repo.reserve_transcription(
-                    user_id=str(current_user["_id"]),
-                    task_id=task_id,
-                    duration_minutes=audio_duration_seconds / 60,
-                )
-            except HTTPException as quota_error:
-                raise ValueError(quota_error.detail)
-
-            # 獲取單檔覆蓋設定
             override = file_overrides.get(str(idx), {})
             file_tags = override.get("tags", default_tags.copy())
             custom_name = override.get("customName", None)
 
-            # 創建任務資料
-            task_data = {
-                "_id": task_id,
-                "task_id": task_id,
-                "task_type": task_type,
-                "user": {
-                    "user_id": str(current_user["_id"]),
-                    "user_email": current_user["email"],
-                    "tier": full_user_data.get("quota", {}).get("tier", "free")
-                },
-                "file": {
-                    "filename": original_filename,
-                    "size_mb": audio_size_mb
-                },
-                "config": {
-                    "punct_provider": punct_provider,
-                    "chunk_audio": True,
-                    "chunk_minutes": 10,
-                    "diarize": diarize,
-                    "max_speakers": max_speakers,
-                    "language": language,
-                    "ui_language": ui_language,
-                },
-                "status": "pending",
-                "stats": {
-                    "audio_duration_seconds": audio_duration_seconds,
-                },
-                "tags": file_tags,
-                "keep_audio": False,
-                "speaker_names": {},
-                "subtitle_settings": {
-                    "density_threshold": 3.0,
-                },
-                "timestamps": {
-                    "created_at": current_time,
-                    "updated_at": current_time,
-                },
-                "batch_id": batch_id,  # 關聯批次 ID
-            }
-
-            # 如果有自訂名稱
-            if custom_name:
-                task_data["custom_name"] = custom_name
-
-            # 保存到資料庫
-            await task_repo.create(task_data)
-
-            # 委派給 Task dispatch seam（批次：chunking 強制開）
-            dispatch_result = await get_task_dispatch().submit(
-                job=TranscriptionJob(
-                    task_id=task_id,
-                    language=None if language == "auto" else language,
-                    use_chunking=True,
-                    use_punctuation=punct_provider != "none",
-                    punctuation_provider=punct_provider,
-                    use_diarization=diarize,
-                    max_speakers=max_speakers,
-                    ui_language=ui_language,
-                    handoff_ext=temp_audio.suffix.lstrip(".").lower(),
-                ),
-                audio_local_path=temp_audio,
-                temp_dir=temp_dir,
-                user_tier=full_user_data.get("quota", {}).get("tier", "free"),
-            )
-            temp_dir = None  # dispatch 後 temp_dir 歸 adapter 負責，避免 except 重複清理
-
-            file_result["task_id"] = task_id
-            file_result["status"] = dispatch_result.status
-            file_result["queue_position"] = dispatch_result.queue_position or 0
-            created_count += 1
-            log.info(
-                "task.batch.created",
-                index=idx + 1,
-                total=total_files,
+            result = await intake_service.intake(
+                user_id=str(current_user["_id"]),
+                user_email=current_user["email"],
+                file_path=file_path,
                 filename=original_filename,
-                task_id=task_id,
-                status=dispatch_result.status,
+                config=IntakeConfig(
+                    task_type=task_type,
+                    punct_provider=punct_provider,
+                    chunk_audio=True,
+                    chunk_minutes=10,
+                    diarize=diarize,
+                    max_speakers=max_speakers,
+                    language=language,
+                    ui_language=ui_language,
+                    tags=file_tags,
+                    custom_name=custom_name,
+                    batch_id=batch_id,
+                ),
+                temp_dir=temp_dir,
             )
 
+            file_result["task_id"] = result.task_id
+            file_result["status"] = result.status
+            file_result["queue_position"] = result.queue_position
+            created_count += 1
+            log.info("task.batch.created", index=idx + 1, total=total_files, filename=original_filename, task_id=result.task_id, status=result.status)
+
+        except HTTPException as e:
+            file_result["status"] = "failed"
+            file_result["error"] = e.detail
+            failed_count += 1
+            if temp_dir and temp_dir.exists():
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            log.error("task.batch.failed", index=idx + 1, total=total_files, filename=display_name, error=e.detail, exc_info=True)
         except Exception as e:
             file_result["status"] = "failed"
             file_result["error"] = str(e)
             failed_count += 1
-
-            # 清理臨時目錄
             if temp_dir and temp_dir.exists():
-                shutil.rmtree(temp_dir)
-
-            # 釋放可能已建立的預扣（idempotent，若無預扣則無動作）
-            if task_id:
-                try:
-                    await reservation_repo.release_by_task_id(task_id)
-                except Exception as release_err:
-                    log.warning("transcription.reservation.release_failed", task_id=task_id, error=str(release_err))
-
-            log.error(
-                "task.batch.failed",
-                index=idx + 1,
-                total=total_files,
-                filename=display_name,
-                error=str(e),
-                exc_info=True,
-            )
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            log.error("task.batch.failed", index=idx + 1, total=total_files, filename=display_name, error=str(e), exc_info=True)
 
         results.append(file_result)
 
-    # 記錄 audit log
+    # ── Audit log ──
     try:
         from ..utils.audit_logger import get_audit_logger
         audit_logger = get_audit_logger()
@@ -1743,22 +1223,9 @@ async def create_batch_transcriptions(
             task_id=batch_id,
             status_code=200,
             message=f"批次建立 {created_count} 個轉錄任務（失敗 {failed_count} 個）",
-            request_body={
-                "batch_id": batch_id,
-                "total": total_files,
-                "created": created_count,
-                "failed": failed_count,
-                "task_type": task_type,
-                "diarize": diarize,
-            }
+            request_body={"batch_id": batch_id, "total": total_files, "created": created_count, "failed": failed_count, "task_type": task_type, "diarize": diarize}
         )
     except Exception as e:
         log.warning("transcription.audit_log.failed", action="batch_create", error=str(e))
 
-    return {
-        "batch_id": batch_id,
-        "total": total_files,
-        "created": created_count,
-        "failed": failed_count,
-        "tasks": results
-    }
+    return {"batch_id": batch_id, "total": total_files, "created": created_count, "failed": failed_count, "tasks": results}
