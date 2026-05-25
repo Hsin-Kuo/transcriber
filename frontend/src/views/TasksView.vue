@@ -55,7 +55,7 @@ import { useI18n } from 'vue-i18n'
 import { usePullToRefresh } from '../composables/usePullToRefresh'
 
 // 新 API 服務層
-import { transcriptionService, taskService } from '../api/services.js'
+import { transcriptionService, taskService } from '../api/services'
 import { NEW_ENDPOINTS } from '../api/endpoints'
 
 // Composables

@@ -537,7 +537,7 @@ import KeyboardShortcutsInfo from '../components/transcript/KeyboardShortcutsInf
 import PlaybackSpeedControl from '../components/transcript/PlaybackSpeedControl.vue'
 
 // API 服務
-import { taskService, summaryService } from '../api/services.js'
+import { taskService, summaryService } from '../api/services'
 import api from '../utils/api'
 import { NEW_ENDPOINTS } from '../api/endpoints'
 

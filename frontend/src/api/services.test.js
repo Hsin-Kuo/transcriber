@@ -18,7 +18,7 @@ describe('services API base', () => {
   it('getEventsUrl 在 VITE_API_URL 未設時用後端絕對 URL(非相對路徑)', async () => {
     vi.stubGlobal('window', { location: { protocol: 'http:', hostname: 'example.test' } })
     vi.resetModules()
-    const { taskService } = await import('./services.js')
+    const { taskService } = await import('./services')
     expect(taskService.getEventsUrl('t1', 'tok')).toBe(
       'http://example.test:8000/tasks/t1/events?token=tok'
     )
@@ -27,7 +27,7 @@ describe('services API base', () => {
   it('getAudioUrl 同樣用後端絕對 URL', async () => {
     vi.stubGlobal('window', { location: { protocol: 'http:', hostname: 'example.test' } })
     vi.resetModules()
-    const { transcriptionService } = await import('./services.js')
+    const { transcriptionService } = await import('./services')
     expect(transcriptionService.getAudioUrl('t1', 'tok')).toMatch(
       /^http:\/\/example\.test:8000\//
     )

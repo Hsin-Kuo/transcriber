@@ -24,13 +24,17 @@
   - [x] T3-a：改寫為 `TaskStateStore` 類別，包含 get/set/delete/lock 方法
   - [x] T3-b：更新 `task_service.py`、`routers/tasks.py`、`main.py` 改用 `TaskStateStore` 注入
 
-- [~] **T4** — 拆分 `frontend/src/views/TranscriptDetailView.vue`
-  - **2026-05-17 進度**：M2 #5 + #2 + #1 三刀，3645 → 3397 行（−7%）
-  - 拆出 `ShareDialog.vue` 元件、`useDisplayPreferences` composable、`utils/searchMatching.ts`
-  - 原 T4-a/b（Canvas + Sidebar）的具體切分在重評後判定為 shallow extraction，不做
+- [x] **T4** — 拆分 `frontend/src/views/TranscriptDetailView.vue`（3645→1905 行，−48%）
+  - **2026-05-17**：M2 #5 + #2 + #1 三刀，3645 → 3397 行（−7%）
+  - **2026-05-25**：深化 composable 抽取，3397 → 1905 行（−41%）
   - [x] M2 #5：抽出 `components/transcript/ShareDialog.vue`
   - [x] M2 #2：抽出 `composables/transcript/useDisplayPreferences.js`
   - [x] M2 #1：抽出 `utils/searchMatching.ts`（純函數，無 Vue 依賴）
+  - [x] 抽出 `useTranscriptDownload.js`（下載 + 摘要格式化）
+  - [x] 抽出 `useEditingLifecycle.js`（編輯啟動/取消/儲存 + 滾動恢復）
+  - [x] 抽出 `useSubtitleAutosave.js`（講者 / 疏密度 debounced 自動存檔）
+  - [x] 抽出 `useContentEditableInput.js`（貼上 / IME / Enter / 快捷鍵）
+  - [x] 抽出 `usePageLifecycle.js`（載入 / 生命週期 / 路由守衛 / watchers）
 
 ## 🟡 中優先（技術債）
 
@@ -66,7 +70,7 @@
 - [x] **T10** — 前端 API 型別安全（由 LAUNCH_READINESS_PLAN M3 完成）
   - [x] T10-a：兩前端各加 ESLint 9 + TypeScript（allowJs 漸進）
   - [x] T10-a：轉 utils/api.ts（兩前端各一份）、utils/searchMatching.ts、api/endpoints.ts
-  - [ ] frontend/src/api/services.js 待後續（需設計 API response types）
+  - [x] frontend/src/api/services.js → services.ts（完整 API response types；2026-05-25）
 
 ---
 
@@ -77,7 +81,7 @@
 | T1 worker.py 拆分 | ✅ 完成 | 2026-04-30 |
 | T2 transcription_service 拆分 | 🟡 部分完成（M1.3 由協調者抽出） | 2026-05-17 |
 | T3 shared_state 封裝 | ✅ 完成 | 2026-04-30 |
-| T4 TranscriptDetailView 拆分 | 🟡 部分完成（M2 三刀） | 2026-05-17 |
+| T4 TranscriptDetailView 拆分 | ✅ 完成（3645→1905 行，−48%） | 2026-05-25 |
 | T5 測試補充 | ✅ 完成（165 後端 + 31 前端；T5-a~f 全 ✅） | 2026-05-22 |
 | T6 Magic number 集中 | ✅ 完成 | 2026-04-30 |
 | T7 Router DI 統一 | ✅ 完成（service provider 集中至 dependencies.py） | 2026-05-22 |
