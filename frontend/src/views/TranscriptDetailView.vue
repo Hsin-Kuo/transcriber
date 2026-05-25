@@ -544,23 +544,19 @@ import { NEW_ENDPOINTS } from '../api/endpoints'
 // Composables
 import { useDisplayPreferences } from '../composables/transcript/useDisplayPreferences'
 import { useTranscriptData } from '../composables/transcript/useTranscriptData'
-import { buildSearchRegex, findAllMatches } from '../utils/searchMatching'
 import { useAudioPlayer } from '../composables/transcript/useAudioPlayer'
 import { formatTime } from '../utils/formatTime'
 import { useSubtitleMode } from '../composables/transcript/useSubtitleMode'
 import { useTranscriptEditor } from '../composables/transcript/useTranscriptEditor'
 import { useSegmentMarkers } from '../composables/transcript/useSegmentMarkers'
 import {
-  applyAnchorRule,
-  buildCharIndexMap,
-  caretToCharOffset,
-  charOffsetToRange,
   extractText,
   useSegmentEditingOffsets,
 } from '../composables/transcript/useSegmentEditingOffsets'
 import { useKeyboardShortcuts } from '../composables/transcript/useKeyboardShortcuts'
 import { useSegmentNavigation } from '../composables/transcript/useSegmentNavigation'
 import { useTranscriptDownload } from '../composables/transcript/useTranscriptDownload'
+import { useSearchReplace } from '../composables/transcript/useSearchReplace'
 import { useTaskTags } from '../composables/task/useTaskTags'
 import { isModifierPressed } from '../utils/platform'
 import { useAuthStore } from '../stores/auth'
@@ -710,25 +706,15 @@ const copyableText = computed(() => {
     .join('\n\n')
 })
 
-// ========== 搜尋/取代功能 ==========
-const searchText = ref('')
-const replaceText = ref('')
-const searchMatches = ref([]) // 存放所有匹配的位置 { start, end }
-const currentMatchIndex = ref(0)
-const matchCase = ref(false)
-const matchWholeWord = ref(false)
-
 // 重新定義 hasUnsavedChanges，檢查實際的 DOM 內容
 const hasUnsavedChanges = computed(() => {
   if (!isEditing.value) return false
 
   if (displayMode.value === 'paragraph') {
-    // 段落模式：從 contenteditable div 提取實際內容並比較
     if (!textareaRef.value) return false
     const currentContent = extractText(textareaRef.value)
     return currentContent !== originalContent.value
   } else if (displayMode.value === 'subtitle') {
-    // 字幕模式：比較表格內容
     const currentContent = convertTableToPlainText(groupedSegments.value)
     return currentContent !== originalContent.value
   }
@@ -745,6 +731,39 @@ const {
 
 // 編輯期 segment offset 追蹤（純文字編輯模式下的 segment 對應）
 const segOffsets = useSegmentEditingOffsets()
+
+// ========== 搜尋/取代 ==========
+const {
+  searchText,
+  replaceText,
+  searchMatches,
+  currentMatchIndex,
+  matchCase,
+  matchWholeWord,
+  isReplacing,
+  contentVersion,
+  handleSearch,
+  goToPreviousMatch,
+  goToNextMatch,
+  handleReplaceCurrent,
+  handleReplaceAllNew,
+  getContentPartsWithHighlight,
+  splitTextWithHighlight,
+  clearHighlights,
+  reSearch,
+  reapplyHighlightsIfNeeded,
+  applySearchHighlightsWithCSS,
+} = useSearchReplace({
+  textareaRef,
+  currentTranscript,
+  displayMode,
+  isEditing,
+  segments,
+  groupedSegments,
+  segmentMarkers,
+  generateSegmentMarkers,
+  segOffsets,
+})
 
 // ========== Segment Navigation (Alt+Click seek, hover chip, highlight) ==========
 const {
@@ -778,23 +797,6 @@ const uniqueSpeakers = computed(() => {
     }
   })
   return Array.from(speakers).sort()
-})
-
-// 內容版本號（用於強制重新渲染 contenteditable）
-const contentVersion = ref(0)
-
-// 是否正在執行替換（用於暫時卸載 contenteditable 避免 Vue DOM 同步問題）
-const isReplacing = ref(false)
-
-// isReplacing 由 true → false 時,代表搜尋取代完成、editing div 剛重新掛載,需要重新初始化 segOffsets
-watch(isReplacing, (newVal, oldVal) => {
-  if (oldVal === true && newVal === false && isEditing.value && displayMode.value === 'paragraph') {
-    nextTick(() => {
-      if (textareaRef.value) {
-        segOffsets.initEditing(textareaRef.value, segmentMarkers.value)
-      }
-    })
-  }
 })
 
 // 保存編輯前的 segments 狀態（用於取消編輯時恢復）
@@ -988,21 +990,12 @@ function handleStartEditing() {
     scrollRestoreTimers.push(timerId)
   }
 
-  // 如果有搜尋結果，應用 CSS 高亮
-  if (displayMode.value === 'paragraph' && searchMatches.value.length > 0) {
-    nextTick(() => {
-      applySearchHighlightsWithCSS()
-    })
-  }
+  reapplyHighlightsIfNeeded()
 }
 
 // 取消編輯的包裝函數（保存滾動位置）
 function handleCancelEditing() {
-  // 清除 CSS 高亮
-  if (CSS.highlights) {
-    CSS.highlights.delete('search-highlight')
-    CSS.highlights.delete('search-highlight-current')
-  }
+  clearHighlights()
 
   // 保存滾動位置（段落模式）
   let savedScrollTop = 0
@@ -1039,21 +1032,12 @@ function handleCancelEditing() {
     scrollRestoreTimers.push(timerId)
   }
 
-  // 如果有搜尋內容，重新搜尋以更新匹配位置
-  if (searchText.value) {
-    nextTick(() => {
-      handleSearch(searchText.value)
-    })
-  }
+  reSearch()
 }
 
 // 儲存編輯的包裝函數
 async function saveEditing() {
-  // 清除 CSS 高亮
-  if (CSS.highlights) {
-    CSS.highlights.delete('search-highlight')
-    CSS.highlights.delete('search-highlight-current')
-  }
+  clearHighlights()
 
   let contentToSave = ''
   let segmentsToSave = null
@@ -1136,12 +1120,7 @@ async function saveEditing() {
       scrollRestoreTimers.push(timerId)
     }
 
-    // 如果有搜尋內容，重新搜尋以更新匹配位置
-    if (searchText.value) {
-      nextTick(() => {
-        handleSearch(searchText.value)
-      })
-    }
+    reSearch()
   }
 }
 
@@ -1383,653 +1362,7 @@ function handleShare() {
   showShareDialog.value = true
 }
 
-// ========== 搜尋功能處理 ==========
-
-// 執行搜尋
-function handleSearch(text) {
-  const wasSearching = searchText.value && searchMatches.value.length > 0
-  searchText.value = text
-
-  if (!text) {
-    // 清除 CSS 高亮
-    if (CSS.highlights) {
-      CSS.highlights.delete('search-highlight')
-      CSS.highlights.delete('search-highlight-current')
-    }
-
-    // 在編輯模式下，只清除狀態而不觸發 Vue 重新渲染
-    // 使用 nextTick 確保狀態更新後再清空 matches，避免 DOM 衝突
-    if (isEditing.value && wasSearching) {
-      nextTick(() => {
-        searchMatches.value = []
-        currentMatchIndex.value = 0
-      })
-    } else {
-      searchMatches.value = []
-      currentMatchIndex.value = 0
-    }
-    return
-  }
-
-  const content = getSearchableContent()
-  const regex = buildSearchRegex(text, {
-    matchCase: matchCase.value,
-    matchWholeWord: matchWholeWord.value,
-  })
-  const matches = findAllMatches(content, regex)
-
-  searchMatches.value = matches
-  currentMatchIndex.value = matches.length > 0 ? 0 : 0
-
-  // 編輯模式下使用 CSS Custom Highlight API
-  if (isEditing.value && displayMode.value === 'paragraph') {
-    nextTick(() => {
-      applySearchHighlightsWithCSS()
-    })
-  }
-
-  // 滾動到第一個匹配項
-  if (matches.length > 0) {
-    scrollToMatch(0)
-  }
-}
-
-// 取得可搜尋的內容
-function getSearchableContent() {
-  if (displayMode.value === 'paragraph') {
-    if (textareaRef.value) {
-      return extractText(textareaRef.value)
-    }
-    return currentTranscript.value.content || ''
-  } else if (displayMode.value === 'subtitle') {
-    // 字幕模式：合併所有 segment 文字
-    let content = ''
-    groupedSegments.value.forEach(group => {
-      group.segments.forEach(segment => {
-        content += segment.text + '\n'
-      })
-    })
-    return content
-  }
-  return ''
-}
-
-// 使用 CSS Custom Highlight API 應用搜尋高亮（編輯模式專用）
-function applySearchHighlightsWithCSS() {
-  if (!CSS.highlights) return
-
-  CSS.highlights.delete('search-highlight')
-  CSS.highlights.delete('search-highlight-current')
-
-  if (!textareaRef.value || searchMatches.value.length === 0) return
-
-  const map = buildCharIndexMap(textareaRef.value)
-  const ranges = []
-  const currentRanges = []
-
-  searchMatches.value.forEach((match, matchIndex) => {
-    const range = charOffsetToRange(map, match.start, match.end)
-    if (!range) return
-    if (matchIndex === currentMatchIndex.value) {
-      currentRanges.push(range)
-    } else {
-      ranges.push(range)
-    }
-  })
-
-  if (ranges.length > 0) {
-    CSS.highlights.set('search-highlight', new Highlight(...ranges))
-  }
-  if (currentRanges.length > 0) {
-    CSS.highlights.set('search-highlight-current', new Highlight(...currentRanges))
-  }
-}
-
 const hoverChipRef = ref(null)
-
-
-// 跳到上一個匹配項
-function goToPreviousMatch() {
-  if (searchMatches.value.length === 0) return
-  currentMatchIndex.value = (currentMatchIndex.value - 1 + searchMatches.value.length) % searchMatches.value.length
-  // 編輯模式下更新 CSS 高亮
-  if (isEditing.value && displayMode.value === 'paragraph') {
-    applySearchHighlightsWithCSS()
-  }
-  scrollToMatch(currentMatchIndex.value)
-}
-
-// 跳到下一個匹配項
-function goToNextMatch() {
-  if (searchMatches.value.length === 0) return
-  currentMatchIndex.value = (currentMatchIndex.value + 1) % searchMatches.value.length
-  // 編輯模式下更新 CSS 高亮
-  if (isEditing.value && displayMode.value === 'paragraph') {
-    applySearchHighlightsWithCSS()
-  }
-  scrollToMatch(currentMatchIndex.value)
-}
-
-// 滾動到指定的匹配項
-function scrollToMatch(index) {
-  if (displayMode.value === 'paragraph') {
-    nextTick(() => {
-      // 編輯模式下使用 CSS Custom Highlight API，需要手動計算滾動位置
-      if (isEditing.value && textareaRef.value && searchMatches.value[index]) {
-        const match = searchMatches.value[index]
-        const range = findRangeForMatch(match)
-        if (range) {
-          const rect = range.getBoundingClientRect()
-          const containerRect = textareaRef.value.getBoundingClientRect()
-          const scrollTop = textareaRef.value.scrollTop + rect.top - containerRect.top - containerRect.height / 2
-          textareaRef.value.scrollTo({ top: scrollTop, behavior: 'smooth' })
-        }
-      } else {
-        // 非編輯模式：使用 DOM 元素
-        const highlightedElements = document.querySelectorAll('.search-highlight')
-        if (highlightedElements[index]) {
-          highlightedElements[index].scrollIntoView({ behavior: 'smooth', block: 'center' })
-        }
-      }
-    })
-  } else if (displayMode.value === 'subtitle') {
-    // 字幕模式：找到對應的行並滾動
-    nextTick(() => {
-      const highlightedElements = document.querySelectorAll('.search-highlight')
-      if (highlightedElements[index]) {
-        highlightedElements[index].scrollIntoView({ behavior: 'smooth', block: 'center' })
-      }
-    })
-  }
-}
-
-// 找到匹配項對應的 Range（用於編輯模式下的滾動）
-function findRangeForMatch(match) {
-  if (!textareaRef.value) return null
-
-  const textNodes = []
-  let charIndex = 0
-  let lastCharWasNewline = false
-
-  function collectTextNodes(node) {
-    if (node.classList && (node.classList.contains('segment-marker') || node.classList.contains('text-timecode-tooltip'))) {
-      return
-    }
-    if (node.nodeType === Node.TEXT_NODE) {
-      const text = node.textContent || ''
-      if (text.length > 0) {
-        const cleanText = text.replace(/\u200B/g, '')
-        if (cleanText.length > 0) {
-          textNodes.push({ node, start: charIndex, end: charIndex + cleanText.length })
-          charIndex += cleanText.length
-          lastCharWasNewline = cleanText.endsWith('\n')
-        }
-      }
-    } else if (node.nodeType === Node.ELEMENT_NODE) {
-      if (node.nodeName === 'BR') {
-        charIndex += 1
-        lastCharWasNewline = true
-        return
-      }
-      // 處理 DIV - 在前面添加換行
-      if (node.nodeName === 'DIV' && charIndex > 0 && !lastCharWasNewline) {
-        charIndex += 1
-        lastCharWasNewline = true
-      }
-      for (const child of node.childNodes) {
-        collectTextNodes(child)
-      }
-      // 處理 DIV - 在後面添加換行
-      if (node.nodeName === 'DIV' && node.childNodes.length > 0) {
-        const hasOnlyBr = node.childNodes.length === 1 && node.childNodes[0].nodeName === 'BR'
-        if (!hasOnlyBr && !lastCharWasNewline) {
-          charIndex += 1
-          lastCharWasNewline = true
-        }
-      }
-    }
-  }
-
-  for (const child of textareaRef.value.childNodes) {
-    collectTextNodes(child)
-  }
-
-  // 找到匹配開始位置對應的文字節點
-  for (const textNode of textNodes) {
-    if (match.start >= textNode.start && match.start < textNode.end) {
-      try {
-        const range = new Range()
-        const startOffset = match.start - textNode.start
-        const endOffset = Math.min(textNode.node.textContent.length, match.end - textNode.start)
-        range.setStart(textNode.node, startOffset)
-        range.setEnd(textNode.node, endOffset)
-        return range
-      } catch (e) {
-        return null
-      }
-    }
-  }
-  return null
-}
-
-// 取代當前匹配項
-function handleReplaceCurrent(newReplaceText) {
-  if (!isEditing.value || searchMatches.value.length === 0) return
-
-  replaceText.value = newReplaceText
-  const match = searchMatches.value[currentMatchIndex.value]
-
-  if (displayMode.value === 'paragraph') {
-    // 段落模式
-    let content = currentTranscript.value.content || ''
-    if (textareaRef.value) {
-      content = extractText(textareaRef.value)
-    }
-
-    // 取代當前匹配
-    const before = content.substring(0, match.start)
-    const after = content.substring(match.end)
-    const replacedContent = before + newReplaceText + after
-
-    // 用 A+ 錨點規則同步更新 segments.value 的文字,
-    // 這樣後續 generateSegmentMarkers 才能在新內容裡比對到被取代的那段。
-    // 用 editSegmentRanges(即時狀態)而非 segmentMarkers(編輯開始時的快照),
-    // 否則「先打字、再取代」會以舊位置算偏移,造成段邊緣的編輯字消失。
-    const from = match.start
-    const to = match.end
-    const newLen = newReplaceText.length
-    segments.value = segments.value.map((seg, idx) => {
-      const range = segOffsets.editSegmentRanges.value.find(
-        (r) => r.segmentIndex === idx
-      )
-      if (!range) return seg
-      const adjusted = applyAnchorRule(
-        range.charStart,
-        range.charEnd,
-        from,
-        to,
-        newLen
-      )
-      if (!adjusted || adjusted.charEnd <= adjusted.charStart) {
-        // Match fully covers this segment — assign replacement text so the segment
-        // stays findable in the new content and doesn't get persisted as "".
-        return { ...seg, text: newReplaceText }
-      }
-      return { ...seg, text: replacedContent.slice(adjusted.charStart, adjusted.charEnd) }
-    })
-
-    // 更新內容
-    updateContentAfterReplace(replacedContent)
-
-    // 重新搜尋並跳到下一個（如果有）
-    // 需要等待 updateContentAfterReplace 的多層 nextTick 完成後再應用高亮
-    const previousIndex = currentMatchIndex.value
-    nextTick(() => {
-      nextTick(() => {
-        nextTick(() => {
-          handleSearch(searchText.value)
-          // 取代後自動跳到下一個匹配項（保持在同一位置，因為前面的已被取代）
-          if (searchMatches.value.length > 0) {
-            const nextIndex = Math.min(previousIndex, searchMatches.value.length - 1)
-            currentMatchIndex.value = nextIndex
-            if (isEditing.value && displayMode.value === 'paragraph') {
-              applySearchHighlightsWithCSS()
-            }
-            scrollToMatch(nextIndex)
-          }
-        })
-      })
-    })
-  } else if (displayMode.value === 'subtitle') {
-    // 字幕模式：找到匹配項並取代
-    let charCount = 0
-    let found = false
-
-    for (const group of groupedSegments.value) {
-      if (found) break
-      for (const segment of group.segments) {
-        const segmentEnd = charCount + segment.text.length + 1 // +1 for newline
-        if (match.start >= charCount && match.start < segmentEnd) {
-          // 找到了對應的 segment
-          const localStart = match.start - charCount
-          const localEnd = match.end - charCount
-          segment.text = segment.text.substring(0, localStart) + newReplaceText + segment.text.substring(localEnd)
-          found = true
-          break
-        }
-        charCount = segmentEnd
-      }
-    }
-
-    // 重新搜尋並跳到下一個（如果有）
-    const previousIndex = currentMatchIndex.value
-    nextTick(() => {
-      handleSearch(searchText.value)
-      // 取代後自動跳到下一個匹配項
-      if (searchMatches.value.length > 0) {
-        const nextIndex = Math.min(previousIndex, searchMatches.value.length - 1)
-        currentMatchIndex.value = nextIndex
-        scrollToMatch(nextIndex)
-      }
-    })
-  }
-}
-
-// 全部取代（新版）
-function handleReplaceAllNew(newReplaceText) {
-  if (!isEditing.value || searchMatches.value.length === 0) return
-
-  replaceText.value = newReplaceText
-  const searchPattern = searchText.value
-
-  // 確認對話框
-  const confirmMessage = $t('searchReplace.confirmReplaceAll', {
-    count: searchMatches.value.length,
-    search: searchPattern,
-    replace: newReplaceText
-  })
-  if (!confirm(confirmMessage)) {
-    return
-  }
-
-  if (displayMode.value === 'paragraph') {
-    // 段落模式
-    let content = currentTranscript.value.content || ''
-    if (textareaRef.value) {
-      content = extractText(textareaRef.value)
-    }
-
-    const regex = buildSearchRegex(searchPattern, {
-      matchCase: matchCase.value,
-      matchWholeWord: matchWholeWord.value,
-    })
-    const replacedContent = content.replace(regex, newReplaceText)
-
-    // 用 editSegmentRanges 切出當下打字後的每段文字,套 regex 後寫回 segments.value。
-    // 用即時 slice 而非 segments.value 的舊文字,可保留段邊緣已被吸收的打字。
-    segments.value = segments.value.map((seg, idx) => {
-      const range = segOffsets.editSegmentRanges.value.find(
-        (r) => r.segmentIndex === idx
-      )
-      if (!range) return seg
-      const currentText = content.slice(range.charStart, range.charEnd)
-      return { ...seg, text: currentText.replace(regex, newReplaceText) }
-    })
-
-    // 更新內容
-    updateContentAfterReplace(replacedContent)
-
-    // 清空搜尋結果
-    searchMatches.value = []
-    currentMatchIndex.value = 0
-  } else if (displayMode.value === 'subtitle') {
-    // 字幕模式
-    const regex = buildSearchRegex(searchPattern, {
-      matchCase: matchCase.value,
-      matchWholeWord: matchWholeWord.value,
-    })
-
-    groupedSegments.value.forEach(group => {
-      group.segments.forEach(segment => {
-        segment.text = segment.text.replace(regex, newReplaceText)
-      })
-    })
-
-    // 清空搜尋結果
-    searchMatches.value = []
-    currentMatchIndex.value = 0
-  }
-}
-
-// 更新內容（取代後）
-// segments.value 由呼叫者預先用 editSegmentRanges 算出正確的新文字後再呼叫此函式
-function updateContentAfterReplace(replacedContent) {
-  // 保存滾動位置
-  let savedScrollTop = 0
-  if (textareaRef.value) {
-    savedScrollTop = textareaRef.value.scrollTop
-  }
-
-  // 設置替換狀態
-  isReplacing.value = true
-
-  // 清空標記
-  segmentMarkers.value = []
-
-  // 更新內容
-  currentTranscript.value.content = replacedContent
-
-  // 增加版本號
-  contentVersion.value++
-
-  // 重新生成標記
-  // segments.value 由呼叫者(handleReplaceCurrent / handleReplaceAllNew)在進到這裡之前
-  // 已用 editSegmentRanges 即時 slice 算過正確的新文字,這裡只需用當下 segments.value 重產 marker
-  if (segments.value && currentTranscript.value.content) {
-    generateSegmentMarkers(segments.value, currentTranscript.value.content)
-  }
-
-  // 使用 setTimeout 給 Vue 足夠時間完成 DOM 清理，避免 insertBefore 錯誤
-  const timerId = setTimeout(() => {
-    if (!isMounted) return
-    isReplacing.value = false
-
-    nextTick(() => {
-      if (!isMounted) return
-      if (savedScrollTop > 0 && textareaRef.value) {
-        textareaRef.value.scrollTop = savedScrollTop
-      }
-    })
-  }, 50)
-  scrollRestoreTimers.push(timerId)
-}
-
-// 將文字內容分割成帶有標記的片段
-function getContentParts() {
-  const content = currentTranscript.value.content || ''
-
-  // 如果沒有 segment 資料,返回純文字
-  if (!segmentMarkers.value || segmentMarkers.value.length === 0) {
-    return [{ text: content, isMarker: false }]
-  }
-
-  const parts = []
-  let lastIndex = 0
-
-  // 按照文字索引排序標記
-  const sortedMarkers = [...segmentMarkers.value].sort((a, b) => a.textStartIndex - b.textStartIndex)
-
-  sortedMarkers.forEach(marker => {
-    // 添加標記之前的文字
-    if (marker.textStartIndex > lastIndex) {
-      parts.push({
-        text: content.substring(lastIndex, marker.textStartIndex),
-        isMarker: false
-      })
-    }
-
-    // 添加帶標記的文字
-    // isMarker: true 表示這是一個 segment,不論是否顯示標記
-    parts.push({
-      text: marker.text,
-      isMarker: true,
-      start: marker.start,
-      end: marker.end,
-      segmentIndex: marker.segmentIndex  // 加入 segment index
-    })
-
-    lastIndex = marker.textEndIndex
-  })
-
-  // 添加最後剩餘的文字
-  if (lastIndex < content.length) {
-    parts.push({
-      text: content.substring(lastIndex),
-      isMarker: false
-    })
-  }
-
-  return parts
-}
-
-// 將文字內容分割成帶有標記和搜尋高亮的片段
-function getContentPartsWithHighlight() {
-  const parts = getContentParts()
-
-  // 在編輯模式下不渲染搜尋高亮，避免 Vue 更新 contenteditable 導致內容丟失
-  // 如果沒有搜尋文字，直接返回原始 parts
-  if (isEditing.value || !searchText.value || searchMatches.value.length === 0) {
-    return parts
-  }
-
-  // 需要將非標記的純文字部分進一步分割為包含搜尋高亮的片段
-  const result = []
-  let globalCharIndex = 0
-
-  for (const part of parts) {
-    if (!part.isMarker) {
-      // 純文字部分：分割搜尋高亮
-      const subParts = splitTextWithHighlightByPosition(part.text, globalCharIndex)
-      result.push(...subParts)
-      globalCharIndex += part.text.length
-    } else {
-      // 標記部分：保留原樣，但內部文字會在模板中用 splitTextWithHighlight 處理
-      result.push(part)
-      globalCharIndex += part.text.length
-    }
-  }
-
-  return result
-}
-
-// 根據全局位置分割文字並添加搜尋高亮
-function splitTextWithHighlightByPosition(text, startPosition) {
-  if (!searchText.value || searchMatches.value.length === 0) {
-    return [{ text, isMarker: false, isHighlight: false }]
-  }
-
-  const endPosition = startPosition + text.length
-  const parts = []
-  let lastIndex = 0
-
-  // 找出所有在這段文字範圍內的匹配
-  const relevantMatches = searchMatches.value
-    .map((match, idx) => ({ ...match, matchIndex: idx }))
-    .filter(match => match.start < endPosition && match.end > startPosition)
-
-  for (const match of relevantMatches) {
-    // 計算在當前文字中的相對位置
-    const localStart = Math.max(0, match.start - startPosition)
-    const localEnd = Math.min(text.length, match.end - startPosition)
-
-    // 添加匹配之前的普通文字
-    if (localStart > lastIndex) {
-      parts.push({
-        text: text.substring(lastIndex, localStart),
-        isMarker: false,
-        isHighlight: false
-      })
-    }
-
-    // 添加高亮文字
-    parts.push({
-      text: text.substring(localStart, localEnd),
-      isMarker: false,
-      isHighlight: true,
-      isCurrent: match.matchIndex === currentMatchIndex.value
-    })
-
-    lastIndex = localEnd
-  }
-
-  // 添加剩餘的普通文字
-  if (lastIndex < text.length) {
-    parts.push({
-      text: text.substring(lastIndex),
-      isMarker: false,
-      isHighlight: false
-    })
-  }
-
-  // 如果沒有任何分割，返回原始文字
-  if (parts.length === 0) {
-    return [{ text, isMarker: false, isHighlight: false }]
-  }
-
-  return parts
-}
-
-// 分割文字並添加搜尋高亮（用於標記內的文字）
-function splitTextWithHighlight(text, segmentIndex) {
-  if (!searchText.value || !text) {
-    return [{ text, isHighlight: false }]
-  }
-
-  const parts = []
-  let lastIndex = 0
-
-  const regex = buildSearchRegex(searchText.value, {
-    matchCase: matchCase.value,
-    matchWholeWord: matchWholeWord.value,
-  })
-  if (!regex) return [{ text, isHighlight: false }]
-
-  try {
-    let match
-
-    // 計算這個 segment 的全局起始位置
-    let globalOffset = 0
-    const sortedMarkers = [...segmentMarkers.value].sort((a, b) => a.textStartIndex - b.textStartIndex)
-    const marker = sortedMarkers.find(m => m.segmentIndex === segmentIndex)
-    if (marker) {
-      globalOffset = marker.textStartIndex
-    }
-
-    while ((match = regex.exec(text)) !== null) {
-      // 添加匹配之前的普通文字
-      if (match.index > lastIndex) {
-        parts.push({
-          text: text.substring(lastIndex, match.index),
-          isHighlight: false
-        })
-      }
-
-      // 判斷是否是當前選中的匹配項
-      const globalMatchStart = globalOffset + match.index
-      const isCurrent = searchMatches.value.some((m, idx) =>
-        m.start === globalMatchStart && idx === currentMatchIndex.value
-      )
-
-      // 添加高亮文字
-      parts.push({
-        text: match[0],
-        isHighlight: true,
-        isCurrent
-      })
-
-      lastIndex = match.index + match[0].length
-    }
-  } catch (e) {
-    // 無效的正則表達式，返回原始文字
-    return [{ text, isHighlight: false }]
-  }
-
-  // 添加剩餘的普通文字
-  if (lastIndex < text.length) {
-    parts.push({
-      text: text.substring(lastIndex),
-      isHighlight: false
-    })
-  }
-
-  // 如果沒有任何分割，返回原始文字
-  if (parts.length === 0) {
-    return [{ text, isHighlight: false }]
-  }
-
-  return parts
-}
-
 
 // 處理貼上事件，只允許純文字
 function handlePaste(e) {
@@ -2238,10 +1571,7 @@ onUnmounted(() => {
   isMounted = false
 
   // segment-highlight cleanup: managed by useSegmentNavigation() onUnmounted
-  if (window.CSS && CSS.highlights) {
-    CSS.highlights.delete('search-highlight')
-    CSS.highlights.delete('search-highlight-current')
-  }
+  clearHighlights()
 
   // 清除講者名稱自動儲存計時器
   if (speakerNamesSaveTimer) {

@@ -32,7 +32,8 @@ src/                  # 後端 (FastAPI)
     admin.py          # 管理後台 API（prefix=/api/admin）
   services/           # 業務邏輯
     intake_service.py           # TranscriptionIntakeService（音檔→配額→task→dispatch 完整 workflow）
-    task_service.py             # 任務狀態管理
+    task_service.py             # 任務狀態管理 + soft_delete_full workflow
+    task_query_helpers.py       # 任務列表 enrichment / filter / audio expiration 純函數
     task_dispatch.py            # Task dispatch seam（LocalDispatch adapter）
     worker_dispatch.py          # AWS 模式下把 task 派發給 Worker（S3+HMAC+SQS）
     progress_store.py           # transient progress state（task_progress collection）

@@ -6,6 +6,7 @@ TaskService - 任務狀態管理服務
 - 權限驗證
 - 取消任務邏輯
 - 清理任務記憶體
+- 完整刪除 workflow（soft-delete + 關聯文件/文檔清理）
 """
 
 from typing import Dict, Any, Optional, List
@@ -150,6 +151,84 @@ class TaskService:
         # 從資料庫刪除
         success = await self.task_repo.delete(task_id)
         return success
+
+    async def soft_delete_full(self, task: Dict[str, Any], task_id: str) -> List[str]:
+        """完整軟刪除：物理刪除檔案/關聯文檔 + DB 標記 deleted。
+
+        這是 delete_task route 和 batch_delete_tasks 的共用邏輯。
+        呼叫者須先做權限驗證和前置檢查（status、已刪除等）。
+
+        Returns:
+            被刪除的檔案名稱列表
+        """
+        from src.database.repositories.transcription_repo import TranscriptionRepository
+        from src.database.repositories.segment_repo import SegmentRepository
+        from src.utils.storage_service import is_aws, delete_audio_by_path as storage_delete_audio_by_path
+        from .task_query_helpers import get_task_field
+
+        deleted_files = []
+
+        # 物理刪除結果檔案（僅本地模式）
+        if not is_aws():
+            allowed_output_dir = Path("output").resolve()
+
+            result_file_path = get_task_field(task, "result_file")
+            if result_file_path:
+                try:
+                    resolved = Path(result_file_path).resolve()
+                    resolved.relative_to(allowed_output_dir)
+                    if resolved.exists():
+                        resolved.unlink()
+                        deleted_files.append(resolved.name)
+                except (ValueError, Exception) as e:
+                    log.warning("task.delete.result_file_failed", task_id=task_id, error=str(e))
+
+            segments_file_path = get_task_field(task, "segments_file")
+            if segments_file_path:
+                try:
+                    resolved = Path(segments_file_path).resolve()
+                    resolved.relative_to(allowed_output_dir)
+                    if resolved.exists():
+                        resolved.unlink()
+                        deleted_files.append(resolved.name)
+                except (ValueError, Exception) as e:
+                    log.warning("task.delete.segments_file_failed", task_id=task_id, error=str(e))
+
+        # 物理刪除音檔
+        try:
+            audio_file_path = task.get("result", {}).get("audio_file")
+            if audio_file_path:
+                storage_delete_audio_by_path(audio_file_path)
+            deleted_files.append(f"{task_id}.mp3")
+        except Exception as e:
+            log.warning("task.delete.audio_failed", task_id=task_id, error=str(e))
+
+        # 清理記憶體
+        self.cleanup_task_memory(task_id)
+
+        # 刪除 transcription 文檔
+        db = self.task_repo.db
+        transcription_repo = TranscriptionRepository(db)
+        try:
+            await transcription_repo.delete(task_id)
+        except Exception as e:
+            log.warning("task.delete.transcription_doc_failed", task_id=task_id, error=str(e))
+
+        # 刪除 segment 文檔
+        segment_repo = SegmentRepository(db)
+        try:
+            await segment_repo.delete(task_id)
+        except Exception as e:
+            log.warning("task.delete.segment_doc_failed", task_id=task_id, error=str(e))
+
+        # 軟刪除 task
+        await self.task_repo.update(task_id, {
+            "deleted": True,
+            "deleted_at": datetime.utcnow()
+        })
+
+        log.info("task.deleted", task_id=task_id)
+        return deleted_files
 
     def cleanup_task_memory(self, task_id: str) -> None:
         """清理任務的執行期資源（progress snapshot、取消標記、臨時目錄、diarization 進程）"""

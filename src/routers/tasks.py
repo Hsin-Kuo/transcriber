@@ -2,18 +2,23 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Request
 from fastapi.responses import StreamingResponse
 from typing import Dict, Any
-from pathlib import Path
 from datetime import datetime, timezone
 import asyncio
 import json
 import os
 
 from ..auth.dependencies import get_current_user, get_current_user_sse
-from ..database.mongodb import get_database
 from ..database.repositories.task_repo import TaskRepository
-from ..database.repositories.tag_repo import TagRepository
 from ..services.task_service import TaskService
 from ..services.tag_service import TagService
+from ..services.task_query_helpers import (
+    enrich_task_data,
+    filter_task_for_list,
+    get_task_field,
+    is_audio_expired,
+    serialize_for_json,
+    get_user_retention_days,
+)
 from ..dependencies import get_task_service, get_tag_service
 from ..services.utils.async_utils import get_current_time
 from ..utils.storage_service import is_aws, delete_audio_by_path as storage_delete_audio_by_path, move_audio, extract_tier_from_path
@@ -29,34 +34,6 @@ except ImportError:
 router = APIRouter(prefix="/tasks", tags=["Tasks"])
 log = get_logger(__name__)
 
-
-# 允許刪除的目錄白名單（相對於工作目錄的絕對路徑）
-_ALLOWED_OUTPUT_DIR = Path("output").resolve()
-_ALLOWED_UPLOADS_DIR = Path("uploads").resolve()
-
-
-def _validate_file_path(file_path: str, allowed_dir: Path) -> Path:
-    """驗證檔案路徑在允許的目錄內，防止路徑穿越攻擊
-
-    Args:
-        file_path: 要驗證的檔案路徑
-        allowed_dir: 允許的目錄（絕對路徑）
-
-    Returns:
-        驗證通過的 Path 物件
-
-    Raises:
-        ValueError: 路徑不在允許的目錄內
-    """
-    resolved = Path(file_path).resolve()
-
-    # 檢查是否在允許的目錄下
-    try:
-        resolved.relative_to(allowed_dir)
-    except ValueError:
-        raise ValueError(f"路徑不在允許的目錄內: {file_path}")
-
-    return resolved
 
 
 @router.get("/recent")
@@ -160,14 +137,7 @@ async def get_tasks(
     Returns:
         任務列表
     """
-    # 取得用戶 tier 的音檔保留天數（JWT 不含 quota，需查 DB）
-    from ..models.quota import QUOTA_TIERS, QuotaTier
-    from ..database.repositories.user_repo import UserRepository
-    user_repo = UserRepository(task_service.task_repo.db)
-    full_user = await user_repo.get_by_id(str(current_user["_id"]))
-    user_tier = full_user.get("quota", {}).get("tier", "free") if full_user else "free"
-    tier_config = QUOTA_TIERS.get(QuotaTier(user_tier), QUOTA_TIERS[QuotaTier.FREE])
-    retention_days = tier_config.get("audio_retention_days", 7)
+    retention_days = await get_user_retention_days(task_service.task_repo.db, str(current_user["_id"]))
 
     # 解析標籤參數
     tags_list = None
@@ -262,65 +232,6 @@ async def get_tasks(
         }
 
 
-def get_task_field(task: Dict[str, Any], field: str) -> Any:
-    """安全獲取任務欄位（支援巢狀與扁平格式）
-
-    Args:
-        task: 任務資料
-        field: 欄位名稱（扁平格式，如 'result_file', 'user_id'）
-
-    Returns:
-        欄位值，如果不存在則返回 None
-    """
-    # 欄位映射：扁平名稱 -> 巢狀路徑
-    FIELD_PATHS = {
-        # user 相關
-        "user_id": ("user", "user_id"),
-        "user_email": ("user", "user_email"),
-
-        # file 相關
-        "filename": ("file", "filename"),
-        "file_size_mb": ("file", "size_mb"),
-
-        # config 相關
-        "punct_provider": ("config", "punct_provider"),
-        "chunk_audio": ("config", "chunk_audio"),
-        "diarize": ("config", "diarize"),
-        "language": ("config", "language"),
-
-        # result 相關
-        "result_file": ("result", "transcription_file"),
-        "result_filename": ("result", "transcription_filename"),
-        "audio_file": ("result", "audio_file"),
-        "audio_filename": ("result", "audio_filename"),
-        "segments_file": ("result", "segments_file"),
-        "text_length": ("result", "text_length"),
-
-        # stats 相關
-        "duration_seconds": ("stats", "duration_seconds"),
-
-        # timestamps 相關
-        "created_at": ("timestamps", "created_at"),
-        "updated_at": ("timestamps", "updated_at"),
-        "completed_at": ("timestamps", "completed_at"),
-    }
-
-    # 如果是頂層欄位（status, progress, tags, keep_audio, custom_name 等）
-    if field not in FIELD_PATHS:
-        return task.get(field)
-
-    # 嘗試從巢狀路徑獲取
-    nested_path = FIELD_PATHS[field]
-    value = task
-    for key in nested_path:
-        if isinstance(value, dict) and key in value:
-            value = value[key]
-        else:
-            return None
-
-    return value
-
-
 async def _clear_expired_audio_in_db(task_repo: TaskRepository, task_id: str) -> None:
     """S3 Lifecycle 已刪除音檔後，同步清除 MongoDB 裡的路徑，
     讓 has_audio=true 篩選在後續查詢中能正確排除這些任務。"""
@@ -328,211 +239,6 @@ async def _clear_expired_audio_in_db(task_repo: TaskRepository, task_id: str) ->
         "result.audio_file": None,
         "result.audio_filename": None
     })
-
-
-def _is_audio_expired(task: Dict[str, Any], retention_days: int) -> bool:
-    """判斷音檔是否已被 S3 Lifecycle 自動刪除
-
-    根據完成時間 + tier 保留天數計算，不需要呼叫 S3。
-    keep_audio 的音檔存在 kept/ 資料夾，不受 lifecycle 影響。
-
-    retention_days 作為 fallback；優先從音檔路徑推導原始 tier 的天數，
-    避免用戶升降方案後計算錯誤。
-
-    Args:
-        task: 任務數據
-        retention_days: 該 tier 的保留天數（fallback）
-
-    Returns:
-        True 表示音檔已過期
-    """
-    if task.get("keep_audio"):
-        return False  # 釘選的音檔不會被 lifecycle 刪除
-
-    completed_at = task.get("timestamps", {}).get("completed_at")
-    if not completed_at:
-        return False
-
-    if isinstance(completed_at, (int, float)):
-        completed_at = datetime.fromtimestamp(completed_at, tz=timezone.utc)
-    elif isinstance(completed_at, str):
-        completed_at = datetime.fromisoformat(completed_at)
-
-    if completed_at.tzinfo is None:
-        completed_at = completed_at.replace(tzinfo=timezone.utc)
-
-    # 從音檔路徑取得上傳時的 tier，對應正確的 S3 Lifecycle 天數
-    # 避免用戶升降方案後 retention_days 與實際 lifecycle 不符
-    audio_file = task.get("result", {}).get("audio_file") or task.get("audio_file")
-    if audio_file:
-        from ..utils.storage_service import extract_tier_from_path
-        from ..models.quota import QUOTA_TIERS, QuotaTier
-        path_tier = extract_tier_from_path(audio_file)
-        # kept 資料夾不受 lifecycle 管理（keep_audio 檢查已在上面處理）
-        if path_tier and path_tier != "kept":
-            try:
-                tier_config = QUOTA_TIERS.get(QuotaTier(path_tier))
-                if tier_config:
-                    retention_days = tier_config.get("audio_retention_days", retention_days)
-            except ValueError:
-                pass  # 未知 tier，沿用傳入的 retention_days
-
-    from datetime import timedelta
-    expiry_time = completed_at + timedelta(days=retention_days)
-    return datetime.now(timezone.utc) > expiry_time
-
-
-def filter_task_for_list(task: Dict[str, Any], retention_days: int = 7) -> Dict[str, Any]:
-    """過濾任務數據，只返回前端列表需要的字段
-
-    Args:
-        task: 完整的任務數據
-        retention_days: 用戶 tier 的音檔保留天數
-
-    Returns:
-        過濾後的任務數據（只包含前端需要的字段）
-    """
-    # 只保留前端需要的字段
-    filtered = {
-        "_id": task.get("_id"),
-        "task_id": task.get("_id"),  # 保留以便向後兼容
-        "task_type": task.get("task_type"),
-        "status": task.get("status"),
-        "progress": task.get("progress"),
-        "progress_percentage": task.get("progress_percentage"),
-        "custom_name": task.get("custom_name"),
-        "tags": task.get("tags", []),
-        "keep_audio": task.get("keep_audio", False),
-        "speaker_names": task.get("speaker_names", {}),
-        "subtitle_settings": task.get("subtitle_settings", {}),
-        "timestamps": task.get("timestamps", {}),
-    }
-
-    # file 信息
-    if task.get("file"):
-        filtered["file"] = {
-            "filename": task["file"].get("filename"),
-            "size_mb": task["file"].get("size_mb")
-        }
-
-    # result 信息（只保留前端需要的）
-    if task.get("result"):
-        audio_file = task["result"].get("audio_file")
-        audio_filename = task["result"].get("audio_filename")
-
-        # 音檔已被 S3 Lifecycle 自動刪除時，不回傳 audio_file
-        if audio_file and _is_audio_expired(task, retention_days):
-            audio_file = None
-            audio_filename = None
-
-        filtered["result"] = {
-            "text_length": task["result"].get("text_length"),
-            "word_count": task["result"].get("word_count"),
-            "audio_file": audio_file,
-            "audio_filename": audio_filename
-        }
-
-    # error 信息（失敗時需要，只回傳 code 讓前端 i18n 翻譯）
-    if task.get("error"):
-        err = task["error"]
-        filtered["error"] = err.get("code", "SYSTEM_ERROR") if isinstance(err, dict) else "SYSTEM_ERROR"
-
-    # cancelling 狀態（取消中時需要）
-    if task.get("cancelling"):
-        filtered["cancelling"] = task.get("cancelling")
-
-    return filtered
-
-
-_PROGRESS_TEXT_TO_PERCENTAGE = {
-    "Worker 開始處理": 3,
-    "正在下載音檔": 5,
-    "正在轉換音檔格式": 10,
-    "正在上傳轉碼後的音檔": 15,
-    "正在準備模型": 20,
-    "正在轉錄音檔與說話者辨識": 30,
-    "正在轉錄音檔": 30,
-    "語者辨識完成": 70,
-    "正在添加標點符號": 80,
-    "標點處理完成": 90,
-    "標點處理失敗": 90,
-    "正在保存結果": 95,
-    "轉錄完成": 100,
-}
-
-
-def _infer_progress_percentage(progress_text: str) -> int:
-    """依照 progress 文字推算百分比（當 worker 未回報時使用）"""
-    for keyword, pct in _PROGRESS_TEXT_TO_PERCENTAGE.items():
-        if keyword in progress_text:
-            return pct
-    return 5
-
-
-def enrich_task_data(task: Dict[str, Any]) -> Dict[str, Any]:
-    """豐富任務數據，添加計算欄位
-
-    Args:
-        task: 原始任務數據
-
-    Returns:
-        豐富後的任務數據
-    """
-    # 創建副本避免修改原始數據
-    enriched = task.copy()
-
-    # 確保進行中的任務總是有進度信息
-    status = enriched.get("status")
-
-    # 如果沒有進度信息，根據狀態添加默認值
-    if "progress" not in enriched or not enriched["progress"]:
-        if status == "pending":
-            enriched["progress"] = "等待處理中..."
-            enriched["progress_percentage"] = 0
-        elif status == "processing":
-            enriched["progress"] = "轉錄處理中..."
-            if not enriched.get("progress_percentage"):
-                enriched["progress_percentage"] = 5
-
-    # 若 worker 沒有寫入 progress_percentage，從 progress 文字推算
-    if enriched.get("progress") and (
-        enriched.get("progress_percentage") is None
-        or enriched.get("progress_percentage") == 0
-    ) and status == "processing":
-        enriched["progress_percentage"] = _infer_progress_percentage(enriched["progress"])
-
-    # 確保 progress_percentage 總是數字
-    if "progress_percentage" in enriched and enriched["progress_percentage"] is not None:
-        try:
-            enriched["progress_percentage"] = float(enriched["progress_percentage"])
-        except (TypeError, ValueError):
-            enriched["progress_percentage"] = 0
-
-    return enriched
-
-
-def serialize_for_json(obj):
-    """將包含 datetime 等特殊類型的對象轉換為可 JSON 序列化的格式
-
-    Args:
-        obj: 要序列化的對象
-
-    Returns:
-        可 JSON 序列化的對象
-    """
-    from datetime import datetime
-    from bson import ObjectId
-
-    if isinstance(obj, dict):
-        return {k: serialize_for_json(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [serialize_for_json(item) for item in obj]
-    elif isinstance(obj, datetime):
-        return obj.isoformat()
-    elif isinstance(obj, ObjectId):
-        return str(obj)
-    else:
-        return obj
 
 
 @router.get("/{task_id}")
@@ -566,20 +272,12 @@ async def get_task(
     # 豐富任務數據
     enriched_task = enrich_task_data(task)
 
-    # 取得用戶 tier 的音檔保留天數
-    from ..database.repositories.user_repo import UserRepository
-    from ..models.quota import QUOTA_TIERS, QuotaTier
-    user_repo = UserRepository(task_service.task_repo.db)
-    full_user = await user_repo.get_by_id(str(current_user["_id"]))
-    user_tier = full_user.get("quota", {}).get("tier", "free") if full_user else "free"
-    tier_config = QUOTA_TIERS.get(QuotaTier(user_tier), QUOTA_TIERS[QuotaTier.FREE])
-    retention_days = tier_config.get("audio_retention_days", 7)
-
+    retention_days = await get_user_retention_days(task_service.task_repo.db, str(current_user["_id"]))
     enriched_task["audio_retention_days"] = retention_days
 
     # 若音檔已過期，清除 audio_file 並標記
     audio_file = enriched_task.get("result", {}).get("audio_file")
-    if audio_file and _is_audio_expired(enriched_task, retention_days):
+    if audio_file and is_audio_expired(enriched_task, retention_days):
         enriched_task["audio_expired"] = True
         enriched_task["result"]["audio_file"] = None
         enriched_task["result"]["audio_filename"] = None
@@ -794,21 +492,7 @@ async def delete_task(
     task_service: TaskService = Depends(get_task_service),
     current_user: dict = Depends(get_current_user)
 ):
-    """軟刪除任務（標記為已刪除但保留記錄供統計），物理刪除相關檔案
-
-    Args:
-        request: Request 對象
-        task_id: 任務 ID
-        task_service: TaskService 實例
-        current_user: 當前用戶
-
-    Returns:
-        刪除結果
-
-    Raises:
-        HTTPException: 任務不存在、無權訪問或無法刪除
-    """
-    # 獲取任務（含權限驗證）
+    """軟刪除任務（標記為已刪除但保留記錄供統計），物理刪除相關檔案"""
     task = await task_service.get_task(task_id, str(current_user["_id"]))
 
     if not task:
@@ -817,105 +501,26 @@ async def delete_task(
             detail="任務不存在或無權訪問"
         )
 
-    # 檢查是否已被刪除
     if task.get("deleted", False):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="任務已被刪除"
         )
 
-    # 不允許刪除進行中的任務
     if task["status"] in ["pending", "processing"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"無法刪除進行中的任務（當前狀態：{task['status']}），請先取消任務"
         )
 
-    deleted_files = []
+    deleted_files = await task_service.soft_delete_full(task, task_id)
 
-    # 物理刪除結果檔案（僅本地模式，AWS 模式結果存在 MongoDB）
-    if not is_aws():
-        result_file_path = get_task_field(task, "result_file")
-        if result_file_path:
-            try:
-                result_file = _validate_file_path(result_file_path, _ALLOWED_OUTPUT_DIR)
-                if result_file.exists():
-                    result_file.unlink()
-                    deleted_files.append(result_file.name)
-                    log.debug("task.delete.result_file_deleted", task_id=task_id, filename=result_file.name)
-            except ValueError as e:
-                log.warning("task.delete.path_validation_failed", task_id=task_id, error=str(e))
-            except Exception as e:
-                log.warning("task.delete.result_file_failed", task_id=task_id, error=str(e))
-
-        # 物理刪除 segments 檔案
-        segments_file_path = get_task_field(task, "segments_file")
-        if segments_file_path:
-            try:
-                segments_file = _validate_file_path(segments_file_path, _ALLOWED_OUTPUT_DIR)
-                if segments_file.exists():
-                    segments_file.unlink()
-                    deleted_files.append(segments_file.name)
-                    log.debug("task.delete.segments_file_deleted", task_id=task_id, filename=segments_file.name)
-            except ValueError as e:
-                log.warning("task.delete.path_validation_failed", task_id=task_id, error=str(e))
-            except Exception as e:
-                log.warning("task.delete.segments_file_failed", task_id=task_id, error=str(e))
-
-    # 物理刪除音檔（如果存在）
-    # ⚠️ 手動刪除任務時，應刪除所有相關檔案（包括音檔）
-    # keep_audio 只控制「自動清理機制」，不影響「用戶手動刪除」
-    try:
-        audio_file_path = task.get("result", {}).get("audio_file") if task else None
-        if audio_file_path:
-            storage_delete_audio_by_path(audio_file_path)
-        deleted_files.append(f"{task_id}.mp3")
-        log.debug("task.delete.audio_deleted", task_id=task_id)
-    except Exception as e:
-        log.warning("task.delete.audio_failed", task_id=task_id, error=str(e))
-
-    # 清理記憶體狀態
-    task_service.cleanup_task_memory(task_id)
-
-    # 物理刪除 MongoDB 中的 transcription 文檔
-    from src.database.repositories.transcription_repo import TranscriptionRepository
-    transcription_repo = TranscriptionRepository(task_service.task_repo.db)
-    try:
-        deleted_transcription = await transcription_repo.delete(task_id)
-        if deleted_transcription:
-            log.debug("task.delete.transcription_doc_deleted", task_id=task_id)
-    except Exception as e:
-        log.warning("task.delete.transcription_doc_failed", task_id=task_id, error=str(e))
-
-    # 物理刪除 MongoDB 中的 segment 文檔
-    from src.database.repositories.segment_repo import SegmentRepository
-    segment_repo = SegmentRepository(task_service.task_repo.db)
-    try:
-        deleted_segment = await segment_repo.delete(task_id)
-        if deleted_segment:
-            log.debug("task.delete.segment_doc_deleted", task_id=task_id)
-    except Exception as e:
-        log.warning("task.delete.segment_doc_failed", task_id=task_id, error=str(e))
-
-    # 在資料庫中標記為已刪除（軟刪除 tasks）
-    from datetime import datetime
-    await task_service.update_task_status(task_id, {
-        "deleted": True,
-        "deleted_at": datetime.utcnow()
-    })
-
-    log.info("task.deleted", task_id=task_id)
-
-    # 記錄 audit log（刪除任務）- 詳細記錄
+    # 記錄 audit log
     try:
         from ..utils.audit_logger import get_audit_logger
         audit_logger = get_audit_logger()
 
-        # 取得任務詳細資訊
         original_filename = task.get("custom_name") or get_task_field(task, "original_filename") or "未知"
-        audio_duration = get_task_field(task, "audio_duration") or 0
-        audio_size = get_task_field(task, "audio_size") or 0
-        task_status = task.get("status", "unknown")
 
         await audit_logger.log_task_operation(
             request=request,
@@ -926,9 +531,7 @@ async def delete_task(
             message=f"刪除任務：{original_filename}",
             request_body={
                 "original_filename": original_filename,
-                "audio_duration_seconds": audio_duration,
-                "audio_size_bytes": audio_size,
-                "task_status": task_status,
+                "task_status": task.get("status", "unknown"),
                 "deleted_files_count": len(deleted_files),
                 "deleted_files": deleted_files
             }
@@ -1105,7 +708,7 @@ async def update_keep_audio(
             new_audio_path = move_audio(task_id, current_tier, "kept")
         elif not new_keep_audio and current_tier == "kept":
             # 檢查音檔是否已超過保留期限
-            if _is_audio_expired(task, tier_config.get("audio_retention_days", 7)):
+            if is_audio_expired(task, tier_config.get("audio_retention_days", 7)):
                 # 已過期，直接刪除
                 storage_delete_audio_by_path(audio_file_path)
                 new_audio_path = None
@@ -1135,19 +738,7 @@ async def batch_delete_tasks(
     task_service: TaskService = Depends(get_task_service),
     current_user: dict = Depends(get_current_user)
 ):
-    """批次刪除任務
-
-    Args:
-        delete_data: 刪除數據 {"task_ids": ["id1", "id2"]}
-        task_service: TaskService 實例
-        current_user: 當前用戶
-
-    Returns:
-        刪除結果
-
-    Raises:
-        HTTPException: 參數錯誤
-    """
+    """批次刪除任務"""
     task_ids = delete_data.get("task_ids", [])
 
     if not task_ids:
@@ -1161,89 +752,13 @@ async def batch_delete_tasks(
 
     for task_id in task_ids:
         try:
-            # 獲取任務（含權限驗證）
             task = await task_service.get_task(task_id, str(current_user["_id"]))
 
-            if not task:
+            if not task or task.get("deleted", False) or task["status"] in ["pending", "processing"]:
                 failed_count += 1
                 continue
 
-            # 檢查是否已被刪除
-            if task.get("deleted", False):
-                failed_count += 1
-                continue
-
-            # 不允許刪除進行中的任務
-            if task["status"] in ["pending", "processing"]:
-                failed_count += 1
-                continue
-
-            # 物理刪除結果檔案（僅本地模式，AWS 模式結果存在 MongoDB）
-            if not is_aws():
-                result_file_path = get_task_field(task, "result_file")
-                if result_file_path:
-                    try:
-                        result_file = _validate_file_path(result_file_path, _ALLOWED_OUTPUT_DIR)
-                        if result_file.exists():
-                            result_file.unlink()
-                            log.debug("task.batch_delete.result_file_deleted", task_id=task_id, filename=result_file.name)
-                    except ValueError as e:
-                        log.warning("task.batch_delete.path_validation_failed", task_id=task_id, error=str(e))
-                    except Exception as e:
-                        log.warning("task.batch_delete.result_file_failed", task_id=task_id, error=str(e))
-
-                # 物理刪除 segments 檔案
-                segments_file_path = get_task_field(task, "segments_file")
-                if segments_file_path:
-                    try:
-                        segments_file = _validate_file_path(segments_file_path, _ALLOWED_OUTPUT_DIR)
-                        if segments_file.exists():
-                            segments_file.unlink()
-                            log.debug("task.batch_delete.segments_file_deleted", task_id=task_id, filename=segments_file.name)
-                    except ValueError as e:
-                        log.warning("task.batch_delete.path_validation_failed", task_id=task_id, error=str(e))
-                    except Exception as e:
-                        log.warning("task.batch_delete.segments_file_failed", task_id=task_id, error=str(e))
-
-            # 物理刪除音檔（使用 storage_service）
-            try:
-                batch_audio_path = task.get("result", {}).get("audio_file") if task else None
-                if batch_audio_path:
-                    storage_delete_audio_by_path(batch_audio_path)
-                log.debug("task.batch_delete.audio_deleted", task_id=task_id)
-            except Exception as e:
-                log.warning("task.batch_delete.audio_failed", task_id=task_id, error=str(e))
-
-            # 清理記憶體
-            task_service.cleanup_task_memory(task_id)
-
-            # 物理刪除 MongoDB 中的 transcription 文檔
-            from src.database.repositories.transcription_repo import TranscriptionRepository
-            transcription_repo = TranscriptionRepository(task_service.task_repo.db)
-            try:
-                deleted_transcription = await transcription_repo.delete(task_id)
-                if deleted_transcription:
-                    log.debug("task.batch_delete.transcription_doc_deleted", task_id=task_id)
-            except Exception as e:
-                log.warning("task.batch_delete.transcription_doc_failed", task_id=task_id, error=str(e))
-
-            # 物理刪除 MongoDB 中的 segment 文檔
-            from src.database.repositories.segment_repo import SegmentRepository
-            segment_repo = SegmentRepository(task_service.task_repo.db)
-            try:
-                deleted_segment = await segment_repo.delete(task_id)
-                if deleted_segment:
-                    log.debug("task.batch_delete.segment_doc_deleted", task_id=task_id)
-            except Exception as e:
-                log.warning("task.batch_delete.segment_doc_failed", task_id=task_id, error=str(e))
-
-            # 在資料庫中標記為已刪除（軟刪除 tasks）
-            from datetime import datetime
-            await task_service.update_task_status(task_id, {
-                "deleted": True,
-                "deleted_at": datetime.utcnow()
-            })
-
+            await task_service.soft_delete_full(task, task_id)
             deleted_count += 1
 
         except Exception as e:
