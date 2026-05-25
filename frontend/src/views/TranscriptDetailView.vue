@@ -516,8 +516,8 @@ class="transcript-layout"
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
 const { t: $t } = useI18n()
@@ -557,6 +557,10 @@ import { useKeyboardShortcuts } from '../composables/transcript/useKeyboardShort
 import { useSegmentNavigation } from '../composables/transcript/useSegmentNavigation'
 import { useTranscriptDownload } from '../composables/transcript/useTranscriptDownload'
 import { useSearchReplace } from '../composables/transcript/useSearchReplace'
+import { useEditingLifecycle } from '../composables/transcript/useEditingLifecycle'
+import { useSubtitleAutosave } from '../composables/transcript/useSubtitleAutosave'
+import { useContentEditableInput } from '../composables/transcript/useContentEditableInput'
+import { usePageLifecycle } from '../composables/transcript/usePageLifecycle'
 import { useTaskTags } from '../composables/task/useTaskTags'
 import { isModifierPressed } from '../utils/platform'
 import { useAuthStore } from '../stores/auth'
@@ -799,58 +803,70 @@ const uniqueSpeakers = computed(() => {
   return Array.from(speakers).sort()
 })
 
-// 保存編輯前的 segments 狀態（用於取消編輯時恢復）
-const originalSegments = ref([])
+// ========== 編輯生命週期（start / cancel / save 完整流程） ==========
+const {
+  originalSegments,
+  handleStartEditing,
+  handleCancelEditing,
+  saveEditing,
+  saveTaskName,
+} = useEditingLifecycle({
+  displayMode,
+  textareaRef,
+  segments,
+  currentTranscript,
+  originalContent,
+  showTimecodeMarkers,
+  savedTimecodeMarkersState,
+  segmentMarkers,
+  generateSegmentMarkers,
+  segOffsets,
+  startEditing,
+  cancelEditing,
+  finishEditing,
+  clearHighlights,
+  reSearch,
+  reapplyHighlightsIfNeeded,
+  saveTranscript,
+  updateTaskName,
+  editingTaskName,
+  isEditingTitle,
+  groupedSegments,
+  reconstructSegmentsFromGroups,
+  isMounted: () => isMounted,
+  scrollRestoreTimers: () => scrollRestoreTimers,
+})
 
-// 講者名稱自動儲存（debounced）
-let speakerNamesSaveTimer = null
-// 疏密度自動儲存（debounced）
-let densityThresholdSaveTimer = null
 // 用於追蹤滾動位置恢復的計時器（以便在 unmount 時清理）
 let scrollRestoreTimers = []
 // 追蹤組件是否已卸載
 let isMounted = true
 // 追蹤是否正在初始化（避免載入時觸發儲存）
 let isInitializing = true
-// Safari IME 守衛：compositionend 在 Safari 先於 keydown 觸發，
-// 導致確認選字的 Enter 的 isComposing 已是 false，需自行追蹤
-let compositionJustEnded = false
+// ========== Contenteditable 輸入處理 ==========
+const {
+  handlePaste,
+  handleCompositionEnd,
+  handleContentEditableKeyDown,
+} = useContentEditableInput({ segOffsets, playbackRate, setPlaybackRate })
 
-watch(speakerNames, (newValue) => {
-  // 只有在字幕模式下才需要自動儲存
-  if (displayMode.value !== 'subtitle') return
-
-  // 清除之前的計時器
-  if (speakerNamesSaveTimer) {
-    clearTimeout(speakerNamesSaveTimer)
-  }
-
-  // 設定新的計時器（1秒後儲存）
-  speakerNamesSaveTimer = setTimeout(async () => {
-    if (!isMounted) return // 如果組件已卸載，不執行
-    console.log('🔄 ' + $t('transcriptDetail.autoSavingSpeaker') + ':', newValue)
-    await updateSpeakerNames(newValue)
-  }, 1000)
-}, { deep: true })
-
-// 疏密度自動儲存（僅在字幕模式下，且非初始化階段）
-watch(densityThreshold, (newValue) => {
-  // 只有在字幕模式下才需要自動儲存
-  if (displayMode.value !== 'subtitle') return
-  // 初始化階段不儲存
-  if (isInitializing) return
-
-  // 清除之前的計時器
-  if (densityThresholdSaveTimer) {
-    clearTimeout(densityThresholdSaveTimer)
-  }
-
-  // 設定新的計時器（1秒後儲存）
-  densityThresholdSaveTimer = setTimeout(async () => {
-    if (!isMounted) return // 如果組件已卸載，不執行
-    console.log('🔄 自動儲存疏密度設定:', newValue)
-    await updateSubtitleSettings({ density_threshold: newValue })
-  }, 1000)
+// ========== 字幕自動儲存（講者名稱、疏密度、segment 講者變更） ==========
+const {
+  updateSegmentSpeaker,
+  handleOpenSpeakerSettings,
+} = useSubtitleAutosave({
+  displayMode,
+  segments,
+  speakerNames,
+  densityThreshold,
+  groupedSegments,
+  currentTranscript,
+  headerRef,
+  saveTranscript,
+  updateSpeakerNames,
+  updateSubtitleSettings,
+  isMounted: () => isMounted,
+  isInitializing: () => isInitializing,
 })
 
 // ========== 下載功能 ==========
@@ -860,30 +876,20 @@ const {
   includeSpeaker,
   includeSummary,
   includeTranscript,
-  performSubtitleDownload,
-  openDownloadDialog,
-  downloadAsPdf
-} = useTranscriptDownload()
-
-// AI 摘要數據（用於下載）
-const summaryData = ref(null)
-
-// 是否有 AI 摘要
-const hasSummaryData = computed(() => {
-  return currentTranscript.value.summary_status === 'completed'
+  hasSummaryData,
+  downloadTranscript,
+  performDownload,
+} = useTranscriptDownload({
+  currentTranscript,
+  displayMode,
+  groupedSegments,
+  speakerNames,
+  timeFormat,
+  generateSubtitleText,
+  generateSRTText,
+  generateVTTText,
+  summaryService,
 })
-
-// 載入 AI 摘要數據
-async function loadSummaryForDownload() {
-  if (!hasSummaryData.value || summaryData.value) return
-
-  try {
-    summaryData.value = await summaryService.get(currentTranscript.value.task_id)
-  } catch (error) {
-    console.error('載入摘要失敗:', error)
-    summaryData.value = null
-  }
-}
 
 // ========== 鍵盤快捷鍵 ==========
 const hasAudio = computed(() => currentTranscript.value.hasAudio)
@@ -904,434 +910,8 @@ useKeyboardShortcuts(audioControls, { isEditing, isEditingTitle })
 
 // ========== 頁面生命週期 ==========
 
-// 載入逐字稿的包裝函數
-async function loadTranscript(taskId) {
-  // 標記為初始化階段
-  isInitializing = true
 
-  const result = await loadTranscriptData(
-    taskId,
-    getAudioUrl,
-    null
-  )
 
-  if (result) {
-    // 初始化音訊 URL 及 token 自動刷新
-    if (result.audioUrl) {
-      initAudioUrl(taskId)
-    }
-
-    // 生成segment標記（僅在段落模式下）
-    if (displayMode.value === 'paragraph' && segments.value && currentTranscript.value.content) {
-      generateSegmentMarkers(segments.value, currentTranscript.value.content)
-    }
-
-    // 應用已儲存的字幕設定（僅在字幕模式下）
-    if (displayMode.value === 'subtitle' && subtitleSettings.value) {
-      if (subtitleSettings.value.density_threshold !== undefined) {
-        densityThreshold.value = subtitleSettings.value.density_threshold
-        console.log('✅ 已應用儲存的疏密度設定:', densityThreshold.value)
-      }
-    }
-  }
-
-  // 延遲結束初始化狀態，確保 watch 不會在載入階段觸發
-  nextTick(() => {
-    isInitializing = false
-  })
-}
-
-// 開始編輯的包裝函數（保存滾動位置）
-function handleStartEditing() {
-  // 保存滾動位置（段落模式）
-  let savedScrollTop = 0
-  if (displayMode.value === 'paragraph' && textareaRef.value) {
-    savedScrollTop = textareaRef.value.scrollTop
-  }
-
-  // 保存 timecode markers 狀態，並在編輯模式下關閉（避免 IME 輸入問題）
-  if (displayMode.value === 'paragraph') {
-    savedTimecodeMarkersState.value = showTimecodeMarkers.value
-    showTimecodeMarkers.value = false
-  }
-
-  // 保存原始的 segments 狀態（以便取消時恢復）
-  if (segments.value.length > 0) {
-    // 深拷貝 segments 以避免引用問題
-    originalSegments.value = JSON.parse(JSON.stringify(segments.value))
-  }
-
-  // 調用原始的 startEditing
-  startEditing()
-
-  // 段落模式：初始化編輯期 segment offset 追蹤（等 contenteditable 掛載）
-  if (displayMode.value === 'paragraph') {
-    nextTick(() => {
-      if (textareaRef.value) {
-        // 防禦：若 segmentMarkers 為空（例如儲存後 content 與 segments 不同步導致 match 失敗），
-        // 在 initEditing 前用當前 DOM 內容重產一次
-        if (!segmentMarkers.value?.length && segments.value?.length) {
-          const content = textareaRef.value.textContent || currentTranscript.value?.content || ''
-          if (content) generateSegmentMarkers(segments.value, content)
-        }
-        segOffsets.initEditing(textareaRef.value, segmentMarkers.value)
-      }
-    })
-  }
-
-  // 恢復滾動位置
-  if (displayMode.value === 'paragraph' && savedScrollTop > 0) {
-    const timerId = setTimeout(() => {
-      if (!isMounted) return
-      if (textareaRef.value) {
-        textareaRef.value.scrollTop = savedScrollTop
-      }
-    }, 100)
-    scrollRestoreTimers.push(timerId)
-  }
-
-  reapplyHighlightsIfNeeded()
-}
-
-// 取消編輯的包裝函數（保存滾動位置）
-function handleCancelEditing() {
-  clearHighlights()
-
-  // 保存滾動位置（段落模式）
-  let savedScrollTop = 0
-  if (displayMode.value === 'paragraph' && textareaRef.value) {
-    savedScrollTop = textareaRef.value.scrollTop
-  }
-
-  // 恢復原始的 segments 狀態
-  if (originalSegments.value.length > 0) {
-    segments.value = JSON.parse(JSON.stringify(originalSegments.value))
-    // 清空備份
-    originalSegments.value = []
-  }
-
-  // 清空編輯期 segment offset 追蹤
-  segOffsets.resetEditing()
-
-  // 調用原始的 cancelEditing
-  cancelEditing()
-
-  // 恢復 timecode markers 狀態
-  if (displayMode.value === 'paragraph') {
-    showTimecodeMarkers.value = savedTimecodeMarkersState.value
-  }
-
-  // 恢復滾動位置
-  if (displayMode.value === 'paragraph' && savedScrollTop > 0) {
-    const timerId = setTimeout(() => {
-      if (!isMounted) return
-      if (textareaRef.value) {
-        textareaRef.value.scrollTop = savedScrollTop
-      }
-    }, 100)
-    scrollRestoreTimers.push(timerId)
-  }
-
-  reSearch()
-}
-
-// 儲存編輯的包裝函數
-async function saveEditing() {
-  clearHighlights()
-
-  let contentToSave = ''
-  let segmentsToSave = null
-
-  // 保存滾動位置（段落模式）
-  let savedScrollTop = 0
-  if (displayMode.value === 'paragraph' && textareaRef.value) {
-    // 滾動發生在 .transcript-display 元素本身
-    savedScrollTop = textareaRef.value.scrollTop
-  }
-
-  if (displayMode.value === 'paragraph') {
-    // 從 contenteditable div 提取純文字 + 用 editSegmentRanges 切出每段新文字
-    if (textareaRef.value) {
-      const { fullText, updatedSegments, hasChanges: segOffsetsHasChanges } =
-        segOffsets.extractForSave(textareaRef.value, segments.value)
-      contentToSave = fullText
-      currentTranscript.value.content = contentToSave
-
-      // segOffsets 內部只比對 slice 跟當下 segments.value;若搜尋取代已經先把
-      // segments.value 改過,內部會偵測不到變更。額外跟編輯前快照比對,確保
-      // 取代後馬上存檔也能正確把 segments 送到後端。
-      let hasChanges = segOffsetsHasChanges
-      if (
-        !hasChanges &&
-        originalSegments.value.length > 0 &&
-        originalSegments.value.length === segments.value.length
-      ) {
-        for (let i = 0; i < segments.value.length; i++) {
-          const a = (segments.value[i].text ?? '').trim()
-          const b = (originalSegments.value[i]?.text ?? '').trim()
-          if (a !== b) {
-            hasChanges = true
-            break
-          }
-        }
-      }
-      if (hasChanges) {
-        segmentsToSave = updatedSegments
-      }
-    } else {
-      contentToSave = currentTranscript.value.content
-    }
-  } else {
-    // 字幕模式：只更新 segments，不更新純文字檔案
-    contentToSave = originalContent.value // 保持原有的純文字內容不變
-    segmentsToSave = reconstructSegmentsFromGroups(groupedSegments.value)
-  }
-
-  const success = await saveTranscript(contentToSave, segmentsToSave, displayMode.value)
-
-  if (success) {
-    finishEditing()
-
-    // 如果有更新 segments，也要更新本地的 segments 資料
-    if (segmentsToSave) {
-      segments.value = segmentsToSave
-    }
-
-    // 清空 segments 備份
-    originalSegments.value = []
-
-    // 清空編輯期 segment offset 追蹤
-    segOffsets.resetEditing()
-
-    // 恢復 timecode markers 狀態
-    if (displayMode.value === 'paragraph') {
-      showTimecodeMarkers.value = savedTimecodeMarkersState.value
-    }
-
-    // 恢復滾動位置（段落模式）
-    if (displayMode.value === 'paragraph' && savedScrollTop > 0) {
-      // 使用 setTimeout 給 DOM 更多時間重新渲染
-      const timerId = setTimeout(() => {
-        if (!isMounted) return
-        if (textareaRef.value) {
-          textareaRef.value.scrollTop = savedScrollTop
-        }
-      }, 100)
-      scrollRestoreTimers.push(timerId)
-    }
-
-    reSearch()
-  }
-}
-
-// 儲存任務名稱的包裝函數
-async function saveTaskName() {
-  await updateTaskName(editingTaskName.value)
-  // 無論成功或失敗都關閉編輯模式
-  isEditingTitle.value = false
-}
-
-// 下載逐字稿
-function downloadTranscript() {
-  // 兩種模式都開啟下載對話框
-  openDownloadDialog()
-}
-
-// 執行下載（從對話框）
-async function performDownload() {
-  // 根據用戶選擇決定是否包含講者資訊
-  // null 表示不顯示講者，{} 或 speakerNames 表示顯示講者（使用自定義名稱或原始代號）
-  const speakerNamesToUse = includeSpeaker.value ? speakerNames.value : null
-  const filename = currentTranscript.value.custom_name || currentTranscript.value.filename || 'transcript'
-  const format = selectedDownloadFormat.value
-  const isParagraphMode = displayMode.value === 'paragraph'
-
-  // 取得逐字稿文字的輔助函數
-  const getTranscriptText = () => {
-    if (isParagraphMode) {
-      // 段落模式：直接使用原始內容
-      return currentTranscript.value.content || ''
-    } else {
-      // 字幕模式：根據設定生成格式化文字
-      return generateSubtitleText(groupedSegments.value, timeFormat.value, speakerNamesToUse)
-    }
-  }
-
-  // PDF 格式處理
-  if (format === 'pdf') {
-    // 如果需要包含摘要且尚未載入，先載入
-    if (includeSummary.value && hasSummaryData.value && !summaryData.value) {
-      await loadSummaryForDownload()
-    }
-
-    // 生成逐字稿文字（如果需要）
-    let transcriptText = ''
-    if (includeTranscript.value) {
-      transcriptText = getTranscriptText()
-    }
-
-    await downloadAsPdf({
-      filename,
-      title: currentTranscript.value.custom_name || currentTranscript.value.filename,
-      summary: includeSummary.value ? summaryData.value : null,
-      transcriptText,
-      includeSummary: includeSummary.value,
-      includeTranscript: includeTranscript.value,
-      t: $t
-    })
-    return
-  }
-
-  // TXT 格式處理（支援內容選擇）
-  if (format === 'txt') {
-    let content = ''
-
-    // 如果有摘要且選擇包含
-    if (includeSummary.value && hasSummaryData.value) {
-      if (!summaryData.value) {
-        await loadSummaryForDownload()
-      }
-      if (summaryData.value) {
-        content += formatSummaryAsText(summaryData.value)
-        if (includeTranscript.value) {
-          content += '\n\n' + '='.repeat(50) + '\n\n'
-        }
-      }
-    }
-
-    // 逐字稿
-    if (includeTranscript.value) {
-      content += getTranscriptText()
-    }
-
-    performSubtitleDownload(content, filename, format)
-    return
-  }
-
-  // SRT/VTT 格式（僅逐字稿，僅字幕模式可用）
-  let content = ''
-  if (format === 'srt') {
-    content = generateSRTText(groupedSegments.value, speakerNamesToUse)
-  } else if (format === 'vtt') {
-    content = generateVTTText(groupedSegments.value, speakerNamesToUse)
-  }
-
-  performSubtitleDownload(content, filename, format)
-}
-
-// 將摘要格式化為純文字
-function formatSummaryAsText(summary) {
-  if (!summary?.content) return ''
-
-  const content = summary.content
-  const lines = []
-
-  lines.push('【AI 摘要】')
-  lines.push('')
-
-  // 主題
-  if (content.meta?.detected_topic) {
-    lines.push(content.meta.detected_topic)
-    lines.push('')
-  }
-
-  // 摘要
-  if (content.summary) {
-    lines.push(`【${$t('aiSummary.executiveSummary')}】`)
-    lines.push(content.summary)
-    lines.push('')
-  }
-
-  // 重點
-  const points = content.key_points || content.highlights || []
-  if (points.length > 0) {
-    lines.push(`【${$t('aiSummary.keyPoints')}】`)
-    points.forEach(point => {
-      const text = typeof point === 'string' ? point : (point.text || point.point || point.content || JSON.stringify(point))
-      lines.push(`• ${text}`)
-    })
-    lines.push('')
-  }
-
-  // 內容段落
-  if (content.segments && content.segments.length > 0) {
-    lines.push(`【${$t('aiSummary.contentSegments')}】`)
-    content.segments.forEach(segment => {
-      lines.push(`▎${segment.topic}`)
-      lines.push(segment.content)
-      if (segment.keywords && segment.keywords.length > 0) {
-        lines.push(`關鍵詞: ${segment.keywords.join(', ')}`)
-      }
-      lines.push('')
-    })
-  }
-
-  // 待辦事項
-  if (content.action_items && content.action_items.length > 0) {
-    lines.push(`【${$t('aiSummary.actionItems')}】`)
-    content.action_items.forEach(item => {
-      let line = `☐ ${item.task}`
-      const meta = []
-      if (item.owner) meta.push(item.owner)
-      if (item.deadline) meta.push(item.deadline)
-      if (meta.length > 0) line += ` (${meta.join(' / ')})`
-      lines.push(line)
-    })
-    lines.push('')
-  }
-
-  return lines.join('\n').trim()
-}
-
-// 更新 segment 的講者
-function updateSegmentSpeaker({ groupId, newSpeaker }) {
-  // 找到對應的 group
-  const group = groupedSegments.value.find(g => g.id === groupId)
-  if (!group) return
-
-  // 更新該 group 中所有 segments 的 speaker
-  group.speaker = newSpeaker
-  group.segments.forEach(segment => {
-    segment.speaker = newSpeaker
-  })
-
-  // 更新原始 segments 數據
-  segments.value = segments.value.map(seg => {
-    const groupSegment = group.segments.find(gs =>
-      gs.start === seg.start && gs.end === seg.end && gs.text === seg.text
-    )
-    if (groupSegment) {
-      return { ...seg, speaker: newSpeaker }
-    }
-    return seg
-  })
-
-  // 自動儲存到後端
-  saveSegmentsToBackend()
-}
-
-// 打開講者設置面板（從 SubtitleTable 的重新命名按鈕觸發）
-function handleOpenSpeakerSettings(speakerCode) {
-  console.log('🔧 打開講者設置面板，當前講者:', speakerCode)
-  // 打開 Header 的講者設定面板，並 focus 到該講者的輸入框
-  if (headerRef.value) {
-    headerRef.value.openSpeakerSettings(speakerCode)
-  }
-}
-
-// 儲存 segments 到後端
-async function saveSegmentsToBackend() {
-  try {
-    await saveTranscript(
-      currentTranscript.value.content,
-      segments.value,
-      'subtitle'
-    )
-    console.log('✅ ' + $t('transcriptDetail.segmentsAutoSaved'))
-  } catch (error) {
-    console.error('❌ ' + $t('transcriptDetail.errorSavingSegments') + ':', error)
-  }
-}
 
 // 返回
 function goBack() {
@@ -1354,8 +934,6 @@ async function deleteTask() {
 }
 
 // ========== 分享功能 ==========
-// 邏輯封裝在 components/transcript/ShareDialog.vue
-// Parent 只需控制可見性；taskId 與初始 share 狀態用 props 傳入
 const showShareDialog = ref(false)
 
 function handleShare() {
@@ -1363,161 +941,6 @@ function handleShare() {
 }
 
 const hoverChipRef = ref(null)
-
-// 處理貼上事件，只允許純文字
-function handlePaste(e) {
-  e.preventDefault()
-  const text = e.clipboardData?.getData('text/plain') || ''
-  if (text) {
-    document.execCommand('insertText', false, text)
-  }
-}
-
-// Safari IME 守衛：compositionend 在 Safari 先於 keydown 觸發，
-// setTimeout(0) 確保 flag 在同一批 keydown 事件處理後才清掉
-function handleCompositionEnd(e) {
-  compositionJustEnded = true
-  segOffsets.handleCompositionEnd(e.currentTarget)
-  setTimeout(() => { compositionJustEnded = false }, 0)
-}
-
-// 處理 contenteditable 區域的按鍵事件（使用 Alt 作為修飾鍵）
-function handleContentEditableKeyDown(e) {
-  // Intercept Enter to insert a literal '\n' into the text node so the DOM stays
-  // flat and CSS Custom Highlight Ranges survive (AltHL + search highlight).
-  //
-  // 關鍵守衛 e.isComposing：注音/拼音 IME 確認選字時 key 也是 'Enter'，
-  // 若在 composition 中 preventDefault + 改 DOM，會把 IME commit 流程攪爛。
-  // handleInput 在 isComposing.value=true 期間被 short-circuit，
-  // 到 compositionend 才看到「IME 字 + 亂塞的 \n」混合 DOM，diffSingleRegion
-  // 把中間整段標為「替換」，applyAnchorRule 把落在區段內的 segment 全部 drop
-  // → editSegmentRanges 變空 → AltHL 完全失效。
-  //
-  // 不用 document.execCommand('insertText', '\n')：實測 Chrome 仍會產生 <div>
-  // 包裝（不是註解宣稱的「flat text node」）；改用 Range API 直接插入字面 \n
-  // 的 text node，DOM 真正保持 flat。Range mutation 不會自動 fire input event，
-  // 手動呼叫 segOffsets.handleInput 同步狀態。
-  if (e.key === 'Enter' && !e.isComposing && !compositionJustEnded) {
-    e.preventDefault()
-    const sel = window.getSelection()
-    if (sel && sel.rangeCount > 0) {
-      const range = sel.getRangeAt(0)
-      range.deleteContents()
-      const nl = document.createTextNode('\n')
-      range.insertNode(nl)
-      range.setStartAfter(nl)
-      range.setEndAfter(nl)
-      sel.removeAllRanges()
-      sel.addRange(range)
-      segOffsets.handleInput(e.currentTarget)
-    }
-    return
-  }
-
-  if (!e.altKey) return
-
-  // Alt + ArrowUp: 加速播放
-  if (e.key === 'ArrowUp') {
-    e.preventDefault()
-    e.stopPropagation()
-    const newRate = Math.min(2, playbackRate.value + 0.25)
-    setPlaybackRate(newRate)
-    return
-  }
-
-  // 修飾鍵 + ArrowDown: 減速播放
-  if (e.key === 'ArrowDown') {
-    e.preventDefault()
-    e.stopPropagation()
-    const newRate = Math.max(0.25, playbackRate.value - 0.25)
-    setPlaybackRate(newRate)
-    return
-  }
-}
-
-// 修復字幕模式編輯時的滾動問題
-function fixSubtitleScrolling() {
-  const wrapper = document.querySelector('.subtitle-table-wrapper')
-  if (!wrapper) return
-
-  const handleWheel = (e) => {
-    const delta = e.deltaY
-    wrapper.scrollTop += delta
-    e.preventDefault()
-  }
-
-  const addScrollListeners = () => {
-    const editableCells = wrapper.querySelectorAll('.col-content[contenteditable="true"]')
-    editableCells.forEach(cell => {
-      cell.addEventListener('wheel', handleWheel, { passive: false })
-    })
-  }
-
-  addScrollListeners()
-
-  const observer = new MutationObserver(() => {
-    addScrollListeners()
-  })
-
-  observer.observe(wrapper, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ['contenteditable']
-  })
-}
-
-// 處理內容區域滾動（關閉 Header 的設置面板）
-function handleContentAreaScroll() {
-  if (headerRef.value) {
-    headerRef.value.closeMoreOptions()
-  }
-}
-
-// 設置滾動監聽器
-function setupScrollListeners() {
-  // 監聽段落模式的滾動（.transcript-display）
-  if (textareaRef.value) {
-    textareaRef.value.addEventListener('scroll', handleContentAreaScroll)
-  }
-
-  // 監聽字幕模式的滾動（.subtitle-table-wrapper）
-  const subtitleWrapper = document.querySelector('.subtitle-table-wrapper')
-  if (subtitleWrapper) {
-    subtitleWrapper.addEventListener('scroll', handleContentAreaScroll)
-  }
-}
-
-// 移除滾動監聽器
-function removeScrollListeners() {
-  if (textareaRef.value) {
-    textareaRef.value.removeEventListener('scroll', handleContentAreaScroll)
-  }
-
-  const subtitleWrapper = document.querySelector('.subtitle-table-wrapper')
-  if (subtitleWrapper) {
-    subtitleWrapper.removeEventListener('scroll', handleContentAreaScroll)
-  }
-}
-
-// 路由離開前的警告
-onBeforeRouteLeave((_to, _from, next) => {
-  if (hasUnsavedChanges.value) {
-    const answer = window.confirm($t('transcriptDetail.confirmLeave'))
-    if (answer) {
-      next()
-    } else {
-      next(false)
-    }
-  } else {
-    next()
-  }
-})
-
-// 載入所有可用標籤（包含顏色和順序）
-async function loadAllTags() {
-  await fetchTagColors()
-}
 
 // 標籤編輯 BottomSheet
 const showTagSheet = ref(false)
@@ -1529,130 +952,46 @@ watch(showTagSheet, (val) => {
   }
 })
 
-// 處理標籤更新
 async function handleTagsUpdated({ taskId, tags }) {
   const success = await updateTags(tags)
   if (success) {
-    // 重新載入標籤列表以獲取最新的標籤
-    await loadAllTags()
+    await fetchTagColors()
   }
 }
 
-// 處理 AI 摘要更新
 function handleSummaryUpdated({ taskId, status }) {
-  console.log(`✅ AI 摘要已更新: ${taskId}, 狀態: ${status}`)
-  // 更新本地狀態
   if (currentTranscript.value.task_id === taskId) {
     currentTranscript.value.summary_status = status
   }
 }
 
-// 初始載入
-onMounted(() => {
-  document.body.classList.add('transcript-detail-page')
-  window.addEventListener('beforeunload', handleBeforeUnload)
-  // Alt key listeners + segment nav listeners: managed by useSegmentNavigation()
-  // resize listener: 由 useDisplayPreferences() 內部 onMounted 註冊
-
-  loadTranscript(route.params.taskId)
-  loadAllTags()
-
-  // 延遲執行以確保 DOM 已渲染
-  const timerId = setTimeout(() => {
-    if (!isMounted) return
-    fixSubtitleScrolling()
-    setupScrollListeners()
-  }, 100)
-  scrollRestoreTimers.push(timerId)
-})
-
-onUnmounted(() => {
-  // 標記組件已卸載，防止異步操作更新狀態
-  isMounted = false
-
-  // segment-highlight cleanup: managed by useSegmentNavigation() onUnmounted
-  clearHighlights()
-
-  // 清除講者名稱自動儲存計時器
-  if (speakerNamesSaveTimer) {
-    clearTimeout(speakerNamesSaveTimer)
-    speakerNamesSaveTimer = null
-  }
-
-  // 清除疏密度自動儲存計時器
-  if (densityThresholdSaveTimer) {
-    clearTimeout(densityThresholdSaveTimer)
-    densityThresholdSaveTimer = null
-  }
-
-  // 清除所有滾動位置恢復計時器
-  scrollRestoreTimers.forEach(timer => clearTimeout(timer))
-  scrollRestoreTimers = []
-
-  // 移除滾動監聽器
-  removeScrollListeners()
-
-  window.removeEventListener('beforeunload', handleBeforeUnload)
-  // Alt key listeners: managed by useSegmentNavigation() onUnmounted
-  // resize listener: 由 useDisplayPreferences() 內部 onUnmounted 移除
-
-  document.body.classList.remove('editing-transcript')
-  document.body.classList.remove('transcript-detail-page')
-
-  // 清理音訊播放器資源（停止 token 自動刷新定時器）
-  cleanupAudioPlayer()
-
-  // 取消所有尚未完成的 API 請求
-  cancelPendingRequests()
-})
-
-// 監聽路由參數變化
-watch(() => route.params.taskId, (newTaskId, oldTaskId) => {
-  if (newTaskId && newTaskId !== oldTaskId) {
-    // 如果有未儲存的變更，先確認
-    if (hasUnsavedChanges.value) {
-      const answer = window.confirm($t('transcriptDetail.confirmLeave'))
-      if (!answer) {
-        // 使用者取消，恢復到原來的任務
-        router.replace({ name: 'transcript-detail', params: { taskId: oldTaskId } })
-        return
-      }
-    }
-    // 切換任務前先離開編輯狀態
-    if (isEditing.value) {
-      handleCancelEditing()
-    }
-    // 載入新任務
-    loadTranscript(newTaskId)
-  }
-})
-
-// 監聽編輯狀態變化，控制視窗高度
-watch(isEditing, (editing) => {
-  if (editing) {
-    document.body.classList.add('editing-transcript')
-  } else {
-    document.body.classList.remove('editing-transcript')
-  }
-})
-
-// 監聽segments和content變化，重新生成標記（僅在非編輯模式）
-watch(
-  () => [segments.value, currentTranscript.value.content, displayMode.value, isEditing.value],
-  () => {
-    if (displayMode.value === 'paragraph' && !isEditing.value && segments.value && currentTranscript.value.content) {
-      generateSegmentMarkers(segments.value, currentTranscript.value.content)
-    }
-  },
-  { deep: true }
-)
-
-// 監聽 displayMode 變化，重新設置滾動監聽器
-watch(displayMode, () => {
-  nextTick(() => {
-    removeScrollListeners()
-    setupScrollListeners()
-  })
+// 頁面生命週期（載入、滾動、路由守衛、watchers）
+usePageLifecycle({
+  route,
+  router,
+  $t,
+  textareaRef,
+  headerRef,
+  displayMode,
+  segments,
+  currentTranscript,
+  subtitleSettings,
+  densityThreshold,
+  isEditing,
+  hasUnsavedChanges,
+  handleBeforeUnload,
+  handleCancelEditing,
+  clearHighlights,
+  cleanupAudioPlayer,
+  cancelPendingRequests,
+  loadTranscriptData,
+  getAudioUrl,
+  initAudioUrl,
+  generateSegmentMarkers,
+  fetchTagColors,
+  isMountedRef: { get: () => isMounted, set: (v) => { isMounted = v } },
+  scrollRestoreTimersRef: { get: () => scrollRestoreTimers, set: (v) => { scrollRestoreTimers = v } },
+  isInitializingRef: { get: () => isInitializing, set: (v) => { isInitializing = v } },
 })
 </script>
 

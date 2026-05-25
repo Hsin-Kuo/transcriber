@@ -1,27 +1,206 @@
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 /**
  * 逐字稿下載管理 Composable
  *
  * 職責：
  * - 管理下載對話框狀態
+ * - 載入 AI 摘要（for download）
  * - 處理段落模式和字幕模式的下載
  * - 生成下載檔案（TXT、SRT、VTT、PDF）
  */
-export function useTranscriptDownload() {
+export function useTranscriptDownload(deps = {}) {
+  const {
+    currentTranscript,
+    displayMode,
+    groupedSegments,
+    speakerNames,
+    timeFormat,
+    generateSubtitleText,
+    generateSRTText,
+    generateVTTText,
+    summaryService,
+  } = deps
+
+  const { t: $t } = useI18n()
+
   // 下載對話框狀態
   const showDownloadDialog = ref(false)
   const selectedDownloadFormat = ref('txt')
-  const includeSpeaker = ref(true) // 預設包含講者資訊
-  const includeSummary = ref(true) // 預設包含 AI 摘要
-  const includeTranscript = ref(true) // 預設包含逐字稿
-  const isGeneratingPdf = ref(false) // PDF 生成中狀態
+  const includeSpeaker = ref(true)
+  const includeSummary = ref(true)
+  const includeTranscript = ref(true)
+  const isGeneratingPdf = ref(false)
 
-  /**
-   * 下載段落模式的逐字稿
-   * @param {String} content - 逐字稿內容
-   * @param {String} filename - 檔案名稱
-   */
+  // AI 摘要數據（用於下載）
+  const summaryData = ref(null)
+
+  const hasSummaryData = computed(() => {
+    return currentTranscript?.value?.summary_status === 'completed'
+  })
+
+  async function loadSummaryForDownload() {
+    if (!hasSummaryData.value || summaryData.value) return
+
+    try {
+      summaryData.value = await summaryService.get(currentTranscript.value.task_id)
+    } catch (error) {
+      console.error('載入摘要失敗:', error)
+      summaryData.value = null
+    }
+  }
+
+  // ========== 下載觸發 ==========
+
+  function openDownloadDialog() {
+    showDownloadDialog.value = true
+  }
+
+  function closeDownloadDialog() {
+    showDownloadDialog.value = false
+  }
+
+  function downloadTranscript() {
+    showDownloadDialog.value = true
+  }
+
+  // ========== 執行下載 ==========
+
+  async function performDownload() {
+    const speakerNamesToUse = includeSpeaker.value ? speakerNames.value : null
+    const filename = currentTranscript.value.custom_name || currentTranscript.value.filename || 'transcript'
+    const format = selectedDownloadFormat.value
+    const isParagraphMode = displayMode.value === 'paragraph'
+
+    const getTranscriptText = () => {
+      if (isParagraphMode) {
+        return currentTranscript.value.content || ''
+      } else {
+        return generateSubtitleText(groupedSegments.value, timeFormat.value, speakerNamesToUse)
+      }
+    }
+
+    // PDF 格式處理
+    if (format === 'pdf') {
+      if (includeSummary.value && hasSummaryData.value && !summaryData.value) {
+        await loadSummaryForDownload()
+      }
+
+      let transcriptText = ''
+      if (includeTranscript.value) {
+        transcriptText = getTranscriptText()
+      }
+
+      await downloadAsPdf({
+        filename,
+        title: currentTranscript.value.custom_name || currentTranscript.value.filename,
+        summary: includeSummary.value ? summaryData.value : null,
+        transcriptText,
+        includeSummary: includeSummary.value,
+        includeTranscript: includeTranscript.value,
+        t: $t
+      })
+      return
+    }
+
+    // TXT 格式處理（支援內容選擇）
+    if (format === 'txt') {
+      let content = ''
+
+      if (includeSummary.value && hasSummaryData.value) {
+        if (!summaryData.value) {
+          await loadSummaryForDownload()
+        }
+        if (summaryData.value) {
+          content += formatSummaryAsText(summaryData.value)
+          if (includeTranscript.value) {
+            content += '\n\n' + '='.repeat(50) + '\n\n'
+          }
+        }
+      }
+
+      if (includeTranscript.value) {
+        content += getTranscriptText()
+      }
+
+      performSubtitleDownload(content, filename, format)
+      return
+    }
+
+    // SRT/VTT 格式（僅逐字稿，僅字幕模式可用）
+    let content = ''
+    if (format === 'srt') {
+      content = generateSRTText(groupedSegments.value, speakerNamesToUse)
+    } else if (format === 'vtt') {
+      content = generateVTTText(groupedSegments.value, speakerNamesToUse)
+    }
+
+    performSubtitleDownload(content, filename, format)
+  }
+
+  // ========== 摘要格式化 ==========
+
+  function formatSummaryAsText(summary) {
+    if (!summary?.content) return ''
+
+    const content = summary.content
+    const lines = []
+
+    lines.push('【AI 摘要】')
+    lines.push('')
+
+    if (content.meta?.detected_topic) {
+      lines.push(content.meta.detected_topic)
+      lines.push('')
+    }
+
+    if (content.summary) {
+      lines.push(`【${$t('aiSummary.executiveSummary')}】`)
+      lines.push(content.summary)
+      lines.push('')
+    }
+
+    const points = content.key_points || content.highlights || []
+    if (points.length > 0) {
+      lines.push(`【${$t('aiSummary.keyPoints')}】`)
+      points.forEach(point => {
+        const text = typeof point === 'string' ? point : (point.text || point.point || point.content || JSON.stringify(point))
+        lines.push(`• ${text}`)
+      })
+      lines.push('')
+    }
+
+    if (content.segments && content.segments.length > 0) {
+      lines.push(`【${$t('aiSummary.contentSegments')}】`)
+      content.segments.forEach(segment => {
+        lines.push(`▎${segment.topic}`)
+        lines.push(segment.content)
+        if (segment.keywords && segment.keywords.length > 0) {
+          lines.push(`關鍵詞: ${segment.keywords.join(', ')}`)
+        }
+        lines.push('')
+      })
+    }
+
+    if (content.action_items && content.action_items.length > 0) {
+      lines.push(`【${$t('aiSummary.actionItems')}】`)
+      content.action_items.forEach(item => {
+        let line = `☐ ${item.task}`
+        const meta = []
+        if (item.owner) meta.push(item.owner)
+        if (item.deadline) meta.push(item.deadline)
+        if (meta.length > 0) line += ` (${meta.join(' / ')})`
+        lines.push(line)
+      })
+      lines.push('')
+    }
+
+    return lines.join('\n').trim()
+  }
+
+  // ========== 檔案下載工具 ==========
+
   function downloadParagraphMode(content, filename) {
     const blob = new Blob([content], { type: 'text/plain' })
     const url = window.URL.createObjectURL(blob)
@@ -34,17 +213,10 @@ export function useTranscriptDownload() {
     window.URL.revokeObjectURL(url)
   }
 
-  /**
-   * 執行下載（字幕模式）
-   * @param {String} content - 字幕內容
-   * @param {String} filename - 檔案名稱
-   * @param {String} format - 下載格式 ('txt' | 'srt' | 'vtt')
-   */
   function performSubtitleDownload(content, filename, format = 'txt') {
     let extension = 'txt'
     let mimeType = 'text/plain; charset=utf-8'
 
-    // 根據格式設定副檔名和 MIME 類型
     if (format === 'srt') {
       extension = 'srt'
       mimeType = 'application/x-subrip; charset=utf-8'
@@ -66,34 +238,16 @@ export function useTranscriptDownload() {
     link.remove()
     window.URL.revokeObjectURL(url)
 
-    // 關閉對話框
     showDownloadDialog.value = false
   }
 
-  /**
-   * 開啟下載對話框（字幕模式使用）
-   */
-  function openDownloadDialog() {
-    showDownloadDialog.value = true
-  }
+  // ========== PDF 生成 ==========
 
-  /**
-   * 關閉下載對話框
-   */
-  function closeDownloadDialog() {
-    showDownloadDialog.value = false
-  }
-
-  // 快取已載入的資源
   let pdfMakeInstance = null
   let chineseFontLoaded = false
 
-  // 中文字體 CDN URL（使用 Google Noto Sans TC 子集版，約 5.6MB）
   const CHINESE_FONT_CDN = 'https://cdn.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf'
 
-  /**
-   * 將 ArrayBuffer 轉換為 Base64
-   */
   function arrayBufferToBase64(buffer) {
     let binary = ''
     const bytes = new Uint8Array(buffer)
@@ -104,11 +258,7 @@ export function useTranscriptDownload() {
     return window.btoa(binary)
   }
 
-  /**
-   * 載入 pdfmake 和中文字體（lazy loading）
-   */
   async function loadPdfMake() {
-    // 如果已載入過，直接返回快取
     if (pdfMakeInstance) {
       return {
         pdfMake: pdfMakeInstance,
@@ -123,10 +273,8 @@ export function useTranscriptDownload() {
 
     const pdfMake = pdfMakeModule.default || pdfMakeModule
 
-    // pdfFontsModule 本身就是 vfs（字體直接在根層級）
     const defaultVfs = pdfFontsModule.default || pdfFontsModule
 
-    // 過濾掉 'default' 屬性，只保留字體檔案
     const vfs = {}
     for (const key in defaultVfs) {
       if (key !== 'default' && typeof defaultVfs[key] === 'string') {
@@ -134,10 +282,8 @@ export function useTranscriptDownload() {
       }
     }
 
-    // 設置 vfs
     pdfMake.vfs = vfs
 
-    // 設置預設字體定義
     pdfMake.fonts = {
       Roboto: {
         normal: 'Roboto-Regular.ttf',
@@ -147,17 +293,14 @@ export function useTranscriptDownload() {
       }
     }
 
-    // 從 CDN 載入中文字體
     try {
       const fontResponse = await fetch(CHINESE_FONT_CDN)
       if (fontResponse.ok) {
         const fontBuffer = await fontResponse.arrayBuffer()
         const fontBase64 = arrayBufferToBase64(fontBuffer)
 
-        // 添加中文字體到 vfs
         pdfMake.vfs['NotoSansTC-Regular.otf'] = fontBase64
 
-        // 添加中文字體定義
         pdfMake.fonts.NotoSansTC = {
           normal: 'NotoSansTC-Regular.otf',
           bold: 'NotoSansTC-Regular.otf',
@@ -173,18 +316,11 @@ export function useTranscriptDownload() {
       console.warn('無法從 CDN 載入中文字體，將使用預設字體:', error)
     }
 
-    // 快取 pdfMake 實例和 vfs
     pdfMakeInstance = pdfMake
 
     return { pdfMake, vfs: pdfMake.vfs, fonts: pdfMake.fonts, hasChineseFont: chineseFontLoaded }
   }
 
-  /**
-   * 格式化 AI 摘要為 PDF 內容
-   * @param {Object} summary - AI 摘要物件
-   * @param {Function} t - i18n 翻譯函數
-   * @returns {Array} pdfmake 內容陣列
-   */
   function formatSummaryForPdf(summary, t) {
     const content = []
 
@@ -192,14 +328,12 @@ export function useTranscriptDownload() {
 
     const summaryContent = summary.content
 
-    // 標題
     content.push({
       text: t('aiSummary.title'),
       style: 'sectionHeader',
       margin: [0, 0, 0, 12]
     })
 
-    // Meta 資訊（類型）
     if (summaryContent.meta) {
       const metaText = []
       if (summaryContent.meta.type) {
@@ -213,7 +347,6 @@ export function useTranscriptDownload() {
         })
       }
 
-      // 偵測主題
       if (summaryContent.meta.detected_topic) {
         content.push({
           text: summaryContent.meta.detected_topic,
@@ -223,7 +356,6 @@ export function useTranscriptDownload() {
       }
     }
 
-    // 摘要
     if (summaryContent.summary) {
       content.push({
         text: t('aiSummary.executiveSummary'),
@@ -237,7 +369,6 @@ export function useTranscriptDownload() {
       })
     }
 
-    // 重點列表
     const keyPoints = (summaryContent.key_points || summaryContent.highlights || []).map(p =>
       typeof p === 'string' ? p : (p.text || p.point || p.content || JSON.stringify(p))
     )
@@ -254,7 +385,6 @@ export function useTranscriptDownload() {
       })
     }
 
-    // 內容段落
     if (summaryContent.segments && summaryContent.segments.length > 0) {
       content.push({
         text: t('aiSummary.contentSegments'),
@@ -283,7 +413,6 @@ export function useTranscriptDownload() {
       })
     }
 
-    // 待辦事項
     if (summaryContent.action_items && summaryContent.action_items.length > 0) {
       content.push({
         text: t('aiSummary.actionItems'),
@@ -307,7 +436,6 @@ export function useTranscriptDownload() {
       })
     }
 
-    // 分隔線
     content.push({
       canvas: [{ type: 'line', x1: 0, y1: 0, x2: 515, y2: 0, lineWidth: 0.5, lineColor: '#cccccc' }],
       margin: [0, 12, 0, 12]
@@ -316,12 +444,6 @@ export function useTranscriptDownload() {
     return content
   }
 
-  /**
-   * 格式化逐字稿為 PDF 內容
-   * @param {String} transcriptText - 逐字稿文字內容
-   * @param {Function} t - i18n 翻譯函數
-   * @returns {Array} pdfmake 內容陣列
-   */
   function formatTranscriptForPdf(transcriptText, t) {
     const content = []
 
@@ -333,7 +455,6 @@ export function useTranscriptDownload() {
       margin: [0, 0, 0, 12]
     })
 
-    // 將逐字稿按行分割並格式化
     const lines = transcriptText.split('\n')
     lines.forEach(line => {
       if (line.trim()) {
@@ -350,17 +471,6 @@ export function useTranscriptDownload() {
     return content
   }
 
-  /**
-   * 生成並下載 PDF
-   * @param {Object} options - 下載選項
-   * @param {String} options.filename - 檔案名稱
-   * @param {String} options.title - 文件標題
-   * @param {Object} options.summary - AI 摘要（可選）
-   * @param {String} options.transcriptText - 逐字稿文字
-   * @param {Boolean} options.includeSummary - 是否包含摘要
-   * @param {Boolean} options.includeTranscript - 是否包含逐字稿
-   * @param {Function} options.t - i18n 翻譯函數
-   */
   async function downloadAsPdf(options) {
     const { filename, title, summary, transcriptText, includeSummary: incSummary, includeTranscript: incTranscript, t } = options
 
@@ -371,27 +481,22 @@ export function useTranscriptDownload() {
 
       const docContent = []
 
-      // 文件標題
       docContent.push({
         text: title || filename,
         style: 'title',
         margin: [0, 0, 0, 20]
       })
 
-      // AI 摘要
       if (incSummary && summary) {
         docContent.push(...formatSummaryForPdf(summary, t))
       }
 
-      // 逐字稿
       if (incTranscript && transcriptText) {
         docContent.push(...formatTranscriptForPdf(transcriptText, t))
       }
 
-      // 根據字體載入狀態選擇字體
       const defaultFont = hasChineseFont ? 'NotoSansTC' : 'Roboto'
 
-      // 如果使用中文字體，不使用 bold（因為只有一個字重）
       const styles = hasChineseFont ? {
         title: {
           fontSize: 20,
@@ -477,10 +582,8 @@ export function useTranscriptDownload() {
         pageMargins: [40, 40, 40, 40]
       }
 
-      // 設置 fonts
       pdfMake.fonts = fonts
 
-      // 將中文字體寫入 pdfMake 的 virtualfs（需要轉換為 Uint8Array）
       if (hasChineseFont && pdfMake.virtualfs && typeof pdfMake.virtualfs.writeFileSync === 'function') {
         const fontBase64 = vfs['NotoSansTC-Regular.otf']
         if (fontBase64) {
@@ -495,7 +598,6 @@ export function useTranscriptDownload() {
 
       pdfMake.createPdf(docDefinition).download(`${filename}.pdf`)
 
-      // 關閉對話框
       showDownloadDialog.value = false
     } catch (error) {
       console.error('PDF 生成失敗:', error)
@@ -513,12 +615,15 @@ export function useTranscriptDownload() {
     includeSummary,
     includeTranscript,
     isGeneratingPdf,
+    hasSummaryData,
 
     // 方法
     downloadParagraphMode,
     performSubtitleDownload,
     openDownloadDialog,
     closeDownloadDialog,
+    downloadTranscript,
+    performDownload,
     downloadAsPdf
   }
 }
