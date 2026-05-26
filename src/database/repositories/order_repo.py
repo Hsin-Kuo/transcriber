@@ -1,8 +1,12 @@
 """訂單資料存取層"""
+import asyncio
 from typing import Optional, Dict, Any, List
 from bson import ObjectId
 
 from ...utils.time_utils import get_utc_timestamp
+from ...utils.logger import get_logger
+
+log = get_logger(__name__)
 
 
 class OrderRepository:
@@ -22,6 +26,8 @@ class OrderRepository:
         now = get_utc_timestamp()
         order_data.setdefault("created_at", now)
         order_data.setdefault("updated_at", now)
+        if order_data.get("status") == "pending":
+            order_data.setdefault("expires_at", now + 3600)
         result = await self.collection.insert_one(order_data)
         order_data["_id"] = result.inserted_id
         return order_data
@@ -85,3 +91,25 @@ class OrderRepository:
             {"$set": updates}
         )
         return result.modified_count > 0
+
+    async def sweep_expired_pending_orders(self) -> int:
+        """將過期的 pending 訂單標記為 expired（保留記錄便於審計）"""
+        now = get_utc_timestamp()
+        result = await self.collection.update_many(
+            {"status": "pending", "expires_at": {"$lt": now}},
+            {"$set": {"status": "expired", "updated_at": now}}
+        )
+        return result.modified_count
+
+
+async def periodic_order_cleanup(db, interval_seconds: int = 300) -> None:
+    """定期清掃過期未付款訂單（背景任務，由 main.py startup 啟動）"""
+    order_repo = OrderRepository(db)
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+            removed = await order_repo.sweep_expired_pending_orders()
+            if removed:
+                log.info("order.sweep.expired_pending.completed", removed=removed)
+        except Exception as e:
+            log.error("order.sweep.failed", error=str(e), exc_info=True)

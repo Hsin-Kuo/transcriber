@@ -322,6 +322,13 @@ async def startup_event():
         name="periodic_reservation_cleanup",
     )
 
+    # 5.3. 啟動定期過期訂單清掃（未付款超時自動標記 expired）
+    from src.database.repositories.order_repo import periodic_order_cleanup
+    create_background_task(
+        periodic_order_cleanup(db),
+        name="periodic_order_cleanup",
+    )
+
     # 6. 載入 Whisper 模型（條件式）
     if SHOULD_LOAD_MODELS:
         from faster_whisper import WhisperModel

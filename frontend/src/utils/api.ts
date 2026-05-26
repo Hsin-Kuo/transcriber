@@ -58,6 +58,8 @@ type RefreshSubscriber = {
 let isRefreshing = false
 let refreshSubscribers: RefreshSubscriber[] = []
 let rateLimitNotifyTimer: ReturnType<typeof setTimeout> | null = null
+let serverErrorNotifyTimer: ReturnType<typeof setTimeout> | null = null
+let networkErrorNotifyTimer: ReturnType<typeof setTimeout> | null = null
 
 function subscribeTokenRefresh(
   resolve: (token: string) => void,
@@ -155,6 +157,24 @@ api.interceptors.response.use(
       if (!rateLimitNotifyTimer) {
         window.dispatchEvent(new CustomEvent('api:rate-limited'))
         rateLimitNotifyTimer = setTimeout(() => { rateLimitNotifyTimer = null }, 3000)
+      }
+      return Promise.reject(error)
+    }
+
+    // 5xx 伺服器錯誤
+    if (error.response && error.response.status >= 500) {
+      if (!serverErrorNotifyTimer) {
+        window.dispatchEvent(new CustomEvent('api:server-error'))
+        serverErrorNotifyTimer = setTimeout(() => { serverErrorNotifyTimer = null }, 5000)
+      }
+      return Promise.reject(error)
+    }
+
+    // 網路錯誤（無 response = 斷線 / timeout；排除用戶主動取消）
+    if (!error.response && error.code !== 'ERR_CANCELED') {
+      if (!networkErrorNotifyTimer) {
+        window.dispatchEvent(new CustomEvent('api:network-error'))
+        networkErrorNotifyTimer = setTimeout(() => { networkErrorNotifyTimer = null }, 5000)
       }
       return Promise.reject(error)
     }
