@@ -74,6 +74,82 @@
 
 ---
 
+## 🔵 營運就緒（上線後持續迭代）
+
+> 2026-05-25 全面評估後新增。按優先度排列。
+
+### P1 — 應盡快處理
+
+- [ ] **O1** — Analytics 整合
+  - 加入 Plausible 或 GA4，取得用戶漏斗與轉換率可見性
+  - Plausible 免改 CSP、免 cookie consent；GA4 需加白名單
+
+- [ ] **O2** — GDPR 資料匯出
+  - 新增 API endpoint 讓用戶下載完整個資（帳號資訊 + 所有轉錄 + segments + tags）
+  - 目前只能逐份下載 TXT
+
+- [ ] **O3** — 付款收據 Email
+  - 訂閱成功 / 續約成功時寄確認信
+  - Email service 基礎設施已有（Resend / SMTP / console）
+
+- [ ] **O4** — Staging 環境
+  - 分離 staging 與 production 部署流程
+  - 避免直接 push aws 分支即部署生產
+
+### P2 — 重要但可迭代
+
+- [ ] **O5** — 退款機制
+  - 藍新退款 API 整合 + admin 退款按鈕
+
+- [x] **O6** — 訂閱到期主動檢查（2026-05-26）
+  - 背景 task 每小時掃描 subscription 過期但 status 仍為 active 的用戶，主動降級
+  - 與既有 lazy 機制互補（`QuotaManager._expire_subscription`）
+
+- [ ] **O7** — Bare `except:` 清理
+  - `src/database/repositories/user_repo.py`（lines 39, 63）
+  - `src/database/repositories/task_repo.py`（line 489）
+  - `src/services/utils/whisper_processor.py`（line 465）
+  - 改為具體 Exception 型別 + 加 log
+
+- [ ] **O8** — SEO / OG Meta Tags
+  - index.html 加 description、OG tags
+  - 分享頁面（/s/:token）加動態 meta（轉錄標題 + 描述）
+
+- [ ] **O9** — Accessibility 基礎
+  - 關鍵互動元素加 aria-label
+  - 按鍵導航支援（Tab focus ring）
+
+- [ ] **O10** — IaC（基礎設施即代碼）
+  - 用 Terraform 或 CDK 定義 AWS 資源
+  - 目前全手動，僅文件記錄 instance ID
+
+- [ ] **O11** — Session 管理
+  - 「登出所有裝置」功能
+  - 用戶可查看活躍 session 列表
+
+- [ ] **O12** — MongoDB 連線池調優
+  - 顯式設定 maxPoolSize / minPoolSize / waitQueueTimeoutMS
+  - Atlas M2 可能撐不住突發流量
+
+### P3 — Nice-to-have
+
+- [ ] **O13** — Circuit breaker（Gemini / S3 熔斷）
+- [ ] **O14** — 內容審核 / 濫用舉報機制
+- [ ] **O15** — Admin 收入 dashboard
+- [ ] **O16** — Plan 升降級金額 proration
+- [ ] **O17** — Google OAuth HTTP timeout 設定
+
+### 已完成（2026-05-25）
+
+- [x] CSP 從 Report-Only 切換為強制模式
+- [x] 登入 rate limit（IP 20次 + Email 5次 / 15分鐘）
+- [x] 隱私權政策 + 服務條款文件撰寫（`docs/privacy-policy.md`、`docs/terms-of-service.md`）
+- [x] 前端 code splitting（主 bundle 648KB→293KB，-55%）+ 移除 dead wavesurfer.js
+- [x] 全局網路錯誤 toast（5xx / network error / offline / online）
+- [x] Pending 訂單 TTL 清理（expires_at + 背景 sweep）
+
+---
+
 ## 進度追蹤
 
 | 任務 | 狀態 | 完成時間 |

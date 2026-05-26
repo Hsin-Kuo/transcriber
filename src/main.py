@@ -329,6 +329,13 @@ async def startup_event():
         name="periodic_order_cleanup",
     )
 
+    # 5.4. 啟動定期訂閱到期掃描（主動降級未登入但已過期的用戶）
+    from src.auth.quota import periodic_subscription_expiry_check
+    create_background_task(
+        periodic_subscription_expiry_check(db),
+        name="periodic_subscription_expiry_check",
+    )
+
     # 6. 載入 Whisper 模型（條件式）
     if SHOULD_LOAD_MODELS:
         from faster_whisper import WhisperModel
