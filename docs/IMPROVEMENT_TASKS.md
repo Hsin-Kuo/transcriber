@@ -105,11 +105,11 @@
   - 背景 task 每小時掃描 subscription 過期但 status 仍為 active 的用戶，主動降級
   - 與既有 lazy 機制互補（`QuotaManager._expire_subscription`）
 
-- [ ] **O7** — Bare `except:` 清理
-  - `src/database/repositories/user_repo.py`（lines 39, 63）
-  - `src/database/repositories/task_repo.py`（line 489）
-  - `src/services/utils/whisper_processor.py`（line 465）
-  - 改為具體 Exception 型別 + 加 log
+- [x] **O7** — Bare `except:` 清理（2026-05-26）
+  - user_repo / task_repo → `except Exception`
+  - whisper_processor → `except OSError`
+  - migrate_json_to_mongo → `except Exception`
+  - 全站零 bare except 殘留
 
 - [ ] **O8** — SEO / OG Meta Tags
   - index.html 加 description、OG tags

@@ -486,7 +486,7 @@ class TaskRepository:
             try:
                 if len(user_id) == 24:  # ObjectId 長度
                     user_id_conditions.append(ObjectId(user_id))
-            except:
+            except Exception:
                 pass
 
             user_filter = {

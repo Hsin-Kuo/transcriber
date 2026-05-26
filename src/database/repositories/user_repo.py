@@ -36,7 +36,7 @@ class UserRepository:
         """根據 ID 獲取用戶"""
         try:
             return await self.collection.find_one({"_id": ObjectId(user_id)})
-        except:
+        except Exception:
             return None
 
     async def get_by_email(self, email: str) -> Optional[Dict[str, Any]]:
@@ -60,7 +60,7 @@ class UserRepository:
         try:
             result = await self.collection.delete_one({"_id": ObjectId(user_id)})
             return result.deleted_count > 0
-        except:
+        except Exception:
             return False
 
     async def update(self, user_id: str, updates: Dict[str, Any]) -> bool:

@@ -44,7 +44,7 @@ def _parse_timestamp(ts_str):
                 continue
         # 如果都失敗，返回當前時間
         return datetime.utcnow()
-    except:
+    except Exception:
         return datetime.utcnow()
 
 
