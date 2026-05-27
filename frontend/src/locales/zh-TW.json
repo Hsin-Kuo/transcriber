@@ -728,6 +728,7 @@
     "expiry7d": "7 天後過期",
     "expiry30d": "30 天後過期",
     "expiry90d": "90 天後過期",
+    "changeExpiry": "變更期限",
     "expired": "分享連結已過期",
     "aiSummary": "AI 摘要",
     "summaryTitle": "摘要",
