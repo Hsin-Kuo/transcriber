@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from bson import ObjectId
+from bson.errors import InvalidId
 
 from ...utils.time_utils import get_utc_timestamp
 from src.utils.logger import get_logger
@@ -33,11 +34,16 @@ class UserRepository:
         return user_data
 
     async def get_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """根據 ID 獲取用戶"""
+        """根據 ID 獲取用戶。
+
+        只 catch InvalidId（user_id 格式錯誤）。DB 連線錯誤、Timeout 等
+        往上拋讓中介軟體處理，避免偽裝成「user 不存在」造成 login 假性失效。
+        """
         try:
-            return await self.collection.find_one({"_id": ObjectId(user_id)})
-        except Exception:
+            object_id = ObjectId(user_id)
+        except InvalidId:
             return None
+        return await self.collection.find_one({"_id": object_id})
 
     async def get_by_email(self, email: str) -> Optional[Dict[str, Any]]:
         """根據 Email 獲取用戶"""
@@ -56,12 +62,13 @@ class UserRepository:
         return await self.collection.find_one({"google_id": google_id})
 
     async def delete(self, user_id: str) -> bool:
-        """刪除用戶"""
+        """刪除用戶。InvalidId 視為「沒有這個 user」，其他異常往上拋。"""
         try:
-            result = await self.collection.delete_one({"_id": ObjectId(user_id)})
-            return result.deleted_count > 0
-        except Exception:
+            object_id = ObjectId(user_id)
+        except InvalidId:
             return False
+        result = await self.collection.delete_one({"_id": object_id})
+        return result.deleted_count > 0
 
     async def update(self, user_id: str, updates: Dict[str, Any]) -> bool:
         """更新用戶資料"""
