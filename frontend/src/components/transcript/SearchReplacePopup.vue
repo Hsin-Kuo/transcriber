@@ -12,6 +12,7 @@
           v-model="localSearchText"
           type="text"
           :placeholder="$t('searchReplace.searchPlaceholder')"
+          :aria-label="$t('searchReplace.searchPlaceholder')"
           class="search-input"
           @input="handleSearchInput"
           @keydown.enter="handleSearchKeydown"
@@ -23,6 +24,8 @@
             class="search-option-btn"
             :class="{ active: localMatchCase }"
             @click="toggleMatchCase"
+            :aria-label="$t('searchReplace.matchCase')"
+            :aria-pressed="localMatchCase"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none">
               <text x="2" y="17" font-size="15" font-weight="semi-bold" font-family="system-ui, sans-serif">Aa</text>
@@ -33,6 +36,8 @@
             class="search-option-btn"
             :class="{ active: localMatchWholeWord }"
             @click="toggleMatchWholeWord"
+            :aria-label="$t('searchReplace.matchWholeWord')"
+            :aria-pressed="localMatchWholeWord"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none">
               <rect x="1" y="5" width="2" height="14" rx="1" />
@@ -57,6 +62,7 @@
           @click="goToPrevious"
           :disabled="totalMatches === 0"
           :title="$t('searchReplace.previous')"
+          :aria-label="$t('searchReplace.previous')"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="18 15 12 9 6 15" />
@@ -67,6 +73,7 @@
           @click="goToNext"
           :disabled="totalMatches === 0"
           :title="$t('searchReplace.next')"
+          :aria-label="$t('searchReplace.next')"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="6 9 12 15 18 9" />
@@ -75,7 +82,7 @@
       </div>
 
       <!-- 關閉按鈕 -->
-      <button class="close-btn" @click="$emit('close')" :title="$t('searchReplace.close')">
+      <button class="close-btn" @click="$emit('close')" :title="$t('searchReplace.close')" :aria-label="$t('searchReplace.close')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="18" y1="6" x2="6" y2="18" />
           <line x1="6" y1="6" x2="18" y2="18" />
@@ -96,6 +103,7 @@
           v-model="localReplaceText"
           type="text"
           :placeholder="$t('searchReplace.replacePlaceholder')"
+          :aria-label="$t('searchReplace.replacePlaceholder')"
           class="replace-input"
           @keydown.enter="handleReplaceKeydown"
           @keydown.esc="$emit('close')"

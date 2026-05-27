@@ -13,6 +13,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import api from '../../utils/api'
 import { NEW_ENDPOINTS } from '../../api/endpoints'
+import { useFocusTrap } from '../../composables/useFocusTrap'
 
 const props = defineProps({
   taskId: { type: String, required: true },
@@ -25,6 +26,9 @@ const props = defineProps({
 const show = defineModel('show', { type: Boolean, default: false })
 
 const { t } = useI18n()
+
+const dialogRef = ref(null)
+useFocusTrap(dialogRef, show)
 
 // 內部 state：用 props 初值，後續 enable/disable/update_expiry 自行維護
 const shareToken = ref(props.initialShareToken)
@@ -107,7 +111,7 @@ function copyShareLink() {
 <template>
   <Teleport to="body">
     <div v-if="show" class="share-overlay" @click.self="show = false">
-      <div class="share-dialog" role="dialog" aria-modal="true" :aria-label="t('shared.shareTitle')">
+      <div ref="dialogRef" class="share-dialog" role="dialog" aria-modal="true" :aria-label="t('shared.shareTitle')">
         <h3>{{ t('shared.shareTitle') }}</h3>
         <p class="share-desc">{{ t('shared.shareDesc') }}</p>
 

@@ -135,6 +135,7 @@
                 :value="speakerNames[speaker] || ''"
                 @input="updateSpeakerName(speaker, $event.target.value)"
                 :placeholder="$t('subtitleTable.speakerPlaceholder', { number: speaker.replace('SPEAKER_', '') })"
+                :aria-label="$t('subtitleTable.speakerPlaceholder', { number: speaker.replace('SPEAKER_', '') })"
                 class="speaker-input"
               />
             </div>

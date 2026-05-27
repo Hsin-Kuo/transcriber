@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <div v-if="visible" class="modal-overlay" @click.self="handleCancel">
-      <div class="modal-container" role="dialog" aria-modal="true" aria-label="音檔合併服務">
+      <div ref="modalContainerRef" class="modal-container" role="dialog" aria-modal="true" aria-label="音檔合併服務">
         <!-- 標題列 -->
         <div class="modal-header">
           <h2>音檔合併服務</h2>
@@ -21,10 +21,14 @@
             <div
               class="upload-zone"
               :class="{ 'drag-over': isDragOver }"
+              role="button"
+              tabindex="0"
+              aria-label="選擇或拖放音檔"
               @dragover.prevent="isDragOver = true"
               @dragleave.prevent="isDragOver = false"
               @drop.prevent="handleDrop"
               @click="triggerFileInput"
+              @keydown.enter="triggerFileInput"
             >
               <input
                 ref="fileInput"
@@ -127,8 +131,9 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, toRef } from 'vue'
 import { VueDraggableNext as draggable } from 'vue-draggable-next'
+import { useFocusTrap } from '../../composables/useFocusTrap'
 
 const props = defineProps({
   visible: {
@@ -138,6 +143,9 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'confirm'])
+
+const modalContainerRef = ref(null)
+useFocusTrap(modalContainerRef, toRef(props, 'visible'))
 
 const fileInput = ref(null)
 const isDragOver = ref(false)

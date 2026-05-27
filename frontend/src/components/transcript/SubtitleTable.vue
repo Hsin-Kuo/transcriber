@@ -21,8 +21,12 @@
               'time-range': timeFormat === 'range',
               'clickable': hasAudio
             }"
+            :role="hasAudio ? 'button' : undefined"
+            :tabindex="hasAudio ? 0 : undefined"
             @click="hasAudio && $emit('seek-to-time', group.startTime)"
+            @keydown.enter="hasAudio && $emit('seek-to-time', group.startTime)"
             :title="hasAudio ? $t('subtitleTable.clickToJumpToTime') : ''"
+            :aria-label="hasAudio ? $t('subtitleTable.clickToJumpToTime') : undefined"
           >
             {{ formatTimestamp(group.startTime, timeFormat, group.endTime) }}
           </td>
@@ -31,8 +35,12 @@
             <span
               class="speaker-badge"
               :class="{ 'clickable': !isEditing }"
+              :role="!isEditing ? 'button' : undefined"
+              :tabindex="!isEditing ? 0 : undefined"
               @click="!isEditing && openSpeakerPicker(group, $event)"
+              @keydown.enter="!isEditing && openSpeakerPicker(group, $event)"
               :title="!isEditing ? $t('subtitleTable.clickToChangeSpeaker') : ''"
+              :aria-label="!isEditing ? $t('subtitleTable.clickToChangeSpeaker') : undefined"
             >
               {{ getSpeakerDisplayName(group.speaker) }}
             </span>
@@ -97,6 +105,7 @@
           v-model="newSpeakerName"
           type="text"
           :placeholder="$t('subtitleTable.newSpeaker')"
+          :aria-label="$t('subtitleTable.newSpeaker')"
           class="speaker-input"
           @keyup.enter="addNewSpeaker"
         />
