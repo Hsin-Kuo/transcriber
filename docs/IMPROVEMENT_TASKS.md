@@ -143,14 +143,17 @@
 - [ ] **O16** — Plan 升降級金額 proration
 - [ ] **O17** — Google OAuth HTTP timeout 設定
 
-### 已完成（2026-05-25）
+### 已完成
 
-- [x] CSP 從 Report-Only 切換為強制模式
-- [x] 登入 rate limit（IP 20次 + Email 5次 / 15分鐘）
-- [x] 隱私權政策 + 服務條款文件撰寫（`docs/privacy-policy.md`、`docs/terms-of-service.md`）
-- [x] 前端 code splitting（主 bundle 648KB→293KB，-55%）+ 移除 dead wavesurfer.js
-- [x] 全局網路錯誤 toast（5xx / network error / offline / online）
-- [x] Pending 訂單 TTL 清理（expires_at + 背景 sweep）
+- [x] CSP 從 Report-Only 切換為強制模式（2026-05-25）
+- [x] 登入 rate limit（IP 20次 + Email 5次 / 15分鐘）（2026-05-25）
+- [x] 隱私權政策 + 服務條款文件撰寫（`docs/privacy-policy.md`、`docs/terms-of-service.md`）（2026-05-25）
+- [x] 前端 code splitting（主 bundle 648KB→293KB，-55%）+ 移除 dead wavesurfer.js（2026-05-25）
+- [x] 全局網路錯誤 toast（5xx / network error / offline / online）（2026-05-25）
+- [x] Pending 訂單 TTL 清理（expires_at + 背景 sweep）（2026-05-25）
+- [x] O6 訂閱到期主動檢查（背景 task 每小時掃描 + 降級）（2026-05-26）
+- [x] O7 Bare `except:` 清理（全站零 bare except）（2026-05-26）
+- [x] O9 Accessibility 基礎（focus-visible / aria-label / aria-live / focus trap / 語義化）（2026-05-27）
 
 ---
 
