@@ -141,7 +141,7 @@
 - [ ] **O14** — 內容審核 / 濫用舉報機制
 - [ ] **O15** — Admin 收入 dashboard
 - [ ] **O16** — Plan 升降級金額 proration
-- [ ] **O17** — Google OAuth HTTP timeout 設定
+- [x] **O17** — Google OAuth HTTP timeout 設定（2026-05-27）
 
 ### 已完成
 
