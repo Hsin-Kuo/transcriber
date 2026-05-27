@@ -3,7 +3,7 @@
     <!-- 頂部標題列 -->
     <header class="shared-header">
       <div class="header-content">
-        <a href="https://soundlite.app" class="brand">Sound Lite</a>
+        <a href="https://my.soundlite.app" class="brand">Sound Lite</a>
         <span class="shared-badge">{{ $t('shared.publicLink') }}</span>
       </div>
     </header>

@@ -20,7 +20,7 @@ const routes = [
     name: 'transcription',
     component: TranscriptionView,
     meta: {
-      title: '轉錄服務',
+      title: '上傳音檔',
       requiresAuth: true
     }
   },

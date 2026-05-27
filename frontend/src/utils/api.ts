@@ -5,13 +5,17 @@
 import axios, { AxiosError } from 'axios'
 import type { AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 
-// 未設定 VITE_API_URL 時，自動沿用當前 hostname + port 8000
+// 未設定 VITE_API_URL 時：開發環境用 hostname:8000，生產環境用 same-origin
 function resolveApiBase(): string {
   const envUrl = import.meta.env.VITE_API_URL as string | undefined
   if (envUrl) return envUrl
   if (typeof window === 'undefined') return ''
-  const { protocol, hostname } = window.location
-  return `${protocol}//${hostname}:8000`
+  const { protocol, hostname, port } = window.location
+  const devPorts = ['5173', '3000']
+  if (devPorts.includes(port)) {
+    return `${protocol}//${hostname}:8000`
+  }
+  return ''
 }
 
 const API_BASE = resolveApiBase()
