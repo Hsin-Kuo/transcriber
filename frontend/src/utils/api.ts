@@ -175,8 +175,12 @@ api.interceptors.response.use(
       return Promise.reject(error)
     }
 
-    // 網路錯誤（無 response = 斷線 / timeout；排除用戶主動取消）
-    if (!error.response && error.code !== 'ERR_CANCELED') {
+    // 網路錯誤（無 response = 斷線 / timeout）。排除這些 expected case：
+    // - ERR_CANCELED: 用戶 / 程式主動 cancel
+    // - ECONNABORTED: axios timeout（大檔上傳碰到 5 分鐘上限會觸發，
+    //                  非真斷網，跳「網路錯誤」會誤導使用者）
+    const benignCodes = new Set(['ERR_CANCELED', 'ECONNABORTED'])
+    if (!error.response && !benignCodes.has(error.code ?? '')) {
       if (!networkErrorNotifyTimer) {
         window.dispatchEvent(new CustomEvent('api:network-error'))
         networkErrorNotifyTimer = setTimeout(() => { networkErrorNotifyTimer = null }, 5000)
