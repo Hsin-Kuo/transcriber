@@ -246,7 +246,9 @@ export function useTranscriptDownload(deps = {}) {
   let pdfMakeInstance = null
   let chineseFontLoaded = false
 
-  const CHINESE_FONT_CDN = 'https://cdn.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf'
+  // Self-hosted Noto Sans TC（放在 public/fonts/，與前端 same-origin，
+  // 不受 CSP connect-src 限制，也不依賴第三方 CDN 可用性）
+  const CHINESE_FONT_URL = '/fonts/NotoSansTC-Regular.otf'
 
   function arrayBufferToBase64(buffer) {
     let binary = ''
@@ -294,7 +296,7 @@ export function useTranscriptDownload(deps = {}) {
     }
 
     try {
-      const fontResponse = await fetch(CHINESE_FONT_CDN)
+      const fontResponse = await fetch(CHINESE_FONT_URL)
       if (fontResponse.ok) {
         const fontBuffer = await fontResponse.arrayBuffer()
         const fontBase64 = arrayBufferToBase64(fontBuffer)
@@ -310,10 +312,10 @@ export function useTranscriptDownload(deps = {}) {
 
         chineseFontLoaded = true
       } else {
-        console.warn('CDN 回應錯誤，使用預設字體')
+        console.error(`中文字體載入失敗 (HTTP ${fontResponse.status})，PDF 中文將顯示為 □`)
       }
     } catch (error) {
-      console.warn('無法從 CDN 載入中文字體，將使用預設字體:', error)
+      console.error('中文字體載入失敗，PDF 中文將顯示為 □：', error)
     }
 
     pdfMakeInstance = pdfMake
