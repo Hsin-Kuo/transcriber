@@ -1,9 +1,22 @@
 """OAuth 第三方登入路由"""
 import os
-import requests as _requests
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
+
+
+class _BoundedTimeoutRequest(google_requests.Request):
+    """google.auth Request 的 10s timeout 版本。
+
+    原 google.auth.transport.requests.Request.__call__ 預設 timeout=120s，
+    Google endpoint 偶有卡頓時會把 worker 阻塞兩分鐘。透過 subclass override
+    __call__ 預設 timeout，所有 verify_oauth2_token 內部請求都受限。
+
+    （舊版用 requests.Session().timeout = 10 是 no-op，Session 沒有
+    timeout 屬性，timeout 只能 per-request 傳入。）
+    """
+    def __call__(self, url, method="GET", body=None, headers=None, timeout=10, **kwargs):
+        return super().__call__(url, method, body, headers, timeout, **kwargs)
 
 from ..utils.time_utils import get_utc_timestamp
 from ..utils.config_loader import get_parameter
@@ -53,11 +66,9 @@ def verify_google_token(credential: str) -> dict:
         )
 
     try:
-        _session = _requests.Session()
-        _session.timeout = 10
         idinfo = id_token.verify_oauth2_token(
             credential,
-            google_requests.Request(session=_session),
+            _BoundedTimeoutRequest(),
             GOOGLE_CLIENT_ID,
             clock_skew_in_seconds=10
         )
