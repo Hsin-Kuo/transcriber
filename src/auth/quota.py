@@ -493,10 +493,12 @@ async def periodic_subscription_expiry_check(db, interval_seconds: int = 3600) -
 
     解決：用戶訂閱到期但從未登入，DB 中 status 永遠顯示 active 的問題。
     現有 lazy 機制（_reset_monthly_quota_if_needed）只在用戶請求時觸發。
+
+    第一次 sweep 在啟動後立即跑（不等 interval），避免 restart 緊接的時段
+    沒被 sweep 覆蓋；之後每 interval_seconds 跑一次。
     """
     while True:
         try:
-            await asyncio.sleep(interval_seconds)
             now_ts = get_utc_timestamp()
             cursor = db.users.find(
                 {
@@ -513,3 +515,4 @@ async def periodic_subscription_expiry_check(db, interval_seconds: int = 3600) -
                 log.info("subscription.expiry_sweep.completed", expired=expired_count)
         except Exception as e:
             log.error("subscription.expiry_sweep.failed", error=str(e), exc_info=True)
+        await asyncio.sleep(interval_seconds)

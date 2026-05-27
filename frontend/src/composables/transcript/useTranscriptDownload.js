@@ -246,9 +246,10 @@ export function useTranscriptDownload(deps = {}) {
   let pdfMakeInstance = null
   let chineseFontLoaded = false
 
-  // Self-hosted Noto Sans TC（放在 public/fonts/，與前端 same-origin，
-  // 不受 CSP connect-src 限制，也不依賴第三方 CDN 可用性）
-  const CHINESE_FONT_URL = '/fonts/NotoSansTC-Regular.otf'
+  // Self-hosted Noto Sans TC：放 src/assets，由 Vite 加 content hash
+  // → 1y immutable cache 安全（換版自動換 filename，舊使用者不會被 cache 卡死）。
+  // 同源 fetch → 不受 CSP connect-src 限制，也不依賴第三方 CDN。
+  const CHINESE_FONT_URL = new URL('../../assets/fonts/NotoSansTC-Regular.otf', import.meta.url).href
 
   function arrayBufferToBase64(buffer) {
     let binary = ''

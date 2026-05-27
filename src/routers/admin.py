@@ -1391,7 +1391,11 @@ async def get_revenue_stats(
         "subscription.status": "active",
         "subscription.cancel_at_period_end": True,
     })
-    month_start = now - (now % 86400) - (30 * 86400)
+    # 「本月流失」用日曆月初當下限（不是 now - 30 天）。
+    # 原邏輯 now - 30*86400 是「最近 30 天」滾動視窗，會隨日子飄移，
+    # 與前端 label「本月流失」語意不符。
+    now_dt = datetime.fromtimestamp(now, tz=timezone.utc)
+    month_start = int(datetime(now_dt.year, now_dt.month, 1, tzinfo=timezone.utc).timestamp())
     expired_this_month = await db.users.count_documents({
         "subscription.status": {"$in": ["expired", "past_due"]},
         "subscription.current_period_end": {"$gte": month_start, "$lt": now},

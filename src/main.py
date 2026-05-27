@@ -303,38 +303,44 @@ async def startup_event():
     logger.info("app.orphaned_tasks.cleaning")
     await task_service.cleanup_orphaned_tasks()
 
-    # 5. 啟動定期記憶體清理
-    create_background_task(
-        task_service.periodic_memory_cleanup(),
-        name="periodic_memory_cleanup",
-    )
+    # 5. 啟動所有定期背景任務
+    # 多 replica 場景下這些任務會在每個 instance 跑一次，等效但浪費 DB+log。
+    # 在非主 replica 設 RUN_BACKGROUND_JOBS=false 跳過，主 replica 預設保持啟用。
+    if os.getenv("RUN_BACKGROUND_JOBS", "true").lower() == "true":
+        # 5.0 定期記憶體清理
+        create_background_task(
+            task_service.periodic_memory_cleanup(),
+            name="periodic_memory_cleanup",
+        )
 
-    # 5.1. 啟動定期孤立進程清理
-    create_background_task(
-        task_service.periodic_orphaned_process_cleanup(),
-        name="periodic_orphaned_process_cleanup",
-    )
+        # 5.1 定期孤立進程清理
+        create_background_task(
+            task_service.periodic_orphaned_process_cleanup(),
+            name="periodic_orphaned_process_cleanup",
+        )
 
-    # 5.2. 啟動定期孤兒預扣清掃（轉錄 reservations + AI 摘要計數器）
-    from src.database.repositories.reservation_repo import periodic_reservation_cleanup
-    create_background_task(
-        periodic_reservation_cleanup(db),
-        name="periodic_reservation_cleanup",
-    )
+        # 5.2 定期孤兒預扣清掃（轉錄 reservations + AI 摘要計數器）
+        from src.database.repositories.reservation_repo import periodic_reservation_cleanup
+        create_background_task(
+            periodic_reservation_cleanup(db),
+            name="periodic_reservation_cleanup",
+        )
 
-    # 5.3. 啟動定期過期訂單清掃（未付款超時自動標記 expired）
-    from src.database.repositories.order_repo import periodic_order_cleanup
-    create_background_task(
-        periodic_order_cleanup(db),
-        name="periodic_order_cleanup",
-    )
+        # 5.3 定期過期訂單清掃（未付款超時自動標記 expired）
+        from src.database.repositories.order_repo import periodic_order_cleanup
+        create_background_task(
+            periodic_order_cleanup(db),
+            name="periodic_order_cleanup",
+        )
 
-    # 5.4. 啟動定期訂閱到期掃描（主動降級未登入但已過期的用戶）
-    from src.auth.quota import periodic_subscription_expiry_check
-    create_background_task(
-        periodic_subscription_expiry_check(db),
-        name="periodic_subscription_expiry_check",
-    )
+        # 5.4 定期訂閱到期掃描（主動降級未登入但已過期的用戶）
+        from src.auth.quota import periodic_subscription_expiry_check
+        create_background_task(
+            periodic_subscription_expiry_check(db),
+            name="periodic_subscription_expiry_check",
+        )
+    else:
+        logger.info("app.background_jobs.disabled", reason="RUN_BACKGROUND_JOBS=false")
 
     # 6. 載入 Whisper 模型（條件式）
     if SHOULD_LOAD_MODELS:

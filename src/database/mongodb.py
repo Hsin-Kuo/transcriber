@@ -56,7 +56,9 @@ class MongoDB:
                 waitQueueTimeoutMS=5000,
                 serverSelectionTimeoutMS=5000,
                 connectTimeoutMS=5000,
-                socketTimeoutMS=5000,
+                # 30s 涵蓋 admin 報表 aggregation 與冷快取場景；
+                # 一般 CRUD 用不到，長 query 建議改用 maxTimeMS() per-op。
+                socketTimeoutMS=30000,
                 **({"directConnection": True} if not is_atlas else {}),
                 **tls_opts,
             )

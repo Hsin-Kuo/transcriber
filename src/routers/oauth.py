@@ -80,16 +80,17 @@ def verify_google_token(credential: str) -> dict:
         return idinfo
 
     except ValueError as e:
+        # 細節只寫 log，response 給通用訊息避免洩漏內部錯誤結構給 client
         log.warning("oauth.google_token.invalid", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Google Token 無效: {str(e)}"
+            detail="Google Token 無效"
         )
     except Exception as e:
         log.warning("oauth.google_token.verify_error", error_type=type(e).__name__, error=str(e))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Google Token 驗證失敗: {str(e)}"
+            detail="Google Token 驗證失敗"
         )
 
 
