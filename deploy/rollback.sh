@@ -109,7 +109,7 @@ echo "${ROLLBACK_SHA}" > "$CURRENT_FILE"
 
 # 健康檢查
 sleep 3
-if curl -fsS https://soundlite.app/health > /dev/null; then
+if curl -fsS https://my.soundlite.app/health > /dev/null; then
   echo "✅ 回滾成功，健康檢查通過：${ROLLBACK_SHA}"
 else
   echo "⚠️  回滾完成但 /health 沒回 200，請手動檢查 systemctl status transcriber"

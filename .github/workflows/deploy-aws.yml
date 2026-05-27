@@ -46,10 +46,12 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         env:
-          VITE_API_URL: "https://soundlite.app"
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
         run: |
           # 寫入 .env.production（會覆寫 repo 內的同名檔，所有需要的變數都要列出）
+          # VITE_API_URL 留空 → 前端 fallback 為 same-origin，由 nginx 反代到 :8000。
+          # 切勿在 job env: 段落再設一份，shell env 會覆蓋 .env.production，
+          # 過去因此 hardcode 成舊網域導致 my.soundlite.app 被 CSP 擋 cross-origin。
           cat > .env.production <<EOF
           VITE_API_URL=
           VITE_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
@@ -182,5 +184,5 @@ jobs:
       - name: Verify deployment
         run: |
           sleep 5
-          curl -f https://soundlite.app/health || exit 1
-          echo "✅ Deployment successful! https://soundlite.app"
+          curl -f https://my.soundlite.app/health || exit 1
+          echo "✅ Deployment successful! https://my.soundlite.app"

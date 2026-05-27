@@ -46,11 +46,13 @@ FROM_NAME=Soundlite
 # MONGODB_URL - 從 /transcriber/mongodb-url 載入
 # RESEND_API_KEY - 從 /transcriber/resend-api-key 載入
 
-# CORS 設定（包含主前端和管理後台）
-CORS_ORIGINS=https://soundlite.app,https://admin.soundlite.app
+# CORS 設定（app 在 my.soundlite.app；admin 在 admin.soundlite.app）
+# 保留 https://soundlite.app 是為了過渡期相容（landing 已搬走後可移除）
+CORS_ORIGINS=https://my.soundlite.app,https://admin.soundlite.app,https://soundlite.app
 
-# Frontend URL (用於 email 中的連結)
-FRONTEND_URL=https://soundlite.app
+# Frontend URL — 用於 email 驗證連結、密碼重設、NewebPay 付款 return
+# 必須指向 transcriber app（my.soundlite.app），不是 landing
+FRONTEND_URL=https://my.soundlite.app
 EOF
 
 echo "=== 建立 systemd 服務 ==="
@@ -89,7 +91,8 @@ sudo nginx -t && sudo systemctl enable nginx && sudo systemctl restart nginx
 
 echo "=== 部署完成 ==="
 echo "Web Server API:  http://localhost:8000"
-echo "前端:            https://soundlite.app"
+echo "Landing:         https://soundlite.app"
+echo "App (前端):       https://my.soundlite.app"
 echo "管理後台:        https://admin.soundlite.app"
 echo ""
 echo "前端靜態檔案請透過 GitHub Actions CI/CD 部署"
