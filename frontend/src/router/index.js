@@ -1,17 +1,18 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import TranscriptionView from '../views/TranscriptionView.vue'
-import TasksView from '../views/TasksView.vue'
-import UserSettingsView from '../views/UserSettingsView.vue'
-import TranscriptDetailView from '../views/TranscriptDetailView.vue'
-import CheckoutView from '../views/CheckoutView.vue'
-import PaymentReturnView from '../views/PaymentReturnView.vue'
-import LoginView from '../views/auth/LoginView.vue'
-import RegisterView from '../views/auth/RegisterView.vue'
-import VerifyEmailView from '../views/auth/VerifyEmailView.vue'
-import ForgotPasswordView from '../views/auth/ForgotPasswordView.vue'
-import ResetPasswordView from '../views/auth/ResetPasswordView.vue'
-import SharedTranscriptView from '../views/SharedTranscriptView.vue'
+
+const TranscriptionView = () => import('../views/TranscriptionView.vue')
+const TasksView = () => import('../views/TasksView.vue')
+const UserSettingsView = () => import('../views/UserSettingsView.vue')
+const TranscriptDetailView = () => import('../views/TranscriptDetailView.vue')
+const CheckoutView = () => import('../views/CheckoutView.vue')
+const PaymentReturnView = () => import('../views/PaymentReturnView.vue')
+const LoginView = () => import('../views/auth/LoginView.vue')
+const RegisterView = () => import('../views/auth/RegisterView.vue')
+const VerifyEmailView = () => import('../views/auth/VerifyEmailView.vue')
+const ForgotPasswordView = () => import('../views/auth/ForgotPasswordView.vue')
+const ResetPasswordView = () => import('../views/auth/ResetPasswordView.vue')
+const SharedTranscriptView = () => import('../views/SharedTranscriptView.vue')
 
 const routes = [
   {
@@ -19,7 +20,7 @@ const routes = [
     name: 'transcription',
     component: TranscriptionView,
     meta: {
-      title: '轉錄服務',
+      title: '上傳音檔',
       requiresAuth: true
     }
   },

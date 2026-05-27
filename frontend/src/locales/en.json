@@ -288,7 +288,7 @@
   "navigation": {
     "expandSidebar": "Expand Sidebar",
     "collapseSidebar": "Collapse Sidebar",
-    "transcription": "Transcription",
+    "transcription": "Upload Audio",
     "audioEditor": "Audio Editor",
     "allTasks": "All Tasks",
     "recent": "Recent",
@@ -723,6 +723,7 @@
     "expiry7d": "In 7 days",
     "expiry30d": "In 30 days",
     "expiry90d": "In 90 days",
+    "changeExpiry": "Change expiry",
     "expired": "This share link has expired",
     "aiSummary": "AI Summary",
     "summaryTitle": "Summary",

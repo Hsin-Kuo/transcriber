@@ -2,11 +2,11 @@
   <Teleport to="body">
     <Transition name="bs">
       <div v-if="modelValue" class="bottom-sheet-overlay" @click.self="close">
-        <div class="bottom-sheet" @click.stop>
+        <div ref="sheetRef" class="bottom-sheet" @click.stop role="dialog" aria-modal="true" :aria-label="title">
           <div class="bottom-sheet-handle"></div>
           <div v-if="title" class="bottom-sheet-header">
             <span>{{ title }}</span>
-            <button class="bottom-sheet-close" @click="close">✕</button>
+            <button class="bottom-sheet-close" @click="close" aria-label="關閉">✕</button>
           </div>
           <div class="bottom-sheet-content">
             <slot />
@@ -18,12 +18,18 @@
 </template>
 
 <script setup>
-defineProps({
+import { ref, toRef } from 'vue'
+import { useFocusTrap } from '../../composables/useFocusTrap'
+
+const props = defineProps({
   modelValue: { type: Boolean, required: true },
   title: { type: String, default: '' }
 })
 
 const emit = defineEmits(['update:modelValue'])
+
+const sheetRef = ref(null)
+useFocusTrap(sheetRef, toRef(props, 'modelValue'))
 
 function close() {
   emit('update:modelValue', false)

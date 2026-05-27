@@ -2,8 +2,8 @@
   <header class="detail-header">
     <div class="header-left">
       <!-- 返回按鈕 -->
-      <button @click="$emit('go-back')" class="btn-back-icon">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <button @click="$emit('go-back')" class="btn-back-icon" :aria-label="$t('transcriptDetail.goBack')">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path d="M19 12H5M12 19l-7-7 7-7" />
         </svg>
       </button>
@@ -16,6 +16,7 @@
           :value="editingTaskName"
           type="text"
           class="title-input"
+          :aria-label="$t('transcriptDetail.editTitle')"
           @input="$emit('update:editingTaskName', $event.target.value)"
           @blur="$emit('save-task-name')"
           @keyup.enter="$emit('save-task-name')"
@@ -134,6 +135,7 @@
                 :value="speakerNames[speaker] || ''"
                 @input="updateSpeakerName(speaker, $event.target.value)"
                 :placeholder="$t('subtitleTable.speakerPlaceholder', { number: speaker.replace('SPEAKER_', '') })"
+                :aria-label="$t('subtitleTable.speakerPlaceholder', { number: speaker.replace('SPEAKER_', '') })"
                 class="speaker-input"
               />
             </div>
@@ -147,8 +149,11 @@
           @click.stop="toggleMoreOptions"
           class="btn btn-header btn-icon"
           :class="{ active: showMoreOptions }"
+          :aria-label="$t('transcriptDetail.moreOptions')"
+          aria-haspopup="true"
+          :aria-expanded="showMoreOptions"
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <circle cx="12" cy="5" r="2" />
             <circle cx="12" cy="12" r="2" />
             <circle cx="12" cy="19" r="2" />

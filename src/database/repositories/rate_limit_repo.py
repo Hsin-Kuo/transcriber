@@ -97,6 +97,13 @@ class RateLimitRepository:
         allowed = count < max_requests
         return allowed, remaining
 
+    async def clear_records(self, limit_type: str, key: str) -> None:
+        """清除指定類型和鍵值的所有記錄（例如登入成功後清除失敗計數）"""
+        await self.collection.delete_many({
+            "type": limit_type,
+            "key": key
+        })
+
     async def check_cooldown(
         self,
         last_request_timestamp: Optional[int],

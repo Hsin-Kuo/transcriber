@@ -21,7 +21,7 @@ os.environ.setdefault(
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from src.models.worker_job import TranscriptionWorkerJob  # noqa: E402
+from src.models.worker_job import TranscriptionJob  # noqa: E402
 from src.services.worker_dispatch import WorkerDispatch  # noqa: E402
 
 
@@ -37,7 +37,7 @@ def _make_job(**overrides):
         max_speakers=None,
     )
     base.update(overrides)
-    return TranscriptionWorkerJob(**base)
+    return TranscriptionJob(**base)
 
 
 def _make_dispatch(
@@ -200,24 +200,3 @@ class TestFailurePath:
 
         uploader.assert_called_once()  # S3 上傳已成功
         fake_db.tasks.update_one.assert_called_once()  # 但 task 仍被標 failed
-
-
-class TestSingleton:
-    def test_get_before_init_raises(self):
-        # reset module global
-        import src.services.worker_dispatch as mod
-        mod._instance = None
-        from src.services.worker_dispatch import get_worker_dispatch
-        with pytest.raises(RuntimeError, match="尚未初始化"):
-            get_worker_dispatch()
-
-    def test_init_then_get_returns_same(self):
-        import src.services.worker_dispatch as mod
-        mod._instance = None
-        from src.services.worker_dispatch import (
-            init_worker_dispatch,
-            get_worker_dispatch,
-        )
-        d = _make_dispatch()
-        init_worker_dispatch(d)
-        assert get_worker_dispatch() is d

@@ -43,6 +43,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { API_BASE } from '../../utils/api'
 import ElectricBorder from '../../components/shared/ElectricBorder.vue'
 
 const router = useRouter()
@@ -63,7 +64,7 @@ onMounted(async () => {
 
   try {
     const response = await fetch(
-      `${import.meta.env.VITE_API_URL ?? ''}/auth/verify-email?token=${token}`
+      `${API_BASE}/auth/verify-email?token=${token}`
     )
 
     const data = await response.json()

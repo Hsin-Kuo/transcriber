@@ -1,4 +1,5 @@
 """配額管理器"""
+import asyncio
 from datetime import datetime, timedelta
 from fastapi import HTTPException, status
 
@@ -485,3 +486,30 @@ def build_ai_summary_consumption_pipeline(plan_limit: int, now_ts: int) -> list:
         # Stage 4: 清掉暫存欄位
         {"$unset": ["_plan_remaining", "_from_plan"]},
     ]
+
+
+async def periodic_subscription_expiry_check(db, interval_seconds: int = 3600) -> None:
+    """定期掃描已過期但 status 仍為 active 的訂閱，主動降級為 free。
+
+    解決：用戶訂閱到期但從未登入，DB 中 status 永遠顯示 active 的問題。
+    現有 lazy 機制（_reset_monthly_quota_if_needed）只在用戶請求時觸發。
+    """
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+            now_ts = get_utc_timestamp()
+            cursor = db.users.find(
+                {
+                    "subscription.status": "active",
+                    "subscription.current_period_end": {"$lt": now_ts},
+                },
+                {"_id": 1, "subscription": 1}
+            )
+            expired_count = 0
+            async for user in cursor:
+                await QuotaManager._expire_subscription(db, user)
+                expired_count += 1
+            if expired_count:
+                log.info("subscription.expiry_sweep.completed", expired=expired_count)
+        except Exception as e:
+            log.error("subscription.expiry_sweep.failed", error=str(e), exc_info=True)

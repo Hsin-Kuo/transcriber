@@ -3,7 +3,7 @@
     <!-- 頂部標題列 -->
     <header class="shared-header">
       <div class="header-content">
-        <a href="https://soundlite.app" class="brand">Sound Lite</a>
+        <a href="https://my.soundlite.app" class="brand">Sound Lite</a>
         <span class="shared-badge">{{ $t('shared.publicLink') }}</span>
       </div>
     </header>
@@ -158,6 +158,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import axios from 'axios'
+import { API_BASE } from '../utils/api'
 import { NEW_ENDPOINTS } from '../api/endpoints'
 
 const { t, locale } = useI18n()
@@ -170,7 +171,6 @@ const audioError = ref(null)
 const audioEl = ref(null)
 const summaryExpanded = ref(false)
 
-const API_BASE = import.meta.env.VITE_API_URL ?? ''
 
 const audioUrl = computed(() => {
   if (!taskData.value.has_audio) return ''

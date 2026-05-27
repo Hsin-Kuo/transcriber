@@ -1,7 +1,7 @@
 # 上線前修改計畫（Launch Readiness）
 
 > 建立日期：2026-05-17
-> 最後更新：2026-05-17（休息暫停點）
+> 最後更新：2026-05-22
 > 目標：把 SoundLite 從「可運行」推到「可公開導流」的狀態
 > 範圍：資安、可維護性、開發/測試/運維三個維度的 launch blocker
 
@@ -17,7 +17,7 @@
 
 ### 剩餘待辦
 - **B1** Staging 環境 — 規劃完整見 [`STAGING_PLAN.md`](./STAGING_PLAN.md)，待 AWS console 操作
-- **M1 #2** DeploymentMode adapter — 大 PR（收斂 53 處 `is_aws()`），可選
+- **M1 #2** DeploymentMode adapter — 剩 SSE polling / 模型載入等非派發 `is_aws()`（派發分支已由 M1.6 收斂），可選
 - 一些 manual follow-ups（見下方「手動 todo」段落）
 
 ### 已部署到 prod 的 commit 範圍
@@ -83,7 +83,7 @@
 
 ### M1. Router / Service 邊界整理 ✅（部分）
 
-完成 4 刀，剩 1 刀可選：
+完成 5 刀，剩 1 刀可選：
 
 | 切片 | 狀態 | 行數變化 |
 |------|------|---------|
@@ -91,7 +91,13 @@
 | **M1.3** TranscriptionOrchestrator B 範圍（run lifecycle） | ✅ | service 1145 → 399（−65%） |
 | **M1.4** Sync DB seam（取代 9 處 inline MongoClient） | ✅ | service & router 合計 −150 |
 | **M1.5** TranscriptionWorkerJob typed schema（Pydantic） | ✅ | server↔worker 合約 typed |
-| **M1.2** DeploymentMode adapter（53 處 is_aws() 收斂） | ⏳ 大 PR 可選 | — |
+| **M1.6** Task dispatch seam（local/AWS 派發統一為 TaskDispatch） | ✅ | 刪 transcription_service、router 去重 2 份派發分支 |
+| **M1.2** DeploymentMode adapter（剩餘非派發 is_aws() 收斂） | ⏳ 大 PR 可選 | — |
+
+> **M1.6**（2026-05-22，commit `91e64b3`）：架構審查產出。intake router 兩處複製的
+> `is_aws()` 派發分支收進 `TaskDispatch` seam（`LocalDispatch` / `WorkerDispatch` 兩
+> adapter）；舊淺殼 `transcription_service.py` 併入 `LocalDispatch` 後刪除；佇列查詢
+> 下沉到 `task_repo`。M1.2 剩 SSE polling、模型載入等非派發 `is_aws()`。
 
 ### M2. 前端超大檔（TranscriptDetailView）✅（部分）
 
@@ -169,6 +175,7 @@
 
 ## 部署現況
 
-- main / aws 兩 branch 同步至 `b31fd25`
+- main 最新 `fc57f25`（fix: 統一 API_BASE + SSE/auth/shared 回歸測試）
 - prod 自開工以來部署成功 8 次（不含 dependabot 自動）
 - CI gate（ruff / pytest / nginx -t / 兩前端 ESLint / 兩前端 type-check）全綠
+- 後端 165 tests / 前端 31 tests 全過

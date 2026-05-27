@@ -1,4 +1,4 @@
-"""TranscriptionWorkerJob schema 測試（M1.5）。
+"""TranscriptionJob schema 測試（M1.5）。
 
 驗證 typed contract：required 欄位、defaults、forward compat（extra ignore）、
 serialize round-trip。
@@ -12,17 +12,17 @@ from pydantic import ValidationError
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from src.models.worker_job import TranscriptionWorkerJob  # noqa: E402
+from src.models.worker_job import TranscriptionJob  # noqa: E402
 
 
 class TestRequiredFields:
     def test_task_id_is_required(self):
         with pytest.raises(ValidationError) as exc:
-            TranscriptionWorkerJob()
+            TranscriptionJob()
         assert "task_id" in str(exc.value)
 
     def test_minimal_valid_construction(self):
-        job = TranscriptionWorkerJob(task_id="abc-123")
+        job = TranscriptionJob(task_id="abc-123")
         assert job.task_id == "abc-123"
         # Defaults
         assert job.language is None
@@ -38,7 +38,7 @@ class TestForwardCompat:
 
     def test_unknown_field_ignored(self):
         # Worker 收到未來版 server 多送的欄位，不該炸
-        job = TranscriptionWorkerJob.model_validate({
+        job = TranscriptionJob.model_validate({
             "task_id": "t1",
             "language": "zh",
             "future_field_we_dont_know_yet": "value",
@@ -53,21 +53,21 @@ class TestForwardCompat:
 class TestTypeValidation:
     def test_task_id_must_be_str(self):
         with pytest.raises(ValidationError):
-            TranscriptionWorkerJob(task_id=12345)  # type: ignore[arg-type]
+            TranscriptionJob(task_id=12345)  # type: ignore[arg-type]
 
     def test_max_speakers_optional_int(self):
         # int OK
-        TranscriptionWorkerJob(task_id="t", max_speakers=5)
+        TranscriptionJob(task_id="t", max_speakers=5)
         # None OK
-        TranscriptionWorkerJob(task_id="t", max_speakers=None)
+        TranscriptionJob(task_id="t", max_speakers=None)
         # 字串會被 coerce（Pydantic v2 默認）or 拒絕？保守驗實際行為
         with pytest.raises(ValidationError):
-            TranscriptionWorkerJob(task_id="t", max_speakers="not-a-number")  # type: ignore[arg-type]
+            TranscriptionJob(task_id="t", max_speakers="not-a-number")  # type: ignore[arg-type]
 
 
 class TestRoundTrip:
     def test_dump_then_validate_preserves_fields(self):
-        original = TranscriptionWorkerJob(
+        original = TranscriptionJob(
             task_id="round-trip-1",
             language="en",
             use_chunking=False,
@@ -78,12 +78,27 @@ class TestRoundTrip:
         )
         # 模擬 server → JSON → SQS → worker → validate
         as_dict = original.model_dump()
-        rehydrated = TranscriptionWorkerJob.model_validate(as_dict)
+        rehydrated = TranscriptionJob.model_validate(as_dict)
         assert rehydrated == original
 
     def test_no_signature_field_in_dump(self):
         """確認 signature 不被 model 知道（envelope 在外）。"""
-        job = TranscriptionWorkerJob(task_id="t")
+        job = TranscriptionJob(task_id="t")
         dumped = job.model_dump()
         assert "_signature" not in dumped
         assert "signature" not in dumped
+
+
+class TestNormalization:
+    """max_speakers == 1 時 diarization 無意義，model 層強制關閉（兩 adapter 一致）。"""
+
+    def test_single_speaker_disables_diarization(self):
+        job = TranscriptionJob(task_id="t", use_diarization=True, max_speakers=1)
+        assert job.use_diarization is False
+
+    def test_multi_speaker_keeps_diarization(self):
+        job = TranscriptionJob(task_id="t", use_diarization=True, max_speakers=3)
+        assert job.use_diarization is True
+
+    def test_ui_language_defaults_none(self):
+        assert TranscriptionJob(task_id="t").ui_language is None

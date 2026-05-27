@@ -49,6 +49,17 @@ class TaskRepository:
         """根據 ID 獲取任務"""
         return await self.collection.find_one({"_id": task_id})
 
+    async def count_all_by_status(self, status: str) -> int:
+        """計算全系統指定 status 的任務數量（LocalDispatch 並發閘門用）。"""
+        return await self.collection.count_documents({"status": status})
+
+    async def get_oldest_pending(self) -> Optional[Dict[str, Any]]:
+        """取最舊的 pending 任務（依建立時間升序）；無則回 None。"""
+        return await self.collection.find_one(
+            {"status": "pending"},
+            sort=[("timestamps.created_at", 1)],
+        )
+
     async def get_by_id_and_user(self, task_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         """根據 ID 和 user_id 獲取任務（權限檢查）
 
@@ -475,7 +486,7 @@ class TaskRepository:
             try:
                 if len(user_id) == 24:  # ObjectId 長度
                     user_id_conditions.append(ObjectId(user_id))
-            except:
+            except Exception:
                 pass
 
             user_filter = {

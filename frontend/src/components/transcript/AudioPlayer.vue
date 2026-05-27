@@ -1,20 +1,21 @@
 <template>
   <div class="audio-player-container">
     <audio
+      v-if="hasAudioElement"
       v-show="audioUrl"
-      ref="audioElement"
+      ref="internalAudioElement"
       preload="metadata"
       :src="audioUrl || ''"
-      @error="handleAudioError"
-      @loadedmetadata="handleAudioLoaded"
-      @canplay="updateDuration"
+      @error="$emit('audio-error', $event)"
+      @loadedmetadata="$emit('audio-loaded')"
+      @canplay="$emit('update-duration')"
       @play="$emit('update:isPlaying', true)"
       @pause="$emit('update:isPlaying', false)"
       @ended="$emit('update:isPlaying', false)"
-      @timeupdate="updateProgress"
-      @durationchange="updateDuration"
-      @volumechange="updateVolume"
-      @ratechange="updatePlaybackRate"
+      @timeupdate="$emit('update-progress')"
+      @durationchange="$emit('update-duration')"
+      @volumechange="$emit('update-volume')"
+      @ratechange="$emit('update-playback-rate')"
     >
       {{ $t('audioPlayer.browserNotSupported') }}
     </audio>
@@ -33,16 +34,6 @@
     </div>
 
     <div class="custom-audio-player circular-player">
-      <!-- Decorative element (top-left) -->
-      <!-- <div class="decorative-element"> -->
-        <!-- <svg width="24" height="24" viewBox="0 0 24 24" fill="none"> -->
-          <!-- Circle -->
-          <!-- <circle cx="8" cy="8" r="1.5" fill="none" stroke="currentColor" stroke-width="1"/> -->
-          <!-- Diagonal line (45 degrees to bottom-right) -->
-          <!-- <line x1="20" y1="7" x2="7" y2="20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/> -->
-        <!-- </svg> -->
-      <!-- </div> -->
-
       <!-- Circular progress bar (1/3 arc at top) -->
       <div class="circular-progress-container">
         <svg
@@ -54,7 +45,7 @@
           @mouseup="stopDragArc"
           @mouseleave="stopDragArc"
         >
-          <!-- 不可見的參考弧線，用於計算進度 -->
+          <!-- Hidden reference arc for drag calculation -->
           <path
             ref="arcReference"
             :d="arcReferencePath"
@@ -64,7 +55,7 @@
             pointer-events="none"
           />
 
-          <!-- Tick marks (手錶刻度) -->
+          <!-- Tick marks -->
           <g v-for="tick in tickMarks" :key="tick.index">
             <line
               :x1="tick.x1"
@@ -87,7 +78,7 @@
       <!-- Central control area -->
       <div class="circular-controls-center">
         <!-- Rewind button -->
-        <button class="audio-control-btn audio-skip-btn skip-backward" @click="emit('skip-backward')" :title="$t('audioPlayer.rewind10s')">
+        <button class="audio-control-btn audio-skip-btn skip-backward" @click="$emit('skip-backward')" :title="$t('audioPlayer.rewind10s')" :aria-label="$t('audioPlayer.rewind10s')">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
             <path d="M3 3v5h5" />
@@ -96,7 +87,7 @@
         </button>
 
         <!-- Play/Pause button -->
-        <button class="audio-control-btn audio-play-btn" @click="emit('toggle-play-pause')" :title="isPlaying ? $t('audioPlayer.pause') : $t('audioPlayer.play')">
+        <button class="audio-control-btn audio-play-btn" @click="$emit('toggle-play-pause')" :title="isPlaying ? $t('audioPlayer.pause') : $t('audioPlayer.play')" :aria-label="isPlaying ? $t('audioPlayer.pause') : $t('audioPlayer.play')">
           <svg v-if="!isPlaying" width="30" height="30" viewBox="0 0 24 24" fill="currentColor">
             <path d="M8 5v14l11-7z" />
           </svg>
@@ -106,7 +97,7 @@
         </button>
 
         <!-- Fast forward button -->
-        <button class="audio-control-btn audio-skip-btn skip-forward" @click="emit('skip-forward')" :title="$t('audioPlayer.fastForward10s')">
+        <button class="audio-control-btn audio-skip-btn skip-forward" @click="$emit('skip-forward')" :title="$t('audioPlayer.fastForward10s')" :aria-label="$t('audioPlayer.fastForward10s')">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
             <path d="M21 3v5h-5" />
@@ -122,8 +113,7 @@
 
         <!-- Middle: Volume control -->
         <div class="volume-control-center">
-          <!-- Mute button (at start of volume bar) -->
-          <button class="audio-control-btn mute-btn-volume" @click="$emit('toggle-mute')" :title="isMuted ? $t('audioPlayer.unmute') : $t('audioPlayer.mute')">
+          <button class="audio-control-btn mute-btn-volume" @click="$emit('toggle-mute')" :title="isMuted ? $t('audioPlayer.unmute') : $t('audioPlayer.mute')" :aria-label="isMuted ? $t('audioPlayer.unmute') : $t('audioPlayer.mute')">
             <svg v-if="!isMuted && volume > 0.5" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
               <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
             </svg>
@@ -141,6 +131,8 @@
             min="0"
             max="100"
             :value="volume * 100"
+            :aria-label="$t('audioPlayer.volume')"
+            :aria-valuenow="Math.round(volume * 100)"
             @input="$emit('set-volume', $event)"
           />
         </div>
@@ -160,7 +152,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { modifierKeyLabel } from '../../utils/platform'
+import { formatTime } from '../../utils/formatTime'
 import KeyboardShortcutsInfo from './KeyboardShortcutsInfo.vue'
 import PlaybackSpeedControl from './PlaybackSpeedControl.vue'
 
@@ -173,12 +165,10 @@ const props = defineProps({
   volume: Number,
   isMuted: Boolean,
   playbackRate: Number,
-  arcPath: String,
-  arcLength: Number,
-  thumbPosition: Object,
-  displayProgress: Number,
+  progressPercent: Number,
+  duration: Number,
   displayTime: Number,
-  duration: Number
+  hasAudioElement: { type: Boolean, default: false },
 })
 
 const emit = defineEmits([
@@ -190,29 +180,34 @@ const emit = defineEmits([
   'toggle-mute',
   'set-volume',
   'set-playback-rate',
-  'start-drag-arc',
-  'drag-arc',
-  'stop-drag-arc',
   'audio-loaded',
   'audio-error',
   'update-progress',
   'update-duration',
   'update-volume',
-  'update-playback-rate'
+  'update-playback-rate',
+  'seek',
 ])
 
-const audioElement = ref(null)
+const internalAudioElement = ref(null)
 const isDragging = ref(false)
+const draggingPercent = ref(0)
 const svgElement = ref(null)
 const arcReference = ref(null)
+let rafId = null
 
-// 生成參考弧線路徑（不使用 rotate，直接計算正確角度）
+const displayProgress = computed(() => {
+  return isDragging.value ? draggingPercent.value : (props.progressPercent || 0)
+})
+
+// --- Arc geometry (internal to this component) ---
+
 const arcReferencePath = computed(() => {
   const radius = 106
-  const centerX = 130  // 與 tickMarks 一致
-  const centerY = 115  // 與 tickMarks 一致
-  const startAngle = 178  // 與 tickMarks 一致
-  const endAngle = 274    // 與 tickMarks 一致
+  const centerX = 130
+  const centerY = 115
+  const startAngle = 178
+  const endAngle = 274
 
   const startRad = (startAngle * Math.PI) / 180
   const endRad = (endAngle * Math.PI) / 180
@@ -222,163 +217,100 @@ const arcReferencePath = computed(() => {
   const endX = centerX + radius * Math.cos(endRad)
   const endY = centerY + radius * Math.sin(endRad)
 
-  // 創建弧線路徑
   const largeArcFlag = endAngle - startAngle > 180 ? 1 : 0
   return `M ${startX} ${startY} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${endX} ${endY}`
 })
 
-// 計算刻度線位置（不使用 rotate，直接計算正確角度）
 const tickMarks = computed(() => {
   const ticks = []
-  const numTicks = 90 // 刻度數量
-  const radius = 106 // 弧的半徑
-  const centerX = 130 // 圓心 X
-  const centerY = 115 // 圓心 Y（調整以匹配弧線位置）
-  const startAngle = 178 // 起始角度（度）- 222° - 44°
-  const endAngle = 274   // 結束角度（度）- 318° - 44°
-  const tickLength = 5   // 刻度長度
+  const numTicks = 90
+  const radius = 106
+  const centerX = 130
+  const centerY = 115
+  const startAngle = 178
+  const endAngle = 274
+  const tickLength = 5
 
   for (let i = 0; i <= numTicks; i++) {
-    // 計算當前刻度的角度
     const progress = i / numTicks
     const angle = startAngle + (endAngle - startAngle) * progress
     const radian = (angle * Math.PI) / 180
 
-    // 計算刻度線的起點（弧線上）
     const x1 = centerX + radius * Math.cos(radian)
     const y1 = centerY + radius * Math.sin(radian)
-
-    // 計算刻度線的終點（向外延伸）
     const x2 = centerX + (radius + tickLength) * Math.cos(radian)
     const y2 = centerY + (radius + tickLength) * Math.sin(radian)
 
     ticks.push({
       index: i,
-      progress: (i / numTicks) * 100, // 轉換為 0-100 的百分比
-      x1,
-      y1,
-      x2,
-      y2
+      progress: (i / numTicks) * 100,
+      x1, y1, x2, y2
     })
   }
-
   return ticks
 })
 
-function handleAudioLoaded() {
-  emit('audio-loaded')
-}
-
-function handleAudioError(event) {
-  emit('audio-error', event)
-}
-
-function updateProgress() {
-  emit('update-progress')
-}
-
-function updateDuration() {
-  // 直接從 audio 元素獲取 duration 並傳遞給父組件
-  if (audioElement.value) {
-    const newDuration = audioElement.value.duration
-    if (newDuration && isFinite(newDuration) && newDuration > 0) {
-      emit('update-duration', newDuration)
-    }
-  }
-}
-
-function updateVolume() {
-  emit('update-volume')
-}
-
-function updatePlaybackRate() {
-  emit('update-playback-rate')
-}
+// --- Arc drag handling (internal) ---
 
 function startDragArc(event) {
+  if (!props.duration || props.duration === 0) return
   isDragging.value = true
   handleDrag(event)
 }
 
 function dragArc(event) {
   if (!isDragging.value) return
-  handleDrag(event)
+  if (rafId !== null) cancelAnimationFrame(rafId)
+  rafId = requestAnimationFrame(() => handleDrag(event))
 }
 
 function stopDragArc() {
+  if (!isDragging.value) return
   isDragging.value = false
+  if (rafId !== null) {
+    cancelAnimationFrame(rafId)
+    rafId = null
+  }
+  if (props.duration > 0) {
+    const newTime = (draggingPercent.value / 100) * props.duration
+    emit('seek', newTime)
+  }
 }
 
 function handleDrag(event) {
-  if (!audioElement.value || !props.duration || !arcReference.value) return
-
+  if (!props.duration || !arcReference.value) return
   const svg = svgElement.value
   if (!svg) return
 
-  // 創建 SVG 點
   const pt = svg.createSVGPoint()
   pt.x = event.clientX
   pt.y = event.clientY
-
-  // 轉換到 SVG 座標系統
   const svgP = pt.matrixTransform(svg.getScreenCTM().inverse())
 
-  // 獲取弧線路徑
   const path = arcReference.value
   const pathLength = path.getTotalLength()
 
-  // 找到滑鼠點擊位置在弧線上最近的點
   let minDistance = Infinity
   let closestPoint = 0
-
-  // 採樣路徑上的點，找到最接近滑鼠的點
   const sampleCount = 100
+
   for (let i = 0; i <= sampleCount; i++) {
     const length = (i / sampleCount) * pathLength
     const point = path.getPointAtLength(length)
     const distance = Math.sqrt(
       Math.pow(point.x - svgP.x, 2) + Math.pow(point.y - svgP.y, 2)
     )
-
     if (distance < minDistance) {
       minDistance = distance
       closestPoint = length
     }
   }
 
-  // 計算進度百分比
-  const progress = (closestPoint / pathLength) * 100
-
-  console.log('Path-based calculation:', {
-    mousePos: { x: svgP.x, y: svgP.y },
-    closestPoint,
-    pathLength,
-    progress,
-    minDistance
-  })
-
-  // 計算對應的時間並跳轉
-  const newTime = (progress / 100) * props.duration
-  if (audioElement.value) {
-    audioElement.value.currentTime = newTime
-    console.log('Seeking to:', newTime, 'seconds')
-  }
+  draggingPercent.value = (closestPoint / pathLength) * 100
 }
 
-function formatTime(seconds) {
-  if (!seconds || isNaN(seconds)) return '0:00'
-  const hours = Math.floor(seconds / 3600)
-  const mins = Math.floor((seconds % 3600) / 60)
-  const secs = Math.floor(seconds % 60)
-  if (hours > 0) {
-    return `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-  }
-  return `${mins}:${secs.toString().padStart(2, '0')}`
-}
-
-// Expose audioElement to parent component
 defineExpose({
-  audioElement
+  audioElement: internalAudioElement
 })
 </script>
 
@@ -472,7 +404,7 @@ defineExpose({
   -ms-user-select: none;
 }
 
-/* Tick marks styles (手錶刻度) */
+/* Tick marks styles */
 .tick-mark {
   stroke: var(--nav-active-bg);
   stroke-opacity: 0.5;
@@ -577,7 +509,6 @@ defineExpose({
   background: var(--nav-bg);
   border-left: 1px solid var(--nav-active-bg);
   border-right: 1px solid var(--nav-active-bg);
-  /* border-radius: 30%; */
   cursor: pointer;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
@@ -677,7 +608,7 @@ defineExpose({
   height: 25px;
 }
 
-/* === 手機版：簡化橫向播放器 === */
+/* === Mobile: simplified horizontal player === */
 @media (max-width: 768px) {
   .audio-player-container {
     position: fixed;
@@ -690,12 +621,10 @@ defineExpose({
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
-    /* 加大上下與左右 padding，避開圓角螢幕與 safe area */
     padding: 12px calc(16px + env(safe-area-inset-right, 0px)) 12px calc(16px + env(safe-area-inset-left, 0px));
     padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   }
 
-  /* 深色模式 */
   :root[data-theme="dark"] .audio-player-container {
     background: rgba(40, 40, 40, 0.95);
   }
@@ -718,7 +647,7 @@ defineExpose({
     font-size: 0.75rem;
   }
 
-  /* 隱藏圓形播放器的複雜元素 */
+  /* Hide circular elements */
   .custom-audio-player.circular-player {
     max-width: 100%;
     padding: 0;
@@ -734,7 +663,7 @@ defineExpose({
     display: none !important;
   }
 
-  /* 時間顯示 */
+  /* Time display */
   .time-display-center {
     font-size: 0.7rem;
     margin: 0;
@@ -743,7 +672,7 @@ defineExpose({
     order: 2;
   }
 
-  /* 控制按鈕橫向排列 */
+  /* Control buttons horizontal */
   .circular-controls-center {
     margin: 0;
     gap: 4px;
@@ -770,12 +699,11 @@ defineExpose({
     height: 14px;
   }
 
-  /* 手機版隱藏快進/快退按鈕上的「10」秒數標籤，節省空間 */
   .audio-control-label {
     display: none;
   }
 
-  /* 音量和速度控制 */
+  /* Volume and speed controls */
   .volume-and-controls {
     flex: 1;
     margin: 0;
@@ -818,7 +746,7 @@ defineExpose({
 
 }
 
-/* 小手機進一步調整 */
+/* Small phone adjustments */
 @media (max-width: 480px) {
   .audio-player-container {
     padding: 10px calc(12px + env(safe-area-inset-right, 0px)) 10px calc(12px + env(safe-area-inset-left, 0px));

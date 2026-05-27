@@ -1,10 +1,10 @@
 <template>
   <Teleport to="body">
     <div v-if="modelValue" class="billing-overlay" @click="$emit('update:modelValue', false)"></div>
-    <div class="billing-panel" :class="{ open: modelValue }">
+    <div ref="billingPanelRef" class="billing-panel" :class="{ open: modelValue }">
       <div class="billing-panel-header">
         <h2>{{ $t('userSettings.subscription.manageBilling') }}</h2>
-        <button class="billing-panel-close" @click="$emit('update:modelValue', false)">
+        <button class="billing-panel-close" @click="$emit('update:modelValue', false)" :aria-label="$t('common.close')">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="18" y1="6" x2="6" y2="18"></line>
             <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -100,9 +100,10 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
+import { useFocusTrap } from '../composables/useFocusTrap'
 
 const { t: $t, locale } = useI18n()
 const authStore = useAuthStore()
@@ -111,6 +112,9 @@ const props = defineProps({
   modelValue: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:modelValue', 'cancelled'])
+
+const billingPanelRef = ref(null)
+useFocusTrap(billingPanelRef, toRef(props, 'modelValue'))
 
 const LIMIT = 6
 const orders = ref([])

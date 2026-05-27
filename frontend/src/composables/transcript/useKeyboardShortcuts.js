@@ -1,121 +1,88 @@
 import { onMounted, onUnmounted } from 'vue'
 
-/**
- * 鍵盤快捷鍵管理 Composable
- *
- * 職責：
- * - 處理音訊播放器相關的鍵盤快捷鍵
- * - 區分編輯和非編輯模式下的快捷鍵
- * - 使用 Alt 作為修飾鍵
- */
-export function useKeyboardShortcuts(
-  hasAudio,
-  audioElement,
-  isEditing,
-  isEditingTitle,
-  togglePlayPause,
-  skipBackward,
-  skipForward,
-  toggleMute,
-  setPlaybackRate,
-  playbackRate
-) {
-  /**
-   * 鍵盤快捷鍵處理函數
-   */
+export function useKeyboardShortcuts(audioPlayerRef, { isEditing, isEditingTitle }) {
   function handleKeyboardShortcuts(event) {
-    // 檢查是否有音訊
-    if (!hasAudio.value || !audioElement.value) return
+    const player = audioPlayerRef.value
+    if (!player) return
 
-    // 檢查焦點是否在輸入框內
     const targetIsInput = event.target.tagName === 'INPUT' ||
                           event.target.tagName === 'TEXTAREA' ||
                           event.target.isContentEditable
 
-    // Ctrl+Alt：播放/暫停
+    // Ctrl+Alt: play/pause
     if (event.altKey && event.ctrlKey) {
       if (event.key === 'Alt' || event.key === 'Control') {
         event.preventDefault()
-        togglePlayPause()
+        player.togglePlayPause()
       }
       return
     }
 
-    // Alt + 鍵組合（編輯和非編輯模式都可用，即使焦點在輸入框內也可用）
+    // Alt + key combos (work in both editing and non-editing mode)
     if (event.altKey) {
       switch(event.key) {
         case 'ArrowLeft':
           event.preventDefault()
-          skipBackward()
+          player.skipBackward()
           break
         case 'ArrowRight':
           event.preventDefault()
-          skipForward()
+          player.skipForward()
           break
-        case 'ArrowUp':  // Alt + 上鍵：加速播放（+0.25x）
+        case 'ArrowUp':
           event.preventDefault()
-          if (setPlaybackRate && playbackRate) {
-            const newRate = Math.min(2, playbackRate.value + 0.25)
-            setPlaybackRate(newRate)
-          }
+          player.setPlaybackRate(Math.min(2, (player.playbackRate?.value || 1) + 0.25))
           break
-        case 'ArrowDown':  // Alt + 下鍵：減速播放（-0.25x）
+        case 'ArrowDown':
           event.preventDefault()
-          if (setPlaybackRate && playbackRate) {
-            const newRate = Math.max(0.25, playbackRate.value - 0.25)
-            setPlaybackRate(newRate)
-          }
+          player.setPlaybackRate(Math.max(0.25, (player.playbackRate?.value || 1) - 0.25))
           break
         case 'm':
         case 'M':
           event.preventDefault()
-          toggleMute()
+          player.toggleMute()
           break
       }
       return
     }
 
-    // 非編輯模式下的單鍵快捷鍵（不需要修飾鍵）
-    // 如果焦點在輸入框內，不處理這些快捷鍵，避免干擾打字
+    // Single-key shortcuts in non-editing mode
     const isEditingText = isEditing.value || isEditingTitle.value
     if (!isEditingText && !targetIsInput && !event.altKey && !event.ctrlKey && !event.metaKey) {
       switch(event.key) {
-        case ' ':  // 空白鍵：播放/暫停
+        case ' ':
         case 'k':
         case 'K':
           event.preventDefault()
-          togglePlayPause()
+          player.togglePlayPause()
           break
-        case 'j':  // J：後退 10 秒
+        case 'j':
         case 'J':
           event.preventDefault()
-          skipBackward()
+          player.skipBackward()
           break
-        case 'l':  // L：前進 10 秒
+        case 'l':
         case 'L':
           event.preventDefault()
-          skipForward()
+          player.skipForward()
           break
-        case 'ArrowLeft':  // 左箭頭：後退 10 秒
+        case 'ArrowLeft':
           event.preventDefault()
-          skipBackward()
+          player.skipBackward()
           break
-        case 'ArrowRight':  // 右箭頭：前進 10 秒
+        case 'ArrowRight':
           event.preventDefault()
-          skipForward()
+          player.skipForward()
           break
-        case 'm':  // M：靜音切換
+        case 'm':
         case 'M':
           event.preventDefault()
-          toggleMute()
+          player.toggleMute()
           break
       }
     }
   }
 
-  /**
-   * 自動註冊鍵盤事件監聽器
-   */
   onMounted(() => {
     window.addEventListener('keydown', handleKeyboardShortcuts)
   })

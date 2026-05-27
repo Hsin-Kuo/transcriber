@@ -211,8 +211,7 @@ class ReservationRepository:
 #
 # ⚠️ 設計決定：consume + pipeline 不用 transaction 包覆
 # ----------------------------------------------------
-# Caller（transcription_service._mark_completed、worker_core/transcription_job）
-# 會依序執行：
+# Caller（orchestrator._mark_completed，兩進程共用）會依序執行：
 #   1. consume_reservation_sync()      # 刪預扣
 #   2. db.users.update_one(pipeline)   # 套用扣款
 #

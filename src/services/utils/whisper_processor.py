@@ -462,7 +462,7 @@ class WhisperProcessor:
             for chunk_path, _ in chunk_entries:
                 try:
                     chunk_path.unlink()
-                except:
+                except OSError:
                     pass
             raise
 

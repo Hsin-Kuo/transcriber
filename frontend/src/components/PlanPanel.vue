@@ -3,10 +3,10 @@
     <!-- Overlay -->
     <div v-if="modelValue" class="plan-overlay" @click="$emit('update:modelValue', false)"></div>
     <!-- Panel -->
-    <div class="plan-panel" :class="{ open: modelValue }">
+    <div ref="panelRef" class="plan-panel" :class="{ open: modelValue }">
       <div class="plan-panel-header">
         <h2>{{ $t('userSettings.planPanel.title') }}</h2>
-        <button class="plan-panel-close" @click="$emit('update:modelValue', false)">
+        <button class="plan-panel-close" @click="$emit('update:modelValue', false)" :aria-label="$t('common.close')">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="18" y1="6" x2="6" y2="18"></line>
             <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -109,10 +109,11 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, toRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
+import { useFocusTrap } from '../composables/useFocusTrap'
 
 const { t: $t } = useI18n()
 const router = useRouter()
@@ -124,6 +125,9 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:modelValue', 'planChanged'])
+
+const panelRef = ref(null)
+useFocusTrap(panelRef, toRef(props, 'modelValue'))
 
 const changingPlan = ref(false)
 const tierOrder = { free: 0, basic: 1, pro: 2 }

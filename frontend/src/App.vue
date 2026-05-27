@@ -56,8 +56,62 @@ function handleRateLimit() {
   }
 }
 
-onMounted(() => window.addEventListener('api:rate-limited', handleRateLimit))
-onUnmounted(() => window.removeEventListener('api:rate-limited', handleRateLimit))
+function handleServerError() {
+  if (notificationToast.value) {
+    notificationToast.value.addNotification({
+      title: '伺服器錯誤',
+      message: '伺服器暫時無法處理請求，請稍後再試',
+      type: 'error',
+    })
+  }
+}
+
+function handleNetworkError() {
+  if (notificationToast.value) {
+    notificationToast.value.addNotification({
+      title: '網路連線異常',
+      message: '無法連接伺服器，請檢查網路連線',
+      type: 'error',
+    })
+  }
+}
+
+function handleOffline() {
+  if (notificationToast.value) {
+    notificationToast.value.addNotification({
+      title: '已離線',
+      message: '網路連線已中斷，部分功能可能無法使用',
+      type: 'warning',
+      duration: 0,
+    })
+  }
+}
+
+function handleOnline() {
+  if (notificationToast.value) {
+    notificationToast.value.addNotification({
+      title: '已恢復連線',
+      message: '網路連線已恢復',
+      type: 'success',
+    })
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('api:rate-limited', handleRateLimit)
+  window.addEventListener('api:server-error', handleServerError)
+  window.addEventListener('api:network-error', handleNetworkError)
+  window.addEventListener('offline', handleOffline)
+  window.addEventListener('online', handleOnline)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('api:rate-limited', handleRateLimit)
+  window.removeEventListener('api:server-error', handleServerError)
+  window.removeEventListener('api:network-error', handleNetworkError)
+  window.removeEventListener('offline', handleOffline)
+  window.removeEventListener('online', handleOnline)
+})
 </script>
 
 <style>

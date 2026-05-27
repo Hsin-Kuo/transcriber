@@ -282,7 +282,7 @@ async def startup_event():
     logger.info("app.audit_logger.initialized")
 
     # 3. 初始化 ProgressStore
-    # Local 模式：InMemory adapter（同進程的 TranscriptionService 寫，TaskService.get_task 讀）
+    # Local 模式：InMemory adapter（同進程的 LocalDispatch / Orchestrator 寫，TaskService.get_task 讀）
     # AWS 模式：Mongo adapter（GPU Worker 寫 task_progress collection，Web Server 在這裡讀）
     if DEPLOY_ENV == "aws":
         from src.worker_core.db import get_db as _get_sync_db
@@ -293,7 +293,8 @@ async def startup_event():
         logger.info("app.progress_store.initialized", adapter="in_memory", mode="local")
 
     # 3.1. 初始化 TaskService
-    task_service = tasks_router.init_task_service(
+    from src.dependencies import init_task_service
+    task_service = init_task_service(
         db, state_store=task_state_store, progress_store=progress_store
     )
     logger.info("app.task_service.initialized")
@@ -319,6 +320,20 @@ async def startup_event():
     create_background_task(
         periodic_reservation_cleanup(db),
         name="periodic_reservation_cleanup",
+    )
+
+    # 5.3. 啟動定期過期訂單清掃（未付款超時自動標記 expired）
+    from src.database.repositories.order_repo import periodic_order_cleanup
+    create_background_task(
+        periodic_order_cleanup(db),
+        name="periodic_order_cleanup",
+    )
+
+    # 5.4. 啟動定期訂閱到期掃描（主動降級未登入但已過期的用戶）
+    from src.auth.quota import periodic_subscription_expiry_check
+    create_background_task(
+        periodic_subscription_expiry_check(db),
+        name="periodic_subscription_expiry_check",
     )
 
     # 6. 載入 Whisper 模型（條件式）
@@ -354,10 +369,12 @@ async def startup_event():
     elif not SHOULD_LOAD_MODELS:
         logger.info("app.diarization.load_skipped")
 
-    # 9. 初始化 TranscriptionService（僅在有 Whisper 模型時）
-    transcription_service = None
+    # 9. 初始化 Task dispatch（依部署模式建 LocalDispatch 或 WorkerDispatch）
+    from src.services.task_dispatch import get_task_dispatch, init_task_dispatch
+
     if SHOULD_LOAD_MODELS and whisper_model is not None:
-        transcription_service = transcriptions_router.init_transcription_service(
+        # local 模式：LocalDispatch（in-process executor + 撿單器）
+        transcriptions_router.init_local_dispatch(
             whisper_model=whisper_model,
             task_service=task_service,
             model_name=current_model_name,  # 傳遞模型名稱供 ProcessPoolExecutor 使用
@@ -365,21 +382,11 @@ async def startup_event():
             executor=executor,
             progress_store=progress_store,
         )
-        logger.info("app.transcription_service.initialized")
-
-        # 10. 啟動任務隊列處理器
-        create_background_task(
-            task_service.process_pending_queue(transcription_service, max_concurrent=2),
-            name="task_queue_processor",
-        )
-        logger.info("app.task_queue.started", max_concurrent=2)
+        logger.info("app.local_dispatch.initialized")
     else:
-        logger.info("app.transcription_service.skipped")
-
-        # AWS 模式：建立 WorkerDispatch（boto3 client + S3 uploader 注入）
-        # local 模式不需要——任務直接走 in-process executor 不送 SQS
+        # AWS 模式：WorkerDispatch（boto3 client + S3 uploader 注入）
         import boto3
-        from src.services.worker_dispatch import WorkerDispatch, init_worker_dispatch
+        from src.services.worker_dispatch import WorkerDispatch
         from src.utils.storage_service import upload_to_handoff
         from src.utils.config_loader import get_parameter as _gp
 
@@ -388,13 +395,16 @@ async def startup_event():
         worker_secret = _gp(
             "/transcriber/worker-secret", fallback_env="WORKER_SECRET", default=""
         )
-        init_worker_dispatch(WorkerDispatch(
+        init_task_dispatch(WorkerDispatch(
             sqs_client=boto3.client("sqs", region_name=sqs_region),
             sqs_queue_url=sqs_queue_url,
             worker_secret=worker_secret,
             handoff_uploader=upload_to_handoff,
         ))
         logger.info("app.worker_dispatch.initialized")
+
+    # 10. 啟動 dispatch 背景機制（LocalDispatch 起撿單器；WorkerDispatch no-op）
+    get_task_dispatch().start()
 
     logger.info("app.startup.ready", version="3.0.0")
 

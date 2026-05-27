@@ -51,6 +51,9 @@ class MongoDB:
             )
             cls.client = AsyncIOMotorClient(
                 MONGODB_URL,
+                maxPoolSize=20,
+                minPoolSize=2,
+                waitQueueTimeoutMS=5000,
                 serverSelectionTimeoutMS=5000,
                 connectTimeoutMS=5000,
                 socketTimeoutMS=5000,

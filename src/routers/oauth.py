@@ -1,5 +1,6 @@
 """OAuth 第三方登入路由"""
 import os
+import requests as _requests
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
@@ -52,11 +53,13 @@ def verify_google_token(credential: str) -> dict:
         )
 
     try:
+        _session = _requests.Session()
+        _session.timeout = 10
         idinfo = id_token.verify_oauth2_token(
             credential,
-            google_requests.Request(),
+            google_requests.Request(session=_session),
             GOOGLE_CLIENT_ID,
-            clock_skew_in_seconds=10  # 允許 10 秒的時間誤差
+            clock_skew_in_seconds=10
         )
 
         # 驗證 issuer

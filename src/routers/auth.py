@@ -11,6 +11,13 @@ from ..auth.cookies import (
 
 
 # ============================================
+# 登入 - 速率限制設定
+# ============================================
+LOGIN_MAX_ATTEMPTS_PER_IP = 20              # 每 IP 每 15 分鐘最多嘗試次數
+LOGIN_MAX_ATTEMPTS_PER_EMAIL = 5            # 每 Email 每 15 分鐘最多嘗試次數
+LOGIN_RATE_LIMIT_WINDOW = 900               # 15 分鐘（秒）
+
+# ============================================
 # 忘記密碼 - 速率限制設定
 # ============================================
 FORGOT_PASSWORD_MAX_REQUESTS_PER_HOUR = 5   # 每 IP 每小時最多請求次數
@@ -280,11 +287,48 @@ async def login(
     """
     audit_logger = get_audit_logger()
     user_repo = UserRepository(db)
+    rate_limit_repo = RateLimitRepository(db)
+
+    # --- 速率限制（在驗證密碼之前） ---
+    client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+    if not client_ip:
+        client_ip = request.client.host if request.client else "unknown"
+
+    ip_allowed, _ = await rate_limit_repo.check_rate_limit(
+        limit_type="login_ip",
+        key=client_ip,
+        max_requests=LOGIN_MAX_ATTEMPTS_PER_IP,
+        window_seconds=LOGIN_RATE_LIMIT_WINDOW
+    )
+    if not ip_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="登入嘗試過於頻繁，請稍後再試"
+        )
+
+    normalized_email = credentials.email.strip().lower()
+    email_allowed, _ = await rate_limit_repo.check_rate_limit(
+        limit_type="login_email",
+        key=normalized_email,
+        max_requests=LOGIN_MAX_ATTEMPTS_PER_EMAIL,
+        window_seconds=LOGIN_RATE_LIMIT_WINDOW
+    )
+    if not email_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="登入嘗試過於頻繁，請稍後再試"
+        )
+
+    # --- 驗證憑證 ---
     user = await user_repo.get_by_email(credentials.email)
 
-    # 驗證用戶和密碼
     if not user or not verify_password(credentials.password, user["password_hash"]):
-        # 記錄登入失敗
+        await rate_limit_repo.record_request(
+            limit_type="login_ip", key=client_ip, ttl_seconds=LOGIN_RATE_LIMIT_WINDOW
+        )
+        await rate_limit_repo.record_request(
+            limit_type="login_email", key=normalized_email, ttl_seconds=LOGIN_RATE_LIMIT_WINDOW
+        )
         await audit_logger.log_auth(
             request=request,
             action="login_failed",
@@ -336,6 +380,9 @@ async def login(
 
     # httpOnly cookie 傳給 client；body 不再回 refresh_token
     set_refresh_cookie(response, refresh_token_value)
+
+    # 登入成功：清除該 email 的失敗計數
+    await rate_limit_repo.clear_records("login_email", normalized_email)
 
     # 記錄成功登入
     await audit_logger.log_auth(

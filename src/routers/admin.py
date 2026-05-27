@@ -1283,6 +1283,134 @@ async def get_admin_statistics(
         )
 
 
+# ========== 收入統計 API ==========
+
+@router.get("/revenue")
+async def get_revenue_stats(
+    admin: dict = Depends(get_current_admin),
+    db=Depends(get_database),
+):
+    """營收 dashboard 數據"""
+    from ..utils.newebpay_service import NewebpayService
+
+    now = get_utc_timestamp()
+
+    # 1. 訂閱分佈 + MRR
+    sub_pipeline = [
+        {"$match": {"subscription.status": "active"}},
+        {"$group": {
+            "_id": {
+                "tier": "$subscription.tier",
+                "billing_cycle": "$subscription.billing_cycle",
+            },
+            "count": {"$sum": 1},
+        }},
+    ]
+    sub_cursor = db.users.aggregate(sub_pipeline)
+    sub_list = await sub_cursor.to_list(length=20)
+
+    subscriber_count = {
+        "basic_monthly": 0, "basic_yearly": 0,
+        "pro_monthly": 0, "pro_yearly": 0,
+    }
+    mrr = 0
+    for item in sub_list:
+        tier = item["_id"].get("tier", "")
+        cycle = item["_id"].get("billing_cycle", "")
+        key = f"{tier}_{cycle}"
+        if key in subscriber_count:
+            subscriber_count[key] = item["count"]
+        price = NewebpayService.get_subscription_price(tier, cycle)
+        if price:
+            monthly = price / 12 if cycle == "yearly" else price
+            mrr += monthly * item["count"]
+
+    # 2. 總收入（所有已付款訂單）
+    total_pipeline = [
+        {"$match": {"status": "paid"}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount_twd"}}},
+    ]
+    total_list = await db.orders.aggregate(total_pipeline).to_list(length=1)
+    total_revenue = total_list[0]["total"] if total_list else 0
+
+    # 3. 額外額度收入
+    extra_pipeline = [
+        {"$match": {"status": "paid", "type": "extra_quota"}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount_twd"}}},
+    ]
+    extra_list = await db.orders.aggregate(extra_pipeline).to_list(length=1)
+    extra_quota_revenue = extra_list[0]["total"] if extra_list else 0
+
+    # 4. 近 6 個月月收入
+    six_months_ago = now - (180 * 86400)
+    monthly_pipeline = [
+        {"$match": {"status": "paid", "paid_at": {"$gte": six_months_ago}}},
+        {"$addFields": {
+            "paid_date": {"$toDate": {"$multiply": ["$paid_at", 1000]}},
+        }},
+        {"$group": {
+            "_id": {"$dateToString": {"format": "%Y-%m", "date": "$paid_date"}},
+            "amount": {"$sum": "$amount_twd"},
+        }},
+        {"$sort": {"_id": -1}},
+        {"$limit": 6},
+    ]
+    monthly_list = await db.orders.aggregate(monthly_pipeline).to_list(length=6)
+    monthly_revenue = [{"month": m["_id"], "amount": m["amount"]} for m in monthly_list]
+
+    # 5. 近 10 筆已付款訂單
+    recent_orders_cursor = db.orders.find(
+        {"status": "paid"},
+        {"merchant_order_no": 1, "amount_twd": 1, "type": 1, "tier": 1, "user_id": 1, "paid_at": 1},
+    ).sort("paid_at", -1).limit(10)
+    recent_raw = await recent_orders_cursor.to_list(length=10)
+
+    user_ids = list({o.get("user_id") for o in recent_raw if o.get("user_id")})
+    email_map = {}
+    if user_ids:
+        users_cursor = db.users.find(
+            {"_id": {"$in": [ObjectId(uid) for uid in user_ids]}},
+            {"email": 1},
+        )
+        async for u in users_cursor:
+            email_map[str(u["_id"])] = u.get("email", "")
+
+    recent_orders = []
+    for o in recent_raw:
+        recent_orders.append({
+            "order_no": o.get("merchant_order_no", ""),
+            "user_email": email_map.get(o.get("user_id", ""), ""),
+            "amount": o.get("amount_twd", 0),
+            "type": o.get("type", ""),
+            "tier": o.get("tier", ""),
+            "paid_at": o.get("paid_at"),
+        })
+
+    # 6. 流失指標
+    pending_cancel = await db.users.count_documents({
+        "subscription.status": "active",
+        "subscription.cancel_at_period_end": True,
+    })
+    month_start = now - (now % 86400) - (30 * 86400)
+    expired_this_month = await db.users.count_documents({
+        "subscription.status": {"$in": ["expired", "past_due"]},
+        "subscription.current_period_end": {"$gte": month_start, "$lt": now},
+    })
+
+    return {
+        "mrr": int(mrr),
+        "subscriber_count": subscriber_count,
+        "total_revenue": total_revenue,
+        "monthly_revenue": monthly_revenue,
+        "recent_orders": recent_orders,
+        "churn": {
+            "pending_cancel": pending_cancel,
+            "expired_this_month": expired_this_month,
+        },
+        "extra_quota_revenue": extra_quota_revenue,
+    }
+
+
 # ========== 審計日誌 API ==========
 
 @router.get("/audit-logs")

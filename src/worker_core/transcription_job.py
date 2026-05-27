@@ -5,7 +5,7 @@
 """
 from structlog.contextvars import bind_contextvars, clear_contextvars
 
-from src.models.worker_job import TranscriptionWorkerJob
+from src.models.worker_job import TranscriptionJob
 from src.services.progress_store import Phase, ProgressStore
 from src.services.utils.diarization_processor import DiarizationProcessor
 from src.services.utils.punctuation_processor import PunctuationProcessor
@@ -26,7 +26,7 @@ def process_task(message_body: dict, progress_store: ProgressStore) -> None:
 
     `message_body` 已被 sqs_consumer 驗 HMAC 並 pop `_signature`。
     """
-    job = TranscriptionWorkerJob.model_validate(message_body)
+    job = TranscriptionJob.model_validate(message_body)
     task_id = job.task_id
     # 綁定 task_id 到 log context:本任務內(含 orchestrator)所有 log 都帶 task_id
     bind_contextvars(task_id=task_id)

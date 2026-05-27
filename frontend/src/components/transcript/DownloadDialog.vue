@@ -1,9 +1,9 @@
 <template>
   <div v-if="show" class="download-dialog-overlay" @click.self="$emit('close')">
-    <div class="download-dialog">
+    <div ref="downloadDialogRef" class="download-dialog" role="dialog" aria-modal="true" :aria-label="$t('downloadDialog.title')">
       <div class="dialog-header">
         <h3>{{ $t('downloadDialog.title') }}</h3>
-        <button @click="$emit('close')" class="btn-close" :title="$t('downloadDialog.cancel')">
+        <button @click="$emit('close')" class="btn-close" :title="$t('downloadDialog.cancel')" :aria-label="$t('common.close')">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"></line>
             <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -125,8 +125,9 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useFocusTrap } from '../../composables/useFocusTrap'
 
 const { t: $t } = useI18n()
 
@@ -174,6 +175,9 @@ const props = defineProps({
 })
 
 defineEmits(['close', 'download', 'update:selectedFormat', 'update:includeSpeaker', 'update:includeSummary', 'update:includeTranscript'])
+
+const downloadDialogRef = ref(null)
+useFocusTrap(downloadDialogRef, toRef(props, 'show'))
 
 // 是否顯示內容選項（僅 TXT/PDF 顯示）
 const showContentOptions = computed(() => {

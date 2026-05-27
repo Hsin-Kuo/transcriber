@@ -5,7 +5,6 @@ import { ref, computed, nextTick } from 'vue'
  *
  * 職責：
  * - 管理編輯狀態（編輯中、標題編輯）
- * - 處理取代功能
  * - 檢查未儲存的變更
  */
 export function useTranscriptEditor(currentTranscript, originalContent, displayMode, groupedSegments, convertTableToPlainText, speakerNames = null) {
@@ -13,10 +12,6 @@ export function useTranscriptEditor(currentTranscript, originalContent, displayM
   const isEditing = ref(false)
   const isEditingTitle = ref(false)
   const editingTaskName = ref('')
-
-  // 取代工具
-  const findText = ref('')
-  const replaceText = ref('')
 
   // 元素引用
   const titleInput = ref(null)
@@ -79,8 +74,6 @@ export function useTranscriptEditor(currentTranscript, originalContent, displayM
   function cancelEditing() {
     currentTranscript.value.content = originalContent.value
     isEditing.value = false
-    findText.value = ''
-    replaceText.value = ''
   }
 
   /**
@@ -88,19 +81,6 @@ export function useTranscriptEditor(currentTranscript, originalContent, displayM
    */
   function finishEditing() {
     isEditing.value = false
-    findText.value = ''
-    replaceText.value = ''
-  }
-
-  // ========== 取代功能 ==========
-
-  /**
-   * 取代全部
-   */
-  function replaceAll() {
-    if (!findText.value) return
-    const regex = new RegExp(findText.value, 'g')
-    currentTranscript.value.content = currentTranscript.value.content.replace(regex, replaceText.value)
   }
 
   // ========== 瀏覽器警告處理 ==========
@@ -121,8 +101,6 @@ export function useTranscriptEditor(currentTranscript, originalContent, displayM
     isEditing,
     isEditingTitle,
     editingTaskName,
-    findText,
-    replaceText,
     hasUnsavedChanges,
 
     // 元素引用
@@ -136,9 +114,6 @@ export function useTranscriptEditor(currentTranscript, originalContent, displayM
     startEditing,
     cancelEditing,
     finishEditing,
-
-    // 取代功能
-    replaceAll,
 
     // 瀏覽器警告
     handleBeforeUnload

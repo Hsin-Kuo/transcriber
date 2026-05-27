@@ -53,9 +53,25 @@ _Avoid_: memory state（舊命名，已從程式碼移除）。
 實際跑轉錄 pipeline 的進程。`DEPLOY_ENV=local` 時是 Web Server 同進程的背景執行緒；`DEPLOY_ENV=aws` 時是獨立的 GPU EC2，從 SQS 取訊息。
 _Avoid_: GPU server、Processor（後者是 pipeline 內部的元件名稱）。
 
-**Worker dispatch**:
-Web Server 把新建 Task 移交給 Worker 的動作。AWS 模式下含三件事：上傳音檔到 S3 → 簽 HMAC SQS 訊息 → 送進 `transcriber-tasks` queue；任一步失敗就把 Task 標 failed。`local` 模式下不適用（任務直接走 in-process executor）。封裝在 `src/services/worker_dispatch.py`。
-_Avoid_: handoff、enqueue（這兩個只是 dispatch 內部的子步驟）。
+**TranscriptionIntakeService**:
+「從音檔到 Task dispatch」的完整 workflow service。封裝 7 步驟：音檔資訊取得 → user fetch（含 tier）→ 配額預留（atomic reserve）→ diarization 可用性檢查 → tag 自動建立 → task DB 寫入 → [[Task dispatch]] submit。失敗時自動 rollback（release reservation + 清 temp_dir）。介面：`intake(user_id, user_email, file_path, filename, config: IntakeConfig, temp_dir) → IntakeResult`。Router 只負責 upload 組裝（把 HTTP multipart / chunked upload 轉成 `file_path`）和 response 格式化。封裝在 `src/services/intake_service.py`。
+_Avoid_: TranscriptionService（舊淺殼已重命名為 [[LocalDispatch]]）、upload service（upload 組裝留在 router，是正當的 HTTP 層責任）。
+
+**Task dispatch**:
+把新建 Task 移交給「會去跑它的 runner」的 seam。[[TranscriptionIntakeService]] 呼叫 `submit(job, audio_local_path, temp_dir, user_tier) -> DispatchResult`，由 adapter 決定走 SQS 還是 in-process executor。兩個 adapter：[[WorkerDispatch]]（AWS）、[[LocalDispatch]]（local）。`DispatchResult` 的硬合約只有 `status`（`pending` / `processing`）；`queue_position` 是 best-effort 顯示糖，adapter 能便宜算就算（WorkerDispatch 不算）。temp_dir 在 `submit()` 返回後即歸 adapter 負責清理。
+_Avoid_: 把這個 seam 叫「Worker dispatch」（那只是其中一個 adapter）、dispatcher（過泛）。
+
+**WorkerDispatch**:
+[[Task dispatch]] 的 **AWS adapter**。`submit()` 含三件事：上傳音檔到 S3 [[Handoff audio]] → 簽 HMAC SQS 訊息 → 送進 `transcriber-tasks` queue；任一步失敗就把 Task 標 failed。fire-and-forget，立即返回 `status=pending`（後續由 GPU Worker 從 SQS 取走）。`start()` 是 no-op。封裝在 `src/services/worker_dispatch.py`。
+_Avoid_: handoff、enqueue（這兩個只是 adapter 內部的子步驟）。
+
+**LocalDispatch**:
+[[Task dispatch]] 的 **local adapter**，是舊有淺殼 `TranscriptionService` 深化後的形態。`submit()` 內含本地並發閘門（`MAX_CONCURRENT_TASKS`）：未滿載就立即把 [[TranscriptionOrchestrator]] submit 進 thread pool、回 `status=processing`；滿載就把 Task 留 `pending`、回 `status=pending`。另持有一個背景撿單器（5 秒輪詢，把 pending Task 依建立時間接走），由 `start()` 啟動。run-now 與撿單兩條路徑共用同一個內部 `_start(job)`。
+_Avoid_: TranscriptionService（舊淺殼命名）、queue processor（撿單器只是 adapter 內部機制）。
+
+**TranscriptionJob**:
+[[Task dispatch]] 的 typed payload（Pydantic），帶 task_id + 轉錄設定（language / chunking / punctuation / diarization / max_speakers / ui_language / handoff_ext）。Web Server 建構；AWS 模式序列化成 SQS body、local 模式直接交給 [[LocalDispatch]]。**跟 [[Task]] 不同**：Task 是 MongoDB 持久實體，TranscriptionJob 是「跑這個 Task 要知道的指令」的傳遞訊息。class 名 `TranscriptionJob`，但檔案維持 `src/models/worker_job.py`（不改檔名，避免跟 worker 薄殼 `src/worker_core/transcription_job.py` 撞名）。
+_Avoid_: TranscriptionWorkerJob（舊名；「Worker」一旦兩模式共用就在說謊）、把它跟 [[Task]] 混用。
 
 **TranscriptionOrchestrator**:
 單次 transcription run 的 Phase 狀態機 + 取消 + 終態（completed / failed）協調者。持有 processors（whisper / punctuation / diarization）與 progress_store，不持有 Task 業務狀態。run() 從 PREPARATION 跑到 PUNCTUATION，期間透過 check_cancelled() poll DB；遇取消拋 `TranscriptionCancelled`、遇例外走 `_mark_failed`、成功走 `_mark_completed`（含 quota consume）。封裝在 `src/transcription/orchestrator.py`，**Web Server 與 Worker 兩個進程共用同一個 class**（透過 [[AudioSource]] adapter 抽掉「音檔從哪來」這個唯一會變的點）。

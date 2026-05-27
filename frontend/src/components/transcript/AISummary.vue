@@ -177,7 +177,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { summaryService, taskService } from '../../api/services.js'
+import { summaryService, taskService } from '../../api/services'
 import { useAuthStore } from '../../stores/auth'
 
 const { t: $t } = useI18n()

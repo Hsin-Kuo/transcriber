@@ -5,13 +5,17 @@
 import axios, { AxiosError } from 'axios'
 import type { AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 
-// 未設定 VITE_API_URL 時，自動沿用當前 hostname + port 8000
+// 未設定 VITE_API_URL 時：開發環境用 hostname:8000，生產環境用 same-origin
 function resolveApiBase(): string {
   const envUrl = import.meta.env.VITE_API_URL as string | undefined
   if (envUrl) return envUrl
   if (typeof window === 'undefined') return ''
-  const { protocol, hostname } = window.location
-  return `${protocol}//${hostname}:8000`
+  const { protocol, hostname, port } = window.location
+  const devPorts = ['5173', '3000']
+  if (devPorts.includes(port)) {
+    return `${protocol}//${hostname}:8000`
+  }
+  return ''
 }
 
 const API_BASE = resolveApiBase()
@@ -58,6 +62,8 @@ type RefreshSubscriber = {
 let isRefreshing = false
 let refreshSubscribers: RefreshSubscriber[] = []
 let rateLimitNotifyTimer: ReturnType<typeof setTimeout> | null = null
+let serverErrorNotifyTimer: ReturnType<typeof setTimeout> | null = null
+let networkErrorNotifyTimer: ReturnType<typeof setTimeout> | null = null
 
 function subscribeTokenRefresh(
   resolve: (token: string) => void,
@@ -155,6 +161,24 @@ api.interceptors.response.use(
       if (!rateLimitNotifyTimer) {
         window.dispatchEvent(new CustomEvent('api:rate-limited'))
         rateLimitNotifyTimer = setTimeout(() => { rateLimitNotifyTimer = null }, 3000)
+      }
+      return Promise.reject(error)
+    }
+
+    // 5xx 伺服器錯誤
+    if (error.response && error.response.status >= 500) {
+      if (!serverErrorNotifyTimer) {
+        window.dispatchEvent(new CustomEvent('api:server-error'))
+        serverErrorNotifyTimer = setTimeout(() => { serverErrorNotifyTimer = null }, 5000)
+      }
+      return Promise.reject(error)
+    }
+
+    // 網路錯誤（無 response = 斷線 / timeout；排除用戶主動取消）
+    if (!error.response && error.code !== 'ERR_CANCELED') {
+      if (!networkErrorNotifyTimer) {
+        window.dispatchEvent(new CustomEvent('api:network-error'))
+        networkErrorNotifyTimer = setTimeout(() => { networkErrorNotifyTimer = null }, 5000)
       }
       return Promise.reject(error)
     }

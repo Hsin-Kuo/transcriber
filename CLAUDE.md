@@ -31,8 +31,10 @@ src/                  # 後端 (FastAPI)
     subscriptions.py  # 藍新（Newebpay）訂閱付款 / webhook
     admin.py          # 管理後台 API（prefix=/api/admin）
   services/           # 業務邏輯
-    task_service.py             # 任務狀態管理
-    transcription_service.py    # 本地模式轉錄入口（包 LocalFileSource、submit Orchestrator）
+    intake_service.py           # TranscriptionIntakeService（音檔→配額→task→dispatch 完整 workflow）
+    task_service.py             # 任務狀態管理 + soft_delete_full workflow
+    task_query_helpers.py       # 任務列表 enrichment / filter / audio expiration 純函數
+    task_dispatch.py            # Task dispatch seam（LocalDispatch adapter）
     worker_dispatch.py          # AWS 模式下把 task 派發給 Worker（S3+HMAC+SQS）
     progress_store.py           # transient progress state（task_progress collection）
     tag_service.py / summary_service.py / audio_service.py
@@ -55,7 +57,9 @@ src/                  # 後端 (FastAPI)
   database/
     repositories/     # MongoDB CRUD
   auth/               # JWT、密碼、依賴注入
-  models/             # Pydantic 資料模型
+  models/             # Pydantic 資料模型 + dataclass
+    worker_job.py     # TranscriptionJob（Task dispatch payload）
+    intake.py         # IntakeConfig / IntakeResult（intake service IO）
 frontend/             # 使用者前端 (Vue 3 + Vite, port 5173/3000)
 admin-frontend/       # 管理後台 (Vue 3 + Vite, port 5174/3003)
 deploy/               # AWS 部署腳本

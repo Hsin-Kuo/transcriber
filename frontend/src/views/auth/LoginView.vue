@@ -110,6 +110,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth'
+import { API_BASE } from '../../utils/api'
 import GoogleSignInButton from '../../components/GoogleSignInButton.vue'
 
 const { t: $t } = useI18n()
@@ -166,7 +167,7 @@ async function resendVerification() {
 
   try {
     const response = await fetch(
-      `${import.meta.env.VITE_API_URL ?? ''}/auth/resend-verification`,
+      `${API_BASE}/auth/resend-verification`,
       {
         method: 'POST',
         headers: {
