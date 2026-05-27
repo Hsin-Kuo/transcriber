@@ -78,7 +78,7 @@
       <!-- Central control area -->
       <div class="circular-controls-center">
         <!-- Rewind button -->
-        <button class="audio-control-btn audio-skip-btn skip-backward" @click="$emit('skip-backward')" :title="$t('audioPlayer.rewind10s')">
+        <button class="audio-control-btn audio-skip-btn skip-backward" @click="$emit('skip-backward')" :title="$t('audioPlayer.rewind10s')" :aria-label="$t('audioPlayer.rewind10s')">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
             <path d="M3 3v5h5" />
@@ -87,7 +87,7 @@
         </button>
 
         <!-- Play/Pause button -->
-        <button class="audio-control-btn audio-play-btn" @click="$emit('toggle-play-pause')" :title="isPlaying ? $t('audioPlayer.pause') : $t('audioPlayer.play')">
+        <button class="audio-control-btn audio-play-btn" @click="$emit('toggle-play-pause')" :title="isPlaying ? $t('audioPlayer.pause') : $t('audioPlayer.play')" :aria-label="isPlaying ? $t('audioPlayer.pause') : $t('audioPlayer.play')">
           <svg v-if="!isPlaying" width="30" height="30" viewBox="0 0 24 24" fill="currentColor">
             <path d="M8 5v14l11-7z" />
           </svg>
@@ -97,7 +97,7 @@
         </button>
 
         <!-- Fast forward button -->
-        <button class="audio-control-btn audio-skip-btn skip-forward" @click="$emit('skip-forward')" :title="$t('audioPlayer.fastForward10s')">
+        <button class="audio-control-btn audio-skip-btn skip-forward" @click="$emit('skip-forward')" :title="$t('audioPlayer.fastForward10s')" :aria-label="$t('audioPlayer.fastForward10s')">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
             <path d="M21 3v5h-5" />
@@ -113,7 +113,7 @@
 
         <!-- Middle: Volume control -->
         <div class="volume-control-center">
-          <button class="audio-control-btn mute-btn-volume" @click="$emit('toggle-mute')" :title="isMuted ? $t('audioPlayer.unmute') : $t('audioPlayer.mute')">
+          <button class="audio-control-btn mute-btn-volume" @click="$emit('toggle-mute')" :title="isMuted ? $t('audioPlayer.unmute') : $t('audioPlayer.mute')" :aria-label="isMuted ? $t('audioPlayer.unmute') : $t('audioPlayer.mute')">
             <svg v-if="!isMuted && volume > 0.5" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
               <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
             </svg>
@@ -131,6 +131,8 @@
             min="0"
             max="100"
             :value="volume * 100"
+            :aria-label="$t('audioPlayer.volume')"
+            :aria-valuenow="Math.round(volume * 100)"
             @input="$emit('set-volume', $event)"
           />
         </div>

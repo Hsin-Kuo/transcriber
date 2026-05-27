@@ -107,7 +107,7 @@ function copyShareLink() {
 <template>
   <Teleport to="body">
     <div v-if="show" class="share-overlay" @click.self="show = false">
-      <div class="share-dialog">
+      <div class="share-dialog" role="dialog" aria-modal="true" :aria-label="t('shared.shareTitle')">
         <h3>{{ t('shared.shareTitle') }}</h3>
         <p class="share-desc">{{ t('shared.shareDesc') }}</p>
 
@@ -118,6 +118,7 @@ function copyShareLink() {
               :value="`${origin}/s/${shareToken}`"
               readonly
               class="share-link-input"
+              :aria-label="t('shared.shareLink')"
               @click="$event.target.select()"
             />
             <button class="share-copy-btn" @click="copyShareLink">
@@ -170,7 +171,7 @@ function copyShareLink() {
           </button>
         </div>
 
-        <button class="share-close-btn" @click="show = false">✕</button>
+        <button class="share-close-btn" @click="show = false" :aria-label="t('common.close')">✕</button>
       </div>
     </div>
   </Teleport>

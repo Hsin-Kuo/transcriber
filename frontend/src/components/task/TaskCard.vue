@@ -9,7 +9,10 @@
         'batch-edit-mode': isBatchMode,
         'clickable': task.status === 'completed' && !isBatchMode
       }"
+      :role="task.status === 'completed' && !isBatchMode ? 'link' : undefined"
+      :tabindex="task.status === 'completed' && !isBatchMode ? 0 : undefined"
       @click="handleCardClick"
+      @keydown.enter="handleCardClick"
     >
       <!-- 批次編輯選擇框 -->
       <div v-if="isBatchMode" class="batch-select-checkbox" @click.stop>
@@ -18,6 +21,7 @@
           :checked="isSelected"
           @change="emit('toggle-selection', task.task_id)"
           class="batch-checkbox"
+          :aria-label="$t('taskList.selectTask')"
         />
       </div>
 
@@ -61,7 +65,7 @@
 
           <!-- 進度條（僅 pending 和 processing 狀態） -->
           <div v-if="task.progress && isTaskExpanded(task.task_id, [task])" class="task-progress">
-            <div class="progress-bar">
+            <div class="progress-bar" role="progressbar" :aria-valuenow="task.progress" aria-valuemin="0" aria-valuemax="100" :aria-label="$t('taskList.taskProgress')">
               <div
                 class="progress-fill"
                 :style="{ width: getProgressWidth(task) }"
@@ -114,6 +118,7 @@
                 class="btn btn-download btn-group-left btn-icon"
                 @click.stop="emit('download', task)"
                 :title="$t('taskList.downloadTranscript')"
+                :aria-label="$t('taskList.downloadTranscript')"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -125,6 +130,7 @@
                 class="btn btn-danger btn-group-right btn-icon"
                 @click.stop="emit('delete', task.task_id)"
                 :title="$t('taskList.deleteTask')"
+                :aria-label="$t('taskList.deleteTask')"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="3 6 5 6 21 6"></polyline>
@@ -137,7 +143,7 @@
 
             <!-- 手機：kebab 按鈕（dropdown 渲染於 .task-wrapper 層，避免 clip-path 裁切） -->
             <div class="mobile-kebab-wrapper mobile-action">
-              <button class="btn-kebab" @click.stop="toggleMobileMenu($event)" :title="$t('taskList.moreActions')">⋮</button>
+              <button class="btn-kebab" @click.stop="toggleMobileMenu($event)" :title="$t('taskList.moreActions')" :aria-label="$t('taskList.moreActions')">⋮</button>
             </div>
           </div>
 
@@ -165,7 +171,7 @@
 
           <!-- 手機：失敗或取消任務的 kebab 按鈕 -->
           <div v-if="['failed', 'cancelled'].includes(task.status)" class="mobile-kebab-wrapper mobile-action">
-            <button class="btn-kebab" @click.stop="toggleMobileMenu($event)" :title="$t('taskList.moreActions')">⋮</button>
+            <button class="btn-kebab" @click.stop="toggleMobileMenu($event)" :title="$t('taskList.moreActions')" :aria-label="$t('taskList.moreActions')">⋮</button>
           </div>
         </div>
 

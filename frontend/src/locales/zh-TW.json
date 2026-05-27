@@ -378,6 +378,8 @@
     "tagsStats": "已加入 {common} • 可用 {candidate}",
     "expand": "展開",
     "collapse": "收合",
+    "selectTask": "選取任務",
+    "taskProgress": "任務進度",
     "moreActions": "更多操作",
     "editTags": "編輯標籤",
     "addTag": "新增標籤",
@@ -484,6 +486,7 @@
     "timecodeMarkers": "時間標記",
     "transcript": "逐字稿",
     "goBack": "返回",
+    "editTitle": "編輯標題",
     "autoSavingSpeaker": "自動儲存講者名稱",
     "segmentsAutoSaved": "Segments 已自動儲存",
     "errorSavingSegments": "儲存 segments 失敗",
@@ -513,6 +516,7 @@
     "nonEditMode": "非編輯模式",
     "unmute": "取消靜音",
     "mute": "靜音",
+    "volume": "音量",
     "playbackSpeed": "播放速度: {rate}x",
     "speedUp": "加速 (+0.25x)",
     "speedDown": "減速 (-0.25x)",
@@ -712,6 +716,7 @@
     "shareDesc": "開啟後，任何人都可以透過連結閱覽此逐字稿",
     "shareEnabled": "已開啟公開分享",
     "shareDisabled": "已取消公開分享",
+    "shareLink": "分享連結",
     "copyLink": "複製連結",
     "linkCopied": "連結已複製",
     "disableShare": "取消分享",
@@ -737,5 +742,8 @@
     "AUDIO_MISSING": "音檔已不存在，可能已過期被系統清除。",
     "SERVER_RESTART": "伺服器重啟導致任務中斷，請重新上傳。",
     "SYSTEM_ERROR": "系統發生未知錯誤，請稍後重試或聯絡客服。"
+  },
+  "common": {
+    "close": "關閉"
   }
 }

@@ -1,7 +1,7 @@
 <template>
   <nav class="navigation" :class="{ collapsed: isCollapsed }">
     <!-- 收合/展開按鈕 -->
-    <button class="toggle-btn" @click="toggleCollapse" :title="isCollapsed ? $t('navigation.expandSidebar') : $t('navigation.collapseSidebar')">
+    <button class="toggle-btn" @click="toggleCollapse" :title="isCollapsed ? $t('navigation.expandSidebar') : $t('navigation.collapseSidebar')" :aria-label="isCollapsed ? $t('navigation.expandSidebar') : $t('navigation.collapseSidebar')">
       <!-- 展開時顯示《（向左，表示收合） -->
       <svg v-if="!isCollapsed" width="16" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="15 18 9 12 15 6"></polyline>
@@ -90,7 +90,7 @@
           {{ getFirstLetter(authStore.user?.email) }}
         </div>
       </router-link>
-      <button @click="handleLogout" class="logout-btn" :title="isCollapsed ? $t('navigation.logout') : ''">
+      <button @click="handleLogout" class="logout-btn" :title="isCollapsed ? $t('navigation.logout') : ''" :aria-label="$t('navigation.logout')">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
           <polyline points="16 17 21 12 16 7"></polyline>

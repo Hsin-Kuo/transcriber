@@ -115,9 +115,15 @@
   - index.html 加 description、OG tags
   - 分享頁面（/s/:token）加動態 meta（轉錄標題 + 描述）
 
-- [ ] **O9** — Accessibility 基礎
-  - 關鍵互動元素加 aria-label
-  - 按鍵導航支援（Tab focus ring）
+- [x] **O9** — Accessibility 基礎（Phase 1，2026-05-27）
+  - [x] 全局 `:focus-visible` focus ring + `:focus:not(:focus-visible)` 消除滑鼠 outline
+  - [x] Icon button aria-label（TranscriptHeader / AudioPlayer / TaskCard / Navigation / Panel close buttons）
+  - [x] NotificationToast 加 `aria-live="polite"` + close button aria-label
+  - [x] Dialog/Modal 加 `role="dialog" aria-modal="true"`（ShareDialog / DownloadDialog / MergeModal / BottomSheet）
+  - [x] 表單輸入加 aria-label（title input / volume slider / share link / batch checkbox）
+  - [x] TaskCard 加 keyboard support（tabindex + Enter handler）
+  - [x] Progress bar 加 `role="progressbar"` + aria-valuenow
+  - [ ] Phase 2（待做）：Modal focus trap / 剩餘 div@click 轉語義 / 全面 input label 檢查
 
 - [ ] **O10** — IaC（基礎設施即代碼）
   - 用 Terraform 或 CDK 定義 AWS 資源

@@ -312,7 +312,7 @@ onUnmounted(() => {
   will-change: scroll-position;
 }
 
-.subtitle-table-wrapper:focus {
+.subtitle-table-wrapper:focus:not(:focus-visible) {
   outline: none;
 }
 
