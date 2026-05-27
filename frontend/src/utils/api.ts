@@ -5,14 +5,15 @@
 import axios, { AxiosError } from 'axios'
 import type { AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 
-// 未設定 VITE_API_URL 時：開發環境用 hostname:8000，生產環境用 same-origin
+// 未設定 VITE_API_URL 時：開發環境（含 vitest）走 hostname:8000，
+// 生產 build same-origin 由 nginx 反代。
+// 用 import.meta.env.DEV 而非 port heuristic，避免 test/preview 環境誤判。
 function resolveApiBase(): string {
   const envUrl = import.meta.env.VITE_API_URL as string | undefined
   if (envUrl) return envUrl
   if (typeof window === 'undefined') return ''
-  const { protocol, hostname, port } = window.location
-  const devPorts = ['5173', '3000']
-  if (devPorts.includes(port)) {
+  if (import.meta.env.DEV) {
+    const { protocol, hostname } = window.location
     return `${protocol}//${hostname}:8000`
   }
   return ''
