@@ -131,9 +131,9 @@
   - 「登出所有裝置」功能
   - 用戶可查看活躍 session 列表
 
-- [ ] **O12** — MongoDB 連線池調優
-  - 顯式設定 maxPoolSize / minPoolSize / waitQueueTimeoutMS
-  - Atlas M2 可能撐不住突發流量
+- [x] **O12** — MongoDB 連線池調優（2026-05-27）
+  - maxPoolSize=20 / minPoolSize=2 / waitQueueTimeoutMS=5000
+  - 防止池滿時無限等待、減少冷啟動延遲
 
 ### P3 — Nice-to-have
 
