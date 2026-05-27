@@ -15,6 +15,100 @@
     </div>
 
     <div v-else class="stats-grid">
+      <!-- 收入總覽 -->
+      <div v-if="revenue" class="stat-card revenue-highlight">
+        <h2>收入</h2>
+        <div class="mrr-display">
+          <span class="mrr-amount">NT$ {{ formatNumber(revenue.mrr) }}</span>
+          <span class="mrr-label">/月 (MRR)</span>
+        </div>
+        <div class="stat-item">
+          <span class="label">累計收入：</span>
+          <span class="value">NT$ {{ formatNumber(revenue.total_revenue) }}</span>
+        </div>
+        <div class="stat-item">
+          <span class="label">額外額度收入：</span>
+          <span class="value">NT$ {{ formatNumber(revenue.extra_quota_revenue) }}</span>
+        </div>
+        <div class="stat-item">
+          <span class="label">待取消：</span>
+          <span class="value" :class="{ 'danger': revenue.churn.pending_cancel > 0 }">{{ revenue.churn.pending_cancel }} 人</span>
+        </div>
+        <div class="stat-item">
+          <span class="label">本月流失：</span>
+          <span class="value" :class="{ 'danger': revenue.churn.expired_this_month > 0 }">{{ revenue.churn.expired_this_month }} 人</span>
+        </div>
+      </div>
+
+      <!-- 訂閱分佈 -->
+      <div v-if="revenue" class="stat-card">
+        <h2>訂閱分佈</h2>
+        <div class="subscriber-grid">
+          <div class="sub-cell">
+            <span class="sub-count">{{ revenue.subscriber_count.basic_monthly }}</span>
+            <span class="sub-label">Basic 月繳</span>
+          </div>
+          <div class="sub-cell">
+            <span class="sub-count">{{ revenue.subscriber_count.basic_yearly }}</span>
+            <span class="sub-label">Basic 年繳</span>
+          </div>
+          <div class="sub-cell">
+            <span class="sub-count">{{ revenue.subscriber_count.pro_monthly }}</span>
+            <span class="sub-label">Pro 月繳</span>
+          </div>
+          <div class="sub-cell">
+            <span class="sub-count">{{ revenue.subscriber_count.pro_yearly }}</span>
+            <span class="sub-label">Pro 年繳</span>
+          </div>
+        </div>
+        <div class="stat-item" style="margin-top: 12px;">
+          <span class="label">付費用戶總計：</span>
+          <span class="value">{{ totalSubscribers }} 人</span>
+        </div>
+      </div>
+
+      <!-- 月收入趨勢 -->
+      <div v-if="revenue && revenue.monthly_revenue.length > 0" class="stat-card wide">
+        <h2>月收入趨勢</h2>
+        <div class="revenue-chart">
+          <div
+            v-for="m in revenueChartData"
+            :key="m.month"
+            class="revenue-bar-wrapper"
+          >
+            <div class="revenue-bar" :style="{ height: m.height + '%' }">
+              <span class="revenue-bar-amount">{{ formatNumber(m.amount) }}</span>
+            </div>
+            <span class="revenue-bar-label">{{ m.month.slice(5) }}月</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 近期訂單 -->
+      <div v-if="revenue && revenue.recent_orders.length > 0" class="stat-card wide">
+        <h2>近期付款</h2>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>時間</th>
+              <th>用戶</th>
+              <th>類型</th>
+              <th>方案</th>
+              <th>金額</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="order in revenue.recent_orders" :key="order.order_no">
+              <td>{{ formatOrderTime(order.paid_at) }}</td>
+              <td>{{ order.user_email || '—' }}</td>
+              <td>{{ orderTypeLabel(order.type) }}</td>
+              <td>{{ order.tier || '—' }}</td>
+              <td>NT$ {{ formatNumber(order.amount) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
       <!-- 總覽卡片 -->
       <div class="stat-card">
         <h2>總覽</h2>
@@ -359,6 +453,8 @@ const stats = ref({
   punct_provider_usage: []
 })
 
+const revenue = ref(null)
+
 const loading = ref(true)
 const error = ref(null)
 const lastUpdate = ref('')
@@ -387,6 +483,44 @@ const hasAnyModelUsage = computed(() => {
 const totalSummaries = computed(() => {
   return stats.value.token_usage.summary?.summaries_count || 1
 })
+
+// 訂閱者總數
+const totalSubscribers = computed(() => {
+  if (!revenue.value) return 0
+  const c = revenue.value.subscriber_count
+  return c.basic_monthly + c.basic_yearly + c.pro_monthly + c.pro_yearly
+})
+
+// 月收入圖表數據（反轉為時間正序 + 計算高度百分比）
+const revenueChartData = computed(() => {
+  if (!revenue.value) return []
+  const data = [...revenue.value.monthly_revenue].reverse()
+  const max = Math.max(...data.map(d => d.amount), 1)
+  return data.map(d => ({
+    ...d,
+    height: Math.max((d.amount / max) * 100, 4),
+  }))
+})
+
+// 獲取收入資料
+async function fetchRevenue() {
+  try {
+    const response = await api.get('/api/admin/revenue')
+    revenue.value = response.data
+  } catch (err) {
+    console.error('載入收入資料失敗:', err)
+  }
+}
+
+function formatOrderTime(ts) {
+  if (!ts) return '—'
+  return new Date(ts * 1000).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
+function orderTypeLabel(type) {
+  const map = { subscription: '訂閱', upgrade_subscription: '升級', downgrade_subscription: '降級', extra_quota: '額外額度' }
+  return map[type] || type
+}
 
 // 獲取統計資料
 async function fetchStats() {
@@ -429,6 +563,7 @@ function formatDuration(seconds) {
 
 onMounted(() => {
   fetchStats()
+  fetchRevenue()
 })
 </script>
 
@@ -800,5 +935,103 @@ onMounted(() => {
   .data-table td {
     padding: 8px 4px;
   }
+}
+
+/* Revenue section */
+.revenue-highlight {
+  border-left: 4px solid var(--color-primary, #dd8448);
+}
+
+.mrr-display {
+  margin-bottom: 16px;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.mrr-amount {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--color-primary, #dd8448);
+}
+
+.mrr-label {
+  font-size: 14px;
+  color: #888;
+}
+
+.subscriber-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.sub-cell {
+  text-align: center;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.sub-count {
+  display: block;
+  font-size: 24px;
+  font-weight: 700;
+  color: #333;
+}
+
+.sub-label {
+  display: block;
+  font-size: 12px;
+  color: #888;
+  margin-top: 4px;
+}
+
+.revenue-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  height: 140px;
+  padding-top: 20px;
+}
+
+.revenue-bar-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  justify-content: flex-end;
+}
+
+.revenue-bar {
+  width: 100%;
+  max-width: 60px;
+  background: var(--color-primary, #dd8448);
+  border-radius: 4px 4px 0 0;
+  position: relative;
+  min-height: 4px;
+  opacity: 0.85;
+  transition: opacity 0.2s;
+}
+
+.revenue-bar:hover {
+  opacity: 1;
+}
+
+.revenue-bar-amount {
+  position: absolute;
+  top: -20px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: #666;
+  white-space: nowrap;
+}
+
+.revenue-bar-label {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #888;
 }
 </style>

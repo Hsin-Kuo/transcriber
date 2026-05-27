@@ -139,7 +139,9 @@
 
 - [ ] **O13** — Circuit breaker（Gemini / S3 熔斷）
 - [ ] **O14** — 內容審核 / 濫用舉報機制
-- [ ] **O15** — Admin 收入 dashboard
+- [x] **O15** — Admin 收入 dashboard（2026-05-27）
+  - `GET /api/admin/revenue`：MRR / 訂閱分佈 / 累計收入 / 月趨勢 / 近期訂單 / 流失指標
+  - AdminDashboard.vue 新增收入卡片區塊（MRR 大字 + 分佈格 + CSS bar chart + 訂單表格）
 - [x] **O16** — Plan 升降級處理（已實作，非傳統 proration）
   - 升級：剩餘配額歸入 `extra_quota` + 立即生效新方案
   - 降級：維持當前方案直到期末，排程新方案於到期日首扣
