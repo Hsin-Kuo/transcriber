@@ -126,6 +126,17 @@ jobs:
           sudo rm -f /etc/nginx/conf.d/default.conf
           sudo nginx -t && sudo systemctl reload nginx
 
+          # Sync .env from canonical deploy/.env.aws（帶 timestamp backup）
+          # 之後 .env 變更直接改 repo 的 deploy/.env.aws，push 就會生效。
+          if [ -f /opt/transcriber/.env ]; then
+              sudo cp /opt/transcriber/.env /opt/transcriber/.env.bak.${SHA}
+          fi
+          sudo cp /opt/transcriber/deploy/.env.aws /opt/transcriber/.env
+          sudo chown ec2-user:ec2-user /opt/transcriber/.env
+          sudo chmod 600 /opt/transcriber/.env
+          # 只保留最近 5 份 .env backup
+          ls -1t /opt/transcriber/.env.bak.* 2>/dev/null | tail -n +6 | xargs -r sudo rm -f
+
           sudo systemctl restart transcriber
 
           # 安裝/更新 rollback 腳本到固定位置（即使本次部署壞掉，rollback 仍可用）

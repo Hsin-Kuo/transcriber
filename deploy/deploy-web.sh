@@ -24,36 +24,10 @@ fi
 echo "=== 安裝 Python 依賴 ==="
 python3.11 -m pip install --user -r requirements-web.txt
 
-echo "=== 建立環境變數檔案 ==="
-cat > /opt/transcriber/.env << 'EOF'
-# AWS 部署配置
-DEPLOY_ENV=aws
-APP_ROLE=server
-
-# AWS 資源
-S3_BUCKET=transcriber-files-696637902131
-S3_REGION=ap-northeast-1
-SQS_QUEUE_URL=https://sqs.ap-northeast-1.amazonaws.com/696637902131/transcriber-tasks
-
-# Email 設定（使用 Resend）
-EMAIL_PROVIDER=resend
-FROM_EMAIL=noreply@soundlite.app
-FROM_NAME=Soundlite
-
-# 以下密鑰從 SSM Parameter Store 自動載入
-# JWT_SECRET_KEY - 從 /transcriber/jwt-secret 載入
-# WORKER_SECRET - 從 /transcriber/worker-secret 載入
-# MONGODB_URL - 從 /transcriber/mongodb-url 載入
-# RESEND_API_KEY - 從 /transcriber/resend-api-key 載入
-
-# CORS 設定（app 在 my.soundlite.app；admin 在 admin.soundlite.app）
-# 保留 https://soundlite.app 是為了過渡期相容（landing 已搬走後可移除）
-CORS_ORIGINS=https://my.soundlite.app,https://admin.soundlite.app,https://soundlite.app
-
-# Frontend URL — 用於 email 驗證連結、密碼重設、NewebPay 付款 return
-# 必須指向 transcriber app（my.soundlite.app），不是 landing
-FRONTEND_URL=https://my.soundlite.app
-EOF
+echo "=== 建立環境變數檔案（從 deploy/.env.aws 同步） ==="
+# 改成從 repo 內 canonical 檔案 cp 過來；後續 GitHub Actions 每次 deploy
+# 也會用同一份檔案重新 sync，避免 EC2 .env 與 repo drift。
+cp /opt/transcriber/deploy/.env.aws /opt/transcriber/.env
 
 echo "=== 建立 systemd 服務 ==="
 sudo tee /etc/systemd/system/transcriber.service > /dev/null << 'EOF'
