@@ -59,6 +59,7 @@ jobs:
           VITE_SENTRY_ENVIRONMENT=production
           VITE_SENTRY_TRACES_SAMPLE_RATE=0.1
           VITE_SENTRY_RELEASE=${{ github.sha }}
+          VITE_BACKEND_PDF_ENABLED=true
           EOF
           npm ci
           npm run build
