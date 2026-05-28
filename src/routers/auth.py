@@ -22,6 +22,20 @@ LOGIN_RATE_LIMIT_WINDOW = 900               # 15 分鐘（秒）
 # ============================================
 FORGOT_PASSWORD_MAX_REQUESTS_PER_HOUR = 5   # 每 IP 每小時最多請求次數
 FORGOT_PASSWORD_COOLDOWN_SECONDS = 300       # 同一 Email 冷卻時間（秒）
+
+# ============================================
+# 註冊 - 速率限制設定
+# ============================================
+REGISTER_MAX_ATTEMPTS_PER_IP = 5            # 每 IP 每小時最多註冊嘗試次數
+REGISTER_MAX_ATTEMPTS_PER_EMAIL = 3         # 每 Email 每小時最多註冊嘗試次數
+REGISTER_RATE_LIMIT_WINDOW = 3600           # 1 小時（秒）
+
+# ============================================
+# 重發驗證信 - 速率限制設定
+# ============================================
+RESEND_VERIFICATION_MAX_PER_IP = 5          # 每 IP 每小時最多重發次數
+RESEND_VERIFICATION_MAX_PER_EMAIL = 3       # 每 Email 每小時最多重發次數
+RESEND_VERIFICATION_COOLDOWN_SECONDS = 60   # 同 Email 兩次重發最小間隔
 from ..models.auth import (
     UserRegister,
     UserLogin,
@@ -69,8 +83,47 @@ async def register(
         HTTPException: Email 已被註冊或發送驗證郵件失敗
     """
     user_repo = UserRepository(db)
+    rate_limit_repo = RateLimitRepository(db)
     email_service = get_email_service()
     audit_logger = get_audit_logger()
+
+    # --- 速率限制（在任何 DB 寫入 / 寄信之前） ---
+    client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+    if not client_ip:
+        client_ip = request.client.host if request.client else "unknown"
+    normalized_email = user_data.email.strip().lower()
+
+    ip_allowed, _ = await rate_limit_repo.check_rate_limit(
+        limit_type="register_ip",
+        key=client_ip,
+        max_requests=REGISTER_MAX_ATTEMPTS_PER_IP,
+        window_seconds=REGISTER_RATE_LIMIT_WINDOW,
+    )
+    if not ip_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="註冊請求過於頻繁，請稍後再試",
+        )
+
+    email_allowed, _ = await rate_limit_repo.check_rate_limit(
+        limit_type="register_email",
+        key=normalized_email,
+        max_requests=REGISTER_MAX_ATTEMPTS_PER_EMAIL,
+        window_seconds=REGISTER_RATE_LIMIT_WINDOW,
+    )
+    if not email_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="註冊請求過於頻繁，請稍後再試",
+        )
+
+    # 不論 email 是否存在都記錄 → 避免「rate-limit 觸發行為」洩漏帳號是否存在
+    await rate_limit_repo.record_request(
+        limit_type="register_ip", key=client_ip, ttl_seconds=REGISTER_RATE_LIMIT_WINDOW
+    )
+    await rate_limit_repo.record_request(
+        limit_type="register_email", key=normalized_email, ttl_seconds=REGISTER_RATE_LIMIT_WINDOW
+    )
 
     # 檢查 Email 是否已存在
     existing_user = await user_repo.get_by_email(user_data.email)
@@ -214,22 +267,86 @@ async def verify_email(
 @router.post("/resend-verification")
 async def resend_verification_email(
     request: ResendVerificationRequest,
+    http_request: Request,
     db=Depends(get_database)
 ):
     """重新發送驗證郵件
 
     Args:
         request: 重新發送驗證郵件請求（包含 email）
+        http_request: HTTP Request（用於取得 IP 做速率限制）
         db: 資料庫實例
 
     Returns:
         成功訊息
 
     Raises:
-        HTTPException: Email 不存在、已驗證或發送失敗
+        HTTPException: Email 不存在、已驗證、超過速率限制或發送失敗
     """
     user_repo = UserRepository(db)
+    rate_limit_repo = RateLimitRepository(db)
     email_service = get_email_service()
+
+    # --- 速率限制（在 DB 查詢 / 寄信之前） ---
+    client_ip = http_request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+    if not client_ip:
+        client_ip = http_request.client.host if http_request.client else "unknown"
+    normalized_email = request.email.strip().lower()
+
+    ip_allowed, _ = await rate_limit_repo.check_rate_limit(
+        limit_type="resend_verification_ip",
+        key=client_ip,
+        max_requests=RESEND_VERIFICATION_MAX_PER_IP,
+        window_seconds=REGISTER_RATE_LIMIT_WINDOW,
+    )
+    if not ip_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="請求過於頻繁，請稍後再試",
+        )
+
+    # 同 email 60s 內只能重發 1 次
+    cooldown_allowed, _ = await rate_limit_repo.check_rate_limit(
+        limit_type="resend_verification_cooldown",
+        key=normalized_email,
+        max_requests=1,
+        window_seconds=RESEND_VERIFICATION_COOLDOWN_SECONDS,
+    )
+    if not cooldown_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"請等待 {RESEND_VERIFICATION_COOLDOWN_SECONDS} 秒後再重新發送",
+        )
+
+    # 同 email 每小時上限
+    email_allowed, _ = await rate_limit_repo.check_rate_limit(
+        limit_type="resend_verification_email",
+        key=normalized_email,
+        max_requests=RESEND_VERIFICATION_MAX_PER_EMAIL,
+        window_seconds=REGISTER_RATE_LIMIT_WINDOW,
+    )
+    if not email_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="重發次數過多，請稍後再試",
+        )
+
+    # 不論 email 是否存在都記錄 → 避免 rate-limit 行為洩漏帳號是否存在
+    await rate_limit_repo.record_request(
+        limit_type="resend_verification_ip",
+        key=client_ip,
+        ttl_seconds=REGISTER_RATE_LIMIT_WINDOW,
+    )
+    await rate_limit_repo.record_request(
+        limit_type="resend_verification_cooldown",
+        key=normalized_email,
+        ttl_seconds=RESEND_VERIFICATION_COOLDOWN_SECONDS,
+    )
+    await rate_limit_repo.record_request(
+        limit_type="resend_verification_email",
+        key=normalized_email,
+        ttl_seconds=REGISTER_RATE_LIMIT_WINDOW,
+    )
 
     user = await user_repo.get_by_email(request.email)
 
