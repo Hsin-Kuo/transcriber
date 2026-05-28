@@ -44,15 +44,27 @@ class TagService:
 
         改 idempotent 的理由：呼叫者的意圖永遠是「確保這個標籤存在」 —
         系統會自動在 PUT /tasks/.../tags 等地方建標籤，跟前端手動建立會 race，
-        此時「已存在」不該對使用者是錯誤。內部 caller 早已 try/except 忽略
-        ValueError，這裡 explicit 把那個語義反映到介面上。
+        此時「已存在」不該對使用者是錯誤。
+
+        Race-safe：依賴 tag_repo 的 (user_id, name) unique index — 若 fast-path
+        check 與 insert 之間有並發 insert，repo 會把 DuplicateKeyError 轉成
+        ValueError，這裡接住後 fallback fetch 既有那筆，仍維持 idempotent 語義。
         """
         existing_tag = await self.tag_repo.get_by_name(user_id, name)
         if existing_tag:
             return existing_tag
 
-        tag = await self.tag_repo.create(user_id, name, color, description)
-        return tag
+        try:
+            return await self.tag_repo.create(user_id, name, color, description)
+        except ValueError:
+            # 並發 race：另一個 request 在 get_by_name 與 insert_one 之間搶先建立。
+            # 重新撈一次當成既有 tag 回傳，符合 idempotent 語義。
+            fallback = await self.tag_repo.get_by_name(user_id, name)
+            if fallback:
+                log.info("tag.create.idempotent_fallback", user_id=user_id, name=name)
+                return fallback
+            # 撈不到代表是其他原因的 ValueError，向上拋
+            raise
 
     async def get_tag(self, user_id: str, tag_id: str) -> Optional[Dict[str, Any]]:
         """獲取標籤

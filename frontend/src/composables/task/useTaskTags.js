@@ -261,41 +261,57 @@ export function useTaskTags($t) {
   }
 
   /**
-   * 重命名標籤（更新所有使用該標籤的任務）
+   * 重命名標籤（atomic：透過後端 PUT /tags/{id}）
+   *
+   * 後端 update_tag 會原子處理：
+   * 1) 驗證新名稱在同 user 唯一
+   * 2) update_many + arrayFilters 一次改完所有 task 的 tags 陣列
+   * 3) tags collection 的 record name 直接 update（tag_id / color / order 不變）
+   *
    * @param {string} oldTag - 舊標籤名稱
    * @param {string} newTag - 新標籤名稱
-   * @param {Array} tasks - 任務列表
+   * @param {Array} _tasks - 任務列表（保留參數以維持呼叫端相容，不再使用）
    */
-  async function renameTag(oldTag, newTag, tasks) {
+  async function renameTag(oldTag, newTag, _tasks) {
     try {
-      // 更新所有任務中的標籤
-      const tasksToUpdate = tasks.filter(task =>
-        task.tags && task.tags.includes(oldTag)
-      )
+      // 找出 tag 物件
+      let tagObj = tagsData.value.find(t => t.name === oldTag)
 
-      // 批量更新所有任務（使用 Promise.all 並行處理）
-      await Promise.all(
-        tasksToUpdate.map(task => {
-          const updatedTags = task.tags.map(t => t === oldTag ? newTag : t)
-          return api.put(`/tasks/${task.task_id}/tags`, {
-            tags: updatedTags
-          })
-        })
-      )
+      // 若本地 tagsData 沒有（純從 task.tags 推導出來的孤兒 tag），
+      // 先 fetch 一次：後端 get_all_tags 會自動補建缺少的 tag record
+      if (!tagObj) {
+        await fetchTagColors()
+        tagObj = tagsData.value.find(t => t.name === oldTag)
+      }
 
-      // 更新自定義標籤順序
+      if (!tagObj) {
+        throw new Error(`找不到標籤「${oldTag}」`)
+      }
+
+      const tagId = tagObj.tag_id || tagObj._id
+
+      // 單一原子呼叫：rename + cascade 改所有 task
+      await api.put(`/tags/${tagId}`, {
+        name: newTag,
+        color: tagObj.color || null,
+        description: tagObj.description || null
+      })
+
+      // 本地狀態同步（避免 UI 短暫顯示舊名；之後 parent 會 fetchAllTags 再對齊）
       if (customTagOrder.value.includes(oldTag)) {
         const index = customTagOrder.value.indexOf(oldTag)
         customTagOrder.value[index] = newTag
       }
-
-      // 更新標籤顏色
       if (tagColors.value[oldTag]) {
-        const oldColor = tagColors.value[oldTag]
-        tagColors.value[newTag] = oldColor
-        delete tagColors.value[oldTag]
-        // 保存新標籤的顏色
-        await updateTagColor(newTag, oldColor)
+        const next = { ...tagColors.value, [newTag]: tagColors.value[oldTag] }
+        delete next[oldTag]
+        tagColors.value = next
+      }
+      const idx = tagsData.value.findIndex(t => t.name === oldTag)
+      if (idx !== -1) {
+        tagsData.value = tagsData.value.map((t, i) =>
+          i === idx ? { ...t, name: newTag } : t
+        )
       }
 
       console.log('✅ ' + ($t ? $t('taskList.successRenameTag', { oldTag, newTag }) : `Tag renamed from ${oldTag} to ${newTag}`))

@@ -3,6 +3,8 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 import uuid
 
+from pymongo.errors import DuplicateKeyError
+
 from ...utils.time_utils import get_utc_timestamp
 from src.utils.logger import get_logger
 
@@ -16,6 +18,24 @@ class TagRepository:
         self.db = db
         self.collection = db.tags
 
+    async def create_indexes(self):
+        """建立索引
+
+        - (user_id, name) unique：DB 層攔截重複，杜絕 race condition 產生
+          多筆同名 tag。若既有資料已有重複（歷史 bug 殘留），index 建立會
+          失敗，由 caller 包 try/except 並記錄 warning，不擋 startup。
+        - user_id：list / get_by_user 主要查詢欄位
+        - (user_id, order)：排序查詢用
+        """
+        await self.collection.create_index(
+            [("user_id", 1), ("name", 1)],
+            unique=True,
+            name="user_id_1_name_1_unique"
+        )
+        await self.collection.create_index("user_id")
+        await self.collection.create_index([("user_id", 1), ("order", 1)])
+        await self.collection.create_index("tag_id")
+
     async def create(self, user_id: str, name: str, color: Optional[str] = None, description: Optional[str] = None) -> Dict[str, Any]:
         """建立新標籤
 
@@ -27,8 +47,11 @@ class TagRepository:
 
         Returns:
             建立的標籤資料
+
+        Raises:
+            ValueError: 同名標籤已存在（含並發 race 觸發 DB unique 衝突的情況）
         """
-        # 檢查是否已存在同名標籤
+        # 應用層 pre-check（快路徑、提供清楚錯誤訊息）
         existing = await self.collection.find_one({
             "user_id": user_id,
             "name": name
@@ -56,7 +79,14 @@ class TagRepository:
             "updated_at": None
         }
 
-        result = await self.collection.insert_one(tag)
+        try:
+            result = await self.collection.insert_one(tag)
+        except DuplicateKeyError:
+            # 並發 race：另一個 request 在 find_one 與 insert_one 之間插入了同名 tag。
+            # DB 層 unique index 攔下重複，與既存 tag 已存在的語義一致，回 ValueError。
+            log.info("tag.create.duplicate_race", user_id=user_id, name=name)
+            raise ValueError(f"標籤 '{name}' 已存在")
+
         tag["_id"] = str(result.inserted_id)
 
         return tag
@@ -108,11 +138,14 @@ class TagRepository:
 
         Returns:
             是否更新成功
+
+        Raises:
+            ValueError: 新名稱與其他標籤衝突（含並發 race 觸發 DB unique 衝突的情況）
         """
         updates = {"updated_at": get_utc_timestamp()}
 
         if name is not None:
-            # 檢查新名稱是否與其他標籤衝突
+            # 應用層 pre-check（快路徑、提供清楚錯誤訊息）
             existing = await self.collection.find_one({
                 "user_id": user_id,
                 "name": name,
@@ -125,10 +158,16 @@ class TagRepository:
         if color is not None:
             updates["color"] = color
 
-        result = await self.collection.update_one(
-            {"tag_id": tag_id, "user_id": user_id},
-            {"$set": updates}
-        )
+        try:
+            result = await self.collection.update_one(
+                {"tag_id": tag_id, "user_id": user_id},
+                {"$set": updates}
+            )
+        except DuplicateKeyError:
+            # 並發 race：另一個 request 在 pre-check 與 update_one 之間把同名 tag 改/建出來。
+            # DB 層 unique index 攔下，與既存衝突的語義一致。
+            log.info("tag.update.duplicate_race", tag_id=tag_id, user_id=user_id, name=name)
+            raise ValueError(f"標籤 '{name}' 已存在")
 
         return result.modified_count > 0
 

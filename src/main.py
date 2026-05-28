@@ -269,6 +269,14 @@ async def startup_event():
         from src.database.repositories.processed_webhook_repo import ProcessedWebhookRepository
         processed_webhook_repo_init = ProcessedWebhookRepository(db)
         await processed_webhook_repo_init.create_indexes()
+        # 建立 Tags 索引（(user_id, name) unique 杜絕並發 race 重複 tag）
+        # 注意：若 tags collection 已有重複資料，unique index 建立會失敗；
+        # 用獨立 try/except 包住，僅記錄 warning，不影響其他索引與服務啟動。
+        try:
+            await tag_repo.create_indexes()
+        except Exception as e:
+            logger.warning("app.db.tag_index_failed", error=str(e),
+                          hint="tags collection 可能有重複 (user_id, name) 資料，需先清理才能建立 unique index")
         logger.info("app.db.indexes_created")
     except Exception as e:
         logger.warning("app.db.index_creation_failed", error=str(e))
