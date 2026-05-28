@@ -5,23 +5,59 @@
     <div class="auth-card electric-card">
       <div class="electric-inner">
         <div class="auth-content">
-          <!-- 驗證中 -->
-          <div v-if="verifying" class="verifying-state">
+          <!-- 1. 預檢 token 中 -->
+          <div v-if="state === 'checking'" class="verifying-state">
             <div class="spinner-large"></div>
-            <h2>正在驗證您的 Email...</h2>
+            <h2>正在檢查驗證連結...</h2>
             <p>請稍候</p>
           </div>
 
-          <!-- 驗證成功 -->
-          <div v-else-if="success" class="success-state">
-            <h2>Email 驗證成功！</h2>
-            <p class="success-message">您的帳號已啟用，現在可以登入使用了</p>
-            <button class="btn-primary" @click="router.push('/login')">
-              前往登入
+          <!-- 2. token 有效，等待使用者確認 -->
+          <div v-else-if="state === 'ready'" class="ready-state">
+            <h2>確認驗證 Email</h2>
+            <p class="confirm-message">
+              您即將完成 <strong>{{ email }}</strong> 的驗證。
+            </p>
+            <p class="confirm-hint">點下方按鈕後即可啟用帳號並自動登入。</p>
+            <button
+              class="btn-primary"
+              :disabled="submitting"
+              @click="confirmVerification"
+            >
+              {{ submitting ? '驗證中...' : '完成驗證並登入' }}
             </button>
           </div>
 
-          <!-- 驗證失敗 -->
+          <!-- 3. 驗證成功（短暫顯示後跳轉） -->
+          <div v-else-if="state === 'success'" class="success-state">
+            <h2>Email 驗證成功！</h2>
+            <p class="success-message">已自動登入，即將前往主頁...</p>
+          </div>
+
+          <!-- 4. 連結過期：提供重發按鈕 -->
+          <div v-else-if="state === 'expired'" class="error-state">
+            <h2>驗證連結已過期</h2>
+            <p class="error-message">{{ errorMessage }}</p>
+            <div class="resend-form">
+              <input
+                v-model="resendEmail"
+                type="email"
+                placeholder="輸入您的 Email"
+                class="resend-input"
+                :disabled="resending"
+              />
+              <button
+                class="btn-primary"
+                :disabled="resending || !resendEmail"
+                @click="handleResend"
+              >
+                {{ resending ? '寄送中...' : '重新寄送驗證信' }}
+              </button>
+            </div>
+            <p v-if="resendNotice" class="resend-notice">{{ resendNotice }}</p>
+          </div>
+
+          <!-- 5. 其他錯誤 -->
           <div v-else class="error-state">
             <h2>驗證失敗</h2>
             <p class="error-message">{{ errorMessage }}</p>
@@ -43,43 +79,93 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { API_BASE } from '../../utils/api'
+import api, { TokenManager } from '../../utils/api'
+import { useAuthStore } from '../../stores/auth'
 import ElectricBorder from '../../components/shared/ElectricBorder.vue'
 
 const router = useRouter()
 const route = useRoute()
+const authStore = useAuthStore()
 
-const verifying = ref(true)
-const success = ref(false)
+// 'checking' | 'ready' | 'success' | 'expired' | 'error'
+const state = ref('checking')
+const email = ref('')
 const errorMessage = ref('')
+const submitting = ref(false)
+
+// 重發驗證信 UI 狀態
+const resendEmail = ref('')
+const resending = ref(false)
+const resendNotice = ref('')
+
+const token = route.query.token
 
 onMounted(async () => {
-  const token = route.query.token
-
   if (!token) {
-    verifying.value = false
+    state.value = 'error'
     errorMessage.value = '缺少驗證 token'
     return
   }
 
+  // 預檢：只查 token 是否有效，不消耗
   try {
-    const response = await fetch(
-      `${API_BASE}/auth/verify-email?token=${token}`
-    )
-
-    const data = await response.json()
-
-    if (response.ok) {
-      success.value = true
+    const { data } = await api.get('/auth/verify-email', {
+      params: { token }
+    })
+    email.value = data.email
+    state.value = 'ready'
+  } catch (err) {
+    const status = err.response?.status
+    const detail = err.response?.data?.detail
+    if (status === 410) {
+      state.value = 'expired'
+      errorMessage.value = detail || '驗證連結已過期'
+      resendEmail.value = '' // 不預填，讓使用者自己輸入避免錯誤連結帶錯 email
     } else {
-      errorMessage.value = data.detail || '驗證失敗，請重試'
+      state.value = 'error'
+      errorMessage.value = detail || '驗證連結無效'
     }
-  } catch (error) {
-    errorMessage.value = '網路錯誤，請稍後再試'
-  } finally {
-    verifying.value = false
   }
 })
+
+async function confirmVerification() {
+  if (submitting.value) return
+  submitting.value = true
+  try {
+    const { data } = await api.post('/auth/verify-email', { token })
+    TokenManager.setAccessToken(data.access_token)
+    await authStore.fetchCurrentUser()
+    state.value = 'success'
+    setTimeout(() => router.push('/'), 1200)
+  } catch (err) {
+    const status = err.response?.status
+    const detail = err.response?.data?.detail
+    if (status === 410) {
+      state.value = 'expired'
+      errorMessage.value = detail || '驗證連結已過期'
+    } else {
+      state.value = 'error'
+      errorMessage.value = detail || '驗證失敗，請重試'
+    }
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function handleResend() {
+  if (resending.value || !resendEmail.value) return
+  resending.value = true
+  resendNotice.value = ''
+  try {
+    await api.post('/auth/resend-verification', { email: resendEmail.value })
+    resendNotice.value = '驗證信已重新寄出，請查看您的信箱'
+  } catch (err) {
+    const detail = err.response?.data?.detail
+    resendNotice.value = detail || '寄送失敗，請稍後再試'
+  } finally {
+    resending.value = false
+  }
+}
 </script>
 
 <style scoped>
@@ -104,6 +190,7 @@ onMounted(async () => {
 }
 
 .verifying-state,
+.ready-state,
 .success-state,
 .error-state {
   display: flex;
@@ -126,7 +213,6 @@ onMounted(async () => {
   100% { transform: rotate(360deg); }
 }
 
-
 h2 {
   font-size: 1.8rem;
   color: var(--main-text);
@@ -134,12 +220,19 @@ h2 {
   font-weight: 700;
 }
 
+.confirm-message,
+.confirm-hint,
 .success-message,
 .error-message {
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   color: var(--main-text-light);
   margin: 0;
   line-height: 1.6;
+}
+
+.confirm-hint {
+  font-size: 0.95rem;
+  opacity: 0.85;
 }
 
 .error-message {
@@ -151,6 +244,35 @@ h2 {
   display: flex;
   gap: 12px;
   margin-top: 10px;
+}
+
+.resend-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 360px;
+  margin-top: 12px;
+}
+
+.resend-input {
+  padding: 12px 16px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 10px;
+  font-size: 1rem;
+  outline: none;
+  background: var(--main-bg);
+  color: var(--main-text);
+}
+
+.resend-input:focus {
+  border-color: var(--main-primary);
+}
+
+.resend-notice {
+  font-size: 0.95rem;
+  color: var(--main-text-light);
+  margin: 0;
 }
 
 .btn-primary,
@@ -169,12 +291,17 @@ h2 {
   color: var(--main-primary);
 }
 
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
   transform: translateY(-2px);
 }
 
-.btn-primary:active {
+.btn-primary:active:not(:disabled) {
   transform: translateY(0);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .btn-secondary {

@@ -36,6 +36,11 @@ class ResendVerificationRequest(BaseModel):
     email: EmailStr
 
 
+class VerifyEmailRequest(BaseModel):
+    """Email 驗證請求（用於 POST /verify-email）"""
+    token: str = Field(..., min_length=10, max_length=128)
+
+
 class ChangePasswordRequest(BaseModel):
     """更改密碼請求"""
     current_password: str = Field(..., description="目前密碼")

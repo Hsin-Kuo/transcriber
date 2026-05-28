@@ -41,6 +41,7 @@ from ..models.auth import (
     UserLogin,
     TokenResponse,
     ResendVerificationRequest,
+    VerifyEmailRequest,
     ChangePasswordRequest,
     UserResponse,
     ForgotPasswordRequest,
@@ -210,25 +211,27 @@ async def register(
 
 
 @router.get("/verify-email")
-async def verify_email(
+async def verify_email_preflight(
     token: str,
     db=Depends(get_database)
 ):
-    """驗證 Email
+    """預檢 token 是否有效（**不消耗 token、不寫 DB**）。
+
+    這個 endpoint 給前端用來在「點此完成驗證」按鈕渲染前確認 token 仍有效。
+    真正的驗證動作要走 POST /verify-email — 避免 Outlook Safe Links /
+    企業 mail gateway / 連結預掃 bot 自動 GET 就把 token 燒掉。
 
     Args:
         token: 驗證 token (from URL query parameter)
         db: 資料庫實例
 
     Returns:
-        成功訊息
+        {"email": ..., "expires_at": ...}
 
     Raises:
-        HTTPException: Token 無效或已過期
+        HTTPException: 400 token 無效 / 已驗證；410 token 已過期
     """
     user_repo = UserRepository(db)
-
-    # 查找具有此 verification_token 的用戶
     user = await user_repo.get_by_verification_token(token)
 
     if not user:
@@ -237,31 +240,111 @@ async def verify_email(
             detail="驗證連結無效"
         )
 
-    # 檢查 token 是否過期
+    if user.get("email_verified"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="此 Email 已完成驗證"
+        )
+
     verification_expires = user.get("verification_expires")
     if verification_expires:
-        # 處理舊格式（datetime）和新格式（timestamp）
         if hasattr(verification_expires, 'timestamp'):
             verification_expires = int(verification_expires.timestamp())
         if verification_expires < get_utc_timestamp():
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=status.HTTP_410_GONE,
                 detail="驗證連結已過期，請重新申請驗證郵件"
             )
 
-    # 更新用戶狀態
+    return {
+        "email": user["email"],
+        "expires_at": verification_expires,
+    }
+
+
+@router.post("/verify-email", response_model=TokenResponse)
+async def verify_email(
+    payload: VerifyEmailRequest,
+    request: Request,
+    response: Response,
+    db=Depends(get_database)
+):
+    """完成 Email 驗證並自動登入。
+
+    必須由使用者明確點擊前端按鈕觸發 → 防 link-preview bot 預掃消耗 token。
+    成功後寫入 refresh cookie 並回傳 access token，使用者免再次登入。
+    """
+    user_repo = UserRepository(db)
+    audit_logger = get_audit_logger()
+
+    user = await user_repo.get_by_verification_token(payload.token)
+
+    if not user:
+        await audit_logger.log_auth(
+            request=request,
+            action="verify_email_invalid",
+            status_code=400,
+            message="無效的驗證 token"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="驗證連結無效"
+        )
+
+    if user.get("email_verified"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="此 Email 已完成驗證"
+        )
+
+    verification_expires = user.get("verification_expires")
+    if verification_expires:
+        if hasattr(verification_expires, 'timestamp'):
+            verification_expires = int(verification_expires.timestamp())
+        if verification_expires < get_utc_timestamp():
+            await audit_logger.log_auth(
+                request=request,
+                action="verify_email_expired",
+                user_id=str(user["_id"]),
+                status_code=410,
+                message=f"驗證連結已過期: {user['email']}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail="驗證連結已過期，請重新申請驗證郵件"
+            )
+
+    # 啟用帳號 + 清 token
     await user_repo.update(str(user["_id"]), {
         "is_active": True,
         "email_verified": True,
-        "verification_token": None,  # 清除 token
-        "verification_expires": None
-        # updated_at 由 user_repo.update() 自動設置
+        "verification_token": None,
+        "verification_expires": None,
     })
 
-    return {
-        "message": "Email 驗證成功！您現在可以登入了",
-        "email": user["email"]
-    }
+    # 自動登入：發 access + refresh，refresh 寫 httpOnly cookie
+    access_token = create_access_token({
+        "sub": str(user["_id"]),
+        "email": user["email"],
+        "role": user["role"],
+    })
+    refresh_token_value = create_refresh_token({
+        "sub": str(user["_id"]),
+        "email": user["email"],
+        "role": user["role"],
+    })
+    await user_repo.save_refresh_token(str(user["_id"]), refresh_token_value)
+    set_refresh_cookie(response, refresh_token_value)
+
+    await audit_logger.log_auth(
+        request=request,
+        action="verify_email",
+        user_id=str(user["_id"]),
+        status_code=200,
+        message=f"Email 驗證成功並自動登入: {user['email']}"
+    )
+
+    return TokenResponse(access_token=access_token, token_type="bearer")
 
 
 @router.post("/resend-verification")
