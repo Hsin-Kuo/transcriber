@@ -299,6 +299,16 @@ async def startup_event():
     )
     logger.info("app.task_service.initialized")
 
+    # 預載 PDF 字體（4 個 Noto Sans CJK，~28MB） — 避免第一個下載 PDF 的
+    # 使用者付出冷啟動的 IO + parse 成本（EC2 EBS gp3 冷讀大概 1-2s）。
+    try:
+        from src.utils.pdf.pdf_generator import preload_fonts
+        preload_fonts()
+        logger.info("app.pdf_fonts.preloaded")
+    except Exception as e:
+        # 字體缺失不該擋整個 backend 起來（PDF 是 optional feature）
+        logger.warning("app.pdf_fonts.preload_failed", error=str(e), exc_info=True)
+
     # 4. 清理異常中斷的任務
     logger.info("app.orphaned_tasks.cleaning")
     await task_service.cleanup_orphaned_tasks()

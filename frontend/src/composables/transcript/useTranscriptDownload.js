@@ -495,8 +495,10 @@ export function useTranscriptDownload(deps = {}) {
     try {
       isGeneratingPdf.value = true
 
-      // 後端目前只 hardcode zh-TW / en 兩個 locale；其他 fallback 成 en
-      const backendLocale = locale.value === 'zh-TW' ? 'zh-TW' : 'en'
+      // 後端目前只 hardcode zh-TW / en 兩個 locale。中文相關語言（zh-CN / zh-Hans
+      // 等）都映射到 zh-TW（section title 是「AI 摘要」「逐字稿」等共通字），
+      // 其他語言（ja / ko / 等）fallback 成 en。
+      const backendLocale = locale.value.startsWith('zh') ? 'zh-TW' : 'en'
 
       const response = await api.post(
         NEW_ENDPOINTS.transcriptions.exportPdf(taskId),
