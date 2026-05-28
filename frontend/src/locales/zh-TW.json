@@ -378,6 +378,7 @@
     "tagsStats": "已加入 {common} • 可用 {candidate}",
     "expand": "展開",
     "collapse": "收合",
+    "showMore": "顯示更多",
     "selectTask": "選取任務",
     "taskProgress": "任務進度",
     "moreActions": "更多操作",

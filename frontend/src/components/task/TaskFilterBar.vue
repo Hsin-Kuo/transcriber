@@ -1,8 +1,14 @@
 <template>
   <div v-if="allTags.length > 0" class="filter-section">
 
-    <!-- 標籤列表 -->
-    <div class="filter-tags">
+    <!-- 標籤列表（可摺疊成最多兩排） -->
+    <div class="filter-tags-wrapper">
+      <div
+        class="filter-tags"
+        ref="filterTagsEl"
+        :class="{ collapsed: shouldCollapse }"
+        :style="shouldCollapse ? { maxHeight: `${twoRowsPx}px` } : null"
+      >
       <div
         v-for="(tag, index) in displayedTagsList"
         :key="tag"
@@ -89,45 +95,61 @@
         </div>
       </div>
 
-      <!-- 操作按鈕 -->
-      <div class="filter-header-actions">
-        <!-- 編輯按鈕 -->
-        <button
-          v-if="!isEditing"
-          class="btn-edit-filter"
-          @click="startEditing"
-          :title="$t('taskList.editTags')"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-          </svg>
-        </button>
-
-        <!-- 保存按鈕 -->
-        <button
-          v-else
-          class="btn-save-filter"
-          @click="saveEditing"
-          :title="$t('taskList.save')"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="20 6 9 17 4 12"></polyline>
-          </svg>
-        </button>
-
-        <!-- 清除篩選按鈕 -->
-        <button
-          v-if="selectedTags.length > 0 && !isEditing"
-          class="btn-clear-filter"
-          @click="clearFilter"
-          :title="$t('taskList.clearFilter')"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
-          </svg>
-        </button>
       </div>
+
+      <!-- 顯示更多 / 收合 切換按鈕（僅在實際溢出且非編輯模式時顯示） -->
+      <button
+        v-if="overflowing && !isEditing"
+        type="button"
+        class="btn-toggle-rows"
+        :class="{ expanded: !isCollapsed }"
+        @click="isCollapsed = !isCollapsed"
+      >
+        <span>{{ isCollapsed ? $t('taskList.showMore') : $t('taskList.collapse') }}</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+      </button>
+    </div>
+
+    <!-- 操作按鈕 -->
+    <div class="filter-header-actions">
+      <!-- 編輯按鈕 -->
+      <button
+        v-if="!isEditing"
+        class="btn-edit-filter"
+        @click="startEditing"
+        :title="$t('taskList.editTags')"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+        </svg>
+      </button>
+
+      <!-- 保存按鈕 -->
+      <button
+        v-else
+        class="btn-save-filter"
+        @click="saveEditing"
+        :title="$t('taskList.save')"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+      </button>
+
+      <!-- 清除篩選按鈕 -->
+      <button
+        v-if="selectedTags.length > 0 && !isEditing"
+        class="btn-clear-filter"
+        @click="clearFilter"
+        :title="$t('taskList.clearFilter')"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
+        </svg>
+      </button>
     </div>
 
     <!-- 顏色選擇器彈出窗口 -->
@@ -142,7 +164,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTaskTags } from '../../composables/task/useTaskTags'
 import ColorPickerPopup from './ColorPickerPopup.vue'
@@ -202,6 +224,79 @@ const colorPickerButtons = ref({})
 
 // 記錄編輯過程中更改的顏色（tag -> color）
 const pendingColorChanges = ref({})
+
+// 摺疊狀態（最多顯示兩排，超出時顯示「顯示更多」按鈕）
+const filterTagsEl = ref(null)
+const isCollapsed = ref(true)
+const overflowing = ref(false)
+const twoRowsPx = ref(80) // fallback；mount 後依實測動態更新
+let resizeObserver = null
+
+// 編輯模式或未溢出時不摺疊
+const shouldCollapse = computed(() =>
+  overflowing.value && isCollapsed.value && !props.isEditing
+)
+
+// 用 getBoundingClientRect 算實際 row 數（不會因 max-height clip 失準；
+// item 即使被 overflow:hidden 隱藏，layout 位置仍存在）
+async function measureOverflow() {
+  await nextTick()
+  // 雙 RAF：等 CSS transition (max-height 0.25s) 與 DOM 全部 commit 後再測量
+  await new Promise(resolve => requestAnimationFrame(resolve))
+  await new Promise(resolve => requestAnimationFrame(resolve))
+
+  if (!filterTagsEl.value) return
+
+  const items = filterTagsEl.value.querySelectorAll('.filter-tag-item')
+  if (items.length === 0) {
+    overflowing.value = false
+    return
+  }
+
+  const containerTop = filterTagsEl.value.getBoundingClientRect().top
+  // 每個 row 以 top 為 key；同一 row 取最大 bottom
+  const rows = new Map()
+  items.forEach(item => {
+    const rect = item.getBoundingClientRect()
+    const top = Math.round(rect.top - containerTop)
+    const bottom = rect.bottom - containerTop
+    rows.set(top, Math.max(rows.get(top) || 0, bottom))
+  })
+
+  const sortedTops = [...rows.keys()].sort((a, b) => a - b)
+  const rowCount = sortedTops.length
+
+  overflowing.value = rowCount > 2
+
+  if (rowCount >= 2) {
+    // 第 2 row 的底部即為兩排可見高度
+    twoRowsPx.value = Math.ceil(rows.get(sortedTops[1]))
+  } else if (rowCount === 1) {
+    twoRowsPx.value = Math.ceil(rows.get(sortedTops[0]))
+  }
+}
+
+onMounted(() => {
+  measureOverflow()
+  if (typeof ResizeObserver !== 'undefined' && filterTagsEl.value) {
+    resizeObserver = new ResizeObserver(() => measureOverflow())
+    resizeObserver.observe(filterTagsEl.value)
+  }
+})
+
+onBeforeUnmount(() => {
+  if (resizeObserver) {
+    resizeObserver.disconnect()
+    resizeObserver = null
+  }
+})
+
+// 標籤數量、排序、編輯模式變化時重新測量（flush: 'post' 確保 DOM 已更新）
+watch(
+  () => [props.allTags.length, props.customTagOrder.length, props.isEditing],
+  () => measureOverflow(),
+  { flush: 'post' }
+)
 
 // Computed
 const displayedTagsList = computed(() => {
@@ -532,12 +627,54 @@ function handleColorSelected({ tag, color }) {
 }
 
 
+.filter-tags-wrapper {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
 .filter-tags {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  flex: 1;
-  min-width: 0;
+  align-items: center;
+  width: 100%;
+  transition: max-height 0.25s ease;
+}
+
+.filter-tags.collapsed {
+  overflow: hidden;
+}
+
+.btn-toggle-rows {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  background: transparent;
+  border: 1px dashed rgba(var(--color-teal-rgb), 0.4);
+  border-radius: 6px;
+  color: rgba(var(--color-teal-rgb), 0.95);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-toggle-rows:hover {
+  background: rgba(var(--color-teal-rgb), 0.1);
+  border-color: rgba(var(--color-teal-rgb), 0.6);
+}
+
+.btn-toggle-rows svg {
+  transition: transform 0.2s;
+}
+
+.btn-toggle-rows.expanded svg {
+  transform: rotate(180deg);
 }
 
 .filter-tag-item {
@@ -725,8 +862,17 @@ function handleColorSelected({ tag, color }) {
     gap: 8px;
   }
 
+  .filter-tags-wrapper {
+    gap: 4px;
+  }
+
   .filter-tags {
     gap: 4px;
+  }
+
+  .btn-toggle-rows {
+    padding: 2px 8px;
+    font-size: var(--font-size-sm);
   }
 
   .filter-tag-btn {
@@ -786,8 +932,22 @@ function handleColorSelected({ tag, color }) {
     gap: 6px;
   }
 
+  .filter-tags-wrapper {
+    gap: 3px;
+  }
+
   .filter-tags {
     gap: 2px;
+  }
+
+  .btn-toggle-rows {
+    padding: 2px 6px;
+    font-size: var(--font-size-sm);
+  }
+
+  .btn-toggle-rows svg {
+    width: 10px;
+    height: 10px;
   }
 
   .filter-tag-item {

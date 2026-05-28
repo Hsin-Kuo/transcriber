@@ -378,6 +378,7 @@
     "tagsStats": "Added {common} • Available {candidate}",
     "expand": "Expand",
     "collapse": "Collapse",
+    "showMore": "Show more",
     "moreActions": "More actions",
     "editTags": "Edit Tags",
     "addTag": "Add Tag",
