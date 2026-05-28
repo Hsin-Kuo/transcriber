@@ -102,43 +102,17 @@
               {{ error }}
             </div>
 
-            <div v-if="success" class="success-message" :class="{ 'send-failed': !emailSent }">
-              <div class="success-icon">{{ emailSent ? '✉️' : '⚠️' }}</div>
-              <p class="success-title">{{ successMessage }}</p>
-              <p v-if="emailSent" class="success-subtitle">
-                請查看您的郵箱 <strong>{{ email }}</strong>，點擊驗證連結完成註冊。
-              </p>
-              <p v-else class="success-subtitle">
-                帳號 <strong>{{ email }}</strong> 已建立，但驗證信寄送暫時失敗。請按下方按鈕重新寄送。
-              </p>
-              <p class="success-note">
-                <a href="#" @click.prevent="resendEmail" class="resend-link">
-                  {{ emailSent ? '沒收到郵件？重新發送' : '立即重新寄送驗證信' }}
-                </a>
-              </p>
-            </div>
-
             <button
-              v-if="!success"
               type="submit"
               class="btn-primary"
               :disabled="loading || !isPasswordValid || password !== confirmPassword"
             >
               {{ loading ? '註冊中...' : '註冊' }}
             </button>
-
-            <button
-              v-else
-              type="button"
-              class="btn-secondary"
-              @click="router.push('/login')"
-            >
-              前往登入頁面
-            </button>
           </form>
 
           <!-- Google 註冊 -->
-          <div v-if="!success && googleClientId" class="oauth-section">
+          <div v-if="googleClientId" class="oauth-section">
             <div class="divider">
               <span>或</span>
             </div>
@@ -151,7 +125,7 @@
             />
           </div>
 
-          <div v-if="!success" class="auth-footer">
+          <div class="auth-footer">
             <p>已有帳號？<router-link to="/login">立即登入</router-link></p>
           </div>
 
@@ -171,7 +145,6 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
-import { API_BASE } from '../../utils/api'
 import GoogleSignInButton from '../../components/GoogleSignInButton.vue'
 
 const router = useRouter()
@@ -212,37 +185,6 @@ function validatePassword() {
   }
 }
 
-const success = ref(false)
-const successMessage = ref('')
-const emailSent = ref(true)  // 寄信成功 = 一般成功 UI；false = 強調重發
-
-async function resendEmail() {
-  loading.value = true
-  error.value = ''
-
-  try {
-    const response = await fetch(`${API_BASE}/auth/resend-verification`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ email: email.value })
-    })
-
-    const data = await response.json()
-
-    if (response.ok) {
-      successMessage.value = data.message || '驗證郵件已重新發送'
-    } else {
-      error.value = data.detail || '重新發送失敗'
-    }
-  } catch (err) {
-    error.value = '網路錯誤，請稍後再試'
-  } finally {
-    loading.value = false
-  }
-}
-
 async function handleRegister() {
   if (password.value !== confirmPassword.value) {
     error.value = '密碼不一致'
@@ -256,20 +198,22 @@ async function handleRegister() {
 
   loading.value = true
   error.value = ''
-  success.value = false
 
   const result = await authStore.register(email.value, password.value)
 
   if (result.success) {
-    // 註冊成功，顯示驗證郵件提示
-    success.value = true
-    emailSent.value = result.emailSent !== false
-    successMessage.value = result.message ||
-      (emailSent.value ? '註冊成功！請查看您的郵箱完成驗證' : '帳號已建立，請重新寄送驗證信')
-  } else {
-    error.value = result.error
+    // 註冊成功 → 跳到「請查信」中間頁，由它處理 cooldown / 重發
+    router.push({
+      name: 'verifyPending',
+      query: {
+        email: result.email || email.value,
+        sent: result.emailSent === false ? 'false' : 'true',
+      }
+    })
+    return
   }
 
+  error.value = result.error
   loading.value = false
 }
 
@@ -510,72 +454,6 @@ function handleGoogleError(err) {
   text-align: left;
   font-weight: 500;
   margin-bottom: 4px;
-}
-
-.success-message {
-  padding: 24px;
-  background: #d4edda;
-  border-radius: 12px;
-  text-align: center;
-  border: 1px solid #c3e6cb;
-}
-
-.success-message.send-failed {
-  background: #fff3cd;
-  border-color: #ffeeba;
-}
-
-.success-message.send-failed .success-title,
-.success-message.send-failed .success-subtitle,
-.success-message.send-failed .success-note {
-  color: #856404;
-}
-
-.success-message.send-failed .success-subtitle strong {
-  color: #533f03;
-}
-
-.success-icon {
-  font-size: 3rem;
-  margin-bottom: 12px;
-}
-
-.success-title {
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: #155724;
-  margin: 0 0 12px 0;
-}
-
-.success-subtitle {
-  font-size: 0.95rem;
-  color: #155724;
-  margin: 0 0 16px 0;
-  line-height: 1.5;
-}
-
-.success-subtitle strong {
-  font-weight: 700;
-  color: #0d3f1a;
-}
-
-.success-note {
-  font-size: 0.85rem;
-  color: #155724;
-  margin: 0;
-  line-height: 1.6;
-}
-
-.resend-link {
-  color: var(--main-primary);
-  text-decoration: underline;
-  font-weight: 600;
-  cursor: pointer;
-  transition: color 0.2s ease;
-}
-
-.resend-link:hover {
-  color: var(--main-primary-dark);
 }
 
 .btn-primary {

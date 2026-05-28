@@ -10,6 +10,7 @@ const PaymentReturnView = () => import('../views/PaymentReturnView.vue')
 const LoginView = () => import('../views/auth/LoginView.vue')
 const RegisterView = () => import('../views/auth/RegisterView.vue')
 const VerifyEmailView = () => import('../views/auth/VerifyEmailView.vue')
+const VerifyPendingView = () => import('../views/auth/VerifyPendingView.vue')
 const ForgotPasswordView = () => import('../views/auth/ForgotPasswordView.vue')
 const ResetPasswordView = () => import('../views/auth/ResetPasswordView.vue')
 const SharedTranscriptView = () => import('../views/SharedTranscriptView.vue')
@@ -95,6 +96,15 @@ const routes = [
     component: VerifyEmailView,
     meta: {
       title: 'Email 驗證',
+      guest: true
+    }
+  },
+  {
+    path: '/register/verify-pending',
+    name: 'verifyPending',
+    component: VerifyPendingView,
+    meta: {
+      title: '請查看您的信箱',
       guest: true
     }
   },
