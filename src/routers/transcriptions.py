@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import quote
 from datetime import datetime, timezone
 from io import BytesIO
+import asyncio
 import uuid
 import json
 import shutil
@@ -542,9 +543,13 @@ class ExportPdfRequest(BaseModel):
 
     transcript_text 由 frontend 預先格式化（依 paragraph 或 subtitle mode），
     backend 只做 PDF render 不做文字組合。summary 從 DB 抓，不在 body 重送。
+
+    transcript_text 上限 2,000,000 字（約 4MB UTF-8）— 防單一請求灌爆
+    generate_pdf 工人 thread 與 t3.small 記憶體。正常逐字稿（百分鐘音檔）
+    遠在這個門檻之下；超長轉錄應分段下載。
     """
     title: str = Field(..., max_length=500, description="PDF 抬頭與下載檔名")
-    transcript_text: Optional[str] = Field(None, description="已格式化逐字稿純文字")
+    transcript_text: Optional[str] = Field(None, max_length=2_000_000, description="已格式化逐字稿純文字")
     include_summary: bool = True
     include_transcript: bool = True
     locale: Literal["zh-TW", "en"] = "zh-TW"
@@ -593,9 +598,12 @@ async def export_transcription_pdf(
     }
     primary_lang = lang_map.get(raw_lang.lower(), "zh-TW")
 
-    # 4. 生成 PDF
+    # 4. 生成 PDF — ReportLab 是 sync CPU-bound（10k 行轉錄 ~1.5s，極端 alternating
+    #    script 可達數十秒）。用 asyncio.to_thread 搬到 thread pool 避免阻塞
+    #    event loop 卡住 SSE 進度推送、login、其他 API。
     from ..utils.pdf.pdf_generator import generate_pdf
-    pdf_bytes = generate_pdf(
+    pdf_bytes = await asyncio.to_thread(
+        generate_pdf,
         title=payload.title,
         summary=summary_doc,
         transcript_text=payload.transcript_text,

@@ -41,8 +41,13 @@ _REGISTER_LOCK = threading.Lock()
 _REGISTERED = False
 
 
-def _register_fonts() -> None:
-    """Idempotent + thread-safe font registration."""
+def preload_fonts() -> None:
+    """Idempotent + thread-safe font registration。
+
+    Public 名字：供 app startup 主動預熱（避免第一個下載 PDF 的使用者
+    付出 28MB 字體 IO + parse 的冷啟動成本）。內部仍會被 generate_pdf
+    呼叫一次以防 startup 跳過。
+    """
     global _REGISTERED
     if _REGISTERED:
         return
@@ -261,7 +266,7 @@ def generate_pdf(
         primary_lang: 影響漢字字形選擇（zh-TW/zh-CN/ja/ko）
         locale: i18n locale（zh-TW / en），影響 section title 等固定字串
     """
-    _register_fonts()
+    preload_fonts()
 
     primary_font = primary_font_for_lang(primary_lang)
     styles = _build_styles(primary_font)
