@@ -49,7 +49,7 @@ from ..models.auth import (
     UpdatePreferencesRequest,
     DeleteAccountRequest
 )
-from ..auth.password import hash_password, verify_password
+from ..auth.password import hash_password, hash_token, verify_password
 from ..auth.jwt_handler import create_access_token, create_refresh_token, verify_token
 from ..auth.dependencies import get_current_user
 from ..database.mongodb import get_database
@@ -156,7 +156,7 @@ async def register(
         "role": "user",
         "is_active": False,  # 需要驗證 email 後才激活
         "email_verified": False,
-        "verification_token": verification_token,
+        "verification_token_hash": hash_token(verification_token),
         "verification_expires": verification_expires,
         "quota": {
             "tier": QuotaTier.FREE,
@@ -319,11 +319,12 @@ async def verify_email(
                 detail="驗證連結已過期，請重新申請驗證郵件"
             )
 
-    # 啟用帳號 + 清 token
+    # 啟用帳號 + 清 token（連帶清掉可能殘留的 legacy plaintext 欄位）
     await user_repo.update(str(user["_id"]), {
         "is_active": True,
         "email_verified": True,
-        "verification_token": None,
+        "verification_token": None,        # legacy plaintext
+        "verification_token_hash": None,
         "verification_expires": None,
     })
 
@@ -454,9 +455,10 @@ async def resend_verification_email(
     verification_token = secrets.token_urlsafe(32)
     verification_expires = get_utc_timestamp() + (24 * 60 * 60)  # 24 小時後過期
 
-    # 更新用戶的驗證 token
+    # 更新用戶的驗證 token（DB 僅存 hash；同時清掉 legacy plaintext 欄位）
     await user_repo.update(str(user["_id"]), {
-        "verification_token": verification_token,
+        "verification_token": None,
+        "verification_token_hash": hash_token(verification_token),
         "verification_expires": verification_expires
         # updated_at 由 user_repo.update() 自動設置
     })
@@ -958,9 +960,10 @@ async def forgot_password(
     now = get_utc_timestamp()
     reset_expires = now + (60 * 60)  # 1 小時後過期
 
-    # 更新用戶的重設 token 和請求時間
+    # 更新用戶的重設 token（DB 僅存 hash；同時清掉 legacy plaintext）
     await user_repo.update(str(user["_id"]), {
-        "password_reset_token": reset_token,
+        "password_reset_token": None,
+        "password_reset_token_hash": hash_token(reset_token),
         "password_reset_expires": reset_expires,
         "password_reset_requested_at": now
     })
@@ -1044,11 +1047,12 @@ async def reset_password(
             detail="新密碼必須包含至少一個數字"
         )
 
-    # 更新密碼並清除重設 token 和冷卻記錄
+    # 更新密碼並清除重設 token 和冷卻記錄（含 legacy plaintext 欄位）
     new_password_hash = hash_password(request.new_password)
     await user_repo.update(str(user["_id"]), {
         "password_hash": new_password_hash,
         "password_reset_token": None,
+        "password_reset_token_hash": None,
         "password_reset_expires": None,
         "password_reset_requested_at": None
     })
@@ -1177,8 +1181,10 @@ async def delete_account(
         "refresh_tokens": [],
         "preferences": {},
         "verification_token": None,
+        "verification_token_hash": None,
         "verification_expires": None,
         "password_reset_token": None,
+        "password_reset_token_hash": None,
         "password_reset_expires": None,
         "password_reset_requested_at": None
     })

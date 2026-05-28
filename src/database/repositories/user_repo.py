@@ -4,6 +4,7 @@ from typing import Optional, Dict, Any, List
 from bson import ObjectId
 from bson.errors import InvalidId
 
+from ...auth.password import hash_token
 from ...utils.time_utils import get_utc_timestamp
 from src.utils.logger import get_logger
 
@@ -50,12 +51,16 @@ class UserRepository:
         return await self.collection.find_one({"email": email})
 
     async def get_by_verification_token(self, token: str) -> Optional[Dict[str, Any]]:
-        """根據驗證 token 獲取用戶"""
-        return await self.collection.find_one({"verification_token": token})
+        """根據驗證 token 獲取用戶（DB 存 sha256 hash，比對前即時 hash）"""
+        return await self.collection.find_one({
+            "verification_token_hash": hash_token(token)
+        })
 
     async def get_by_password_reset_token(self, token: str) -> Optional[Dict[str, Any]]:
-        """根據密碼重設 token 獲取用戶"""
-        return await self.collection.find_one({"password_reset_token": token})
+        """根據密碼重設 token 獲取用戶（DB 存 sha256 hash，比對前即時 hash）"""
+        return await self.collection.find_one({
+            "password_reset_token_hash": hash_token(token)
+        })
 
     async def get_by_google_id(self, google_id: str) -> Optional[Dict[str, Any]]:
         """根據 Google ID 獲取用戶"""
