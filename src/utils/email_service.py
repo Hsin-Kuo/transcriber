@@ -148,7 +148,8 @@ class EmailService:
                 <p>如果您沒有註冊此帳號，請忽略此郵件。</p>
             </div>
             <div style="text-align: center; margin-top: 30px; color: #666; font-size: 12px;">
-                <p>© 2026 Sound Lite. All rights reserved.</p>
+                <p style="margin: 0 0 4px 0;">此為系統自動寄送，請勿直接回覆。</p>
+                <p style="margin: 0;">© 2026 Sound Lite. All rights reserved.</p>
             </div>
         </body>
         </html>
@@ -167,6 +168,9 @@ class EmailService:
         此驗證連結將在 24 小時後過期。
 
         如果您沒有註冊此帳號，請忽略此郵件。
+
+        ─────────────────────────────
+        此為系統自動寄送，請勿直接回覆。
         """
 
         return await self._send_email(
@@ -229,7 +233,8 @@ class EmailService:
                 </div>
             </div>
             <div style="text-align: center; margin-top: 30px; color: #666; font-size: 12px;">
-                <p>© 2026 Sound Lite. All rights reserved.</p>
+                <p style="margin: 0 0 4px 0;">此為系統自動寄送，請勿直接回覆。</p>
+                <p style="margin: 0;">© 2026 Sound Lite. All rights reserved.</p>
             </div>
         </body>
         </html>
@@ -248,6 +253,9 @@ class EmailService:
         此連結將在 1 小時後過期。
 
         如果您沒有請求重設密碼，請忽略此郵件，您的帳號仍然安全。
+
+        ─────────────────────────────
+        此為系統自動寄送，請勿直接回覆。
         """
 
         return await self._send_email(
