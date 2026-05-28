@@ -100,13 +100,35 @@ interface RetryableRequest extends InternalAxiosRequestConfig {
   _retry?: boolean
 }
 
+// 這些端點的 401 不是 access token 過期 — 它們本來就不需要 token
+// （登入/註冊/Google OAuth/refresh 自身）。若不排除，登入失敗會誤觸 refresh，
+// 把「帳密錯誤」覆寫成「缺少 refresh token cookie」之類的錯訊。
+const AUTH_ENDPOINTS_NO_REFRESH = [
+  '/auth/login',
+  '/auth/register',
+  '/auth/refresh',
+  '/auth/google',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+]
+
+function shouldSkipRefresh(url: string | undefined): boolean {
+  if (!url) return false
+  return AUTH_ENDPOINTS_NO_REFRESH.some((path) => url.includes(path))
+}
+
 api.interceptors.response.use(
   (response: AxiosResponse) => response,
   async (error: AxiosError) => {
     const originalRequest = error.config as RetryableRequest | undefined
 
-    // 如果是 401 錯誤且不是刷新 Token 請求
-    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+    // 如果是 401 錯誤且不是刷新 Token 請求，且不是「本來就不該帶 token」的 auth 端點
+    if (
+      error.response?.status === 401
+      && originalRequest
+      && !originalRequest._retry
+      && !shouldSkipRefresh(originalRequest.url)
+    ) {
       if (isRefreshing) {
         // 如果正在刷新，將請求加入隊列
         return new Promise((resolve, reject) => {
