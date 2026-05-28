@@ -514,13 +514,21 @@ export function useTranscriptDownload(deps = {}) {
 
       const blob = new Blob([response.data], { type: 'application/pdf' })
       const url = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `${filename}.pdf`
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      window.URL.revokeObjectURL(url)
+      try {
+        const link = document.createElement('a')
+        link.href = url
+        link.download = `${filename}.pdf`
+        document.body.appendChild(link)
+        try {
+          link.click()
+        } finally {
+          link.remove()
+        }
+      } finally {
+        // 不管 click / appendChild / remove 是否拋例外，都確保 URL 被釋放
+        // 避免 createObjectURL 在異常路徑洩漏 blob memory
+        window.URL.revokeObjectURL(url)
+      }
 
       showDownloadDialog.value = false
     } finally {
