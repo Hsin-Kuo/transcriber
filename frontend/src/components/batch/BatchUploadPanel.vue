@@ -176,9 +176,13 @@
             </button>
           </div>
 
-          <!-- 快速標籤 -->
+          <!-- 快速標籤（限制兩排，超出可手動展開） -->
           <div v-if="availableQuickTags.length > 0" class="quick-tags-section">
-            <div class="quick-tags">
+            <div
+              class="quick-tags"
+              :ref="quickTagsContainerRef"
+              :style="quickTagsContentStyle"
+            >
               <button
                 v-for="tag in availableQuickTags"
                 :key="tag"
@@ -189,6 +193,18 @@
                 + {{ tag }}
               </button>
             </div>
+            <button
+              v-if="quickTagsOverflowing"
+              type="button"
+              class="btn-toggle-quick-tags"
+              :class="{ expanded: !quickTagsCollapsed }"
+              @click="toggleQuickTags"
+            >
+              <span>{{ quickTagsCollapsed ? $t('taskList.showMore') : $t('taskList.collapse') }}</span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
           </div>
 
           <div v-if="config.tags.length > 0" class="selected-tags">
@@ -248,6 +264,7 @@
 <script setup>
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useCollapsibleRows } from '../../composables/useCollapsibleRows'
 
 const { t: $t, locale } = useI18n()
 
@@ -321,6 +338,18 @@ const config = reactive({
 // 可用的快速標籤（排除已選擇的）
 const availableQuickTags = computed(() => {
   return props.existingTags.filter(tag => !config.tags.includes(tag))
+})
+
+// 快速標籤區限制最多兩排，超出可手動展開
+const {
+  containerRef: quickTagsContainerRef,
+  contentStyle: quickTagsContentStyle,
+  overflowing: quickTagsOverflowing,
+  isCollapsed: quickTagsCollapsed,
+  toggle: toggleQuickTags,
+} = useCollapsibleRows({
+  itemSelector: '.quick-tag-btn',
+  watchSources: [() => availableQuickTags.value.length],
 })
 
 // 格式化檔案大小
@@ -903,6 +932,36 @@ watch(() => props.initialFiles, (newFiles) => {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  transition: max-height 0.25s ease;
+}
+
+.btn-toggle-quick-tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(var(--color-teal-rgb), 0.95);
+  background: transparent;
+  border: 1px dashed rgba(var(--color-teal-rgb), 0.4);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-toggle-quick-tags:hover {
+  background: rgba(var(--color-teal-rgb), 0.1);
+  border-color: rgba(var(--color-teal-rgb), 0.6);
+}
+
+.btn-toggle-quick-tags svg {
+  transition: transform 0.2s;
+}
+
+.btn-toggle-quick-tags.expanded svg {
+  transform: rotate(180deg);
 }
 
 .quick-tag-btn {
