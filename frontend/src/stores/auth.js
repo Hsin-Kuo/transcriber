@@ -60,12 +60,13 @@ export const useAuthStore = defineStore('auth', () => {
 
     try {
       const response = await api.post('/auth/register', { email, password })
-      // 註冊成功，但需要驗證 email
-      // API 返回 { message, email }
+      // 註冊成功（包含寄信失敗的情況，user 已被保留）
+      // API 返回 { message, email, email_sent }
       return {
         success: true,
         message: response.data.message,
-        email: response.data.email
+        email: response.data.email,
+        emailSent: response.data.email_sent !== false,
       }
     } catch (err) {
       error.value = err.response?.data?.detail || '註冊失敗'

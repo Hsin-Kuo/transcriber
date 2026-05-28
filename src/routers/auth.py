@@ -139,7 +139,8 @@ async def register(
         )
         return {
             "message": "註冊成功！請檢查您的信箱以完成驗證",
-            "email": user_data.email
+            "email": user_data.email,
+            "email_sent": True,  # 對外保持一致，不洩漏 email 是否已註冊
         }
 
     # 生成驗證 token (使用 secrets 生成安全的隨機字符串)
@@ -182,19 +183,22 @@ async def register(
     )
 
     if not email_sent:
-        # 如果郵件發送失敗，刪除剛創建的用戶
-        await user_repo.delete(str(user["_id"]))
+        # 不刪除 user（保留 inactive 狀態）：
+        # - 寄信失敗通常是 transient（Resend 5xx、SMTP timeout）
+        # - 砍掉 user 會讓用戶以為註冊失敗、嘗試重新註冊時又撞到「已存在」邏輯
+        # - 用戶可直接走 /auth/resend-verification 觸發重發
         await audit_logger.log_auth(
             request=request,
-            action="register_failed",
+            action="register_email_failed",
             user_id=str(user["_id"]),
-            status_code=500,
-            message=f"註冊失敗（郵件發送失敗）: {user_data.email}"
+            status_code=200,
+            message=f"註冊但驗證信寄送失敗: {user_data.email}"
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="發送驗證郵件失敗，請稍後再試"
-        )
+        return {
+            "message": "帳號已建立，但驗證信寄送發生問題。請稍後使用「重新發送驗證信」。",
+            "email": user_data.email,
+            "email_sent": False,
+        }
 
     await audit_logger.log_auth(
         request=request,
@@ -206,7 +210,8 @@ async def register(
 
     return {
         "message": "註冊成功！請查看您的郵箱完成驗證",
-        "email": user_data.email
+        "email": user_data.email,
+        "email_sent": True,
     }
 
 

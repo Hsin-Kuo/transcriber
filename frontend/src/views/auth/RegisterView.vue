@@ -102,15 +102,19 @@
               {{ error }}
             </div>
 
-            <div v-if="success" class="success-message">
-              <div class="success-icon">✉️</div>
+            <div v-if="success" class="success-message" :class="{ 'send-failed': !emailSent }">
+              <div class="success-icon">{{ emailSent ? '✉️' : '⚠️' }}</div>
               <p class="success-title">{{ successMessage }}</p>
-              <p class="success-subtitle">
+              <p v-if="emailSent" class="success-subtitle">
                 請查看您的郵箱 <strong>{{ email }}</strong>，點擊驗證連結完成註冊。
               </p>
+              <p v-else class="success-subtitle">
+                帳號 <strong>{{ email }}</strong> 已建立，但驗證信寄送暫時失敗。請按下方按鈕重新寄送。
+              </p>
               <p class="success-note">
-                沒收到郵件？請檢查垃圾郵件資料夾，或
-                <a href="#" @click.prevent="resendEmail" class="resend-link">重新發送驗證郵件</a>
+                <a href="#" @click.prevent="resendEmail" class="resend-link">
+                  {{ emailSent ? '沒收到郵件？重新發送' : '立即重新寄送驗證信' }}
+                </a>
               </p>
             </div>
 
@@ -210,6 +214,7 @@ function validatePassword() {
 
 const success = ref(false)
 const successMessage = ref('')
+const emailSent = ref(true)  // 寄信成功 = 一般成功 UI；false = 強調重發
 
 async function resendEmail() {
   loading.value = true
@@ -258,7 +263,9 @@ async function handleRegister() {
   if (result.success) {
     // 註冊成功，顯示驗證郵件提示
     success.value = true
-    successMessage.value = result.message || '註冊成功！請查看您的郵箱完成驗證'
+    emailSent.value = result.emailSent !== false
+    successMessage.value = result.message ||
+      (emailSent.value ? '註冊成功！請查看您的郵箱完成驗證' : '帳號已建立，請重新寄送驗證信')
   } else {
     error.value = result.error
   }
@@ -511,6 +518,21 @@ function handleGoogleError(err) {
   border-radius: 12px;
   text-align: center;
   border: 1px solid #c3e6cb;
+}
+
+.success-message.send-failed {
+  background: #fff3cd;
+  border-color: #ffeeba;
+}
+
+.success-message.send-failed .success-title,
+.success-message.send-failed .success-subtitle,
+.success-message.send-failed .success-note {
+  color: #856404;
+}
+
+.success-message.send-failed .success-subtitle strong {
+  color: #533f03;
 }
 
 .success-icon {
