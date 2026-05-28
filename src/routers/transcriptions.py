@@ -1,11 +1,13 @@
 """轉錄管理路由"""
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from typing import Optional, List
+from pydantic import BaseModel, Field
+from typing import Optional, List, Literal
 from pathlib import Path
 from urllib.parse import quote
 from datetime import datetime, timezone
+from io import BytesIO
 import uuid
 import json
 import shutil
@@ -531,6 +533,90 @@ async def download_transcription(
         media_type="text/plain; charset=utf-8",
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
+        }
+    )
+
+
+class ExportPdfRequest(BaseModel):
+    """PDF 匯出參數。
+
+    transcript_text 由 frontend 預先格式化（依 paragraph 或 subtitle mode），
+    backend 只做 PDF render 不做文字組合。summary 從 DB 抓，不在 body 重送。
+    """
+    title: str = Field(..., max_length=500, description="PDF 抬頭與下載檔名")
+    transcript_text: Optional[str] = Field(None, description="已格式化逐字稿純文字")
+    include_summary: bool = True
+    include_transcript: bool = True
+    locale: Literal["zh-TW", "en"] = "zh-TW"
+
+
+@router.post("/{task_id}/export/pdf")
+async def export_transcription_pdf(
+    task_id: str,
+    payload: ExportPdfRequest,
+    current_user: dict = Depends(get_current_user),
+    db = Depends(get_database)
+):
+    """Server-side PDF 生成（支援 TC/SC/JP/KR 多語言 CJK 字體）。
+
+    對應 frontend useTranscriptDownload.js 的 downloadAsPdf()，把 ReportLab
+    渲染搬到 backend，前端不再需要 5.4MB 字體 + pdfmake bundle。
+    """
+    # 1. Auth + task 存在 + 已完成
+    task_repo = TaskRepository(db)
+    task = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="任務不存在或無權訪問"
+        )
+    if task["status"] != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"任務尚未完成（當前狀態：{task['status']}）"
+        )
+
+    # 2. 抓 summary（如需要）
+    summary_doc = None
+    if payload.include_summary:
+        from ..database.repositories.summary_repo import SummaryRepository
+        summary_repo = SummaryRepository(db)
+        summary_doc = await summary_repo.get_by_task_id(task_id)
+
+    # 3. 決定 primary_lang：task.language → ISO 拼出 IETF tag
+    raw_lang = (task.get("language") or "zh-TW").strip()
+    lang_map = {
+        "zh": "zh-TW", "zh-tw": "zh-TW", "zh-hant": "zh-TW",
+        "zh-cn": "zh-CN", "zh-hans": "zh-CN",
+        "ja": "ja", "ja-jp": "ja",
+        "ko": "ko", "ko-kr": "ko",
+    }
+    primary_lang = lang_map.get(raw_lang.lower(), "zh-TW")
+
+    # 4. 生成 PDF
+    from ..utils.pdf.pdf_generator import generate_pdf
+    pdf_bytes = generate_pdf(
+        title=payload.title,
+        summary=summary_doc,
+        transcript_text=payload.transcript_text,
+        include_summary=payload.include_summary,
+        include_transcript=payload.include_transcript,
+        primary_lang=primary_lang,
+        locale=payload.locale,
+    )
+
+    # 5. 組檔名（UTF-8 percent-encode 給 Content-Disposition）
+    download_filename = (payload.title or "transcript").strip() or "transcript"
+    if not download_filename.lower().endswith(".pdf"):
+        download_filename += ".pdf"
+    encoded = quote(download_filename, safe='')
+
+    return StreamingResponse(
+        BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded}",
+            "Content-Length": str(len(pdf_bytes)),
         }
     )
 
