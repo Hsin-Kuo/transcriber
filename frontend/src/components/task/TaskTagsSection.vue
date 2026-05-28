@@ -1,5 +1,5 @@
 <template>
-  <div class="task-tags-section" ref="tagSectionEl" @click.stop>
+  <div class="task-tags-section" ref="tagSectionEl" @click.stop @keydown.enter.stop>
     <!-- 編輯模式 -->
     <div v-if="isEditing" class="tag-edit-mode">
 

@@ -355,7 +355,16 @@ function handleMobileDelete() {
 }
 
 // Methods
-function handleCardClick() {
+function handleCardClick(e) {
+  // Enter 從卡片內部互動元素（input / button / a / textarea / contenteditable）冒泡上來時，
+  // 代表使用者意圖在操作那個元素（如新增標籤、按刪除按鈕），不該再觸發整張卡片導航。
+  if (e?.type === 'keydown') {
+    const t = e.target
+    const tag = t?.tagName
+    if (tag === 'INPUT' || tag === 'BUTTON' || tag === 'TEXTAREA' || tag === 'A' || t?.isContentEditable) {
+      return
+    }
+  }
   if (props.task.status === 'completed' && !props.isBatchMode) {
     emit('view', props.task.task_id)
   }
