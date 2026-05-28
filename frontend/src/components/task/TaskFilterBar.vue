@@ -254,25 +254,46 @@ async function measureOverflow() {
   }
 
   const containerTop = filterTagsEl.value.getBoundingClientRect().top
-  // 每個 row 以 top 為 key；同一 row 取最大 bottom
-  const rows = new Map()
+
+  // 收集每個 item 的 (top, bottom) 並排序
+  const itemRects = []
   items.forEach(item => {
     const rect = item.getBoundingClientRect()
-    const top = Math.round(rect.top - containerTop)
-    const bottom = rect.bottom - containerTop
-    rows.set(top, Math.max(rows.get(top) || 0, bottom))
+    itemRects.push({
+      top: rect.top - containerTop,
+      bottom: rect.bottom - containerTop,
+    })
   })
+  itemRects.sort((a, b) => a.top - b.top)
 
-  const sortedTops = [...rows.keys()].sort((a, b) => a - b)
-  const rowCount = sortedTops.length
+  // Tolerance-based grouping：top 差距 > 8px 才算新 row。
+  // 避免 sub-pixel rendering（rect.top = 0.0 / 0.3 / 0.5）把同一 row 誤切成
+  // 多個假 row 而導致 twoRowsPx 算到 row 1 內部位置 → 只顯示 1 row 的 bug。
+  // 8px << flex gap，不會誤把相鄰兩 row 併成同一 row。
+  const ROW_TOLERANCE = 8
+  const rowBottoms = []
+  let lastRowTop = -Infinity
+  for (const { top, bottom } of itemRects) {
+    if (top - lastRowTop > ROW_TOLERANCE) {
+      lastRowTop = top
+      rowBottoms.push(bottom)
+    } else {
+      // 同 row 取最大 bottom（同 row 內 items 高度可能略不同）
+      rowBottoms[rowBottoms.length - 1] = Math.max(
+        rowBottoms[rowBottoms.length - 1],
+        bottom
+      )
+    }
+  }
 
+  const rowCount = rowBottoms.length
   overflowing.value = rowCount > 2
 
   if (rowCount >= 2) {
     // 第 2 row 的底部即為兩排可見高度
-    twoRowsPx.value = Math.ceil(rows.get(sortedTops[1]))
+    twoRowsPx.value = Math.ceil(rowBottoms[1])
   } else if (rowCount === 1) {
-    twoRowsPx.value = Math.ceil(rows.get(sortedTops[0]))
+    twoRowsPx.value = Math.ceil(rowBottoms[0])
   }
 }
 
