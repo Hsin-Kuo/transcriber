@@ -559,6 +559,7 @@ class ExportPdfRequest(BaseModel):
 async def export_transcription_pdf(
     task_id: str,
     payload: ExportPdfRequest,
+    request: Request,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_database)
 ):
@@ -618,6 +619,21 @@ async def export_transcription_pdf(
     if not download_filename.lower().endswith(".pdf"):
         download_filename += ".pdf"
     encoded = quote(download_filename, safe='')
+
+    # 6. Audit log（同 /download 既有 pattern；PDF 是高成本操作，留 trail 給濫用偵測）
+    try:
+        from ..utils.audit_logger import get_audit_logger
+        audit_logger = get_audit_logger()
+        await audit_logger.log_transcription_operation(
+            request=request,
+            action="export_pdf",
+            user_id=str(current_user["_id"]),
+            task_id=task_id,
+            status_code=200,
+            message=f"匯出 PDF：{download_filename}（{len(pdf_bytes):,} bytes，lang={primary_lang}）"
+        )
+    except Exception as e:
+        log.warning("transcription.audit_log.failed", action="export_pdf", error=str(e))
 
     return StreamingResponse(
         BytesIO(pdf_bytes),
