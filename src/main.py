@@ -206,6 +206,11 @@ async def startup_event():
         validate_aws_config()
         logger.info("app.startup.aws_config_validated")
 
+    # Email 服務設定驗證（resend/ses 漏設 FROM_EMAIL 在第一個用戶註冊時才爆炸太晚）
+    from src.utils.email_service import get_email_service
+    get_email_service()  # 觸發 __init__ 的 _validate_config()
+    logger.info("app.startup.email_config_validated")
+
     # 清理殘留的暫存目錄（處理 crash/重啟後的孤兒檔案）
     from src.utils.config_loader import cleanup_stale_temp_dirs
     cleanup_stale_temp_dirs()

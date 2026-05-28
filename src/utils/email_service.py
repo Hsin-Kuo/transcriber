@@ -1,4 +1,5 @@
 """Email 發送服務"""
+import re
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -11,19 +12,88 @@ from src.utils.logger import get_logger
 log = get_logger(__name__)
 
 
+# 寬鬆的 email 格式檢查：localpart@domain.tld，擋掉空字串、缺 @、缺 TLD
+_EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+class EmailConfigError(RuntimeError):
+    """Email 服務設定不完整時拋出，讓 startup 直接 fail-fast。"""
+
+
 class EmailService:
     """Email 發送服務類"""
 
     def __init__(self):
-        """初始化 Email 服務配置"""
+        """初始化 Email 服務配置，並依 provider 驗證必要環境變數。
+
+        - console: 不驗證（本地開發預設）
+        - resend / ses: FROM_EMAIL 必填且為合法 email 格式
+        - smtp: SMTP_HOST、SMTP_USER、SMTP_PASSWORD、FROM_EMAIL 都需齊
+        """
         self.email_provider = os.getenv("EMAIL_PROVIDER", "console")
         self.smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
         self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
         self.smtp_user = os.getenv("SMTP_USER", "")
         self.smtp_password = os.getenv("SMTP_PASSWORD", "")
-        self.from_email = os.getenv("FROM_EMAIL", self.smtp_user)
+        # 不再對沒有 verified domain 的 SMTP_USER fallback，避免發出 invalid From header
+        self.from_email = os.getenv("FROM_EMAIL", "").strip()
         self.from_name = os.getenv("FROM_NAME", "Sound Lite 服務")
         self.frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+        self._validate_config()
+
+    def _validate_config(self) -> None:
+        """依 provider 驗證設定；不通過直接拋 EmailConfigError。"""
+        provider = self.email_provider
+
+        if provider == "console":
+            return
+
+        if provider not in ("resend", "ses", "smtp"):
+            raise EmailConfigError(
+                f"EMAIL_PROVIDER={provider!r} 不支援；可選 console / resend / ses / smtp"
+            )
+
+        # resend / ses / smtp 都要 from_email
+        if not self.from_email:
+            raise EmailConfigError(
+                f"EMAIL_PROVIDER={provider} 需要設定 FROM_EMAIL 環境變數"
+            )
+        if not _EMAIL_RE.match(self.from_email):
+            raise EmailConfigError(
+                f"FROM_EMAIL={self.from_email!r} 非合法 email 格式"
+            )
+
+        # resend / ses 額外要求 from_email 必須是 provider 已驗證的 domain。
+        # 這裡無法做遠端驗證，只能提示 ops 注意 — 在 logger 留下明確 warning。
+        if provider in ("resend", "ses"):
+            log.info(
+                "email.config.validated",
+                provider=provider,
+                from_email=self.from_email,
+                note="ensure_from_email_domain_is_verified_on_provider",
+            )
+            return
+
+        # SMTP：需要完整的連線設定
+        if provider == "smtp":
+            missing = []
+            if not self.smtp_host:
+                missing.append("SMTP_HOST")
+            if not self.smtp_user:
+                missing.append("SMTP_USER")
+            if not self.smtp_password:
+                missing.append("SMTP_PASSWORD")
+            if missing:
+                raise EmailConfigError(
+                    f"EMAIL_PROVIDER=smtp 缺少必要環境變數: {', '.join(missing)}"
+                )
+            log.info(
+                "email.config.validated",
+                provider="smtp",
+                from_email=self.from_email,
+                smtp_host=self.smtp_host,
+            )
 
     async def send_verification_email(
         self,
