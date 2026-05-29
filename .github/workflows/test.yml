@@ -44,6 +44,9 @@ jobs:
           # 測試需要有效 JWT secret 才能 import jwt_handler
           JWT_SECRET_KEY: a3f2c1b8e4d6a9f5c2b8e1d4a6f9c3b2e5d8a1f4c7b6e3d2a5f8c1b4e7d6a9f2
           DEPLOY_ENV: local
+          # 顯式鎖定 console 避免未來 import src.main 觸發 startup_event 對
+          # EMAIL_PROVIDER=resend 缺密鑰 fail-fast
+          EMAIL_PROVIDER: console
         run: pytest tests/ -v
 
   nginx-conf:

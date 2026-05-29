@@ -12,6 +12,7 @@ Ops 設定：
        - 或 env: RESEND_WEBHOOK_SECRET
 """
 import json
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
@@ -79,18 +80,29 @@ async def resend_webhook(
             raw_body=raw_body,
         )
     except InvalidWebhookSignature as e:
+        # 簽名驗證失敗一律 log.warning（廉價），但 audit_log 為避免被
+        # 大量假請求灌爆，只在能成功 claim 「signature_failed:<IP>:<minute>」
+        # bucket 時寫入 — 每 IP 每分鐘最多 1 筆 audit。
         log.warning(
             "resend_webhook.signature_failed",
             reason=str(e),
             remote=request.client.host if request.client else None,
         )
-        await audit_logger.log_auth(
-            request=request,
-            action="resend_webhook_invalid_signature",
-            user_id=None,
-            status_code=401,
-            message=f"webhook 簽名驗證失敗: {e}",
-        )
+        client_ip = request.client.host if request.client else "unknown"
+        minute_bucket = int(time.time()) // 60
+        bucket_repo = ProcessedWebhookRepository(db)
+        if await bucket_repo.claim(
+            provider="resend-sigfail",
+            natural_id=f"{client_ip}:{minute_bucket}",
+            metadata={"reason": str(e)[:200]},
+        ):
+            await audit_logger.log_auth(
+                request=request,
+                action="resend_webhook_invalid_signature",
+                user_id=None,
+                status_code=401,
+                message=f"webhook 簽名驗證失敗: {e}",
+            )
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid signature")
 
     # 3. 解析 body

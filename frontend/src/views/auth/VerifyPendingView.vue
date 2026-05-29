@@ -150,6 +150,8 @@ const status = ref('pending')
 const bounced = computed(() => status.value === 'bounced' || status.value === 'complained')
 const abandoning = ref(false)
 const pollTimedOut = ref(false)  // 5min polling 結束仍 pending 時顯示提示
+let consecutivePollFailures = 0
+const MAX_SILENT_POLL_FAILURES = 3  // 連續 N 次失敗才告知用戶 / 紀錄錯誤
 
 let timer = null
 let pollTimer = null
@@ -178,6 +180,7 @@ async function pollStatus() {
       _silentRateLimit: true,
     })
     status.value = data.status || 'pending'
+    consecutivePollFailures = 0  // 成功一次就重置
 
     // verified 狀態被後端故意隱藏（防 enumeration），前端不再 auto-redirect
     if (bounced.value) {
@@ -185,7 +188,13 @@ async function pollStatus() {
       stopPolling()
     }
   } catch (err) {
-    // poll 失敗只是暫時 — 不打斷 user，下次再試
+    // 單次失敗可能是暫時網路抖動 — 累積到 N 次才視為有問題
+    consecutivePollFailures += 1
+    if (consecutivePollFailures >= MAX_SILENT_POLL_FAILURES) {
+      // 連續失敗 = 後端 endpoint 真的有問題；至少在 console 留下 trace
+      // 未來可改用 Sentry.captureException(err) 上報
+      console.warn('verify-pending: registration-status poll repeatedly failing', err)
+    }
   }
 }
 
