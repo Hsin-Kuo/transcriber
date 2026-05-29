@@ -20,6 +20,11 @@ import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue'
  *     </button>
  *   </template>
  *
+ * 注意：containerRef 是 **function ref**（callback），不是 Ref 物件。原因是
+ * <script setup> 從 composable destructure 出來的 ref 用 `:ref="xxx"` 綁定
+ * 時會被 Vue 模板 auto-unwrap 成 `.value`（null/HTMLElement），導致 ref 無
+ * 法正確 attach。function ref 不會被 auto-unwrap，是最穩的綁定方式。
+ *
  * 量測策略：
  *   1) 用 getBoundingClientRect 拿到每個 item 的 top/bottom（即使被
  *      overflow:hidden 視覺隱藏，layout 位置仍存在）
@@ -40,11 +45,18 @@ export function useCollapsibleRows(opts) {
   const forceExpand = opts.forceExpand || (() => false)
   const watchSources = opts.watchSources || []
 
-  const containerRef = ref(null)
+  // 內部記住的 DOM 元素（由 function ref setter 寫入）
+  const containerEl = ref(null)
   const isCollapsed = ref(true)
   const overflowing = ref(false)
   const twoRowsPx = ref(80) // fallback；mount 後依實測動態更新
   let resizeObserver = null
+
+  // function ref：template 綁定這個 callback，Vue 會在 mount/unmount 時呼叫
+  // 重點：function ref 不會被 <script setup> 模板 auto-unwrap，是穩定的綁定方式
+  function containerRef(el) {
+    containerEl.value = el || null
+  }
 
   const shouldCollapse = computed(
     () => overflowing.value && isCollapsed.value && !forceExpand()
@@ -62,15 +74,15 @@ export function useCollapsibleRows(opts) {
     await new Promise(resolve => requestAnimationFrame(resolve))
     await new Promise(resolve => requestAnimationFrame(resolve))
 
-    if (!containerRef.value) return
+    if (!containerEl.value) return
 
-    const items = containerRef.value.querySelectorAll(itemSelector)
+    const items = containerEl.value.querySelectorAll(itemSelector)
     if (items.length === 0) {
       overflowing.value = false
       return
     }
 
-    const containerTop = containerRef.value.getBoundingClientRect().top
+    const containerTop = containerEl.value.getBoundingClientRect().top
 
     const itemRects = []
     items.forEach(item => {
@@ -125,16 +137,16 @@ export function useCollapsibleRows(opts) {
     }
   }
 
-  // 監聽 containerRef：consumer 元件若是 v-if mount，ref 會在掛載瞬間從
-  // null → element，這時才掛 observer + 跑初次 measure；
-  // v-if 解除後 ref 變回 null，順手把 observer 拆掉避免 leak。
+  // 監聽 containerEl：consumer 元件若是 v-if mount，function ref 會在掛載
+  // 瞬間 callback(el)，此時 containerEl.value 從 null → element，掛 observer
+  // 並跑初次 measure；v-if 解除時 callback(null)，順手拆 observer 避免 leak。
   watch(
-    containerRef,
+    containerEl,
     (el) => {
       attachObserver(el)
       if (el) measure()
     },
-    { flush: 'post', immediate: true }
+    { flush: 'post' }
   )
 
   onBeforeUnmount(() => {
