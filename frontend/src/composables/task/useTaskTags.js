@@ -36,6 +36,9 @@ const globalTagColors = ref({})
 const globalTagsData = ref([]) // 存儲完整的標籤信息（包含 ID）
 const globalCustomTagOrder = ref([])
 
+// 並發 fetch dedupe：多個 component 同時掛載時共享同一個 in-flight request
+let inflightFetchTags = null
+
 /**
  * Task Tags Composable
  * 管理任務標籤的共享狀態和邏輯
@@ -80,59 +83,46 @@ export function useTaskTags($t) {
   // ===== API 函數 =====
 
   /**
-   * 從後端獲取標籤顏色
+   * 從後端獲取全部標籤（含 id / color / order），寫入共享狀態
+   *
+   * 並發呼叫會共享同一個 in-flight request，避免多個 component 同時 mount
+   * 時對 GET /tags 重複請求。Mutation 後（rename / reorder / color）想強制
+   * 重抓時，等前一個 request 結束後再 call 即可拿到新資料。
    */
   async function fetchTagColors() {
-    try {
-      const response = await api.get('/tags')
-      const colors = {}
-      const tags = response.data || []
+    if (inflightFetchTags) return inflightFetchTags
 
-      // 存儲完整的標籤信息
-      tagsData.value = tags
+    inflightFetchTags = (async () => {
+      try {
+        const response = await api.get('/tags')
+        const tags = response.data || []
 
-      tags.forEach(tag => {
-        if (tag.color) {
-          colors[tag.name] = tag.color
+        tagsData.value = tags
+
+        const colors = {}
+        tags.forEach(tag => {
+          if (tag.color) colors[tag.name] = tag.color
+        })
+        tagColors.value = colors
+
+        // tags 已按 order 欄位排序
+        if (tags.length > 0) {
+          customTagOrder.value = tags.map(tag => tag.name)
         }
-      })
-      tagColors.value = colors
-
-      // 同時更新標籤順序（tags 已按 order 欄位排序）
-      if (tags.length > 0) {
-        customTagOrder.value = tags.map(tag => tag.name)
+      } catch (error) {
+        console.error(($t ? $t('taskList.errorFetchTagColors') : 'Error fetching tag colors') + ':', error)
+      } finally {
+        inflightFetchTags = null
       }
-    } catch (error) {
-      console.error(($t ? $t('taskList.errorFetchTagColors') : 'Error fetching tag colors') + ':', error)
-    }
+    })()
+
+    return inflightFetchTags
   }
 
   /**
-   * 從後端獲取標籤順序
-   * 注意：這個函數現在從 tagsData 中提取名稱順序（因為 tagsData 已按 order 排序）
+   * @deprecated 保留給舊呼叫端；資料與 fetchTagColors 完全相同。
    */
-  async function fetchTagOrder() {
-    try {
-      // 如果 tagsData 已經有數據，直接從中提取名稱順序
-      if (tagsData.value.length > 0) {
-        customTagOrder.value = tagsData.value.map(tag => tag.name)
-        console.log('✅ ' + ($t ? $t('taskList.logLoadedTagOrder') : 'Loaded custom tag order'), tagsData.value.length, ($t ? $t('taskList.logTagCount') : 'tags'))
-        return
-      }
-
-      // 如果 tagsData 尚未加載，則先獲取標籤數據
-      const response = await api.get('/tags')
-      const tags = response.data || []
-
-      if (tags.length > 0) {
-        tagsData.value = tags
-        customTagOrder.value = tags.map(tag => tag.name)
-        console.log('✅ ' + ($t ? $t('taskList.logLoadedTagOrder') : 'Loaded custom tag order'), tags.length, ($t ? $t('taskList.logTagCount') : 'tags'))
-      }
-    } catch (error) {
-      console.error(($t ? $t('taskList.errorFetchTagOrder') : 'Error fetching tag order') + ':', error)
-    }
-  }
+  const fetchTagOrder = fetchTagColors
 
   /**
    * 保存標籤順序到後端
@@ -297,7 +287,7 @@ export function useTaskTags($t) {
         description: tagObj.description || null
       })
 
-      // 本地狀態同步（避免 UI 短暫顯示舊名；之後 parent 會 fetchAllTags 再對齊）
+      // 本地狀態同步（避免 UI 短暫顯示舊名；之後 parent 會 fetchTagColors 再對齊）
       if (customTagOrder.value.includes(oldTag)) {
         const index = customTagOrder.value.indexOf(oldTag)
         customTagOrder.value[index] = newTag

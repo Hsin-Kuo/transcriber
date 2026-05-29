@@ -114,7 +114,7 @@ import TaskGrid from './TaskGrid.vue'
 import RulerPagination from '../common/RulerPagination.vue'
 
 const { t: $t } = useI18n()
-const { fetchTagColors, fetchTagOrder } = useTaskTags($t)
+const { fetchTagColors, tagsData } = useTaskTags($t)
 
 // Props
 const props = defineProps({
@@ -223,8 +223,8 @@ const emitFilterChange = () => {
 watch([selectedTaskType, selectedFilterTags], emitFilterChange, { deep: true })
 
 // Computed
-// 從 API 獲取的所有標籤
-const allTags = ref([])
+// 從共享 tagsData 推導（避免額外打一次 /tags）
+const allTags = computed(() => tagsData.value.map(t => t.name))
 
 const sortedTasks = computed(() => {
   // 後端已經處理了 task_type 和 tags 篩選，且預設按 created_at desc 排序。
@@ -380,10 +380,9 @@ async function handleTaskTagsUpdated({ taskId, tags }) {
 
 // Methods - Tag Events
 function handleTagRenamed() {
-  // 標籤重命名後刷新
+  // 標籤重命名後刷新（tagsData 已由 composable 內部同步，僅需通知 parent 重抓 task）
   emit('refresh')
-  // 重新獲取標籤列表
-  fetchAllTags()
+  fetchTagColors()
 }
 
 function handleTagColorChanged() {
@@ -393,20 +392,6 @@ function handleTagColorChanged() {
 async function handleTagsReordered() {
   // 標籤順序變更後重新獲取標籤數據，確保順序同步
   await fetchTagColors()
-  await fetchAllTags()
-}
-
-// 獲取所有標籤（使用 /tags API，已按 order 排序）
-async function fetchAllTags() {
-  try {
-    const response = await api.get('/tags')
-    // /tags 返回完整標籤對象（含 order），提取名稱並保持順序
-    const tags = response.data || []
-    allTags.value = tags.map(tag => tag.name)
-  } catch (error) {
-    console.error('Failed to fetch tags:', error)
-    allTags.value = []
-  }
 }
 
 // Lifecycle
@@ -416,8 +401,6 @@ onMounted(() => {
   // 這確保使用恢復後的篩選條件，而非初始值
   emitFilterChange()
   fetchTagColors()
-  fetchTagOrder()
-  fetchAllTags()
 })
 </script>
 
