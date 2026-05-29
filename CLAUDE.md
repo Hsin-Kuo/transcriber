@@ -29,6 +29,7 @@ src/                  # 後端 (FastAPI)
     summaries.py      # AI 摘要
     shared.py         # 分享連結（無需登入可看）
     subscriptions.py  # 藍新（Newebpay）訂閱付款 / webhook
+    email_webhooks.py # Resend bounce / complaint webhook（prefix=/webhooks）
     admin.py          # 管理後台 API（prefix=/api/admin）
   services/           # 業務邏輯
     intake_service.py           # TranscriptionIntakeService（音檔→配額→task→dispatch 完整 workflow）

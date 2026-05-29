@@ -36,6 +36,17 @@ class UserRepository:
             "email",
             partialFilterExpression={"email": {"$type": "string"}},
         )
+        # verification / password reset token hash 是用戶點信件連結時的查詢欄位。
+        # partial index 只索引「目前持有有效 token」的少數 user（其他 user 此欄位
+        # 為 null），collection 規模再大查詢仍是常數時間。
+        await self.collection.create_index(
+            "verification_token_hash",
+            partialFilterExpression={"verification_token_hash": {"$type": "string"}},
+        )
+        await self.collection.create_index(
+            "password_reset_token_hash",
+            partialFilterExpression={"password_reset_token_hash": {"$type": "string"}},
+        )
         log.info("user.indexes.created")
 
     async def create(self, user_data: Dict[str, Any]) -> Dict[str, Any]:

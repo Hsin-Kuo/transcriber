@@ -8,6 +8,7 @@ import os
 from jinja2 import Template
 
 from src.utils.logger import get_logger
+from src.utils.privacy import mask_email
 
 log = get_logger(__name__)
 
@@ -67,6 +68,18 @@ class EmailService:
         # resend / ses 額外要求 from_email 必須是 provider 已驗證的 domain。
         # 這裡無法做遠端驗證，只能提示 ops 注意 — 在 logger 留下明確 warning。
         if provider in ("resend", "ses"):
+            # resend 還需要 API key — 啟動就確認，不要等第一個用戶註冊才爆
+            if provider == "resend":
+                from src.utils.config_loader import get_parameter
+                api_key = get_parameter(
+                    "/transcriber/resend-api-key",
+                    fallback_env="RESEND_API_KEY",
+                )
+                if not api_key:
+                    raise EmailConfigError(
+                        "EMAIL_PROVIDER=resend 但 RESEND_API_KEY 未設定 "
+                        "(SSM: /transcriber/resend-api-key 或 env: RESEND_API_KEY)"
+                    )
             log.info(
                 "email.config.validated",
                 provider=provider,
@@ -393,7 +406,7 @@ class EmailService:
             server.login(self.smtp_user, self.smtp_password)
             server.send_message(msg)
 
-        log.info("email.sent", to_email=to_email, provider="smtp")
+        log.info("email.sent", to_email=mask_email(to_email), provider="smtp")
         return True
 
     def _send_via_ses(
@@ -421,7 +434,7 @@ class EmailService:
             },
         )
 
-        log.info("email.sent", to_email=to_email, provider="ses")
+        log.info("email.sent", to_email=mask_email(to_email), provider="ses")
         return True
 
     def _send_via_resend(
@@ -455,7 +468,7 @@ class EmailService:
 
         resend.Emails.send(params)
 
-        log.info("email.sent", to_email=to_email, provider="resend")
+        log.info("email.sent", to_email=mask_email(to_email), provider="resend")
         return True
 
 

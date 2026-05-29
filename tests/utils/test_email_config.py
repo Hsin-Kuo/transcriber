@@ -31,8 +31,12 @@ def clean_env(monkeypatch):
         "SMTP_PORT",
         "SMTP_USER",
         "SMTP_PASSWORD",
+        "RESEND_API_KEY",
     ):
         monkeypatch.delenv(key, raising=False)
+    # 清掉 module-level cache，避免上輪 test 留下的值
+    from src.utils import config_loader
+    config_loader._param_cache.clear()
 
 
 def test_console_provider_no_validation(clean_env, monkeypatch):
@@ -62,9 +66,19 @@ def test_resend_with_invalid_from_email_raises(clean_env, monkeypatch):
         EmailService()
 
 
+def test_resend_without_api_key_raises(clean_env, monkeypatch):
+    """EMAIL_PROVIDER=resend 但缺 RESEND_API_KEY 應啟動失敗，不要等
+    第一個用戶註冊才在 _send_via_resend 拋 ValueError。"""
+    monkeypatch.setenv("EMAIL_PROVIDER", "resend")
+    monkeypatch.setenv("FROM_EMAIL", "noreply@soundlite.app")
+    with pytest.raises(EmailConfigError, match="RESEND_API_KEY"):
+        EmailService()
+
+
 def test_resend_with_valid_config_ok(clean_env, monkeypatch):
     monkeypatch.setenv("EMAIL_PROVIDER", "resend")
     monkeypatch.setenv("FROM_EMAIL", "noreply@soundlite.app")
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_xxx")
     svc = EmailService()
     assert svc.from_email == "noreply@soundlite.app"
 
@@ -102,5 +116,6 @@ def test_unknown_provider_raises(clean_env, monkeypatch):
 def test_from_email_strips_whitespace(clean_env, monkeypatch):
     monkeypatch.setenv("EMAIL_PROVIDER", "resend")
     monkeypatch.setenv("FROM_EMAIL", "  noreply@soundlite.app  ")
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_xxx")
     svc = EmailService()
     assert svc.from_email == "noreply@soundlite.app"

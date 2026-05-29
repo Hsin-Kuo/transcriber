@@ -1377,7 +1377,13 @@ async def delete_account(
         "password_reset_token": None,
         "password_reset_token_hash": None,
         "password_reset_expires": None,
-        "password_reset_requested_at": None
+        "password_reset_requested_at": None,
+        # email_bounce_reason 可能含 provider 回傳的完整 email 字串或診斷訊息，
+        # 屬於 PII，soft-delete 須一併抹除
+        "email_bounced": None,
+        "email_bounce_event": None,
+        "email_bounce_at": None,
+        "email_bounce_reason": None
     })
 
     return {"message": "帳號已永久刪除"}
