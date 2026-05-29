@@ -12,6 +12,9 @@ const CHUNK_THRESHOLD = 95 * 1024 * 1024 // 95 MB
 const CHUNK_SIZE = 90 * 1024 * 1024 // 90 MB
 const MAX_RETRIES = 3
 const RETRY_DELAY_MS = 2000
+// 對齊後端 USER_CHUNK_CONCURRENCY（src/routers/uploads.py）。
+// 超過此值 chunk 會排隊在 user semaphore 上等不到效益，反而吃 nginx 429 風險。
+const PARALLEL_CHUNKS = 3
 
 // 單檔上限：須與後端 MAX_UPLOAD_SIZE_MB 一致（預設 3 GB）
 export const MAX_UPLOAD_SIZE_MB = 3072
@@ -49,18 +52,35 @@ export async function uploadChunked(file, { onProgress } = {}) {
   })
   const { upload_id, total_chunks } = initRes.data
 
-  // 2. 逐片上傳
-  for (let i = 0; i < total_chunks; i++) {
-    const start = i * CHUNK_SIZE
-    const end = Math.min(start + CHUNK_SIZE, file.size)
-    const blob = file.slice(start, end)
+  // 2. Worker pool 並行上傳（PARALLEL_CHUNKS 個 worker 從共享 queue 各自取 index）
+  const queue = Array.from({ length: total_chunks }, (_, i) => i)
+  let completed = 0
+  let aborted = false
 
-    await uploadChunkWithRetry(upload_id, i, blob)
-
-    if (onProgress) {
-      onProgress(Math.round(((i + 1) / total_chunks) * 100))
+  async function worker() {
+    while (!aborted && queue.length > 0) {
+      // JS single-thread，shift() 原子；多 worker 不會搶到同 index
+      const i = queue.shift()
+      if (i === undefined) return
+      try {
+        const start = i * CHUNK_SIZE
+        const end = Math.min(start + CHUNK_SIZE, file.size)
+        const blob = file.slice(start, end)
+        await uploadChunkWithRetry(upload_id, i, blob)
+        completed++
+        if (onProgress) {
+          onProgress(Math.round((completed / total_chunks) * 100))
+        }
+      } catch (err) {
+        // 任一 chunk 重試耗盡：通知其他 worker 停下、整體 fail-fast
+        aborted = true
+        throw err
+      }
     }
   }
+
+  const workerCount = Math.min(PARALLEL_CHUNKS, total_chunks)
+  await Promise.all(Array.from({ length: workerCount }, () => worker()))
 
   // 3. 完成組裝
   const completeRes = await api.post(NEW_ENDPOINTS.uploads.complete(upload_id))

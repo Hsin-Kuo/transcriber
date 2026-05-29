@@ -7,6 +7,7 @@ import os
 import asyncio
 import signal
 import subprocess
+import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
@@ -332,6 +333,9 @@ async def startup_event():
     logger.info("app.orphaned_tasks.cleaning")
     await task_service.cleanup_orphaned_tasks()
 
+    # 4.5 Event loop tick monitor（每 replica 都要跑，給自己的 /health 用，不受 RUN_BACKGROUND_JOBS 控制）
+    create_background_task(_loop_tick_monitor(), name="loop_tick_monitor")
+
     # 5. 啟動所有定期背景任務
     # 多 replica 場景下這些任務會在每個 instance 跑一次，等效但浪費 DB+log。
     # 在非主 replica 設 RUN_BACKGROUND_JOBS=false 跳過，主 replica 預設保持啟用。
@@ -488,9 +492,34 @@ async def root():
     }
 
 
+# ── Event loop liveness 監控 ──────────────────────────────
+# 背景任務每秒寫 _last_loop_tick，/health 用它判斷 event loop 是否被卡住。
+# 卡住的成因例如：handler 內做 sync I/O、ProcessPool 阻塞、無意中 await 太久等。
+# 若 event loop 完全停轉，/health 本身就不會回應，連 ping DB 都跑不到 — 所以這
+# 個 metric 主要抓「快卡住但還沒完全死」的中間狀態（1-3s 停頓）。
+_last_loop_tick: float = 0.0
+LOOP_STALL_DEGRADED_THRESHOLD = 3.0  # > 3s 沒 tick 列為 degraded
+
+
+async def _loop_tick_monitor() -> None:
+    """每秒更新 _last_loop_tick，極低成本（一個 sleep 而已）。"""
+    global _last_loop_tick
+    _last_loop_tick = time.monotonic()
+    while True:
+        await asyncio.sleep(1)
+        _last_loop_tick = time.monotonic()
+
+
+def _loop_stall_seconds() -> float:
+    """距離上次 tick 過了幾秒。startup 完成前回 0.0（背景任務還沒啟動）。"""
+    if _last_loop_tick == 0.0:
+        return 0.0
+    return round(time.monotonic() - _last_loop_tick, 3)
+
+
 @app.get("/health")
 async def health_check():
-    """健康檢查端點：實際 ping DB，degraded 時回 503 讓 LB / CloudWatch 抓得到"""
+    """健康檢查端點：實際 ping DB + 偵測 event loop stall，degraded 時回 503"""
     db_status = "unknown"
     db_error = None
     try:
@@ -508,7 +537,11 @@ async def health_check():
         db_status = "error"
         db_error = str(e)[:200]
 
-    healthy = db_status == "connected"
+    stall = _loop_stall_seconds()
+    db_ok = db_status == "connected"
+    loop_ok = stall <= LOOP_STALL_DEGRADED_THRESHOLD
+    healthy = db_ok and loop_ok
+
     body = {
         "status": "healthy" if healthy else "degraded",
         "deploy_env": DEPLOY_ENV,
@@ -516,9 +549,12 @@ async def health_check():
         "whisper_model": current_model_name,
         "diarization_available": diarization_pipeline is not None,
         "database": db_status,
+        "loop_stall_seconds": stall,
     }
     if db_error:
         body["database_error"] = db_error
+    if not loop_ok:
+        body["loop_warning"] = f"event loop stalled {stall}s (>{LOOP_STALL_DEGRADED_THRESHOLD}s threshold)"
     if not healthy:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=body)
     return body
