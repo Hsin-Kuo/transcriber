@@ -276,6 +276,10 @@ async def startup_event():
         from src.database.repositories.processed_webhook_repo import ProcessedWebhookRepository
         processed_webhook_repo_init = ProcessedWebhookRepository(db)
         await processed_webhook_repo_init.create_indexes()
+        # 建立 chunk_uploads 索引（分片上傳 metadata；過期由 periodic_chunk_upload_cleanup 處理）
+        from src.database.repositories.chunk_upload_repo import ChunkUploadRepository
+        chunk_upload_repo_init = ChunkUploadRepository(db)
+        await chunk_upload_repo_init.create_indexes()
         # 建立 Tags 索引（(user_id, name) unique 杜絕並發 race 重複 tag）
         # 注意：若 tags collection 已有重複資料，unique index 建立會失敗；
         # 用獨立 try/except 包住，僅記錄 warning，不影響其他索引與服務啟動。
@@ -363,6 +367,13 @@ async def startup_event():
         create_background_task(
             periodic_subscription_expiry_check(db),
             name="periodic_subscription_expiry_check",
+        )
+
+        # 5.5 定期 chunk uploads 清掃（過期 metadata + temp_dir）
+        from src.routers.uploads import periodic_chunk_upload_cleanup
+        create_background_task(
+            periodic_chunk_upload_cleanup(db),
+            name="periodic_chunk_upload_cleanup",
         )
     else:
         logger.info("app.background_jobs.disabled", reason="RUN_BACKGROUND_JOBS=false")

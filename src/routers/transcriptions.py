@@ -14,6 +14,8 @@ import json
 import shutil
 import mimetypes
 
+import aiofiles
+
 from ..auth.dependencies import get_current_user
 from ..database.mongodb import get_database
 from ..database.repositories.task_repo import TaskRepository
@@ -40,6 +42,16 @@ from ..services.task_dispatch import (
 
 router = APIRouter(prefix="/transcriptions", tags=["Transcriptions"])
 log = get_logger(__name__)
+
+
+async def _stream_upload_to(upload_file: UploadFile, dest_path: Path) -> None:
+    """Streaming UploadFile -> 磁碟，避免 await read() 一次性把整檔載入 RAM + sync write 卡 event loop。"""
+    async with aiofiles.open(dest_path, "wb") as out:
+        while True:
+            buf = await upload_file.read(1024 * 1024)
+            if not buf:
+                break
+            await out.write(buf)
 
 
 # 全域處理器單例（在啟動時初始化；router 用 _diarization_processor 檢查可用性）
@@ -195,19 +207,16 @@ async def _assemble_upload(
 
     這是正當的 router 責任：把原始 HTTP 請求轉成 service 可消費的 Path。
     """
-    from .uploads import get_upload_meta, remove_upload, MAX_UPLOAD_SIZE, MAX_UPLOAD_SIZE_MB
+    from .uploads import consume_upload, MAX_UPLOAD_SIZE, MAX_UPLOAD_SIZE_MB
     from src.services.audio_service import AudioService
 
     user_id = str(current_user["_id"])
 
     # ── 單檔分片上傳 ──
     if upload_id:
-        meta = get_upload_meta(upload_id)
+        meta = await consume_upload(upload_id, user_id)
         if not meta:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "upload_id 無效或尚未完成組裝")
-        if meta["user_id"] != user_id:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "無權使用此上傳")
-        remove_upload(upload_id)
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "upload_id 無效、尚未完成組裝、或無權使用")
         temp_dir = meta["temp_dir"]
         file_path = meta["assembled_path"]
         filename = custom_name.strip() if custom_name and custom_name.strip() else file_path.name
@@ -226,16 +235,11 @@ async def _assemble_upload(
         merge_paths = []
         merge_temp_dirs = []
         for uid in uid_list:
-            meta = get_upload_meta(uid)
+            meta = await consume_upload(uid, user_id)
             if not meta:
                 for d in merge_temp_dirs:
                     if d.exists(): shutil.rmtree(d)
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, f"upload_id {uid} 無效或尚未完成組裝")
-            if meta["user_id"] != user_id:
-                for d in merge_temp_dirs:
-                    if d.exists(): shutil.rmtree(d)
-                raise HTTPException(status.HTTP_403_FORBIDDEN, "無權使用此上傳")
-            remove_upload(uid)
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, f"upload_id {uid} 無效、尚未完成組裝、或無權使用")
             merge_paths.append(meta["assembled_path"])
             merge_temp_dirs.append(meta["temp_dir"])
 
@@ -277,8 +281,7 @@ async def _assemble_upload(
         for idx, uf in enumerate(uploaded_files):
             suffix = Path(uf.filename).suffix
             temp_path = temp_dir / f"input_{idx}{suffix}"
-            with temp_path.open("wb") as f:
-                f.write(await uf.read())
+            await _stream_upload_to(uf, temp_path)
             try:
                 validate_magic_bytes(temp_path)
             except HTTPException:
@@ -298,9 +301,7 @@ async def _assemble_upload(
         uf = uploaded_files[0]
         suffix = Path(uf.filename).suffix
         file_path = temp_dir / f"input{suffix}"
-        content = await uf.read()
-        with file_path.open("wb") as f:
-            f.write(content)
+        await _stream_upload_to(uf, file_path)
         try:
             validate_magic_bytes(file_path)
         except HTTPException:
@@ -1229,19 +1230,16 @@ async def create_batch_transcriptions(
     intake_service.set_diarization_available(bool(_diarization_processor))
 
     # ── 建立處理列表 ──
-    from .uploads import get_upload_meta, remove_upload
+    from .uploads import consume_upload
 
     _batch_items = []
     for i, uf in enumerate(files):
         _batch_items.append((i, uf, None))
+    user_id_str = str(current_user["_id"])
     for str_idx, uid in chunked_uploads_map.items():
         global_idx = int(str_idx)
-        meta = get_upload_meta(uid)
-        if meta and meta["user_id"] == str(current_user["_id"]):
-            remove_upload(uid)
-            _batch_items.append((global_idx, None, meta))
-        else:
-            _batch_items.append((global_idx, None, None))
+        meta = await consume_upload(uid, user_id_str)
+        _batch_items.append((global_idx, None, meta))  # meta=None 代表 consume 失敗
     _batch_items.sort(key=lambda x: x[0])
 
     # ── 逐檔呼叫 intake() ──
@@ -1268,9 +1266,7 @@ async def create_batch_transcriptions(
                 temp_dir = get_temp_dir()
                 suffix = Path(upload_file.filename).suffix
                 file_path = temp_dir / f"input{suffix}"
-                content = await upload_file.read()
-                with file_path.open("wb") as f:
-                    f.write(content)
+                await _stream_upload_to(upload_file, file_path)
                 validate_magic_bytes(file_path)
                 original_filename = upload_file.filename
 

@@ -15,6 +15,7 @@ fastapi
 uvicorn[standard]
 python-multipart
 motor
+aiofiles
 
 # 結構化 logging
 structlog
