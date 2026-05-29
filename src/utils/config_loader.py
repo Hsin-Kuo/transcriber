@@ -16,7 +16,6 @@ import shutil
 import tempfile
 from pathlib import Path
 from typing import Optional
-from functools import lru_cache
 
 from src.utils.logger import get_logger
 
@@ -87,12 +86,18 @@ def _get_ssm():
     return _ssm_client
 
 
-@lru_cache(maxsize=64)
+_param_cache: dict[tuple, str] = {}
+
+
 def get_parameter(name: str, fallback_env: Optional[str] = None, default: str = "") -> str:
     """讀取設定參數
 
-    AWS 模式：從 SSM Parameter Store 讀取（帶快取）
+    AWS 模式：從 SSM Parameter Store 讀取
     Local 模式：從環境變數讀取
+
+    Cache 政策：**只 cache 非空回傳值** — 避免「server 啟動時 SSM 暫時不通
+    導致回空 → lru_cache 鎖死空值 → 之後永遠回 500」這種 poison 情境。
+    secrets 為空一定是錯，重打 SSM 比 cache 錯誤值好。
 
     Args:
         name: SSM 參數名稱（例如 /transcriber/jwt-secret）
@@ -102,18 +107,23 @@ def get_parameter(name: str, fallback_env: Optional[str] = None, default: str = 
     Returns:
         參數值
     """
+    cache_key = (name, fallback_env, default)
+    cached = _param_cache.get(cache_key)
+    if cached:
+        return cached
+
     if DEPLOY_ENV == "aws":
         try:
             resp = _get_ssm().get_parameter(Name=name, WithDecryption=True)
-            return resp["Parameter"]["Value"]
+            value = resp["Parameter"]["Value"]
         except Exception as e:
             log.warning("config.ssm_read_failed", parameter=name, error=str(e))
             # Fallback 到環境變數
-            if fallback_env:
-                return os.getenv(fallback_env, default)
-            return default
+            value = os.getenv(fallback_env, default) if fallback_env else default
     else:
         # 本地模式：直接讀環境變數
-        if fallback_env:
-            return os.getenv(fallback_env, default)
-        return default
+        value = os.getenv(fallback_env, default) if fallback_env else default
+
+    if value:
+        _param_cache[cache_key] = value
+    return value

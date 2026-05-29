@@ -26,6 +26,16 @@ class UserRepository:
             [("reserved_ai_summaries", 1)],
             partialFilterExpression={"reserved_ai_summaries": {"$gt": 0}},
         )
+        # Email 是熱路徑 query key（register 查重、login、webhook 標 bounce 等）
+        # — Atlas 預設可能已自動建索引，但 code 端明示一份，部署到新環境也安全。
+        # 用 partial index 排除 soft-delete user（email=None）避免與 unique 衝突；
+        # 暫不開 unique=True 是因為現有 soft-delete 行為下兩個 deleted user 都會
+        # 是 email=null 不該被視為衝突，且 register 流程的 duplicate-check 已在
+        # application 層保證唯一性。
+        await self.collection.create_index(
+            "email",
+            partialFilterExpression={"email": {"$type": "string"}},
+        )
         log.info("user.indexes.created")
 
     async def create(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -65,6 +75,51 @@ class UserRepository:
     async def get_by_google_id(self, google_id: str) -> Optional[Dict[str, Any]]:
         """根據 Google ID 獲取用戶"""
         return await self.collection.find_one({"google_id": google_id})
+
+    async def mark_email_bounced(
+        self,
+        email: str,
+        event_type: str,
+        reason: Optional[str] = None,
+    ) -> bool:
+        """標記 email 為 bounced / complained。
+
+        比對方式為精確比對（不做大小寫 normalize），與 get_by_email 一致：
+        Resend 在事件 payload 中回傳的 `to` 與我們呼叫 send 時送出的字串
+        完全相同，因此能直接命中 user record。
+
+        Args:
+            email: 收件地址（須與 user.email 完全一致）
+            event_type: 'bounced' | 'complained'
+            reason: provider 給的原因（可選）
+
+        Returns:
+            True 若找到對應 user（不論是否有實際欄位變動）；False 表示
+            找不到對應 user（可能該 email 未註冊但仍收到 webhook，例如
+            admin 通知或 system test 寄出的信）。
+
+            使用 matched_count 而非 modified_count 是為了正確處理「同一
+            user 因不同事件多次被標記」的場景：例如先 bounced 後 suppressed，
+            兩次 svix_id 不同（不會被 idempotency 擋）但欄位值不變，
+            modified_count=0 會讓 caller 誤以為 user 不存在。
+        """
+        now = get_utc_timestamp()
+        result = await self.collection.update_one(
+            {"email": email},
+            {
+                # 最近一筆事件覆寫 event/reason；email_bounce_at 用 $min 保留
+                # 最早 bounce 時間（同 user 先 bounced 後 suppressed 時，
+                # 最早事件才是真正的 deliverability 死亡時間點）
+                "$set": {
+                    "email_bounced": True,
+                    "email_bounce_event": event_type,
+                    "email_bounce_reason": reason,
+                    "updated_at": now,
+                },
+                "$min": {"email_bounce_at": now},
+            },
+        )
+        return result.matched_count > 0
 
     async def delete(self, user_id: str) -> bool:
         """刪除用戶。InvalidId 視為「沒有這個 user」，其他異常往上拋。"""

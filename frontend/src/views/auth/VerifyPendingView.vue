@@ -2,56 +2,101 @@
   <div class="auth-container">
     <div class="auth-card">
       <div class="auth-content">
-        <div class="pending-icon">{{ initialSent ? '✉️' : '⚠️' }}</div>
+        <!-- ===== Bounced / Complained 狀態：email 收信異常 ===== -->
+        <template v-if="bounced">
+          <div class="pending-icon">❌</div>
 
-        <h1 class="auth-title">
-          {{ initialSent ? '請查看您的信箱' : '帳號已建立，請重發驗證信' }}
-        </h1>
+          <h1 class="auth-title">
+            {{ status === 'complained' ? '此 Email 已標記為拒收' : 'Email 似乎無法送達' }}
+          </h1>
 
-        <p class="auth-subtitle">
-          <template v-if="initialSent">
-            我們已將驗證連結寄到 <strong>{{ email }}</strong>，點開連結即可完成註冊。
-          </template>
-          <template v-else>
-            帳號 <strong>{{ email }}</strong> 已建立，但驗證信寄送暫時失敗。請按下方按鈕重新寄送。
-          </template>
-        </p>
-
-        <div class="hint-box">
-          <p class="hint-title">沒收到信？</p>
-          <ul class="hint-list">
-            <li>確認是否進到「垃圾郵件」或「促銷活動」資料夾</li>
-            <li>確認 email 地址沒打錯（目前是 <code>{{ email }}</code>）</li>
-            <li>等候一兩分鐘後再重新寄送</li>
-          </ul>
-        </div>
-
-        <!-- 重發按鈕 + cooldown -->
-        <button
-          type="button"
-          class="btn-primary"
-          :disabled="cooldownRemaining > 0 || resending"
-          @click="handleResend"
-        >
-          <span v-if="resending">寄送中...</span>
-          <span v-else-if="cooldownRemaining > 0">{{ cooldownRemaining }} 秒後可重新寄送</span>
-          <span v-else>重新寄送驗證信</span>
-        </button>
-
-        <!-- 重發結果訊息 -->
-        <div v-if="resendNotice" :class="['notice', resendError ? 'notice-error' : 'notice-success']">
-          {{ resendNotice }}
-        </div>
-
-        <div class="auth-footer">
-          <p>
-            收到信並完成驗證後，
-            <router-link to="/login">前往登入</router-link>
+          <p class="auth-subtitle">
+            <template v-if="status === 'complained'">
+              我們收到了 <strong>{{ email }}</strong> 的收件方標示「不想再收信」，將不再嘗試寄送。
+            </template>
+            <template v-else>
+              <strong>{{ email }}</strong> 收信失敗 — 信箱可能不存在或拼字有誤。
+            </template>
           </p>
-          <p class="muted">
-            打錯 email？<router-link to="/register">回到註冊頁</router-link>
+
+          <div class="hint-box hint-box-warning">
+            <p class="hint-title">您可以：</p>
+            <ul class="hint-list">
+              <li>確認 email 拼字（漏字母 / 多字母 / 域名打錯）</li>
+              <li>使用其他 email 重新註冊</li>
+            </ul>
+          </div>
+
+          <button
+            type="button"
+            class="btn-primary"
+            :disabled="abandoning"
+            @click="handleAbandon"
+          >
+            <span v-if="abandoning">處理中...</span>
+            <span v-else>改用其他 email 重新註冊</span>
+          </button>
+
+          <div class="auth-footer">
+            <p class="muted">
+              如果您確定 email 沒打錯，請聯絡支援團隊
+            </p>
+          </div>
+        </template>
+
+        <!-- ===== 正常 pending / verified 狀態 ===== -->
+        <template v-else>
+          <div class="pending-icon">{{ initialSent ? '✉️' : '⚠️' }}</div>
+
+          <h1 class="auth-title">
+            {{ initialSent ? '請查看您的信箱' : '帳號已建立，請重發驗證信' }}
+          </h1>
+
+          <p class="auth-subtitle">
+            <template v-if="initialSent">
+              我們已將驗證連結寄到 <strong>{{ email }}</strong>，點開連結即可完成註冊。
+            </template>
+            <template v-else>
+              帳號 <strong>{{ email }}</strong> 已建立，但驗證信寄送暫時失敗。請按下方按鈕重新寄送。
+            </template>
           </p>
-        </div>
+
+          <div class="hint-box">
+            <p class="hint-title">沒收到信？</p>
+            <ul class="hint-list">
+              <li>確認是否進到「垃圾郵件」或「促銷活動」資料夾</li>
+              <li>確認 email 地址沒打錯（目前是 <code>{{ email }}</code>）</li>
+              <li>等候一兩分鐘後再重新寄送</li>
+            </ul>
+          </div>
+
+          <!-- 重發按鈕 + cooldown -->
+          <button
+            type="button"
+            class="btn-primary"
+            :disabled="cooldownRemaining > 0 || resending"
+            @click="handleResend"
+          >
+            <span v-if="resending">寄送中...</span>
+            <span v-else-if="cooldownRemaining > 0">{{ cooldownRemaining }} 秒後可重新寄送</span>
+            <span v-else>重新寄送驗證信</span>
+          </button>
+
+          <!-- 重發結果訊息 -->
+          <div v-if="resendNotice" :class="['notice', resendError ? 'notice-error' : 'notice-success']">
+            {{ resendNotice }}
+          </div>
+
+          <div class="auth-footer">
+            <p>
+              收到信並完成驗證後，
+              <router-link to="/login">前往登入</router-link>
+            </p>
+            <p class="muted">
+              打錯 email？<router-link to="/register">回到註冊頁</router-link>
+            </p>
+          </div>
+        </template>
       </div>
     </div>
   </div>
@@ -61,9 +106,11 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '../../utils/api'
+import { useAuthStore } from '../../stores/auth'
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 
 // 後端 cooldown = 60s（src/routers/auth.py: RESEND_VERIFICATION_COOLDOWN_SECONDS）
 const COOLDOWN_SECONDS = 60
@@ -77,7 +124,16 @@ const resending = ref(false)
 const resendNotice = ref('')
 const resendError = ref(false)
 
+// 'pending' | 'verified' | 'bounced' | 'complained'
+const status = ref('pending')
+const bounced = computed(() => status.value === 'bounced' || status.value === 'complained')
+const abandoning = ref(false)
+
 let timer = null
+let pollTimer = null
+const POLL_INTERVAL_MS = 15_000
+const POLL_MAX_DURATION_MS = 5 * 60_000  // 5 分鐘上限
+let pollStartedAt = 0
 
 function startCooldown(seconds = COOLDOWN_SECONDS) {
   cooldownRemaining.value = seconds
@@ -89,6 +145,49 @@ function startCooldown(seconds = COOLDOWN_SECONDS) {
       timer = null
     }
   }, 1000)
+}
+
+async function pollStatus() {
+  if (!email.value) return
+  try {
+    const { data } = await api.get('/auth/registration-status', {
+      params: { email: email.value }
+    })
+    status.value = data.status || 'pending'
+
+    if (status.value === 'verified') {
+      // 另一個 tab 已完成驗證 + auto-login（P0-2）→ localStorage 已有 token
+      stopPolling()
+      // 跨 tab 同步 auth store；成功則 user 已登入，落到首頁
+      await authStore.initialize()
+      router.push(authStore.isAuthenticated ? '/' : '/login')
+    } else if (bounced.value) {
+      // bounce / complaint → 終態，停止 poll
+      stopPolling()
+    }
+  } catch (err) {
+    // poll 失敗只是暫時 — 不打斷 user，下次再試
+  }
+}
+
+function startPolling() {
+  pollStartedAt = Date.now()
+  // 立即跑一次（剛收到 webhook 的 case）
+  pollStatus()
+  pollTimer = setInterval(() => {
+    if (Date.now() - pollStartedAt > POLL_MAX_DURATION_MS) {
+      stopPolling()
+      return
+    }
+    pollStatus()
+  }, POLL_INTERVAL_MS)
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
 }
 
 onMounted(() => {
@@ -103,11 +202,26 @@ onMounted(() => {
   } else {
     cooldownRemaining.value = 0
   }
+  startPolling()
 })
 
 onBeforeUnmount(() => {
   if (timer) clearInterval(timer)
+  stopPolling()
 })
+
+async function handleAbandon() {
+  if (abandoning.value) return
+  abandoning.value = true
+  try {
+    // 後端永遠回 200，這裡的 await 主要是等刪除完成再跳轉
+    await api.post('/auth/abandon-registration', { email: email.value })
+  } catch (err) {
+    // 即使失敗也帶用戶回 register — UX 比 strict 重要
+  } finally {
+    router.replace('/register')
+  }
+}
 
 async function handleResend() {
   if (resending.value || cooldownRemaining.value > 0) return
@@ -120,6 +234,9 @@ async function handleResend() {
     resendNotice.value = '驗證信已重新寄出，請查看您的信箱'
     resendError.value = false
     startCooldown()
+    // 重新計算 poll 視窗，給新一輪寄信完整 5 分鐘的監測時間
+    stopPolling()
+    startPolling()
   } catch (err) {
     const status = err.response?.status
     const detail = err.response?.data?.detail
@@ -190,6 +307,16 @@ async function handleResend() {
   padding: 16px 20px;
   text-align: left;
   width: 100%;
+}
+
+.hint-box.hint-box-warning {
+  background: #fff3cd;
+  border: 1px solid #ffeeba;
+}
+
+.hint-box.hint-box-warning .hint-title,
+.hint-box.hint-box-warning .hint-list {
+  color: #856404;
 }
 
 .hint-title {

@@ -1,0 +1,190 @@
+"""Resend webhook 端點 — 接收 bounce / complaint 事件並標記 user。
+
+Resend 在 email 投遞失敗或被收件人標 spam 時會 POST 事件到設定的 URL。
+冪等性由 ProcessedWebhookRepository（_id unique 約束）保證。
+
+Ops 設定：
+1. Resend dashboard → Webhooks → Add Endpoint:
+       URL: https://soundlite.app/webhooks/resend
+       Events: email.bounced, email.complained
+2. 把 Resend 給的 webhook secret（whsec_...）放到：
+       - SSM: /transcriber/resend-webhook-secret
+       - 或 env: RESEND_WEBHOOK_SECRET
+"""
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+
+from ..database.mongodb import get_database
+from ..database.repositories.processed_webhook_repo import ProcessedWebhookRepository
+from ..database.repositories.user_repo import UserRepository
+from ..utils.audit_logger import get_audit_logger
+from ..utils.config_loader import get_parameter
+from ..utils.logger import get_logger
+from ..utils.privacy import mask_email
+from ..utils.resend_webhook import (
+    InvalidWebhookSignature,
+    verify_signature,
+)
+
+router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
+log = get_logger(__name__)
+
+
+# 認定為「永久失敗」的事件 → 標 email_bounced
+# - email.bounced:    收件方 server 永久拒絕（hard bounce）
+# - email.complained: 用戶按 mark as spam
+# - email.suppressed: Resend 自己 suppression list 攔下（通常源於先前 bounce）
+#
+# 故意不放 email.failed：該事件涵蓋「無效收件人」與「我們的 API key /
+# domain / 配額問題」，後者不該歸咎於使用者的 email。要做的話需要解析
+# data.failed.reason，目前先 log 不自動處理。
+HARD_FAIL_EVENTS = {"email.bounced", "email.complained", "email.suppressed"}
+
+
+@router.post("/resend")
+async def resend_webhook(
+    request: Request,
+    db=Depends(get_database),
+):
+    """接收 Resend 推送的 email 事件。"""
+    audit_logger = get_audit_logger()
+
+    # 1. 取 secret（SSM 優先，env fallback）
+    secret = get_parameter(
+        "/transcriber/resend-webhook-secret",
+        fallback_env="RESEND_WEBHOOK_SECRET",
+    )
+    if not secret:
+        log.error("resend_webhook.no_secret_configured")
+        # 不暴露細節；只回 500 讓 ops 看 log
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "webhook misconfigured")
+
+    # 2. 驗簽
+    raw_body = await request.body()
+    try:
+        verify_signature(
+            secret=secret,
+            svix_id=request.headers.get("svix-id", ""),
+            svix_timestamp=request.headers.get("svix-timestamp", ""),
+            svix_signature=request.headers.get("svix-signature", ""),
+            raw_body=raw_body,
+        )
+    except InvalidWebhookSignature as e:
+        log.warning(
+            "resend_webhook.signature_failed",
+            reason=str(e),
+            remote=request.client.host if request.client else None,
+        )
+        await audit_logger.log_auth(
+            request=request,
+            action="resend_webhook_invalid_signature",
+            user_id=None,
+            status_code=401,
+            message=f"webhook 簽名驗證失敗: {e}",
+        )
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid signature")
+
+    # 3. 解析 body
+    try:
+        payload = json.loads(raw_body.decode("utf-8"))
+    except json.JSONDecodeError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid json body")
+
+    event_type = payload.get("type", "")
+    data = payload.get("data") or {}
+    # Resend event data 中 to 官方文件是 array，但歷史上偶見字串；
+    # 過濾出真正有 @ 的字串，擋掉空字串 / dict / 怪資料。
+    to_field = data.get("to")
+    if isinstance(to_field, list):
+        recipients = [
+            x.strip() for x in to_field
+            if isinstance(x, str) and "@" in x and x.strip()
+        ]
+    elif isinstance(to_field, str) and "@" in to_field and to_field.strip():
+        recipients = [to_field.strip()]
+    else:
+        recipients = []
+
+    svix_id = request.headers.get("svix-id", "")
+
+    log.info(
+        "resend_webhook.received",
+        event=event_type,
+        svix_id=svix_id,
+        recipients=[mask_email(r) for r in recipients],
+    )
+
+    # 4. 先過濾事件類型 — 只對 hard-fail 才寫 processed_webhooks
+    # （否則 email.delivered / opened / clicked 等高頻事件會塞爆 collection）
+    if event_type not in HARD_FAIL_EVENTS:
+        return {"status": "ignored", "event": event_type}
+
+    # hard-fail 但收件人空（payload schema 異常）→ 仍 ack 200 但不佔 claim
+    if not recipients:
+        log.warning(
+            "resend_webhook.hard_fail_no_recipients",
+            event=event_type,
+            svix_id=svix_id,
+            payload_keys=list(data.keys()),
+        )
+        return {"status": "ignored", "event": event_type, "reason": "no_recipients"}
+
+    # 5. 冪等性：用 svix-id 當 natural_id
+    webhook_repo = ProcessedWebhookRepository(db)
+    natural_id = svix_id or f"no-id-{event_type}-{data.get('email_id', '')}"
+    if not await webhook_repo.claim(
+        provider="resend",
+        natural_id=natural_id,
+        metadata={"event": event_type},
+    ):
+        log.info("resend_webhook.duplicate_skipped", svix_id=svix_id)
+        return {"status": "duplicate"}
+
+    # 6. 標記受影響 user（失敗時 release claim 讓 Resend 重試能重新處理）
+    try:
+        user_repo = UserRepository(db)
+        short_event = event_type.split(".", 1)[-1]  # "bounced" / "complained" / "suppressed"
+
+        # 從不同 event schema 抽 reason：
+        #   bounced:    data.bounce.message + data.bounce.subType
+        #   complained: 通常無 reason 欄位
+        #   suppressed: 推測 data.suppressed.reason（schema 未官方確認）
+        bounce_info = data.get("bounce") or {}
+        suppressed_info = data.get("suppressed") or {}
+        reason = (
+            bounce_info.get("message")
+            or bounce_info.get("subType")
+            or suppressed_info.get("reason")
+            or None
+        )
+
+        marked = 0
+        for to_email in recipients:
+            ok = await user_repo.mark_email_bounced(
+                email=to_email,
+                event_type=short_event,
+                reason=reason,
+            )
+            if ok:
+                marked += 1
+                await audit_logger.log_auth(
+                    request=request,
+                    action=f"email_{short_event}",
+                    user_id=None,
+                    status_code=200,
+                    message=f"email {short_event}: {to_email} ({reason or 'no reason'})",
+                )
+
+        log.info(
+            "resend_webhook.processed",
+            event=event_type,
+            recipients=[mask_email(r) for r in recipients],
+            marked=marked,
+        )
+        return {"status": "ok", "event": event_type, "marked": marked}
+    except Exception:
+        # DB 抖動 / mark_email_bounced 失敗 → release claim 讓 Resend 重試能再進來
+        await webhook_repo.release(provider="resend", natural_id=natural_id)
+        log.error("resend_webhook.processing_failed", svix_id=svix_id, exc_info=True)
+        raise

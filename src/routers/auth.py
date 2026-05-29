@@ -36,12 +36,22 @@ REGISTER_RATE_LIMIT_WINDOW = 3600           # 1 小時（秒）
 RESEND_VERIFICATION_MAX_PER_IP = 5          # 每 IP 每小時最多重發次數
 RESEND_VERIFICATION_MAX_PER_EMAIL = 3       # 每 Email 每小時最多重發次數
 RESEND_VERIFICATION_COOLDOWN_SECONDS = 60   # 同 Email 兩次重發最小間隔
+
+# ============================================
+# Registration status polling - 速率限制
+# ============================================
+REG_STATUS_MAX_PER_IP = 90                  # 每 IP 每分鐘最多 poll 次數（legit 用戶 ~20）
+REG_STATUS_WINDOW = 60
+
+ABANDON_REGISTRATION_MAX_PER_IP = 10        # 每 IP 每小時最多放棄註冊次數
+ABANDON_REGISTRATION_WINDOW = 3600
 from ..models.auth import (
     UserRegister,
     UserLogin,
     TokenResponse,
     ResendVerificationRequest,
     VerifyEmailRequest,
+    AbandonRegistrationRequest,
     ChangePasswordRequest,
     UserResponse,
     ForgotPasswordRequest,
@@ -57,6 +67,7 @@ from ..database.repositories.user_repo import UserRepository
 from ..database.repositories.rate_limit_repo import RateLimitRepository
 from ..utils.audit_logger import get_audit_logger
 from ..utils.email_service import get_email_service
+from ..utils.privacy import mask_email
 from ..models.quota import QUOTA_TIERS, QuotaTier
 
 from ..utils.logger import get_logger
@@ -134,6 +145,7 @@ async def register(
         await audit_logger.log_auth(
             request=request,
             action="register_duplicate",
+            user_id=str(existing_user["_id"]),
             status_code=200,
             message=f"重複註冊嘗試: {user_data.email}"
         )
@@ -288,6 +300,7 @@ async def verify_email(
         await audit_logger.log_auth(
             request=request,
             action="verify_email_invalid",
+            user_id=None,
             status_code=400,
             message="無效的驗證 token"
         )
@@ -451,6 +464,14 @@ async def resend_verification_email(
             detail="此 Email 已完成驗證"
         )
 
+    # 過去 Resend webhook 標記過 bounce/complained → 不再嘗試寄信
+    if user.get("email_bounced"):
+        log.info("auth.resend_verification.skip_bounced", email=mask_email(request.email))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="此 Email 收信異常（可能不存在或被標為垃圾），請聯絡客服處理"
+        )
+
     # 生成新的驗證 token
     verification_token = secrets.token_urlsafe(32)
     verification_expires = get_utc_timestamp() + (24 * 60 * 60)  # 24 小時後過期
@@ -479,6 +500,144 @@ async def resend_verification_email(
         "message": "驗證郵件已重新發送，請查看您的郵箱",
         "email": request.email
     }
+
+
+@router.get("/registration-status")
+async def registration_status(
+    email: str,
+    request: Request,
+    db=Depends(get_database)
+):
+    """供「請查信」中間頁 poll：回報指定 email 的註冊驗證狀態。
+
+    用於偵測 Resend webhook 標記的 bounce / complaint，讓使用者可以即時
+    重新選 email。為防 enumeration，未知 email、格式錯誤 email 都與
+    pending 同回應（不用 EmailStr 是為了避免 422 vs 200 變成「該字串是
+    否為合法 email 格式」的部分 oracle）。
+
+    Returns:
+        {"status": "pending" | "verified" | "bounced" | "complained"}
+
+    Raises:
+        HTTPException: 429 超過 rate limit
+    """
+    rate_limit_repo = RateLimitRepository(db)
+    client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+    if not client_ip:
+        client_ip = request.client.host if request.client else "unknown"
+
+    ip_allowed, _ = await rate_limit_repo.check_rate_limit(
+        limit_type="registration_status_ip",
+        key=client_ip,
+        max_requests=REG_STATUS_MAX_PER_IP,
+        window_seconds=REG_STATUS_WINDOW,
+    )
+    if not ip_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="查詢過於頻繁，請稍後再試",
+        )
+    await rate_limit_repo.record_request(
+        limit_type="registration_status_ip",
+        key=client_ip,
+        ttl_seconds=REG_STATUS_WINDOW,
+    )
+
+    # 簡易 sanity 檢查：完全不像 email 直接回 pending（不 422）以維持
+    # enumeration 一致性。實際 email 是否合法由 DB lookup 命中與否決定。
+    if "@" not in email or len(email) > 320:
+        return {"status": "pending"}
+
+    # 直接以原樣 lookup（與 register 流程儲存的 email 格式一致 — pydantic
+    # EmailStr 只 lowercase domain，保留 localpart 大小寫）
+    user_repo = UserRepository(db)
+    user = await user_repo.get_by_email(email)
+
+    # 未知 email → 偽裝成 pending，避免變成 enumeration oracle
+    if not user:
+        return {"status": "pending"}
+
+    if user.get("email_verified"):
+        return {"status": "verified"}
+
+    if user.get("email_bounced"):
+        # 區分 bounce / complaint 讓前端可顯示不同訊息
+        event = user.get("email_bounce_event", "bounced")
+        return {"status": event}
+
+    return {"status": "pending"}
+
+
+@router.post("/abandon-registration")
+async def abandon_registration(
+    payload: AbandonRegistrationRequest,
+    request: Request,
+    db=Depends(get_database)
+):
+    """放棄已 bounce 的未驗證註冊 — 刪除 user record 讓使用者可換 email 重來。
+
+    安全條件：只有 (未驗證 AND email_bounced) 的 user 會被刪除。已驗證帳號
+    永遠不會經此路徑刪除 — 真實用戶不會誤刪。
+
+    為防 enumeration，無論 user 存在與否、是否符合刪除條件，一律回 200。
+    """
+    rate_limit_repo = RateLimitRepository(db)
+    audit_logger = get_audit_logger()
+    client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+    if not client_ip:
+        client_ip = request.client.host if request.client else "unknown"
+
+    ip_allowed, _ = await rate_limit_repo.check_rate_limit(
+        limit_type="abandon_registration_ip",
+        key=client_ip,
+        max_requests=ABANDON_REGISTRATION_MAX_PER_IP,
+        window_seconds=ABANDON_REGISTRATION_WINDOW,
+    )
+    if not ip_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="請求過於頻繁，請稍後再試",
+        )
+    await rate_limit_repo.record_request(
+        limit_type="abandon_registration_ip",
+        key=client_ip,
+        ttl_seconds=ABANDON_REGISTRATION_WINDOW,
+    )
+
+    # 格式 sanity（與 registration-status 一致），不合法直接 200 不查 DB
+    if "@" not in payload.email or len(payload.email) > 320:
+        return {"status": "ok"}
+
+    # lookup 用原樣 email（與 register 寫入時一致）
+    user_repo = UserRepository(db)
+    user = await user_repo.get_by_email(payload.email)
+
+    deleted = False
+    # 安全雙重檢查：必須同時是「未驗證」且「已 bounced」才刪。
+    # 已驗證帳號永不經此路徑刪除 — 即使未來重構也要保留這個約束。
+    if (
+        user
+        and not user.get("email_verified")
+        and user.get("email_bounced")
+    ):
+        assert not user.get("email_verified"), \
+            "abandon-registration 不可刪除已驗證 user"
+        deleted = await user_repo.delete(str(user["_id"]))
+        if deleted:
+            await audit_logger.log_auth(
+                request=request,
+                action="abandon_registration",
+                user_id=str(user["_id"]),
+                status_code=200,
+                message=f"放棄已 bounce 的註冊: {payload.email}"
+            )
+            # rate-limit key 用 normalize 過的 email（與 register 階段一致）
+            rate_key_email = payload.email.strip().lower()
+            await rate_limit_repo.clear_records("register_email", rate_key_email)
+            await rate_limit_repo.clear_records("resend_verification_email", rate_key_email)
+            await rate_limit_repo.clear_records("resend_verification_cooldown", rate_key_email)
+
+    return {"status": "ok"}
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -940,6 +1099,19 @@ async def forgot_password(
 
     # 檢查帳號是否已激活
     if not user.get("email_verified"):
+        return success_message
+
+    # 過去 Resend webhook 標記過 bounce/complained → 靜默 skip（不洩漏狀態）
+    if user.get("email_bounced"):
+        log.info("auth.forgot_password.skip_bounced", email=mask_email(request.email))
+        audit_logger = get_audit_logger()
+        await audit_logger.log_auth(
+            request=http_request,
+            action="forgot_password_skip_bounced",
+            user_id=str(user["_id"]),
+            status_code=200,
+            message=f"密碼重設信因 email bounced 未寄出: {request.email}",
+        )
         return success_message
 
     # 檢查 Email 冷卻時間

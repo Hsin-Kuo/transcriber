@@ -41,6 +41,16 @@ class VerifyEmailRequest(BaseModel):
     token: str = Field(..., min_length=10, max_length=128)
 
 
+class AbandonRegistrationRequest(BaseModel):
+    """放棄註冊請求（用戶在 verify-pending 偵測到 email bounce 後可呼叫）
+
+    刻意用 str 而非 EmailStr — 與 GET /registration-status 一致：
+    格式錯誤的 email 也應靜默回 200，避免 422 vs 200 變成「字串是否為
+    合法 email 格式」的部分 enumeration oracle。
+    """
+    email: str = Field(..., max_length=320)
+
+
 class ChangePasswordRequest(BaseModel):
     """更改密碼請求"""
     current_password: str = Field(..., description="目前密碼")
