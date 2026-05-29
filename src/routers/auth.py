@@ -641,6 +641,9 @@ async def abandon_registration(
             await rate_limit_repo.clear_records("register_email", rate_key_email)
             await rate_limit_repo.clear_records("resend_verification_email", rate_key_email)
             await rate_limit_repo.clear_records("resend_verification_cooldown", rate_key_email)
+            # 也清掉該 IP 的 register 計數 — 用戶誠實 abandon 不該算 failed attempt，
+            # 否則連續 typo 兩三次後 IP 會被擋住無法以正確 email 重來
+            await rate_limit_repo.clear_records("register_ip", client_ip)
 
     return {"status": "ok"}
 
@@ -1106,18 +1109,18 @@ async def forgot_password(
     if not user.get("email_verified"):
         return success_message
 
-    # 過去 Resend webhook 標記過 bounce/complained → 靜默 skip（不洩漏狀態）
+    # 注意：此處故意 **不** 對 user.email_bounced 做 pre-flight skip。
+    # 已驗證 user 的 email 標 bounced 可能是暫時失敗（信箱滿、轉址抖動），
+    # 若這時 silent skip 密碼重設 → 真實用戶被永久鎖死無法自救。
+    # 寄信動作仍會走 Resend，若仍失敗交由 Resend 的 suppression 與 webhook
+    # 處理；用戶若仍收不到信可走 support。
+    # 對未驗證 user 的 bounce 阻擋仍由 resend-verification + register flow 處理。
     if user.get("email_bounced"):
-        log.info("auth.forgot_password.skip_bounced", email=mask_email(request.email))
-        audit_logger = get_audit_logger()
-        await audit_logger.log_auth(
-            request=http_request,
-            action="forgot_password_skip_bounced",
+        log.info(
+            "auth.forgot_password.attempt_for_bounced_user",
             user_id=str(user["_id"]),
-            status_code=200,
-            message=f"密碼重設信因 email bounced 未寄出: {request.email}",
+            email=mask_email(request.email),
         )
-        return success_message
 
     # 檢查 Email 冷卻時間
     last_request = user.get("password_reset_requested_at")

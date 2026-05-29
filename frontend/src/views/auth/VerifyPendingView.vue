@@ -87,6 +87,11 @@
             {{ resendNotice }}
           </div>
 
+          <!-- Polling 5 分鐘超時提示 -->
+          <div v-if="pollTimedOut" class="notice notice-info">
+            已停止自動偵測。若您已完成驗證，請手動<router-link to="/login">前往登入</router-link>。
+          </div>
+
           <div class="auth-footer">
             <p>
               收到信並完成驗證後，
@@ -126,6 +131,7 @@ const resendError = ref(false)
 const status = ref('pending')
 const bounced = computed(() => status.value === 'bounced' || status.value === 'complained')
 const abandoning = ref(false)
+const pollTimedOut = ref(false)  // 5min polling 結束仍 pending 時顯示提示
 
 let timer = null
 let pollTimer = null
@@ -149,7 +155,9 @@ async function pollStatus() {
   if (!email.value) return
   try {
     const { data } = await api.get('/auth/registration-status', {
-      params: { email: email.value }
+      params: { email: email.value },
+      // 背景 polling — 撞 429 不要彈全域 rate-limit toast 騷擾用戶
+      _silentRateLimit: true,
     })
     status.value = data.status || 'pending'
 
@@ -165,11 +173,16 @@ async function pollStatus() {
 
 function startPolling() {
   pollStartedAt = Date.now()
+  pollTimedOut.value = false
   // 立即跑一次（剛收到 webhook 的 case）
   pollStatus()
   pollTimer = setInterval(() => {
     if (Date.now() - pollStartedAt > POLL_MAX_DURATION_MS) {
       stopPolling()
+      // 仍 pending（非 bounced）才顯示 timeout 提示
+      if (!bounced.value) {
+        pollTimedOut.value = true
+      }
       return
     }
     pollStatus()
@@ -375,6 +388,12 @@ async function handleResend() {
   background: #f8d7da;
   color: #721c24;
   border: 1px solid #f5c6cb;
+}
+
+.notice-info {
+  background: #d1ecf1;
+  color: #0c5460;
+  border: 1px solid #bee5eb;
 }
 
 .auth-footer {

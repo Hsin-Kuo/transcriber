@@ -96,8 +96,10 @@ function redirectToLogin(reason: string): void {
 }
 
 // 擴充 axios config 加 _retry 標記（避免無限 refresh 迴圈）
+// 與 _silentRateLimit 讓 polling 類請求不觸發全域 toast
 interface RetryableRequest extends InternalAxiosRequestConfig {
   _retry?: boolean
+  _silentRateLimit?: boolean
 }
 
 // 這些端點的 401 不是 access token 過期 — 它們本來就不需要 token
@@ -110,6 +112,9 @@ const AUTH_ENDPOINTS_NO_REFRESH = [
   '/auth/google',
   '/auth/forgot-password',
   '/auth/reset-password',
+  // 未認證的 polling / 自助流程 — 拿到 401 應顯示對應錯誤而非觸發 refresh
+  '/auth/registration-status',
+  '/auth/abandon-registration',
 ]
 
 function shouldSkipRefresh(url: string | undefined): boolean {
@@ -180,8 +185,9 @@ api.interceptors.response.use(
     }
 
     // 429 Rate Limit：debounce 避免同時多個請求失敗時重複通知
+    // _silentRateLimit 旗標讓背景 polling 類請求（verify-pending 等）不觸發全域 toast
     if (error.response?.status === 429) {
-      if (!rateLimitNotifyTimer) {
+      if (!originalRequest?._silentRateLimit && !rateLimitNotifyTimer) {
         window.dispatchEvent(new CustomEvent('api:rate-limited'))
         rateLimitNotifyTimer = setTimeout(() => { rateLimitNotifyTimer = null }, 3000)
       }

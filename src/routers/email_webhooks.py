@@ -199,4 +199,13 @@ async def resend_webhook(
         # DB 抖動 / mark_email_bounced 失敗 → release claim 讓 Resend 重試能再進來
         await webhook_repo.release(provider="resend", natural_id=natural_id)
         log.error("resend_webhook.processing_failed", svix_id=svix_id, exc_info=True)
+        # 同時寫 audit log 方便監控 release loop（Resend 最多重試 16 次，
+        # 若同 svix_id 看到多筆 audit 代表 DB 持續異常）
+        await audit_logger.log_auth(
+            request=request,
+            action="resend_webhook_release",
+            user_id=None,
+            status_code=500,
+            message=f"webhook processing failed, claim released: svix_id={svix_id}",
+        )
         raise
