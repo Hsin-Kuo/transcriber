@@ -5,7 +5,6 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional
 import os
-from jinja2 import Template
 
 from src.utils.logger import get_logger
 from src.utils.privacy import mask_email
@@ -108,6 +107,77 @@ class EmailService:
                 smtp_host=self.smtp_host,
             )
 
+    def _render_branded_email(
+        self,
+        *,
+        heading: str,
+        intro_html: str,
+        cta_label: str,
+        cta_url: str,
+        extra_html: str = "",
+        preheader: str = "",
+    ) -> str:
+        """渲染帶品牌 logo + 主色（橘）的 email HTML。
+
+        驗證信 / 密碼重設信共用，避免 header / footer 重複。
+        - logo 從 frontend_url serve 的 PNG 載入（避免內嵌 SVG 被 Gmail/Outlook 擋）
+        - preheader 是收件匣預覽文字，視覺隱藏但會出現在主旨後面
+        - 同時輸出 VML（Outlook）與 anchor（其他 client）的雙版本 CTA
+        """
+        logo_url = f"{self.frontend_url.rstrip('/')}/web-app-manifest-192x192.png"
+        accent = "#dd8448"        # --palette-orange-primary
+        accent_dark = "#b8762d"   # --palette-orange-dark
+        return f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; background: #f8f4eb;">
+    <div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:#f8f4eb;opacity:0;">{preheader}</div>
+    <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: linear-gradient(135deg, {accent} 0%, {accent_dark} 100%); color: white; padding: 30px 20px; text-align: center; border-radius: 10px 10px 0 0;">
+            <img src="{logo_url}" width="64" height="64" alt="Sound Lite" style="display: block; margin: 0 auto 12px auto; border: 0; border-radius: 12px;" />
+            <h1 style="margin: 0; color: white; font-size: 22px; line-height: 1.3;">{heading}</h1>
+        </div>
+        <div style="background: #ffffff; padding: 30px; border-radius: 0 0 10px 10px; border: 1px solid #efe1c6; border-top: 0;">
+            {intro_html}
+            <div style="text-align: center; margin: 30px 0;">
+                <!--[if mso]>
+                <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{cta_url}" style="height:50px;v-text-anchor:middle;width:200px;" arcsize="10%" stroke="f" fillcolor="{accent}">
+                    <w:anchorlock/>
+                    <center style="color:#ffffff;font-family:sans-serif;font-size:16px;font-weight:bold;">{cta_label}</center>
+                </v:roundrect>
+                <![endif]-->
+                <!--[if !mso]><!-->
+                <a href="{cta_url}" style="display: inline-block; padding: 15px 30px; background-color: {accent}; color: #ffffff !important; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">{cta_label}</a>
+                <!--<![endif]-->
+            </div>
+            <p style="color: #666; font-size: 14px;">或者複製以下連結到瀏覽器：</p>
+            <div style="background: #f8f4eb; padding: 15px; border-left: 4px solid {accent}; margin: 20px 0; word-break: break-all; border-radius: 4px;">
+                <a href="{cta_url}" style="color: {accent_dark}; text-decoration: none; font-size: 13px;">{cta_url}</a>
+            </div>
+            {extra_html}
+        </div>
+        <div style="text-align: center; margin-top: 30px; color: #666; font-size: 12px;">
+            <p style="margin: 0 0 4px 0;">此為系統自動寄送，請勿直接回覆。</p>
+            <p style="margin: 0;">© 2026 <a href="https://soundlite.app" style="color: #666; text-decoration: none;">Sound Lite</a>. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+</html>"""
+
+    @staticmethod
+    def _render_branded_text(body: str) -> str:
+        """純文字版本：開頭加品牌行 + 統一 footer。"""
+        return (
+            "Sound Lite | https://soundlite.app\n"
+            "═════════════════════════════\n\n"
+            f"{body.strip()}\n\n"
+            "─────────────────────────────\n"
+            "此為系統自動寄送，請勿直接回覆。\n"
+        )
+
     async def send_verification_email(
         self,
         to_email: str,
@@ -124,67 +194,30 @@ class EmailService:
         """
         verification_url = f"{self.frontend_url}/verify-email?token={verification_token}"
 
-        # Email 模板 - 使用內聯樣式以確保郵件客戶端相容性
-        html_template = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-        </head>
-        <body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-                <h1 style="margin: 0; color: white;">歡迎使用 Sound Lite 服務</h1>
-            </div>
-            <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
-                <h2 style="margin-top: 0;">請驗證您的電子郵件地址</h2>
-                <p>感謝您註冊！請點擊下方按鈕驗證您的 email：</p>
+        intro_html = (
+            '<h2 style="margin-top: 0; color: #44465b;">請驗證您的電子郵件地址</h2>'
+            '<p>感謝您註冊 <span style="white-space: nowrap;">Sound Lite</span>！'
+            '請點擊下方按鈕完成 Email 驗證：</p>'
+        )
+        extra_html = (
+            '<p style="margin: 20px 0 8px 0;"><strong>注意：</strong>此驗證連結將在 24 小時後過期。</p>'
+            '<p style="color: #666; font-size: 14px;">如果您沒有註冊此帳號，請忽略此郵件。</p>'
+        )
+        html_content = self._render_branded_email(
+            heading="歡迎加入",
+            intro_html=intro_html,
+            cta_label="驗證 Email",
+            cta_url=verification_url,
+            extra_html=extra_html,
+            preheader="點此完成 Email 驗證，連結 24 小時內有效",
+        )
 
-                <div style="text-align: center; margin: 30px 0;">
-                    <!--[if mso]>
-                    <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{ verification_url }}" style="height:50px;v-text-anchor:middle;width:200px;" arcsize="10%" stroke="f" fillcolor="#667eea">
-                        <w:anchorlock/>
-                        <center style="color:#ffffff;font-family:sans-serif;font-size:16px;font-weight:bold;">驗證 Email</center>
-                    </v:roundrect>
-                    <![endif]-->
-                    <!--[if !mso]><!-->
-                    <a href="{{ verification_url }}" style="display: inline-block; padding: 15px 30px; background-color: #667eea; color: #ffffff !important; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">驗證 Email</a>
-                    <!--<![endif]-->
-                </div>
-
-                <p>或者複製以下連結到瀏覽器：</p>
-                <div style="background: #fff; padding: 15px; border-left: 4px solid #667eea; margin: 20px 0; word-break: break-all;">
-                    <a href="{{ verification_url }}" style="color: #667eea; text-decoration: none;">{{ verification_url }}</a>
-                </div>
-
-                <p><strong>注意：</strong>此驗證連結將在 24 小時後過期。</p>
-
-                <p>如果您沒有註冊此帳號，請忽略此郵件。</p>
-            </div>
-            <div style="text-align: center; margin-top: 30px; color: #666; font-size: 12px;">
-                <p style="margin: 0 0 4px 0;">此為系統自動寄送，請勿直接回覆。</p>
-                <p style="margin: 0;">© 2026 Sound Lite. All rights reserved.</p>
-            </div>
-        </body>
-        </html>
-        """
-
-        template = Template(html_template)
-        html_content = template.render(verification_url=verification_url)
-
-        # 純文字版本（備用）
-        text_content = f"""
-        歡迎使用 Sound Lite 轉錄服務！
-
-        請點擊以下連結驗證您的 email：
-        {verification_url}
-
-        此驗證連結將在 24 小時後過期。
-
-        如果您沒有註冊此帳號，請忽略此郵件。
-
-        ─────────────────────────────
-        此為系統自動寄送，請勿直接回覆。
-        """
+        text_content = self._render_branded_text(
+            f"歡迎使用 Sound Lite！\n\n"
+            f"請點擊以下連結驗證您的 email：\n{verification_url}\n\n"
+            f"此驗證連結將在 24 小時後過期。\n\n"
+            f"如果您沒有註冊此帳號，請忽略此郵件。"
+        )
 
         return await self._send_email(
             to_email=to_email,
@@ -209,67 +242,31 @@ class EmailService:
         """
         reset_url = f"{self.frontend_url}/reset-password?token={reset_token}"
 
-        # Email 模板 - 使用內聯樣式以確保郵件客戶端相容性
-        html_template = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-        </head>
-        <body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-                <h1 style="margin: 0; color: white;">密碼重設請求</h1>
-            </div>
-            <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
-                <h2 style="margin-top: 0;">重設您的密碼</h2>
-                <p>我們收到了您的密碼重設請求。請點擊下方按鈕重設您的密碼：</p>
+        intro_html = (
+            '<h2 style="margin-top: 0; color: #44465b;">重設您的密碼</h2>'
+            '<p>我們收到了您的密碼重設請求。請點擊下方按鈕設定新密碼：</p>'
+        )
+        extra_html = (
+            '<div style="background: #fff3cd; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; color: #856404; border-radius: 4px;">'
+            '<strong>注意：</strong>此連結將在 1 小時後過期。'
+            '如果您沒有請求重設密碼，請忽略此郵件，您的帳號仍然安全。'
+            '</div>'
+        )
+        html_content = self._render_branded_email(
+            heading="密碼重設請求",
+            intro_html=intro_html,
+            cta_label="重設密碼",
+            cta_url=reset_url,
+            extra_html=extra_html,
+            preheader="點此重設您的 Sound Lite 密碼，連結 1 小時內有效",
+        )
 
-                <div style="text-align: center; margin: 30px 0;">
-                    <!--[if mso]>
-                    <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{ reset_url }}" style="height:50px;v-text-anchor:middle;width:200px;" arcsize="10%" stroke="f" fillcolor="#667eea">
-                        <w:anchorlock/>
-                        <center style="color:#ffffff;font-family:sans-serif;font-size:16px;font-weight:bold;">重設密碼</center>
-                    </v:roundrect>
-                    <![endif]-->
-                    <!--[if !mso]><!-->
-                    <a href="{{ reset_url }}" style="display: inline-block; padding: 15px 30px; background-color: #667eea; color: #ffffff !important; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">重設密碼</a>
-                    <!--<![endif]-->
-                </div>
-
-                <p>或者複製以下連結到瀏覽器：</p>
-                <div style="background: #fff; padding: 15px; border-left: 4px solid #667eea; margin: 20px 0; word-break: break-all;">
-                    <a href="{{ reset_url }}" style="color: #667eea; text-decoration: none;">{{ reset_url }}</a>
-                </div>
-
-                <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; color: #856404;">
-                    <strong>注意：</strong>此連結將在 1 小時後過期。如果您沒有請求重設密碼，請忽略此郵件，您的帳號仍然安全。
-                </div>
-            </div>
-            <div style="text-align: center; margin-top: 30px; color: #666; font-size: 12px;">
-                <p style="margin: 0 0 4px 0;">此為系統自動寄送，請勿直接回覆。</p>
-                <p style="margin: 0;">© 2026 Sound Lite. All rights reserved.</p>
-            </div>
-        </body>
-        </html>
-        """
-
-        template = Template(html_template)
-        html_content = template.render(reset_url=reset_url)
-
-        # 純文字版本（備用）
-        text_content = f"""
-        密碼重設請求 - Sound Lite
-
-        我們收到了您的密碼重設請求。請點擊以下連結重設您的密碼：
-        {reset_url}
-
-        此連結將在 1 小時後過期。
-
-        如果您沒有請求重設密碼，請忽略此郵件，您的帳號仍然安全。
-
-        ─────────────────────────────
-        此為系統自動寄送，請勿直接回覆。
-        """
+        text_content = self._render_branded_text(
+            f"密碼重設請求\n\n"
+            f"我們收到了您的密碼重設請求。請點擊以下連結重設密碼：\n{reset_url}\n\n"
+            f"此連結將在 1 小時後過期。\n\n"
+            f"如果您沒有請求重設密碼，請忽略此郵件，您的帳號仍然安全。"
+        )
 
         return await self._send_email(
             to_email=to_email,
@@ -302,27 +299,32 @@ class EmailService:
             if details_lines else ""
         )
 
+        logo_url = f"{self.frontend_url.rstrip('/')}/web-app-manifest-192x192.png"
         html_content = f"""
         <!DOCTYPE html>
-        <html><head><meta charset="UTF-8"></head>
-        <body style="font-family: 'Segoe UI', sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background: linear-gradient(135deg, #d9534f 0%, #c9302c 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-                <h1 style="margin: 0; color: white;">⚠️ 帳號異動通知</h1>
-            </div>
-            <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
-                <p>您好，</p>
-                <p>您在 Sound Lite 的帳號剛剛由管理員 <strong>{admin_email}</strong> 執行了以下操作：</p>
-                <p style="font-size: 18px; font-weight: bold; color: #c9302c;">{action_label}</p>
-                {details_block}
-                <p>如果這是您預期或要求的操作（例如協助重設密碼），可忽略此信。</p>
-                <p>若您<strong>不認識此 admin</strong>或<strong>未授權此操作</strong>，請立即回信此地址，並考慮：</p>
-                <ul>
-                    <li>立即登入更改密碼</li>
-                    <li>檢查近期登入紀錄是否異常</li>
-                </ul>
-            </div>
-            <div style="text-align: center; margin-top: 30px; color: #666; font-size: 12px;">
-                <p>© 2026 Sound Lite. All rights reserved.</p>
+        <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+        <body style="margin: 0; padding: 0; background: #f8f4eb;">
+            <div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:#f8f4eb;opacity:0;">您的 Sound Lite 帳號剛剛被管理員執行操作，請確認是否為您本人授權。</div>
+            <div style="font-family: 'Segoe UI', sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <div style="background: linear-gradient(135deg, #d9534f 0%, #c9302c 100%); color: white; padding: 30px 20px; text-align: center; border-radius: 10px 10px 0 0;">
+                    <img src="{logo_url}" width="64" height="64" alt="Sound Lite" style="display: block; margin: 0 auto 12px auto; border: 0; border-radius: 12px;" />
+                    <h1 style="margin: 0; color: white; font-size: 22px;">⚠️ 帳號異動通知</h1>
+                </div>
+                <div style="background: #ffffff; padding: 30px; border-radius: 0 0 10px 10px; border: 1px solid #efe1c6; border-top: 0;">
+                    <p>您好，</p>
+                    <p>您在 Sound Lite 的帳號剛剛由管理員 <strong>{admin_email}</strong> 執行了以下操作：</p>
+                    <p style="font-size: 18px; font-weight: bold; color: #c9302c;">{action_label}</p>
+                    {details_block}
+                    <p>如果這是您預期或要求的操作（例如協助重設密碼），可忽略此信。</p>
+                    <p>若您<strong>不認識此 admin</strong>或<strong>未授權此操作</strong>，請立即回信此地址，並考慮：</p>
+                    <ul>
+                        <li>立即登入更改密碼</li>
+                        <li>檢查近期登入紀錄是否異常</li>
+                    </ul>
+                </div>
+                <div style="text-align: center; margin-top: 30px; color: #666; font-size: 12px;">
+                    <p style="margin: 0;">© 2026 <a href="https://soundlite.app" style="color: #666; text-decoration: none;">Sound Lite</a>. All rights reserved.</p>
+                </div>
             </div>
         </body></html>
         """
