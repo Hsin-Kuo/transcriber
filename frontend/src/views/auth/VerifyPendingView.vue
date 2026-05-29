@@ -4,7 +4,7 @@
       <div class="auth-content">
         <!-- ===== Bounced / Complained 狀態：email 收信異常 ===== -->
         <template v-if="bounced">
-          <div class="pending-icon">❌</div>
+          <div class="pending-icon" aria-hidden="true">❌</div>
 
           <h1 class="auth-title">
             {{ status === 'complained' ? '此 Email 已標記為拒收' : 'Email 似乎無法送達' }}
@@ -46,7 +46,7 @@
 
         <!-- ===== 正常 pending / verified 狀態 ===== -->
         <template v-else>
-          <div class="pending-icon">{{ initialSent ? '✉️' : '⚠️' }}</div>
+          <div class="pending-icon" aria-hidden="true">{{ initialSent ? '✉️' : '⚠️' }}</div>
 
           <h1 class="auth-title">
             {{ initialSent ? '請查看您的信箱' : '帳號已建立，請重發驗證信' }}
@@ -83,12 +83,17 @@
           </button>
 
           <!-- 重發結果訊息 -->
-          <div v-if="resendNotice" :class="['notice', resendError ? 'notice-error' : 'notice-success']">
+          <div
+            v-if="resendNotice"
+            :class="['notice', resendError ? 'notice-error' : 'notice-success']"
+            role="status"
+            aria-live="polite"
+          >
             {{ resendNotice }}
           </div>
 
           <!-- Polling 5 分鐘超時提示 -->
-          <div v-if="pollTimedOut" class="notice notice-info">
+          <div v-if="pollTimedOut" class="notice notice-info" role="status" aria-live="polite">
             已停止自動偵測。若您已完成驗證，請手動<router-link to="/login">前往登入</router-link>。
           </div>
 
@@ -119,13 +124,17 @@ const router = useRouter()
 const COOLDOWN_SECONDS = 60
 
 // Vue Router 對 `?email=a&email=b` 會給 array — 攻擊者偽造分享 URL 可能塞。
-// 取第一個非空字串值，無法解析就回空字串（onMounted 會 redirect 回 /register）。
+// 取第一個非空字串值並截 320 字（對齊 backend MAX_EMAIL_LENGTH），避免
+// 1MB 字串塞進 template `{{ email }}` 撐爆 DOM（Vue 雖會 escape 不致 XSS）。
+const MAX_EMAIL_DISPLAY_LENGTH = 320
 function pickQueryString(value) {
+  let str
   if (Array.isArray(value)) {
-    const first = value.find((v) => typeof v === 'string' && v)
-    return first || ''
+    str = value.find((v) => typeof v === 'string' && v) || ''
+  } else {
+    str = typeof value === 'string' ? value : ''
   }
-  return typeof value === 'string' ? value : ''
+  return str.slice(0, MAX_EMAIL_DISPLAY_LENGTH)
 }
 const email = computed(() => pickQueryString(route.query.email))
 // 從 query.sent 判斷初次寄信是否成功；缺省當作 sent=true

@@ -42,3 +42,20 @@ def test_mask_email_handles_garbage(bad):
 def test_mask_email_preserves_domain():
     """Domain 整段不遮蔽 — 方便 debug 時辨識公司/服務 provider。"""
     assert mask_email("john.doe@company.internal").endswith("@company.internal")
+
+
+def test_mask_email_unicode_localpart():
+    """中文 / Unicode localpart 應正確處理（不 crash、首字符遮蔽邏輯一致）。"""
+    assert mask_email("用戶@example.com") == "用***@example.com"
+
+
+def test_mask_email_idn_domain():
+    """IDN（國際化網域）domain 整段保留。"""
+    assert mask_email("alice@台灣.tw") == "a***@台灣.tw"
+
+
+def test_mask_email_emoji_localpart():
+    """Emoji localpart（極少見但理論可能）— 不該 crash。"""
+    result = mask_email("📧test@example.com")
+    assert result.endswith("@example.com")
+    assert "📧" in result or result.startswith("?")  # 取首字即可

@@ -453,25 +453,26 @@ async def resend_verification_email(
 
     user = await user_repo.get_by_email(request.email)
 
+    # 統一 200 回應防 enumeration：unknown / verified / bounced 都回相同訊息，
+    # 僅在「真的有未驗證 user 且未 bounce」時實際寄信。對應 UX 細節：
+    # - 不存在的 email：用戶會發現自己沒在自家信箱看到信，自然會去 register
+    # - 已驗證 email：用戶會嘗試登入，發現可直接 login
+    # - bounced email：verify-pending 頁的 registration-status polling 會回
+    #   bounced 並切換到「換 email」UI，使用者不需透過此 endpoint 知道狀態
+    silent_success = {
+        "message": "驗證郵件已重新發送，請查看您的郵箱",
+        "email": request.email
+    }
+
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="此 Email 尚未註冊"
-        )
+        return silent_success
 
     if user.get("email_verified"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="此 Email 已完成驗證"
-        )
+        return silent_success
 
-    # 過去 Resend webhook 標記過 bounce/complained → 不再嘗試寄信
     if user.get("email_bounced"):
         log.info("auth.resend_verification.skip_bounced", email=mask_email(request.email))
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="此 Email 收信異常（可能不存在或被標為垃圾），請聯絡客服處理"
-        )
+        return silent_success
 
     # 生成新的驗證 token
     verification_token = secrets.token_urlsafe(32)
@@ -492,15 +493,13 @@ async def resend_verification_email(
     )
 
     if not email_sent:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="發送驗證郵件失敗，請稍後再試"
-        )
+        # 寄信失敗（Resend transient 5xx 等）仍回 silent success — 不能洩漏
+        # 「user 存在」這個資訊。用戶可透過 verify-pending 頁的 polling 看狀態，
+        # 或再次按重發按鈕（受 60s cooldown 限制）。
+        log.warning("auth.resend_verification.send_failed", email=mask_email(request.email))
+        return silent_success
 
-    return {
-        "message": "驗證郵件已重新發送，請查看您的郵箱",
-        "email": request.email
-    }
+    return silent_success
 
 
 @router.get("/registration-status")
