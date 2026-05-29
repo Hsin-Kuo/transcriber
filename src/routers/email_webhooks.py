@@ -31,6 +31,14 @@ router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
 log = get_logger(__name__)
 
 
+# 單一 webhook event 可處理的 recipient 上限 — 防 secret 外洩後 attacker 用
+# 巨大 to_field 一次 mark 大量 user。Resend 實際單封 send 通常 to=1 名收件人。
+MAX_RECIPIENTS_PER_EVENT = 50
+
+# email_bounce_reason 寫 DB 的長度上限 — 防 attacker-controlled 1MB 字串
+MAX_REASON_LENGTH = 500
+
+
 # 認定為「永久失敗」的事件 → 標 email_bounced
 # - email.bounced:    收件方 server 永久拒絕（hard bounce）
 # - email.complained: 用戶按 mark as spam
@@ -100,6 +108,8 @@ async def resend_webhook(
     recipients: list[str] = []
     if isinstance(to_field, list):
         for x in to_field:
+            if len(recipients) >= MAX_RECIPIENTS_PER_EVENT:
+                break  # 截斷，避免 secret 外洩後 DoS
             if isinstance(x, str) and "@" in x and x.strip():
                 recipients.append(x.strip())
             elif isinstance(x, dict):
@@ -109,6 +119,15 @@ async def resend_webhook(
                     recipients.append(addr.strip())
     elif isinstance(to_field, str) and "@" in to_field and to_field.strip():
         recipients = [to_field.strip()]
+
+    # 若被截斷則明確 warning（正常 Resend send 1 名收件人，超過 50 必異常）
+    if isinstance(to_field, list) and len(to_field) > MAX_RECIPIENTS_PER_EVENT:
+        log.warning(
+            "resend_webhook.recipients_truncated",
+            event=event_type,
+            received=len(to_field),
+            kept=len(recipients),
+        )
 
     svix_id = request.headers.get("svix-id", "")
 
@@ -162,6 +181,9 @@ async def resend_webhook(
             or suppressed_info.get("reason")
             or None
         )
+        # 截斷防 attacker-controlled 巨大字串塞 DB / 拖慢 query
+        if isinstance(reason, str) and len(reason) > MAX_REASON_LENGTH:
+            reason = reason[:MAX_REASON_LENGTH] + "…(truncated)"
 
         marked = 0
         for to_email in recipients:

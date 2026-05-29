@@ -546,7 +546,12 @@ async def registration_status(
 
     # 簡易 sanity 檢查：完全不像 email 直接回 pending（不 422）以維持
     # enumeration 一致性。實際 email 是否合法由 DB lookup 命中與否決定。
-    if "@" not in email or len(email) > MAX_EMAIL_LENGTH:
+    # 含控制字元也視同非法格式。
+    if (
+        "@" not in email
+        or len(email) > MAX_EMAIL_LENGTH
+        or any(ch in email for ch in "\r\n\t\0")
+    ):
         return {"status": "pending"}
 
     # 直接以原樣 lookup（與 register 流程儲存的 email 格式一致 — pydantic
@@ -610,8 +615,15 @@ async def abandon_registration(
         ttl_seconds=ABANDON_REGISTRATION_WINDOW,
     )
 
-    # 格式 sanity（與 registration-status 一致），不合法直接 200 不查 DB
-    if "@" not in payload.email or len(payload.email) > MAX_EMAIL_LENGTH:
+    # 格式 sanity（與 registration-status 一致），不合法直接 200 不查 DB。
+    # 同時擋掉含控制字元（\n / \r / \t 等）的 email — 雖然 production 用 JSON
+    # logger 不會 log injection，但 audit_logs DB 仍儲存 raw 字串，避免之後
+    # admin UI render 出怪東西。
+    if (
+        "@" not in payload.email
+        or len(payload.email) > MAX_EMAIL_LENGTH
+        or any(ch in payload.email for ch in "\r\n\t\0")
+    ):
         return {"status": "ok"}
 
     # lookup 用原樣 email（與 register 寫入時一致）

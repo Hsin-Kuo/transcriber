@@ -118,9 +118,18 @@ const router = useRouter()
 // 後端 cooldown = 60s（src/routers/auth.py: RESEND_VERIFICATION_COOLDOWN_SECONDS）
 const COOLDOWN_SECONDS = 60
 
-const email = computed(() => String(route.query.email || ''))
+// Vue Router 對 `?email=a&email=b` 會給 array — 攻擊者偽造分享 URL 可能塞。
+// 取第一個非空字串值，無法解析就回空字串（onMounted 會 redirect 回 /register）。
+function pickQueryString(value) {
+  if (Array.isArray(value)) {
+    const first = value.find((v) => typeof v === 'string' && v)
+    return first || ''
+  }
+  return typeof value === 'string' ? value : ''
+}
+const email = computed(() => pickQueryString(route.query.email))
 // 從 query.sent 判斷初次寄信是否成功；缺省當作 sent=true
-const initialSent = computed(() => route.query.sent !== 'false')
+const initialSent = computed(() => pickQueryString(route.query.sent) !== 'false')
 
 const cooldownRemaining = ref(COOLDOWN_SECONDS)
 const resending = ref(false)
