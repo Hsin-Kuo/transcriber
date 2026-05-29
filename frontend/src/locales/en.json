@@ -323,7 +323,6 @@
     "uploading": "Uploading...",
     "uploadFailed": "Upload Failed",
     "uploadFailedMessage": "Upload failed: {message}",
-    "errorLoadTasks": "Failed to load tasks",
     "errorUpload": "Upload failed"
   },
   "uploadZone": {

@@ -264,11 +264,13 @@ import MergeModal from '../components/merge/MergeModal.vue'
 import BatchUploadPanel from '../components/batch/BatchUploadPanel.vue'
 
 // 新 API 服務層
-import { transcriptionService, taskService } from '../api/services'
+import { transcriptionService } from '../api/services'
 import { exceedsMaxSize, MAX_UPLOAD_SIZE_MB } from '../utils/chunkedUpload.js'
 import { useCollapsibleRows } from '../composables/useCollapsibleRows'
+import { useTaskTags } from '../composables/task/useTaskTags'
 
 const { t: $t, locale } = useI18n()
+const { tagsData, fetchTagColors } = useTaskTags($t)
 
 const showNotification = inject('showNotification')
 const uploading = ref(false)
@@ -282,7 +284,6 @@ const maxSpeakers = ref(null)
 const pendingFile = ref(null)
 const selectedTags = ref([])
 const tagInput = ref('')
-const tasks = ref([])  // 任務列表，用於顯示快速標籤
 
 // 合併模式狀態
 const mergeMode = reactive({
@@ -313,16 +314,8 @@ function formatFileSize(bytes) {
   return (bytes / 1024 / 1024).toFixed(2) + ' MB'
 }
 
-// 獲取所有唯一標籤
-const allTags = computed(() => {
-  const tags = new Set()
-  tasks.value.forEach(task => {
-    if (task.tags && task.tags.length > 0) {
-      task.tags.forEach(tag => tags.add(tag))
-    }
-  })
-  return Array.from(tags).sort()
-})
+// 獲取所有唯一標籤（canonical 來源：/tags，包含尚未被任何 task 使用的孤兒 tag）
+const allTags = computed(() => tagsData.value.map(t => t.name))
 
 // 可用的快速標籤（排除已選擇的）
 const availableQuickTags = computed(() => {
@@ -425,16 +418,6 @@ function removeTag(index) {
   selectedTags.value.splice(index, 1)
 }
 
-// 載入任務列表
-async function refreshTasks() {
-  try {
-    const response = await taskService.list({ limit: 20 })
-    tasks.value = response.tasks || response || []
-  } catch (error) {
-    console.error($t('transcription.errorLoadTasks') + ':', error)
-  }
-}
-
 // 確認後開始上傳
 async function confirmAndUpload() {
   // 判斷是合併模式還是單檔模式
@@ -480,17 +463,9 @@ async function confirmAndUpload() {
   try {
     // 使用新 API 服務層（大檔自動走分片上傳）
     uploadProgress.value = 0
-    const responseData = await transcriptionService.create(formData, {
+    await transcriptionService.create(formData, {
       onProgress: (pct) => { uploadProgress.value = pct }
     })
-
-    const newTask = {
-      ...responseData,
-      file: isMergeMode ? `合併 ${mergeMode.files.length} 個檔案` : pendingFile.value.name,
-      uploadedAt: new Date().toLocaleString('zh-TW')
-    }
-
-    tasks.value.unshift(newTask)
 
     // 顯示轉錄中通知
     if (showNotification) {
@@ -616,8 +591,8 @@ async function confirmBatchUpload(formData) {
       }
     }
 
-    // 刷新任務列表
-    await refreshTasks()
+    // 上傳完成後重抓 tag 列表（user 可能在 BatchUploadPanel 內建了新 tag）
+    await fetchTagColors()
 
   } catch (error) {
     console.error('批次上傳失敗:', error)
@@ -640,12 +615,9 @@ async function confirmBatchUpload(formData) {
   }
 }
 
-
-
-
 // 生命週期
 onMounted(() => {
-  refreshTasks()
+  fetchTagColors()  // 取得 canonical tag 列表（含尚未被使用的孤兒 tag）
   // 限制視窗高度
   document.body.classList.add('upload-page')
 })

@@ -323,7 +323,6 @@
     "uploading": "上傳中...",
     "uploadFailed": "上傳失敗",
     "uploadFailedMessage": "上傳失敗：{message}",
-    "errorLoadTasks": "載入任務失敗",
     "errorUpload": "上傳失敗"
   },
   "uploadZone": {
