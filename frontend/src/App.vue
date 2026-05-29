@@ -76,41 +76,18 @@ function handleNetworkError() {
   }
 }
 
-function handleOffline() {
-  if (notificationToast.value) {
-    notificationToast.value.addNotification({
-      title: '已離線',
-      message: '網路連線已中斷，部分功能可能無法使用',
-      type: 'warning',
-      duration: 0,
-    })
-  }
-}
-
-function handleOnline() {
-  if (notificationToast.value) {
-    notificationToast.value.addNotification({
-      title: '已恢復連線',
-      message: '網路連線已恢復',
-      type: 'success',
-    })
-  }
-}
-
+// navigator.onLine / offline 事件在 macOS Wi-Fi 省電休眠、背景 tab throttling 時會誤觸發，
+// 改靠 api:network-error（實際 request 失敗才 fire）作為唯一離線信號。
 onMounted(() => {
   window.addEventListener('api:rate-limited', handleRateLimit)
   window.addEventListener('api:server-error', handleServerError)
   window.addEventListener('api:network-error', handleNetworkError)
-  window.addEventListener('offline', handleOffline)
-  window.addEventListener('online', handleOnline)
 })
 
 onUnmounted(() => {
   window.removeEventListener('api:rate-limited', handleRateLimit)
   window.removeEventListener('api:server-error', handleServerError)
   window.removeEventListener('api:network-error', handleNetworkError)
-  window.removeEventListener('offline', handleOffline)
-  window.removeEventListener('online', handleOnline)
 })
 </script>
 
