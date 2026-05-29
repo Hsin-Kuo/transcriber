@@ -3,6 +3,11 @@ from pydantic import BaseModel, EmailStr, Field, validator
 from typing import Optional, List
 
 
+# RFC 5321: email 總長 ≤ 254 chars，部分系統用 320（local 64 + @ + domain 255）
+# 我們採寬鬆值 320 以兼容 edge case
+MAX_EMAIL_LENGTH = 320
+
+
 class UserRegister(BaseModel):
     """用戶註冊請求"""
     email: EmailStr
@@ -48,7 +53,7 @@ class AbandonRegistrationRequest(BaseModel):
     格式錯誤的 email 也應靜默回 200，避免 422 vs 200 變成「字串是否為
     合法 email 格式」的部分 enumeration oracle。
     """
-    email: str = Field(..., max_length=320)
+    email: str = Field(..., max_length=MAX_EMAIL_LENGTH)
 
 
 class ChangePasswordRequest(BaseModel):

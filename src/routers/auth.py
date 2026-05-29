@@ -46,6 +46,7 @@ REG_STATUS_WINDOW = 60
 ABANDON_REGISTRATION_MAX_PER_IP = 10        # 每 IP 每小時最多放棄註冊次數
 ABANDON_REGISTRATION_WINDOW = 3600
 from ..models.auth import (
+    MAX_EMAIL_LENGTH,
     UserRegister,
     UserLogin,
     TokenResponse,
@@ -545,7 +546,7 @@ async def registration_status(
 
     # 簡易 sanity 檢查：完全不像 email 直接回 pending（不 422）以維持
     # enumeration 一致性。實際 email 是否合法由 DB lookup 命中與否決定。
-    if "@" not in email or len(email) > 320:
+    if "@" not in email or len(email) > MAX_EMAIL_LENGTH:
         return {"status": "pending"}
 
     # 直接以原樣 lookup（與 register 流程儲存的 email 格式一致 — pydantic
@@ -553,15 +554,20 @@ async def registration_status(
     user_repo = UserRepository(db)
     user = await user_repo.get_by_email(email)
 
-    # 未知 email → 偽裝成 pending，避免變成 enumeration oracle
+    # 未知 email → 偽裝成 pending（防 enumeration）
     if not user:
         return {"status": "pending"}
 
+    # 已驗證的 user 也回 pending — 否則此 endpoint 可被未認證攻擊者用來
+    # enumerate「哪些 email 已是 SoundLite 已驗證用戶」。代價：cross-tab
+    # 場景下另一 tab 完成驗證後本 tab 無法自動跳轉（保留人工 navigate）。
     if user.get("email_verified"):
-        return {"status": "verified"}
+        return {"status": "pending"}
 
     if user.get("email_bounced"):
-        # 區分 bounce / complaint 讓前端可顯示不同訊息
+        # bounced/complained 仍洩漏「該 email 有未驗證註冊」— 但這個資訊在
+        # register flow 也已能取得（用同 email 嘗試註冊會 silent return 200），
+        # 不算新增洩漏。對使用者體驗（典型 typo case）價值很高。
         event = user.get("email_bounce_event", "bounced")
         return {"status": event}
 
@@ -605,7 +611,7 @@ async def abandon_registration(
     )
 
     # 格式 sanity（與 registration-status 一致），不合法直接 200 不查 DB
-    if "@" not in payload.email or len(payload.email) > 320:
+    if "@" not in payload.email or len(payload.email) > MAX_EMAIL_LENGTH:
         return {"status": "ok"}
 
     # lookup 用原樣 email（與 register 寫入時一致）
@@ -613,15 +619,14 @@ async def abandon_registration(
     user = await user_repo.get_by_email(payload.email)
 
     deleted = False
-    # 安全雙重檢查：必須同時是「未驗證」且「已 bounced」才刪。
-    # 已驗證帳號永不經此路徑刪除 — 即使未來重構也要保留這個約束。
+    # 安全約束：只有「未驗證 AND 已 bounced」的 user 會被刪除。
+    # 已驗證帳號永不經此路徑刪除 — 即使未來重構也要保留這個約束
+    # （請保留 `not user.get("email_verified")` 條件）。
     if (
         user
         and not user.get("email_verified")
         and user.get("email_bounced")
     ):
-        assert not user.get("email_verified"), \
-            "abandon-registration 不可刪除已驗證 user"
         deleted = await user_repo.delete(str(user["_id"]))
         if deleted:
             await audit_logger.log_auth(

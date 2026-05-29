@@ -46,10 +46,17 @@ def _decode_secret(secret: str) -> bytes:
     # 容忍前綴大小寫變體
     if secret.startswith("whsec_"):
         secret = secret[len("whsec_"):]
+    # 「whsec_」純前綴 / 任何 strip 後是空字串都拒絕，避免 zero-length HMAC key
+    # 讓攻擊者能輕易產出合法簽名
+    if not secret:
+        raise InvalidWebhookSignature("RESEND_WEBHOOK_SECRET strip 前綴後為空")
     try:
-        return base64.b64decode(secret)
+        decoded = base64.b64decode(secret)
     except Exception as e:
         raise InvalidWebhookSignature(f"webhook secret 不是有效的 base64: {e}") from e
+    if not decoded:
+        raise InvalidWebhookSignature("RESEND_WEBHOOK_SECRET base64 decode 後為空")
+    return decoded
 
 
 def verify_signature(

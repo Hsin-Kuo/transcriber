@@ -93,18 +93,22 @@ async def resend_webhook(
 
     event_type = payload.get("type", "")
     data = payload.get("data") or {}
-    # Resend event data 中 to 官方文件是 array，但歷史上偶見字串；
-    # 過濾出真正有 @ 的字串，擋掉空字串 / dict / 怪資料。
+    # Resend event data 中 to 官方文件是 array of string；歷史上偶見字串；
+    # 未來可能改為 list of dict (Recipient object) — 已加 dict 抽取 fallback。
+    # 過濾出真正有 @ 的字串，擋掉空字串、純空白、其他怪資料。
     to_field = data.get("to")
+    recipients: list[str] = []
     if isinstance(to_field, list):
-        recipients = [
-            x.strip() for x in to_field
-            if isinstance(x, str) and "@" in x and x.strip()
-        ]
+        for x in to_field:
+            if isinstance(x, str) and "@" in x and x.strip():
+                recipients.append(x.strip())
+            elif isinstance(x, dict):
+                # 防禦：Resend 若改 schema 用 {"email": "..."} 或 {"address": "..."}
+                addr = x.get("email") or x.get("address")
+                if isinstance(addr, str) and "@" in addr and addr.strip():
+                    recipients.append(addr.strip())
     elif isinstance(to_field, str) and "@" in to_field and to_field.strip():
         recipients = [to_field.strip()]
-    else:
-        recipients = []
 
     svix_id = request.headers.get("svix-id", "")
 
@@ -174,6 +178,14 @@ async def resend_webhook(
                     user_id=None,
                     status_code=200,
                     message=f"email {short_event}: {to_email} ({reason or 'no reason'})",
+                )
+            else:
+                # 沒有對應 user — 可能 admin 通知信、test send、或 email
+                # 大小寫與 DB 存的不一致（codebase-wide localpart case 議題）
+                log.warning(
+                    "resend_webhook.no_user_for_recipient",
+                    event=event_type,
+                    recipient=mask_email(to_email),
                 )
 
         log.info(

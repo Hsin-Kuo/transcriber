@@ -17,10 +17,10 @@ from src.utils.privacy import mask_email  # noqa: E402
 
 
 @pytest.mark.parametrize("email, expected", [
-    ("alice@example.com", "al***@example.com"),
-    ("a@example.com", "a***@example.com"),
-    ("longusername@sub.example.com", "lo***@sub.example.com"),
-    ("ab@x.io", "ab***@x.io"),
+    ("alice@example.com", "a***@example.com"),
+    ("a@example.com", "***@example.com"),  # 1 字 localpart 全遮
+    ("longusername@sub.example.com", "l***@sub.example.com"),
+    ("ab@x.io", "a***@x.io"),  # 2 字 localpart 只露首字
 ])
 def test_mask_email_normal(email, expected):
     assert mask_email(email) == expected

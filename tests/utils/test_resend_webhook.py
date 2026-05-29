@@ -212,3 +212,18 @@ def test_malformed_base64_secret_raises_invalid_signature(now):
             raw_body=b"{}",
             now_ts=now,
         )
+
+
+def test_secret_only_prefix_no_value_raises(now):
+    """secret 只有 "whsec_" 前綴沒實際內容（ops paste 殘缺）→ decode 後是
+    空 bytes，HMAC 仍能算出（用 zero-length key），但攻擊者也可猜出來。
+    應該明確拒絕避免靜默接受所有簽名。"""
+    with pytest.raises(InvalidWebhookSignature):
+        verify_signature(
+            secret="whsec_",
+            svix_id="msg",
+            svix_timestamp=str(now),
+            svix_signature="v1,xxx",
+            raw_body=b"{}",
+            now_ts=now,
+        )

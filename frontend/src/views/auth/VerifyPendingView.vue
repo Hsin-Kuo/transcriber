@@ -106,11 +106,9 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '../../utils/api'
-import { useAuthStore } from '../../stores/auth'
 
 const route = useRoute()
 const router = useRouter()
-const authStore = useAuthStore()
 
 // 後端 cooldown = 60s（src/routers/auth.py: RESEND_VERIFICATION_COOLDOWN_SECONDS）
 const COOLDOWN_SECONDS = 60
@@ -155,13 +153,8 @@ async function pollStatus() {
     })
     status.value = data.status || 'pending'
 
-    if (status.value === 'verified') {
-      // 另一個 tab 已完成驗證 + auto-login（P0-2）→ localStorage 已有 token
-      stopPolling()
-      // 跨 tab 同步 auth store；成功則 user 已登入，落到首頁
-      await authStore.initialize()
-      router.push(authStore.isAuthenticated ? '/' : '/login')
-    } else if (bounced.value) {
+    // verified 狀態被後端故意隱藏（防 enumeration），前端不再 auto-redirect
+    if (bounced.value) {
       // bounce / complaint → 終態，停止 poll
       stopPolling()
     }
