@@ -10,7 +10,7 @@
 - 過期清理用 `last_activity_at` 而非 `created_at`，讓慢速大檔上傳不會中途被清掉
 - temp_dir 仍存本機 EBS：同一 upload 的所有 chunk 必須打到同一台 EC2（多 EC2 時須 sticky）
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, List
 
@@ -106,14 +106,24 @@ class ChunkUploadRepository:
         """找出 last_activity_at 早於 grace_seconds 前的 doc，刪 doc 並回傳被刪 docs。
 
         Caller 用回傳的 temp_dir 清磁碟。
+
+        以 find_one_and_delete 逐個處理而非 delete_many：
+        - find 與 delete 之間若有 add_chunk 更新 last_activity_at，delete_many 不會
+          重新驗證會誤砍剛活躍的 upload
+        - 同時也避免回傳「找到但未刪」的 doc 導致 caller 誤刪 temp_dir
+        N+1 query 在小批量過期 doc + 5 分鐘間隔下完全可接受。
         """
-        cutoff = datetime.now(timezone.utc).timestamp() - grace_seconds
-        cutoff_dt = datetime.fromtimestamp(cutoff, tz=timezone.utc)
+        cutoff_dt = datetime.now(timezone.utc) - timedelta(seconds=grace_seconds)
         expired = await self.collection.find(
             {"last_activity_at": {"$lt": cutoff_dt}}
         ).to_list(length=None)
-        if expired:
-            await self.collection.delete_many(
-                {"_id": {"$in": [d["_id"] for d in expired]}}
-            )
-        return expired
+
+        deleted: List[dict] = []
+        for doc in expired:
+            confirmed = await self.collection.find_one_and_delete({
+                "_id": doc["_id"],
+                "last_activity_at": {"$lt": cutoff_dt},
+            })
+            if confirmed is not None:
+                deleted.append(confirmed)
+        return deleted

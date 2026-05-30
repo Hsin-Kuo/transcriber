@@ -114,7 +114,10 @@ async def upload_chunk(
     user_id = str(current_user["_id"])
     meta = await repo.get(upload_id)
     if not meta:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "upload_id 不存在或已過期")
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "上傳工作階段已過期或不存在，請重新選擇檔案上傳",
+        )
 
     if meta["user_id"] != user_id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "無權操作此上傳")
@@ -143,7 +146,15 @@ async def upload_chunk(
 
             # 原子 $addToSet 寫入 received，回傳更新後的 doc
             updated = await repo.add_chunk(upload_id, user_id, chunk_index)
-            received_count = len(updated["received"]) if updated else 0
+            if updated is None:
+                # 驗證與寫入之間 doc 被刪除（極罕見：例如 concurrent complete 驗證
+                # 失敗或 cleanup sweep 邊界 race）。chunk 檔還在但已無 metadata 對應，
+                # 回 409 讓 client 重新 init 而不是回 200 假裝成功。
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "上傳工作階段已失效，請重新選擇檔案上傳",
+                )
+            received_count = len(updated["received"])
 
     return {
         "chunk_index": chunk_index,
@@ -161,7 +172,10 @@ async def complete_upload(
     repo = _repo()
     meta = await repo.get(upload_id)
     if not meta:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "upload_id 不存在或已過期")
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "上傳工作階段已過期或不存在，請重新選擇檔案上傳",
+        )
 
     if meta["user_id"] != str(current_user["_id"]):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "無權操作此上傳")

@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, s
 from fastapi.responses import FileResponse
 from typing import List, Dict, Any
 from pathlib import Path
+import asyncio
 import json
 import tempfile
 import shutil
@@ -290,10 +291,12 @@ async def merge_audio_files(
         # 合併音檔（固定MP3格式）
         audio_service = AudioService(output_dir=Path("output/merged"))
 
-        merged_path = audio_service.merge_audio_files(saved_files)
+        # ffmpeg merge 跑 subprocess，sync I/O 包進 threadpool 才不會卡 event loop
+        merged_path = await asyncio.to_thread(audio_service.merge_audio_files, saved_files)
 
         # 獲取合併後的音檔資訊
-        duration_ms = audio_service.get_audio_duration(merged_path)
+        # ffprobe 跑 subprocess，sync I/O 包進 threadpool 才不會卡 event loop
+        duration_ms = await asyncio.to_thread(audio_service.get_audio_duration, merged_path)
         duration_seconds = duration_ms / 1000.0
         size_mb = merged_path.stat().st_size / 1024 / 1024
 

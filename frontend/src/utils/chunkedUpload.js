@@ -89,6 +89,7 @@ export async function uploadChunked(file, { onProgress } = {}) {
 
 /**
  * 上傳單個 chunk，失敗自動重試
+ * 只對 transient 錯誤（網路 / 5xx / 429）重試；4xx (400/403/404/409/413) 是永久錯誤直接 throw
  */
 async function uploadChunkWithRetry(uploadId, chunkIndex, blob) {
   let lastError
@@ -107,6 +108,11 @@ async function uploadChunkWithRetry(uploadId, chunkIndex, blob) {
       return
     } catch (err) {
       lastError = err
+      // 4xx 永久錯誤不重試（429 例外：rate limit 是 transient）
+      const status = err?.response?.status
+      if (status && status >= 400 && status < 500 && status !== 429) {
+        throw err
+      }
       if (attempt < MAX_RETRIES - 1) {
         console.warn(`Chunk ${chunkIndex} 上傳失敗 (第 ${attempt + 1} 次)，${RETRY_DELAY_MS}ms 後重試...`)
         await sleep(RETRY_DELAY_MS)

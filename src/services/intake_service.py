@@ -6,6 +6,7 @@
 Router 的殘留責任：解析 upload → 組裝 file_path → 呼叫 intake() → 回傳 HTTP response。
 """
 
+import asyncio
 import shutil
 import uuid
 from pathlib import Path
@@ -82,7 +83,10 @@ class TranscriptionIntakeService:
             # 1. 音檔資訊
             audio_service = AudioService()
             try:
-                audio_duration_ms = audio_service.get_audio_duration(file_path)
+                # ffprobe 跑 subprocess，sync I/O 包進 threadpool 才不會卡 event loop
+                audio_duration_ms = await asyncio.to_thread(
+                    audio_service.get_audio_duration, file_path
+                )
                 audio_duration_seconds = audio_duration_ms / 1000.0
                 audio_size_mb = round(file_path.stat().st_size / 1024 / 1024, 2)
             except Exception as e:

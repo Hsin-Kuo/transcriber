@@ -246,7 +246,10 @@ async def _assemble_upload(
         temp_dir = get_temp_dir()
         audio_service = AudioService()
         merged_output = temp_dir / f"merged_{uuid.uuid4().hex[:8]}.mp3"
-        file_path = audio_service.merge_audio_files(merge_paths, output_path=merged_output)
+        # ffmpeg merge 跑 subprocess，sync I/O 包進 threadpool 才不會卡 event loop
+        file_path = await asyncio.to_thread(
+            audio_service.merge_audio_files, merge_paths, output_path=merged_output
+        )
 
         if custom_name and custom_name.strip():
             filename = f"{custom_name.strip()}.mp3"
@@ -291,7 +294,10 @@ async def _assemble_upload(
 
         audio_service = AudioService()
         merged_output = temp_dir / f"merged_{uuid.uuid4().hex[:8]}.mp3"
-        file_path = audio_service.merge_audio_files(saved_files, output_path=merged_output)
+        # ffmpeg merge 跑 subprocess，sync I/O 包進 threadpool 才不會卡 event loop
+        file_path = await asyncio.to_thread(
+            audio_service.merge_audio_files, saved_files, output_path=merged_output
+        )
 
         if custom_name and custom_name.strip():
             filename = f"{custom_name.strip()}.mp3"
