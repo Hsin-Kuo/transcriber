@@ -138,6 +138,13 @@ jobs:
           # 只保留最近 5 份 .env backup
           ls -1t /opt/transcriber/.env.bak.* 2>/dev/null | tail -n +6 | xargs -r sudo rm -f
 
+          # Sync systemd unit from canonical deploy/transcriber.service
+          # 包含 --workers 2 + ExecStartPre cleanup（避免 worker startup pkill race）
+          # systemd-analyze verify 擋住語法錯誤的 unit 部署
+          sudo cp /opt/transcriber/deploy/transcriber.service /etc/systemd/system/transcriber.service
+          sudo systemd-analyze verify /etc/systemd/system/transcriber.service
+          sudo systemctl daemon-reload
+
           sudo systemctl restart transcriber
 
           # 安裝/更新 rollback 腳本到固定位置（即使本次部署壞掉，rollback 仍可用）
