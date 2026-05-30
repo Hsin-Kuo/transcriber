@@ -218,12 +218,13 @@ async def startup_event():
     from src.utils.config_loader import cleanup_stale_temp_dirs
     cleanup_stale_temp_dirs()
 
-    # 清理殘留的 ProcessPoolExecutor worker 進程
-    try:
-        cleaned = cleanup_worker_processes()
-        logger.info("app.startup.stale_processes_cleaned", count=cleaned)
-    except Exception as e:
-        logger.warning("app.startup.stale_processes_cleanup_failed", error=str(e))
+    # 為什麼這裡不再呼叫 cleanup_worker_processes()：
+    # uvicorn --workers 2 下，每個 worker 的 startup hook 各跑一次 pkill 會把
+    # sibling worker 的 multiprocessing.resource_tracker 一起殺掉 → workers
+    # crash loop。「清舊殘留」這件事改在 systemd ExecStartPre 跑一次
+    # （見 deploy/transcriber.service），整個 service 只跑一次、發生在 master
+    # spawn workers 之前，跟 multi-worker 天然兼容。
+    # 函式本身保留 — signal_handler / shutdown 仍會用到，那兩個情境只跑一次。
 
     # 獲取主事件循環
     main_loop = asyncio.get_running_loop()

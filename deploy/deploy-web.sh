@@ -29,24 +29,10 @@ echo "=== 建立環境變數檔案（從 deploy/.env.aws 同步） ==="
 # 也會用同一份檔案重新 sync，避免 EC2 .env 與 repo drift。
 cp /opt/transcriber/deploy/.env.aws /opt/transcriber/.env
 
-echo "=== 建立 systemd 服務 ==="
-sudo tee /etc/systemd/system/transcriber.service > /dev/null << 'EOF'
-[Unit]
-Description=Transcriber Web Server
-After=network.target
-
-[Service]
-Type=simple
-User=ec2-user
-WorkingDirectory=/opt/transcriber
-Environment="PATH=/home/ec2-user/.local/bin:/usr/local/bin:/usr/bin"
-ExecStart=/home/ec2-user/.local/bin/uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 2
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
+echo "=== 安裝 systemd 服務 ==="
+# 從 repo 內 canonical 檔案 cp 過來，避免 EC2 上的 unit 跟 repo drift。
+# 後續每次 deploy（deploy-aws.yml）也會 sync 這份檔案 + systemctl daemon-reload。
+sudo cp /opt/transcriber/deploy/transcriber.service /etc/systemd/system/transcriber.service
 
 echo "=== 啟動後端服務 ==="
 sudo systemctl daemon-reload
