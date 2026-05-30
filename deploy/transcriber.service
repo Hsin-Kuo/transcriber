@@ -13,7 +13,10 @@ Environment="PATH=/home/ec2-user/.local/bin:/usr/local/bin:/usr/bin"
 # 原本放在 src/main.py 的 startup，但 uvicorn --workers 2 之下每個 worker 都
 # 會跑 pkill，把 sibling worker 的 multiprocessing.resource_tracker 一起殺掉
 # → workers crash loop。把這步移到 systemd ExecStartPre，整個 service 只跑一次。
-ExecStartPre=/usr/bin/sh -c 'pkill -9 -f multiprocessing.spawn || true; pkill -9 -f multiprocessing.resource_tracker || true; exit 0'
+#
+# 走獨立 script 而非 inline /bin/sh -c '...'，原因見 pre-start-cleanup.sh 內註解
+# （簡言之：sh -c 的參數會出現在 sh 進程 cmdline 內，pkill -f 會把 sh 自己當 match 殺掉）。
+ExecStartPre=/opt/transcriber/deploy/pre-start-cleanup.sh
 
 ExecStart=/home/ec2-user/.local/bin/uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 2
 Restart=always

@@ -142,10 +142,20 @@ jobs:
           # 包含 --workers 2 + ExecStartPre cleanup（避免 worker startup pkill race）
           # systemd-analyze verify 擋住語法錯誤的 unit 部署
           sudo cp /opt/transcriber/deploy/transcriber.service /etc/systemd/system/transcriber.service
+          # 確保 ExecStartPre 腳本可執行（tar 通常會保留 +x，保險起見補 chmod）
+          chmod +x /opt/transcriber/deploy/pre-start-cleanup.sh
           sudo systemd-analyze verify /etc/systemd/system/transcriber.service
           sudo systemctl daemon-reload
 
           sudo systemctl restart transcriber
+          # 等 service 真的進到 active 狀態（systemctl restart 是同步、但快速 fail 也可能會看到 activating）
+          sleep 3
+          sudo systemctl is-active --quiet transcriber || {
+              echo "[ERROR] transcriber service not active after restart"
+              sudo systemctl status transcriber --no-pager | head -30
+              sudo journalctl -u transcriber -n 30 --no-pager
+              exit 1
+          }
 
           # 安裝/更新 rollback 腳本到固定位置（即使本次部署壞掉，rollback 仍可用）
           sudo install -m 0755 /opt/transcriber/deploy/rollback.sh /usr/local/bin/transcriber-rollback
