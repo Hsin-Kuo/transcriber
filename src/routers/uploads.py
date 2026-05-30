@@ -40,11 +40,12 @@ CLEANUP_INTERVAL_SECONDS = 300  # 每 5 分鐘掃一次
 USER_CHUNK_CONCURRENCY = 3
 _user_chunk_semaphores: dict[str, asyncio.Semaphore] = {}
 
-# 整台機器（單一 process）最多同時 N 條 chunk 在寫磁碟。
-# t3.small EBS gp3 baseline 125 MB/s，每條 streaming 約 30-60 MB/s 上限，
-# 取 10 留 headroom 給其他磁碟 I/O（log、Mongo、組裝完整檔案）。
-# 多 worker 模式下總並行 = N × workers，要嚴格全域控制只能上 Redis。
-GLOBAL_CHUNK_CONCURRENCY = 10
+# 單一 process 內最多同時 N 條 chunk 在寫磁碟。
+# t3.small EBS gp3 baseline 125 MB/s，每條 streaming 約 30-60 MB/s 上限。
+# Multi-worker (--workers 2) 模式下，總並行 = N × workers，所以這個數字以
+# 「機器總 I/O / workers」反推。取 5：5 × 2 workers = 10 條，剛好不爆磁碟。
+# 真要嚴格全域協調得上 Redis distributed semaphore，目前流量不值得。
+GLOBAL_CHUNK_CONCURRENCY = 5
 _global_chunk_semaphore = asyncio.Semaphore(GLOBAL_CHUNK_CONCURRENCY)
 
 

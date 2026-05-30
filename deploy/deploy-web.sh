@@ -40,7 +40,7 @@ Type=simple
 User=ec2-user
 WorkingDirectory=/opt/transcriber
 Environment="PATH=/home/ec2-user/.local/bin:/usr/local/bin:/usr/bin"
-ExecStart=/home/ec2-user/.local/bin/uvicorn src.main:app --host 0.0.0.0 --port 8000
+ExecStart=/home/ec2-user/.local/bin/uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 2
 Restart=always
 RestartSec=5
 
