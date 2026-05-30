@@ -26,15 +26,21 @@ class UserRepository:
             [("reserved_ai_summaries", 1)],
             partialFilterExpression={"reserved_ai_summaries": {"$gt": 0}},
         )
-        # Email 是熱路徑 query key（register 查重、login、webhook 標 bounce 等）
-        # — Atlas 預設可能已自動建索引，但 code 端明示一份，部署到新環境也安全。
-        # 用 partial index 排除 soft-delete user（email=None）避免與 unique 衝突；
-        # 暫不開 unique=True 是因為現有 soft-delete 行為下兩個 deleted user 都會
-        # 是 email=null 不該被視為衝突，且 register 流程的 duplicate-check 已在
-        # application 層保證唯一性。
+        # Email 是熱路徑 query key（register 查重、login、webhook 標 bounce 等）。
+        # 設計：partial index + unique
+        #   - partial（only when email is string）排除 soft-delete user（email=null）
+        #     讓多個 soft-deleted user 不會被視為「null email 重複」
+        #   - unique 由 DB 強制（比 application-layer dedup 安全）
+        # 為什麼用自訂 name "email_unique_partial" 而不是預設 "email_1"：
+        #   早期 Atlas 上自動建了 unique non-partial 的 email_1，跟現在 code 想要的
+        #   partial spec 衝突（MongoDB 不允許 createIndex 直接修改既有 index spec →
+        #   IndexKeySpecsConflict）。用不同名字讓兩個 index 在過渡期共存；遷移完成
+        #   後另外手動 dropIndex("email_1")。
         await self.collection.create_index(
             "email",
+            name="email_unique_partial",
             partialFilterExpression={"email": {"$type": "string"}},
+            unique=True,
         )
         # verification / password reset token hash 是用戶點信件連結時的查詢欄位。
         # partial index 只索引「目前持有有效 token」的少數 user（其他 user 此欄位

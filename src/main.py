@@ -251,48 +251,60 @@ async def startup_event():
     audit_log_repo = AuditLogRepository(db)
 
     # 建立索引
-    try:
-        await task_repo.create_indexes()
-        await audit_log_repo.create_indexes()
-        # 建立 Summaries 索引
-        from src.database.repositories.summary_repo import SummaryRepository
-        summary_repo = SummaryRepository(db)
-        await summary_repo.create_indexes()
-        # 建立 RateLimit 索引（用於忘記密碼等功能的速率限制）
-        from src.database.repositories.rate_limit_repo import RateLimitRepository
-        rate_limit_repo = RateLimitRepository(db)
-        await rate_limit_repo.ensure_indexes()
-        # 建立 Orders 索引
-        from src.database.repositories.order_repo import OrderRepository
-        order_repo_init = OrderRepository(db)
-        await order_repo_init.create_indexes()
-        # 建立 Reservations 索引（額度預扣）
-        from src.database.repositories.reservation_repo import ReservationRepository
-        reservation_repo_init = ReservationRepository(db)
-        await reservation_repo_init.create_indexes()
-        # 建立 Users 索引（AI 摘要預扣 partial index，供背景清掃用）
-        from src.database.repositories.user_repo import UserRepository
-        user_repo_init = UserRepository(db)
-        await user_repo_init.create_indexes()
-        # 建立 processed_webhooks 索引（webhook 冪等性 + TTL 90 天清理）
-        from src.database.repositories.processed_webhook_repo import ProcessedWebhookRepository
-        processed_webhook_repo_init = ProcessedWebhookRepository(db)
-        await processed_webhook_repo_init.create_indexes()
-        # 建立 chunk_uploads 索引（分片上傳 metadata；過期由 periodic_chunk_upload_cleanup 處理）
-        from src.database.repositories.chunk_upload_repo import ChunkUploadRepository
-        chunk_upload_repo_init = ChunkUploadRepository(db)
-        await chunk_upload_repo_init.create_indexes()
-        # 建立 Tags 索引（(user_id, name) unique 杜絕並發 race 重複 tag）
-        # 注意：若 tags collection 已有重複資料，unique index 建立會失敗；
-        # 用獨立 try/except 包住，僅記錄 warning，不影響其他索引與服務啟動。
+    # 每個 repo 用獨立 try/except 包覆，避免任一個 repo 失敗就阻斷後面所有的索引建立。
+    # 過去的版本是一個外層 try 包全部 → 任一 repo 失敗（例如 Atlas drift / IndexKeySpecsConflict）
+    # 就 silent fail 整段，使得新加進來的 repo（如 chunk_uploads）跑不到 create_indexes。
+    async def _safe_create(name: str, coro) -> None:
         try:
-            await tag_repo.create_indexes()
+            await coro
         except Exception as e:
-            logger.warning("app.db.tag_index_failed", error=str(e),
-                          hint="tags collection 可能有重複 (user_id, name) 資料，需先清理才能建立 unique index")
-        logger.info("app.db.indexes_created")
+            logger.warning("app.db.index_creation_failed", repo=name, error=str(e))
+
+    await _safe_create("tasks", task_repo.create_indexes())
+    await _safe_create("audit_logs", audit_log_repo.create_indexes())
+
+    from src.database.repositories.summary_repo import SummaryRepository
+    summary_repo = SummaryRepository(db)
+    await _safe_create("summaries", summary_repo.create_indexes())
+
+    # RateLimitRepository 用的方法名是 ensure_indexes（不是 create_indexes）
+    from src.database.repositories.rate_limit_repo import RateLimitRepository
+    rate_limit_repo = RateLimitRepository(db)
+    await _safe_create("rate_limits", rate_limit_repo.ensure_indexes())
+
+    from src.database.repositories.order_repo import OrderRepository
+    order_repo_init = OrderRepository(db)
+    await _safe_create("orders", order_repo_init.create_indexes())
+
+    from src.database.repositories.reservation_repo import ReservationRepository
+    reservation_repo_init = ReservationRepository(db)
+    await _safe_create("reservations", reservation_repo_init.create_indexes())
+
+    from src.database.repositories.user_repo import UserRepository
+    user_repo_init = UserRepository(db)
+    await _safe_create("users", user_repo_init.create_indexes())
+
+    from src.database.repositories.processed_webhook_repo import ProcessedWebhookRepository
+    processed_webhook_repo_init = ProcessedWebhookRepository(db)
+    await _safe_create("processed_webhooks", processed_webhook_repo_init.create_indexes())
+
+    # 建立 chunk_uploads 索引（分片上傳 metadata；過期由 periodic_chunk_upload_cleanup 處理）
+    from src.database.repositories.chunk_upload_repo import ChunkUploadRepository
+    chunk_upload_repo_init = ChunkUploadRepository(db)
+    await _safe_create("chunk_uploads", chunk_upload_repo_init.create_indexes())
+
+    # Tags 用獨立的 hint 訊息：unique index 建立失敗大概率代表 collection 有重複資料
+    # 需要先清理（migrations/cleanup_duplicate_tags.py），跟一般 drift 情境不同。
+    try:
+        await tag_repo.create_indexes()
     except Exception as e:
-        logger.warning("app.db.index_creation_failed", error=str(e))
+        logger.warning(
+            "app.db.tag_index_failed",
+            error=str(e),
+            hint="tags collection 可能有重複 (user_id, name) 資料，需先清理才能建立 unique index",
+        )
+
+    logger.info("app.db.indexes_created")
 
     # 統計任務數量
     task_count = await db.tasks.count_documents({})
