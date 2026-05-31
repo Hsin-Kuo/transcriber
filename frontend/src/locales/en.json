@@ -304,7 +304,7 @@
     "fileInfo": "Information",
     "fileName": "File Name",
     "fileSize": "File Size",
-    "audioRetentionNote": "Audio retention rule: Maximum 3 audio files can be retained. Older files will be deleted automatically, or you can manually select files to keep.",
+    "audioRetentionNote": "Audio retention rule: Audio files are automatically deleted after {days} days. Pin a file to keep it.",
     "speakerDiarization": "Speaker Diarization",
     "enable": "Enable",
     "maxSpeakers": "Number of Speakers (Optional)",
