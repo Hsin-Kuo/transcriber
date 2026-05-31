@@ -18,24 +18,57 @@ GitHub (aws branch)
 
 ## 一般功能開發部署
 
-**觸發方式：push 到 `aws` branch**
+### 開發流程（feature branch → PR → main → ff aws → deploy）
+
+`main` 跟 `aws` 已設 branch protection（[詳細規則](#branch-protection)）。**不准直接 push** 任一分支。
 
 ```bash
-git checkout aws
-git merge main
-git push origin aws
+# 1. 開新 feature
+git checkout main && git pull
+git checkout -b feature/xxx
+
+# 2. 開發 + commit
+# ... 略 ...
+
+# 3. push branch + open PR（CI 跑 5 個 status check）
+git push -u origin feature/xxx
+gh pr create --base main
+
+# 4. CI 通過後 merge
+gh pr merge --squash --delete-branch
+
+# 5. Deploy
+git checkout aws && git pull
+git merge --ff-only origin/main
+git push origin aws                # 觸發 deploy-aws.yml
 ```
 
-GitHub Actions 自動執行以下步驟：
+### GitHub Actions 自動執行的步驟
 
 | 項目 | 動作 |
 |---|---|
-| 後端 Python 程式碼 | 打包 `src/` → SCP 到 EC2 → `systemctl restart transcriber` |
+| 後端 Python 程式碼 | 打包 `src/` + `deploy/` → SCP 到 EC2 → 解壓 + `pip install -r requirements-web.txt` |
 | 前端 | `npm run build` → 上傳到 `/var/www/transcriber` |
 | Admin 前端 | `npm run build` → 上傳到 `/var/www/admin` |
-| Nginx config | 複製 `deploy/nginx-ec2.conf` → `nginx -t && systemctl reload nginx` |
+| Nginx config | `cp deploy/nginx-ec2.conf` → `nginx -t && systemctl reload nginx` |
+| **systemd unit** | `cp deploy/transcriber.service` → `systemd-analyze verify` → `systemctl daemon-reload` |
+| Backend restart | `systemctl restart transcriber` → 等 3s → `systemctl is-active --quiet` 驗證沒 crash loop |
+| `.env` | 從 `deploy/.env.aws` sync（帶 timestamp backup） |
 
 進度可在 GitHub Actions 頁面查看，最後會自動 curl `https://soundlite.app/health` 驗證。
+
+### systemd unit 變更規則 ⚠️
+
+**禁止 SSH 直接編輯 `/etc/systemd/system/transcriber.service`**。
+- ✅ 改 `deploy/transcriber.service`（含 `ExecStartPre`、`--workers 2` 等） → PR → push aws → deploy 自動 sync + daemon-reload + restart
+- ❌ 直接 SSH 改 EC2 上的 unit → 下次 deploy 會被覆蓋掉，且改動沒在 git，造成 drift
+- 在本機沒辦法跑 `systemd-analyze verify`（macOS 沒 systemd），靠 CI deploy 階段驗證 + `is-active --quiet` 兜底
+
+### Branch protection
+
+- `main`: 必須走 PR，5 個 status check（Ruff / Pytest / Nginx conf / Frontend lint × 2）全過才能合
+- `aws`: 禁 force push、禁刪除、強制 linear history（只接受 ff merge from main）
+- Admin（你）可 bypass，但 bypass 會留在 GitHub 個人 security log
 
 ---
 

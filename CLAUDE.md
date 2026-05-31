@@ -64,9 +64,13 @@ src/                  # 後端 (FastAPI)
 frontend/             # 使用者前端 (Vue 3 + Vite, port 5173/3000)
 admin-frontend/       # 管理後台 (Vue 3 + Vite, port 5174/3003)
 deploy/               # AWS 部署腳本
-  nginx-ec2.conf      # Nginx 設定（生產用）
-  deploy-web.sh       # Web Server 初始部署腳本
-  deploy-gpu-worker.sh# GPU Worker 初始部署腳本
+  nginx-ec2.conf            # Nginx 設定（生產用）
+  transcriber.service       # systemd unit canonical 檔；deploy 時 cp 到 EC2
+                            # /etc/systemd/system/，禁止直接 SSH 改該 EC2 檔
+  pre-start-cleanup.sh      # systemd ExecStartPre：清舊 multiprocessing 殘留
+                            # （獨立 script 避免 pkill -f 配 inline sh -c self-kill）
+  deploy-web.sh             # Web Server 初始部署腳本
+  deploy-gpu-worker.sh      # GPU Worker 初始部署腳本
 ```
 
 ---
@@ -171,9 +175,14 @@ DEPLOY_ENV=aws    → Web Server (APP_ROLE=server) + GPU Worker (APP_ROLE=worker
 
 ### AWS 生產部署架構
 - **Web Server**：EC2 t3.small + Nginx（反向代理 + 靜態檔案 serve）
+- **uvicorn `--workers 2`**：兩個 worker process（每個獨立 event loop），由 systemd 管理
+  - 每 worker 各自跑 `_loop_tick_monitor`，`/health` body 帶 `loop_stall_seconds` 偵測 event loop 卡頓
+  - Per-worker semaphores（`USER_CHUNK_CONCURRENCY`、`GLOBAL_CHUNK_CONCURRENCY`）— 全機並行上限 = 設定值 × workers
 - **前端**：build 後直接部署到 EC2 `/var/www/transcriber`（非 S3+CloudFront）
 - **GPU Worker**：EC2 g4dn.xlarge Spot，`src/worker.py` 作為 SQS consumer
 - **CI/CD**：GitHub Actions，push 到 **`aws` 分支**觸發部署（非 `main`）
+  - systemd unit、nginx config、`.env` 都 sync from repo（不准 SSH 手改）
+  - `deploy-aws.yml` 含 `systemd-analyze verify` + `systemctl is-active --quiet` 雙保險
 
 ### MongoDB Collections
 - `users` — 帳號、角色、使用配額、藍新訂閱 / merchant order 對照
@@ -188,6 +197,7 @@ DEPLOY_ENV=aws    → Web Server (APP_ROLE=server) + GPU Worker (APP_ROLE=worker
 - `processed_webhooks` — webhook idempotency（藍新等外部 callback 重發保護）
 - `rate_limits` — auth / upload rate limit 計數
 - `reservations` — 上傳前的配額預留
+- `chunk_uploads` — 分片上傳 metadata（streaming chunk staging；3h 無活動由 `periodic_chunk_upload_cleanup` sweep）
 - `worker_heartbeats` — GPU Worker 60 秒 keep-alive（B6 監控用）
 
 ### SSE 進度推送（本地 vs AWS 行為不同）
