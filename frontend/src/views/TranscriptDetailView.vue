@@ -341,7 +341,7 @@ class="transcript-layout"
             <div
               v-else-if="isEditing"
               class="transcript-display editing"
-              :class="{ 'alt-segment-hover': hoverChipVisible }"
+              :class="{ 'alt-segment-hover': hoverChipVisible, 'alt-no-seek': !currentTranscript.hasAudio }"
               contenteditable="true"
               :key="`transcript-editing-${contentVersion}`"
               ref="textareaRef"
@@ -359,7 +359,7 @@ class="transcript-layout"
             <div
               v-else
               class="transcript-display"
-              :class="{ 'alt-pressed': isAltPressed && currentTranscript.hasAudio }"
+              :class="{ 'alt-pressed': isAltPressed, 'alt-no-seek': isAltPressed && !currentTranscript.hasAudio }"
               :key="`transcript-${showTimecodeMarkers}-${contentVersion}`"
               ref="textareaRef"
             >
@@ -1155,6 +1155,16 @@ usePageLifecycle({
 
 .transcript-display.alt-pressed .marker-wrapper .text-part:hover {
   background-color: rgba(148, 171, 204, 0.3);
+}
+
+/* 音檔已刪除：Alt 仍亮 segment 色塊與 timecode 供檢視，但停用 seek，
+   游標不顯示為可點擊（避免看起來可點卻無反應） */
+.transcript-display.alt-no-seek .marker-wrapper .text-part {
+  cursor: default;
+}
+.transcript-display.editing.alt-segment-hover.alt-no-seek,
+.transcript-display.editing.alt-segment-hover.alt-no-seek * {
+  cursor: default !important;
 }
 
 /* 搜尋高亮 */
