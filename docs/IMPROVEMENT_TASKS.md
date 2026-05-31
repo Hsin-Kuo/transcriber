@@ -147,6 +147,21 @@
   - 降級：維持當前方案直到期末，排程新方案於到期日首扣
   - 不做金額差額計算，設計上刻意如此
 - [x] **O17** — Google OAuth HTTP timeout 設定（2026-05-27）
+- [x] **M9** — Upload UX 重構（streaming + multi-worker + Mongo metadata）（2026-05-30）
+  - **Phase 1**：streaming chunk write（aiofiles）、`_active_uploads` dict → MongoDB
+    `chunk_uploads` collection（atomic `$addToSet` / `findOneAndDelete`）、user/global
+    semaphore、nginx chunks 限流（120r/min burst 30）
+  - **Phase 2**：前端 worker pool 並行 3 條 + 4xx 不重試、event loop stall monitor
+    （`/health` 加 `loop_stall_seconds`）、`uvicorn --workers 2`
+  - **修正**：`merge_audio_files` / `get_audio_duration` 在 async 內裸跑 sync subprocess
+    一律包進 `asyncio.to_thread`；`sweep_expired` find→delete race；4xx silent retry
+  - **基礎建設**：systemd unit 改 repo-as-source（`deploy/transcriber.service`）、
+    `pre-start-cleanup.sh` 解 multiprocessing 殘留、`deploy-aws.yml` 加
+    `systemd-analyze verify` + `is-active --quiet` 雙保險、branch protection（main + aws）
+  - **副產品**：修 `user_repo.email` index drift（補 `unique=True`、改名 `email_unique_partial`
+    避開 Atlas 舊 `email_1`）、每個 repo `create_indexes` 獨立 try/except 避免連坐失敗
+  - **測試**：`tests/unit/test_chunk_upload_repo.py` 11 個（含 monkeypatch race）
+  - **Post-mortem**：[`POSTMORTEM_2026-05-30_multi_worker.md`](./POSTMORTEM_2026-05-30_multi_worker.md)
 
 ### 已完成
 
@@ -176,3 +191,4 @@
 | T8 結構化 logging | ✅ 完成（M4） | 2026-05-17 |
 | T9 SSE 效能 | ⏳ 待處理 | — |
 | T10 前端型別安全 | ✅ 完成（M3） | 2026-05-17 |
+| M9 Upload streaming + multi-worker | ✅ 完成 | 2026-05-30 |

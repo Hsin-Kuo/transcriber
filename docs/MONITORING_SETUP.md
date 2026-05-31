@@ -23,6 +23,26 @@
 |-------|---------|------|------|
 | **`transcriber-health-endpoint-down`** | `https://soundlite.app/health` HTTP 狀態 | 連續 2 個 1 分鐘窗口失敗 | 寄信 |
 
+### `/health` body 內含的監控欄位
+
+`/health` 除了 HTTP 200 之外，body 還帶以下欄位（給更細粒度的監控用）：
+
+| 欄位 | 意義 | 健康範圍 | 建議 alarm 條件 |
+|------|------|---------|---------------|
+| `database` | Mongo ping 結果 | `"connected"` | 非 `connected` → degraded（已 emit 503）|
+| `loop_stall_seconds` | 距離上次 `_loop_tick_monitor` tick 多久 | 0-1s 鋸齒波 | 持續 > 2s 代表 event loop 被 sync I/O 卡住 |
+
+`loop_stall_seconds > 3.0` 時 `/health` 直接回 503（已寫進 code），所以 `transcriber-health-endpoint-down` 順便也抓到嚴重 stall。要抓「中度卡頓」可額外用 CloudWatch custom metric 從 body 提取：
+
+```bash
+# 範例（用 cron 或 Lambda 提取 metric）
+curl -s https://soundlite.app/health \
+  | jq -r '.loop_stall_seconds // .detail.loop_stall_seconds' \
+  | xargs -I {} aws cloudwatch put-metric-data \
+      --namespace Transcriber --metric-name EventLoopStallSeconds \
+      --value {} --region ap-northeast-1
+```
+
 對應的 Route53 health check：
 - ID：`fa65c1d9-daa7-4912-8eb7-b3630900b6a5`
 - 從 ~15 個 AWS region IP 同時 polling `/health`，30 秒一次
