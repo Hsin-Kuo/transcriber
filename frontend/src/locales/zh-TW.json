@@ -326,7 +326,7 @@
     "errorUpload": "上傳失敗"
   },
   "uploadZone": {
-    "clickToUpload": "點擊或拖放檔案",
+    "clickToUpload": "點擊或拖曳檔案",
     "supportedFormats": "支援音訊（M4A、MP3、WAV）及影片（MP4、MOV、AVI）格式",
     "uploadingFile": "上傳檔案中...",
     "fileTooLarge": "檔案過大",
