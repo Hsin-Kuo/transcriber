@@ -81,10 +81,6 @@
                 <span class="value">{{ (pendingFile.size / 1024 / 1024).toFixed(2) }} MB</span>
               </div>
             </template>
-
-            <div class="file-note">
-              {{ $t('transcription.audioRetentionNote') }}
-            </div>
           </div>
 
           <!-- 語言選擇（移至左欄） -->
@@ -230,6 +226,13 @@
             </div>
           </div>
 
+          <!-- 音檔保留規則（移至右欄最下方） -->
+          <div class="modal-section retention-section">
+            <div class="file-note">
+              {{ $t('transcription.audioRetentionNote', { days: audioRetentionDays }) }}
+            </div>
+          </div>
+
           </div><!-- end right col -->
         </div>
 
@@ -268,9 +271,14 @@ import { transcriptionService } from '../api/services'
 import { exceedsMaxSize, MAX_UPLOAD_SIZE_MB } from '../utils/chunkedUpload.js'
 import { useCollapsibleRows } from '../composables/useCollapsibleRows'
 import { useTaskTags } from '../composables/task/useTaskTags'
+import { useAuthStore } from '../stores/auth'
 
 const { t: $t, locale } = useI18n()
 const { tagsData, fetchTagColors } = useTaskTags($t)
+
+const authStore = useAuthStore()
+// 音檔保留天數依方案動態顯示（FREE=3、付費方案=7），未取得時 fallback 3
+const audioRetentionDays = computed(() => authStore.quota?.audio_retention_days || 3)
 
 const showNotification = inject('showNotification')
 const uploading = ref(false)

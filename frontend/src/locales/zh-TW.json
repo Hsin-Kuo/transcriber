@@ -304,7 +304,7 @@
     "fileInfo": "檔案資訊",
     "fileName": "檔案名稱",
     "fileSize": "檔案大小",
-    "audioRetentionNote": "音檔保留規則：最多可保留3個音檔，超過會從最舊的依序刪除，亦可手動勾選保留。",
+    "audioRetentionNote": "音檔保留規則：音檔會在 {days} 天後自動刪除，可手動釘選保留。",
     "speakerDiarization": "說話者辨識",
     "enable": "啟用",
     "maxSpeakers": "預估說話者人數（可選）",
