@@ -11,10 +11,11 @@ from typing import Optional
 from ..auth.dependencies import get_current_user
 from ..database.mongodb import get_database
 from ..database.repositories.user_repo import UserRepository
-from ..database.repositories.order_repo import OrderRepository, DuplicatePendingOrderError
+from ..database.repositories.order_repo import OrderRepository
 from ..database.repositories.processed_webhook_repo import ProcessedWebhookRepository
 from ..models.quota import QuotaTier, QUOTA_TIERS, is_upgrade
-from ..utils.newebpay_service import get_newebpay_service, NewebpayService
+from ..services.order_settlement import build_order_settlement, PaymentNotification
+from ..utils.newebpay_service import get_newebpay_service
 from ..utils.time_utils import get_utc_timestamp
 from ..utils.logger import get_logger
 
@@ -24,166 +25,10 @@ log = get_logger(__name__)
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
-# 防連點冷卻秒數：同類型付款在這個秒數內重複送出才擋（防誤觸 / 連點）；
-# 超過此秒數的舊 pending 單不擋，改由 supersede 取代，讓使用者可立即重試。
-PENDING_COOLDOWN_SECONDS = 30
-
 
 # ── 輔助函式 ────────────────────────────────────────────────────────────────
-
-async def _guard_and_supersede_pending(order_repo, user_id: str, order_type: str) -> None:
-    """付款防重（supersede + 短冷卻）：
-
-    1. 冷卻：PENDING_COOLDOWN_SECONDS 秒內已有同類型 pending → 擋（429），防連點。
-    2. 取代：否則把同類型既有 pending 單標記 superseded，再讓呼叫端建立新單。
-       使用者中途離開付款頁後可幾乎立即重試，且不累積 pending 垃圾單。
-    """
-    if await order_repo.has_recent_pending_order(user_id, order_type, PENDING_COOLDOWN_SECONDS):
-        raise HTTPException(status_code=429, detail="付款請求處理中，請稍候幾秒再試")
-    superseded = await order_repo.supersede_pending_orders(user_id, order_type)
-    if superseded:
-        log.info(
-            "subscription.pending.superseded",
-            user_id=user_id, order_type=order_type, count=superseded,
-        )
-
-
-async def _create_pending_order(order_repo, order_data: dict):
-    """建立 pending 訂單；若撞到並發重複（DB partial unique index）→ 轉 429。
-
-    防 HIGH-1 TOCTOU race：兩個幾乎同時的請求都通過冷卻+supersede 後，DB 唯一索引
-    只讓一張 pending 成功，另一張在這裡被攔成 429（而非 500）。
-    """
-    try:
-        return await order_repo.create(order_data)
-    except DuplicatePendingOrderError:
-        raise HTTPException(status_code=429, detail="付款請求處理中，請稍候幾秒再試")
-
-
-async def _terminate_orphan_contracts(db, order_repo, user_id: str, keep_period_no: str) -> None:
-    """對帳收斂（防 MED-2 孤兒委託）：
-
-    訂閱啟動後，終止該 user 名下「已 paid 但 period_no ≠ 目前 active」的其他藍新委託，
-    避免雙重完成造成多個委託並存、每月重複扣款。冪等：已標記 contract_terminated_at
-    或藍新回「已終止」皆安全略過。
-    """
-    # 防呆：拿不到目前委託編號時不敢動（否則 $nin:[None] 可能誤終止其他委託）
-    if not keep_period_no:
-        return
-
-    # best-effort：本函式在「訂單已標記 paid」之後執行，屬不可重試位置（重發 Notify 會被
-    # is_first + status==paid 短路）。因此絕不可向外拋例外拖垮已成功的訂閱啟動；
-    # 任何終止失敗改為記錄 + 送 Sentry 供人工處理。
-    svc = get_newebpay_service()
-    try:
-        cursor = db.orders.find({
-            "user_id": user_id,
-            "status": "paid",
-            "type": {"$in": ["subscription", "upgrade_subscription", "downgrade_subscription"]},
-            "period_no": {"$nin": [None, keep_period_no]},
-            "contract_terminated_at": {"$exists": False},
-        })
-        orphans = [o async for o in cursor]
-    except Exception as e:
-        log.error("subscription.orphan_contract.scan_failed", user_id=user_id, error=str(e), exc_info=True)
-        return
-
-    for o in orphans:
-        pno = o.get("period_no")
-        ono = o.get("merchant_order_no")
-        if not pno or not ono:
-            continue
-        try:
-            ok, msg = await svc.terminate_period_contract(ono, pno)
-        except Exception as e:
-            # 網路/逾時等例外：不拋出，記錄 + Sentry 供人工終止（孤兒委託需人工跟進）
-            log.error("subscription.orphan_contract.terminate_error", user_id=user_id, period_no=pno, error=str(e), exc_info=True)
-            _capture_orphan_contract_alert(user_id, pno, str(e))
-            continue
-        already = ("無法重複終止" in (msg or "")) or ("已終止" in (msg or ""))
-        if ok or already:
-            # 標記避免每次啟動重打；保留 paid 狀態供審計
-            await order_repo.update_by_order_no(ono, {"contract_terminated_at": get_utc_timestamp()})
-            log.info("subscription.orphan_contract.terminated", user_id=user_id, period_no=pno, already=already)
-        else:
-            # 藍新回非成功且非「已終止」：不標記，記錄 + Sentry 供人工處理
-            log.warning("subscription.orphan_contract.terminate_failed", user_id=user_id, period_no=pno, message=msg)
-            _capture_orphan_contract_alert(user_id, pno, msg)
-
-
-def _capture_orphan_contract_alert(user_id: str, period_no: str, detail: str) -> None:
-    """孤兒委託未能自動終止 → 送 Sentry 供人工終止（可能造成重複扣款，需即時跟進）。"""
-    try:
-        import sentry_sdk
-        with sentry_sdk.push_scope() as scope:
-            scope.set_tag("payment.issue", "orphan_contract_terminate_failed")
-            scope.set_context("orphan_contract", {"user_id": user_id, "period_no": period_no, "detail": detail})
-            sentry_sdk.capture_message(
-                f"孤兒定期定額委託未能自動終止，需人工終止：user={user_id} period_no={period_no}",
-                level="error",
-            )
-    except ImportError:
-        pass
-
-
-def _is_duplicate_first_completion(sub: dict, order: dict) -> bool:
-    """判斷這筆 first-payment 是否為『重複完成』（sibling 已先啟動）。
-
-    LOW-4 殘留防護：使用者過了冷卻後重開 checkout 會 supersede 舊單並建新單，
-    兩張藍新付款頁都可能被完成。第一張完成會正常啟動；第二張完成時應被擋下，
-    避免重複啟用、重複加值 extra_quota，並終止這張多出來的委託。
-    """
-    if sub.get("status") != "active":
-        return False  # 無既有 active → 第一筆完成，正常啟動
-    active_order = sub.get("active_order_no")
-    if not active_order or active_order == order.get("merchant_order_no"):
-        return False
-    otype = order.get("type", "subscription")
-    if otype in ("upgrade_subscription", "downgrade_subscription"):
-        # 合法升降級：目前 active 應為這張要取代的前一張(prev)；
-        # 若前任已被別的 sibling 換掉（active ≠ prev）→ 這張是重複完成。
-        return active_order != order.get("prev_order_no")
-    # 新訂閱 / reactivate：reactivate 發生於 cancel_at_period_end=True；
-    # 重複新訂閱則 sibling 已把 cancel_at_period_end 設為 False。
-    return not sub.get("cancel_at_period_end", False)
-
-
-async def _reject_duplicate_completion(order_repo, order, user_id: str, period_no: str) -> None:
-    """重複完成處理：終止這張多出來的委託、標記訂單需退款，不啟用/不加值。
-
-    首期已立即授權扣款（PeriodStartType=2），故標記 needs_refund + 送 Sentry 供人工退首期款。
-    狀態保留為 paid（period_no 已設），若終止失敗，下次啟動的對帳收斂仍會接手重試。
-    """
-    svc = get_newebpay_service()
-    ono = order["merchant_order_no"]
-    try:
-        ok, msg = await svc.terminate_period_contract(ono, period_no)
-    except Exception as e:
-        ok, msg = False, f"exception: {e}"
-    already = ("無法重複終止" in (msg or "")) or ("已終止" in (msg or ""))
-    updates = {
-        "status": "paid",
-        "paid_at": get_utc_timestamp(),
-        "is_duplicate": True,
-        "needs_refund": True,
-    }
-    if ok or already:
-        updates["contract_terminated_at"] = get_utc_timestamp()
-    await order_repo.update_by_order_no(ono, updates)
-    log.warning(
-        "subscription.duplicate_completion.rejected",
-        user_id=user_id, order_no=ono, period_no=period_no, terminate_ok=ok, message=msg,
-    )
-    _capture_orphan_contract_alert(user_id, period_no, f"重複完成已拒絕，需退首期款；終止結果: ok={ok} msg={msg}")
-
-
-def _build_quota_from_tier(tier: str) -> dict:
-    tier_enum = QuotaTier(tier)
-    tier_config = QUOTA_TIERS[tier_enum]
-    return {
-        "tier": tier,
-        **{k: v for k, v in tier_config.items() if k not in ("name", "price")},
-    }
+# 付款狀態機（建單防重、settlement、孤兒收斂、重複完成、tier→quota）已抽到
+# src/services/order_settlement.py 的 OrderSettlement。詳見 CONTEXT.md「金流與訂單」。
 
 
 def _notify_url(path: str) -> str:
@@ -280,12 +125,9 @@ async def create_checkout(
         raise HTTPException(status_code=500, detail="價格尚未設定")
 
     user_id = str(current_user["_id"])
-    order_repo = OrderRepository(db)
-
-    await _guard_and_supersede_pending(order_repo, user_id, "subscription")
 
     order_no = svc.generate_order_no("SLSUB")
-    await _create_pending_order(order_repo, {
+    await build_order_settlement(db).open_pending({
         "user_id": user_id,
         "merchant_order_no": order_no,
         "type": "subscription",
@@ -399,11 +241,9 @@ async def reactivate_subscription(
         raise HTTPException(status_code=500, detail="價格尚未設定")
 
     user_id = str(current_user["_id"])
-    order_repo = OrderRepository(db)
-    await _guard_and_supersede_pending(order_repo, user_id, "subscription")
 
     order_no = svc.generate_order_no("SLSUB")
-    await _create_pending_order(order_repo, {
+    await build_order_settlement(db).open_pending({
         "user_id": user_id,
         "merchant_order_no": order_no,
         "type": "subscription",
@@ -464,10 +304,7 @@ async def change_plan(
 
     user_id = str(current_user["_id"])
     await _handle_invoice_save(request, user_id, user_repo)
-    order_repo = OrderRepository(db)
-
-    upgrade_type = "upgrade_subscription" if upgrading else "downgrade_subscription"
-    await _guard_and_supersede_pending(order_repo, user_id, upgrade_type)
+    settlement = build_order_settlement(db)
 
     if upgrading:
         # ── 升級：立即付款，Notify 成功後舊合約取消、剩餘額度→extra_quota ──
@@ -482,7 +319,7 @@ async def change_plan(
         remaining_ai = max(0, old_limit_ai - usage.get("ai_summaries", 0))
 
         order_no = svc.generate_order_no("SLUPG")
-        await _create_pending_order(order_repo, {
+        await settlement.open_pending({
             "user_id": user_id,
             "merchant_order_no": order_no,
             "type": "upgrade_subscription",
@@ -527,7 +364,7 @@ async def change_plan(
         if days_until_end < 2:
             # 剩餘 < 2 天，改為立即訂閱新方案
             order_no = svc.generate_order_no("SLDWN")
-            await _create_pending_order(order_repo, {
+            await settlement.open_pending({
                 "user_id": user_id,
                 "merchant_order_no": order_no,
                 "type": "downgrade_subscription",
@@ -562,7 +399,7 @@ async def change_plan(
             period_first_date = first_date_obj.strftime("%Y/%m/%d")
 
             order_no = svc.generate_order_no("SLDWN")
-            await _create_pending_order(order_repo, {
+            await settlement.open_pending({
                 "user_id": user_id,
                 "merchant_order_no": order_no,
                 "type": "downgrade_subscription",
@@ -643,12 +480,9 @@ async def purchase_extra_quota(
     await _handle_invoice_save(request, user_id, user_repo)
 
     svc = get_newebpay_service()
-    order_repo = OrderRepository(db)
-
-    await _guard_and_supersede_pending(order_repo, user_id, "extra_quota")
 
     order_no = svc.generate_order_no("SLEXT")
-    await _create_pending_order(order_repo, {
+    await build_order_settlement(db).open_pending({
         "user_id": user_id,
         "merchant_order_no": order_no,
         "type": "extra_quota",
@@ -773,48 +607,19 @@ async def period_notify(request: Request, db=Depends(get_database)):
         log.warning("subscription.webhook.duplicate_skipped", natural_id=natural_id)
         return {"status": "ok"}
 
-    # 已 claim → 進入處理。若中途失敗：釋放 claim + 送 Sentry，讓藍新重發能重做
+    # 已 claim → 進入處理。若中途失敗：釋放 claim + 送 Sentry，讓藍新重發能重做。
+    # settle() 負責 order 生命週期 idempotency（order_not_found / 已 paid 短路）
+    # 與所有帳號狀態變更——router 只做解密 + claim + 結果記錄。
     try:
-        order_repo = OrderRepository(db)
-        order = await order_repo.get_by_order_no(merchant_order_no)
-        if not order:
-            log.warning("subscription.webhook.order_not_found", merchant_order_no=merchant_order_no)
-            return {"status": "ok"}
-
-        # 冪等性保護：首次付款若 order 已是 paid，直接跳過避免重複處理
-        if is_first_payment and order.get("status") == "paid":
-            log.warning("subscription.webhook.order_already_paid", merchant_order_no=merchant_order_no)
-            return {"status": "ok"}
-
-        user_repo = UserRepository(db)
-        user_id = order["user_id"]
-
-        if notify_status == "SUCCESS":
-            await order_repo.update_by_order_no(merchant_order_no, {
-                "period_no": period_no,
-                "auth_times": already_times or 1,
-                "newebpay_trade_no": trade_no,
-            })
-
-            order_type = order.get("type", "subscription")
-
-            if order_type in ("subscription", "upgrade_subscription"):
-                await _handle_subscription_paid(
-                    db, user_repo, order_repo, order, user_id,
-                    period_no, is_first_payment, trade_no
-                )
-            elif order_type == "downgrade_subscription":
-                await _handle_downgrade_paid(
-                    db, user_repo, order_repo, order, user_id,
-                    period_no, is_first_payment
-                )
-
-        else:
-            await order_repo.update_by_order_no(merchant_order_no, {"status": "failed"})
-            if not is_first_payment:
-                # 續扣失敗（非首次付款）→ 立即降為 free
-                await _handle_payment_failed(db, user_repo, user_id)
-
+        settle_result = await build_order_settlement(db).settle(PaymentNotification(
+            order_no=merchant_order_no,
+            success=(notify_status == "SUCCESS"),
+            is_first_payment=is_first_payment,
+            period_no=period_no,
+            trade_no=trade_no,
+            auth_times=already_times,
+        ))
+        log.info("subscription.webhook.settled", natural_id=natural_id, outcome=settle_result.outcome.value)
         return {"status": "ok"}
     except Exception as e:
         # 處理失敗：釋放 claim 讓藍新下次重發能重做；送 Sentry 警示需人工檢查
@@ -835,159 +640,6 @@ async def period_notify(request: Request, db=Depends(get_database)):
             pass
         # 回 500 讓藍新重試
         raise
-
-
-async def _handle_subscription_paid(
-    db, user_repo, order_repo, order, user_id,
-    period_no, is_first_payment: bool, trade_no
-):
-    """首次授權成功 or 續扣成功"""
-    now = datetime.utcnow()
-    tier = order["tier"]
-    billing_cycle = order["billing_cycle"]
-    order_type = order.get("type", "subscription")
-    period_end = NewebpayService.calc_period_end(billing_cycle, now)
-
-    if is_first_payment:
-        # 重複完成防護：sibling 已先啟動 → 拒絕重複啟用/加值、終止這張多出來的委託
-        full_user = await user_repo.get_by_id(user_id)
-        cur_sub = full_user.get("subscription", {}) if full_user else {}
-        if _is_duplicate_first_completion(cur_sub, order):
-            await _reject_duplicate_completion(order_repo, order, user_id, period_no)
-            return
-        # ── 首次付款：啟動訂閱 ──────────────────────────────────────────
-        if order_type == "upgrade_subscription":
-            prev_order_no = order.get("prev_order_no")
-            prev_period_no = order.get("prev_period_no")
-            if prev_order_no and prev_period_no:
-                svc = get_newebpay_service()
-                ok, msg = await svc.terminate_period_contract(prev_order_no, prev_period_no)
-                if not ok:
-                    log.warning("subscription.upgrade.old_contract_terminate_failed", message=msg)
-
-            extra_dur = order.get("extra_duration_minutes", 0)
-            extra_ai = order.get("extra_ai_summaries", 0)
-            if extra_dur or extra_ai:
-                await user_repo.add_extra_quota(user_id, extra_dur, extra_ai)
-
-        subscription = {
-            "status": "active",
-            "tier": tier,
-            "billing_cycle": billing_cycle,
-            "current_period_start": now.timestamp(),
-            "current_period_end": period_end.timestamp(),
-            "cancel_at_period_end": False,
-            "canceled_at": None,
-            "pending_plan_change": None,
-            "payment_provider": "newebpay",
-            "active_order_no": order["merchant_order_no"],
-            "period_no": period_no,
-            "created_at": now.timestamp(),
-            "updated_at": now.timestamp(),
-        }
-        await user_repo.update_subscription(user_id, subscription)
-        await user_repo.update_quota(user_id, _build_quota_from_tier(tier))
-        await _reset_monthly_usage(db, user_id, now)
-        await order_repo.update_by_order_no(
-            order["merchant_order_no"], {"status": "paid", "paid_at": now.timestamp()}
-        )
-        log.info("subscription.activated", user_id=user_id, tier=tier, billing_cycle=billing_cycle)
-        # 對帳收斂：終止此 user 其他非當前的 active 委託（防雙重完成造成孤兒重複扣款）
-        await _terminate_orphan_contracts(db, order_repo, user_id, period_no)
-
-    else:
-        # ── 續扣成功：更新計費週期 ──────────────────────────────────────
-        full_user = await user_repo.get_by_id(user_id)
-        sub = full_user.get("subscription", {}) if full_user else {}
-        sub.update({
-            "current_period_start": now.timestamp(),
-            "current_period_end": period_end.timestamp(),
-            "updated_at": now.timestamp(),
-        })
-        await user_repo.update_subscription(user_id, sub)
-        await _reset_monthly_usage(db, user_id, now)
-        log.info("subscription.renewed", user_id=user_id)
-
-
-async def _handle_downgrade_paid(
-    db, user_repo, order_repo, order, user_id, period_no, is_first_payment: bool
-):
-    """降級定期定額扣款成功"""
-    now = datetime.utcnow()
-    tier = order["tier"]
-    billing_cycle = order["billing_cycle"]
-    period_end = NewebpayService.calc_period_end(billing_cycle, now)
-
-    if is_first_payment:
-        # 重複完成防護（同上）
-        full_user = await user_repo.get_by_id(user_id)
-        cur_sub = full_user.get("subscription", {}) if full_user else {}
-        if _is_duplicate_first_completion(cur_sub, order):
-            await _reject_duplicate_completion(order_repo, order, user_id, period_no)
-            return
-        # ── 首次扣款：正式切換為新方案（保底重試終止舊 Pro）────────────────
-        prev_order_no = order.get("prev_order_no")
-        prev_period_no = order.get("prev_period_no")
-        if prev_period_no and prev_order_no:
-            svc = get_newebpay_service()
-            ok, msg = await svc.terminate_period_contract(prev_order_no, prev_period_no)
-            if not ok:
-                log.warning("subscription.downgrade.old_pro_contract_terminate_failed", message=msg)
-
-        subscription = {
-            "status": "active",
-            "tier": tier,
-            "billing_cycle": billing_cycle,
-            "current_period_start": now.timestamp(),
-            "current_period_end": period_end.timestamp(),
-            "cancel_at_period_end": False,
-            "canceled_at": None,
-            "pending_plan_change": None,
-            "payment_provider": "newebpay",
-            "active_order_no": order["merchant_order_no"],
-            "period_no": period_no,
-            "updated_at": now.timestamp(),
-        }
-        await user_repo.update_subscription(user_id, subscription)
-        await user_repo.update_quota(user_id, _build_quota_from_tier(tier))
-        await _reset_monthly_usage(db, user_id, now)
-        await order_repo.update_by_order_no(
-            order["merchant_order_no"], {"status": "paid", "paid_at": now.timestamp()}
-        )
-        log.info("subscription.downgrade.activated", user_id=user_id, tier=tier)
-        # 對帳收斂：終止此 user 其他非當前的 active 委託（防雙重完成造成孤兒重複扣款）
-        await _terminate_orphan_contracts(db, order_repo, user_id, period_no)
-
-    else:
-        # ── 後續續扣：更新計費週期 ──────────────────────────────────────
-        full_user = await user_repo.get_by_id(user_id)
-        sub = full_user.get("subscription", {}) if full_user else {}
-        sub.update({
-            "current_period_start": now.timestamp(),
-            "current_period_end": period_end.timestamp(),
-            "updated_at": now.timestamp(),
-        })
-        await user_repo.update_subscription(user_id, sub)
-        await _reset_monthly_usage(db, user_id, now)
-        log.info("subscription.downgrade.renewed", user_id=user_id)
-
-
-async def _handle_payment_failed(db, user_repo: UserRepository, user_id: str):
-    """續扣失敗：立即降為 free"""
-    now = datetime.utcnow()
-
-    full_user = await user_repo.get_by_id(user_id)
-    sub = full_user.get("subscription", {}) if full_user else {}
-    sub.update({
-        "status": "expired",
-        "cancel_at_period_end": False,
-        "updated_at": now.timestamp(),
-    })
-    await user_repo.update_subscription(user_id, sub)
-
-    free_quota = _build_quota_from_tier("free")
-    await user_repo.update_quota(user_id, free_quota)
-    log.warning("subscription.renewal.payment_failed", user_id=user_id)
 
 
 # ── Notify Handler（MPG 一次性） ─────────────────────────────────────────────
@@ -1022,34 +674,14 @@ async def mpg_notify(request: Request, db=Depends(get_database)):
         return {"status": "ok"}
 
     try:
-        order_repo = OrderRepository(db)
-        order = await order_repo.get_by_order_no(merchant_order_no)
-        if not order:
-            log.warning("payment.webhook.order_not_found", merchant_order_no=merchant_order_no)
-            return {"status": "ok"}
-
-        # 冪等性保護
-        if order.get("status") == "paid":
-            log.warning("payment.webhook.order_already_paid", merchant_order_no=merchant_order_no)
-            return {"status": "ok"}
-
-        user_repo = UserRepository(db)
-        user_id = order["user_id"]
-
-        if result == "SUCCESS":
-            extra_dur = order.get("extra_duration_minutes", 0)
-            extra_ai = order.get("extra_ai_summaries", 0)
-            await user_repo.add_extra_quota(user_id, extra_dur, extra_ai)
-            await order_repo.update_by_order_no(merchant_order_no, {
-                "status": "paid",
-                "newebpay_trade_no": trade_no,
-                "paid_at": datetime.utcnow().timestamp(),
-            })
-            log.info("payment.extra_quota.purchased", user_id=user_id, extra_duration_minutes=extra_dur, extra_ai_summaries=extra_ai)
-        else:
-            await order_repo.update_by_order_no(merchant_order_no, {"status": "failed"})
-            log.warning("payment.extra_quota.purchase_failed", user_id=user_id)
-
+        # MPG 一次性付款一律視為 first；settle() 處理 order_not_found / 已 paid 短路與加值
+        settle_result = await build_order_settlement(db).settle(PaymentNotification(
+            order_no=merchant_order_no,
+            success=(result == "SUCCESS"),
+            is_first_payment=True,
+            trade_no=trade_no,
+        ))
+        log.info("payment.webhook.settled", merchant_order_no=merchant_order_no, outcome=settle_result.outcome.value)
         return {"status": "ok"}
     except Exception as e:
         await webhook_repo.release(provider="newebpay-mpg", natural_id=merchant_order_no)
@@ -1106,21 +738,4 @@ async def payment_return(request: Request):
     return RedirectResponse(
         url=f"{FRONTEND_URL}/payment/return?{query}",
         status_code=303  # 303 See Other：POST → GET redirect
-    )
-
-
-# ── 輔助 ─────────────────────────────────────────────────────────────────────
-
-async def _reset_monthly_usage(db, user_id: str, now: datetime):
-    await db.users.update_one(
-        {"_id": ObjectId(user_id)},
-        {
-            "$set": {
-                "usage.transcriptions": 0,
-                "usage.duration_minutes": 0,
-                "usage.ai_summaries": 0,
-                "usage.last_reset": now,
-                "updated_at": get_utc_timestamp(),
-            }
-        }
     )

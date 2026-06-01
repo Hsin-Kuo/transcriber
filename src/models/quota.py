@@ -26,6 +26,19 @@ def is_upgrade(from_tier: str, to_tier: str) -> bool:
     return to_order > from_order
 
 
+def build_quota_from_tier(tier: str) -> dict:
+    """把 tier 名稱映射成寫入 user.quota 的 dict（去掉純展示用的 name / price）。
+
+    純函數，屬 quota model 的職責（不是 router、也不是 OrderSettlement 的）。
+    OrderSettlement 啟用/降級訂閱、降為 free 時都用它換算 quota。
+    """
+    tier_config = QUOTA_TIERS[QuotaTier(tier)]
+    return {
+        "tier": tier,
+        **{k: v for k, v in tier_config.items() if k not in ("name", "price")},
+    }
+
+
 # 配額等級詳細定義
 QUOTA_TIERS = {
     QuotaTier.FREE: {

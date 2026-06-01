@@ -246,6 +246,24 @@ class UserRepository:
         """更新用戶訂閱資料"""
         return await self.update(user_id, {"subscription": subscription_data})
 
+    async def reset_monthly_usage(self, user_id: str, now: datetime) -> bool:
+        """歸零當期用量（訂閱首扣 / 續扣成功時呼叫）。
+
+        `usage.last_reset` 存 datetime（與配額月結邏輯一致）；`updated_at` 用秒級
+        timestamp（與其他 user 欄位一致）。
+        """
+        result = await self.collection.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": {
+                "usage.transcriptions": 0,
+                "usage.duration_minutes": 0,
+                "usage.ai_summaries": 0,
+                "usage.last_reset": now,
+                "updated_at": get_utc_timestamp(),
+            }},
+        )
+        return result.modified_count > 0
+
     async def add_extra_quota(
         self, user_id: str, duration_minutes: float = 0, ai_summaries: int = 0
     ) -> bool:

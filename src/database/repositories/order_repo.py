@@ -108,6 +108,23 @@ class OrderRepository:
     async def get_by_period_no(self, period_no: str) -> Optional[Dict[str, Any]]:
         return await self.collection.find_one({"period_no": period_no})
 
+    async def find_orphan_contracts(
+        self, user_id: str, keep_period_no: str
+    ) -> List[Dict[str, Any]]:
+        """找出該 user 名下「已 paid 但 period_no ≠ 目前 active」的其他藍新委託。
+
+        供 OrderSettlement 的孤兒委託對帳收斂用：訂閱啟動後終止這些多出來的委託，
+        防雙重完成造成每月重複扣款。已標記 contract_terminated_at 的不再列入。
+        """
+        cursor = self.collection.find({
+            "user_id": user_id,
+            "status": "paid",
+            "type": {"$in": ["subscription", "upgrade_subscription", "downgrade_subscription"]},
+            "period_no": {"$nin": [None, keep_period_no]},
+            "contract_terminated_at": {"$exists": False},
+        })
+        return [o async for o in cursor]
+
     async def get_active_subscription_order(self, user_id: str) -> Optional[Dict[str, Any]]:
         """取得用戶目前有效的訂閱訂單（type=subscription, status=paid）"""
         return await self.collection.find_one({
