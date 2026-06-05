@@ -343,13 +343,13 @@ async function handleResend() {
 }
 
 .hint-box.hint-box-warning {
-  background: #fff3cd;
-  border: 1px solid #ffeeba;
+  background: color-mix(in srgb, var(--color-warning) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
 }
 
 .hint-box.hint-box-warning .hint-title,
 .hint-box.hint-box-warning .hint-list {
-  color: #856404;
+  color: var(--color-warning-dark);
 }
 
 .hint-title {
@@ -406,15 +406,15 @@ async function handleResend() {
 }
 
 .notice-success {
-  background: #d4edda;
-  color: #155724;
-  border: 1px solid #c3e6cb;
+  background: var(--color-success-bg);
+  color: var(--color-success-dark);
+  border: 1px solid color-mix(in srgb, var(--color-success) 30%, transparent);
 }
 
 .notice-error {
-  background: #f8d7da;
-  color: #721c24;
-  border: 1px solid #f5c6cb;
+  background: color-mix(in srgb, var(--color-danger) 15%, transparent);
+  color: var(--color-danger-dark);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 30%, transparent);
 }
 
 .notice-info {

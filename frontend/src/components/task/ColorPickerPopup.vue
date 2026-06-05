@@ -104,7 +104,7 @@ function selectColor(color) {
 /* 彈窗主體 */
 .color-picker-popup {
   position: fixed;
-  background: white;
+  background: var(--color-white);
   border: 1px solid rgba(var(--color-primary-rgb), 0.3);
   border-radius: 8px;
   padding: 12px;
