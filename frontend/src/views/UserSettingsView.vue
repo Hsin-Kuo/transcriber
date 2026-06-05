@@ -638,6 +638,7 @@ import { computed, ref, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useClickOutside } from '../composables/useClickOutside'
+import { useDateFormatter } from '../composables/useDateFormatter'
 import { useI18n } from 'vue-i18n'
 import api from '../utils/api'
 import { detectTimezone, detectTheme } from '../utils/defaults'
@@ -649,6 +650,7 @@ const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 const { t: $t, locale } = useI18n()
+const { formatDate: formatDateTz } = useDateFormatter()
 
 // Google OAuth Client ID
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
@@ -705,10 +707,7 @@ function handlePlanChanged(event) {
 
 function formatDate(timestamp) {
   if (!timestamp) return ''
-  const d = new Date(typeof timestamp === 'number' && timestamp < 1e12 ? timestamp * 1000 : timestamp)
-  return d.toLocaleDateString(locale.value === 'zh-TW' ? 'zh-TW' : 'en-US', {
-    year: 'numeric', month: 'long', day: 'numeric'
-  })
+  return formatDateTz(timestamp, { month: 'long', day: 'numeric' })
 }
 
 

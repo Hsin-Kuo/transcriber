@@ -104,8 +104,10 @@ import { ref, computed, watch, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
 import { useFocusTrap } from '../composables/useFocusTrap'
+import { useDateFormatter } from '../composables/useDateFormatter'
 
-const { t: $t, locale } = useI18n()
+const { t: $t } = useI18n()
+const { formatDate: formatDateTz } = useDateFormatter()
 const authStore = useAuthStore()
 
 const props = defineProps({
@@ -139,10 +141,7 @@ const currentCycleLabel = computed(() => {
 
 function formatDate(timestamp) {
   if (!timestamp) return ''
-  const d = new Date(timestamp < 1e12 ? timestamp * 1000 : timestamp)
-  return d.toLocaleDateString(locale.value === 'zh-TW' ? 'zh-TW' : 'en-US', {
-    year: 'numeric', month: 'long', day: 'numeric',
-  })
+  return formatDateTz(timestamp, { month: 'long', day: 'numeric' })
 }
 
 function formatOrderDesc(order) {
