@@ -33,8 +33,10 @@ class TestGetTierDefault:
     def test_known_tier_returns_field(self):
         assert _get_tier_default({"quota": {"tier": "pro"}}, "max_duration_minutes", 0) == 3000
 
-    def test_unknown_tier_returns_fallback(self):
-        assert _get_tier_default({"quota": {"tier": "bogus"}}, "max_duration_minutes", 42) == 42
+    def test_unknown_tier_falls_back_to_free_default(self):
+        # 未知 tier → 退回 FREE 的權威值（180），不再採用傳入的硬編 fallback，
+        # 確保所有 fallback 都對齊 QUOTA_TIERS 唯一真實來源。
+        assert _get_tier_default({"quota": {"tier": "bogus"}}, "max_duration_minutes", 42) == 180
 
     def test_missing_quota_defaults_to_free_tier(self):
         # 無 quota → tier 視為 free → free 的 max_concurrent_tasks = 1

@@ -106,3 +106,19 @@ QUOTA_TIERS = {
         "price": 99.99  # USD/月
     }
 }
+
+
+def tier_default(user: dict, field: str):
+    """依 user 的 tier 從 QUOTA_TIERS 取該欄位的預設值。
+
+    這是 quota fallback 的唯一真實來源：當 user.quota 缺某欄位時，
+    所有呼叫端都應透過這裡取值，而非各自硬編數字（避免出現過時的 60 等）。
+    tier 字串缺失或無法辨識時退回 FREE 的設定。
+    """
+    tier_str = (user.get("quota") or {}).get("tier", QuotaTier.FREE.value)
+    try:
+        tier_enum = QuotaTier(tier_str)
+    except ValueError:
+        tier_enum = QuotaTier.FREE
+    free_default = QUOTA_TIERS[QuotaTier.FREE].get(field)
+    return QUOTA_TIERS[tier_enum].get(field, free_default)

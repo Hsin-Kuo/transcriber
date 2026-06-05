@@ -14,6 +14,7 @@ from fastapi import HTTPException, status
 from pymongo.errors import OperationFailure
 
 from ...utils.time_utils import get_utc_timestamp
+from src.models.quota import tier_default
 from src.utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -112,7 +113,7 @@ class ReservationRepository:
                         total_reserved = docs[0]["total"] if docs else 0.0
 
                         # 3. 檢查
-                        plan_max = (user.get("quota") or {}).get("max_duration_minutes", 60)
+                        plan_max = (user.get("quota") or {}).get("max_duration_minutes") or tier_default(user, "max_duration_minutes")
                         current_usage = (user.get("usage") or {}).get("duration_minutes", 0)
                         extra = (user.get("extra_quota") or {}).get("duration_minutes", 0)
 
