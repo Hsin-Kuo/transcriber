@@ -141,11 +141,28 @@ async def register(
     # 檢查 Email 是否已存在
     existing_user = await user_repo.get_by_email(user_data.email)
     if existing_user:
-        # 為防止 email 枚舉攻擊，回傳與新註冊相同的訊息
-        # 可選：發送「有人嘗試用您的 email 註冊」的通知信
+        # 防 email 枚舉：HTTP response 與新註冊完全一致，不洩漏帳號是否存在。
+        # 但「寄給信箱真正擁有者」的信不會洩漏給攻擊者，故依帳號狀態寄不同信：
+        #   - 已驗證 → 「帳號已存在」通知（引導登入 / 忘記密碼）
+        #   - 註冊過但未驗證 → 重寄驗證信（換新 token + 24h），協助完成註冊
+        if existing_user.get("email_verified"):
+            await email_service.send_account_exists_email(to_email=user_data.email)
+            dup_action = "register_duplicate_verified"
+        else:
+            new_token = secrets.token_urlsafe(32)
+            await user_repo.update(str(existing_user["_id"]), {
+                "verification_token": None,  # 清 legacy plaintext
+                "verification_token_hash": hash_token(new_token),
+                "verification_expires": get_utc_timestamp() + (24 * 60 * 60),
+            })
+            await email_service.send_verification_email(
+                to_email=user_data.email,
+                verification_token=new_token,
+            )
+            dup_action = "register_duplicate_unverified_resent"
         await audit_logger.log_auth(
             request=request,
-            action="register_duplicate",
+            action=dup_action,
             user_id=str(existing_user["_id"]),
             status_code=200,
             message=f"重複註冊嘗試: {user_data.email}"
