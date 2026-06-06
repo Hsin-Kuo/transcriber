@@ -121,7 +121,9 @@ const authStore = useAuthStore()
 // Google OAuth Client ID（從環境變數取得）
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 
-const email = ref('')
+// 驗證完成後會帶 ?email= 導來，預填方便使用者直接登入
+const emailFromQuery = router.currentRoute.value.query.email
+const email = ref(typeof emailFromQuery === 'string' ? emailFromQuery : '')
 const password = ref('')
 const showPassword = ref(false)
 const loading = ref(false)

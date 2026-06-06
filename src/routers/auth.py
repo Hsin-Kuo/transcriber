@@ -297,17 +297,17 @@ async def verify_email_preflight(
     }
 
 
-@router.post("/verify-email", response_model=TokenResponse)
+@router.post("/verify-email")
 async def verify_email(
     payload: VerifyEmailRequest,
     request: Request,
-    response: Response,
     db=Depends(get_database)
 ):
-    """完成 Email 驗證並自動登入。
+    """完成 Email 驗證（不自動登入）。
 
     必須由使用者明確點擊前端按鈕觸發 → 防 link-preview bot 預掃消耗 token。
-    成功後寫入 refresh cookie 並回傳 access token，使用者免再次登入。
+    驗證成功後不發 token、不寫 refresh cookie，避免覆蓋瀏覽器內其他已登入的
+    session（refresh cookie 為 domain 共用一份）；改由使用者自行登入。
     """
     user_repo = UserRepository(db)
     audit_logger = get_audit_logger()
@@ -359,29 +359,15 @@ async def verify_email(
         "verification_expires": None,
     })
 
-    # 自動登入：發 access + refresh，refresh 寫 httpOnly cookie
-    access_token = create_access_token({
-        "sub": str(user["_id"]),
-        "email": user["email"],
-        "role": user["role"],
-    })
-    refresh_token_value = create_refresh_token({
-        "sub": str(user["_id"]),
-        "email": user["email"],
-        "role": user["role"],
-    })
-    await user_repo.save_refresh_token(str(user["_id"]), refresh_token_value)
-    set_refresh_cookie(response, refresh_token_value)
-
     await audit_logger.log_auth(
         request=request,
         action="verify_email",
         user_id=str(user["_id"]),
         status_code=200,
-        message=f"Email 驗證成功並自動登入: {user['email']}"
+        message=f"Email 驗證成功: {user['email']}"
     )
 
-    return TokenResponse(access_token=access_token, token_type="bearer")
+    return {"verified": True, "email": user["email"]}
 
 
 @router.post("/resend-verification")
