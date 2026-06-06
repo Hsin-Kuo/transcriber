@@ -1181,6 +1181,49 @@ async def forgot_password(
     return success_message
 
 
+@router.get("/reset-password")
+async def reset_password_preflight(
+    token: str,
+    db=Depends(get_database)
+):
+    """預檢密碼重設 token 是否有效（**不消耗、不寫 DB**）。
+
+    給前端在渲染重設表單前確認 token 仍有效，讓過期/無效連結能在「點開當下」
+    就提示重新申請，而不是等使用者填完送出才被擋。唯讀，故 mail gateway /
+    連結預掃 bot 的自動 GET 不會消耗 token。
+
+    Args:
+        token: 密碼重設 token (from URL query parameter)
+        db: 資料庫實例
+
+    Returns:
+        {"valid": True, "expires_at": ...}
+
+    Raises:
+        HTTPException: 400 token 無效或已過期
+    """
+    user_repo = UserRepository(db)
+    user = await user_repo.get_by_password_reset_token(token)
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="重設連結無效或已過期"
+        )
+
+    reset_expires = user.get("password_reset_expires")
+    if reset_expires:
+        if hasattr(reset_expires, 'timestamp'):
+            reset_expires = int(reset_expires.timestamp())
+        if reset_expires < get_utc_timestamp():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="重設連結已過期，請重新申請"
+            )
+
+    return {"valid": True, "expires_at": reset_expires}
+
+
 @router.post("/reset-password")
 async def reset_password(
     http_request: Request,
