@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { resolveLandingPath } from '../utils/loginRedirect'
 
 const TranscriptionView = () => import('../views/TranscriptionView.vue')
 const TasksView = () => import('../views/TasksView.vue')
@@ -161,9 +162,10 @@ router.beforeEach(async (to, from, next) => {
     return
   }
 
-  // 訪客頁面（已登入用戶不應訪問）
+  // 訪客頁面（已登入用戶不應訪問）：套用與登入相同的落點邏輯
+  // —— 有未刪除任務導任務列表，否則上傳頁（尊重 redirect query）
   if (to.meta.guest && authStore.isAuthenticated) {
-    next({ name: 'transcription' })
+    next(await resolveLandingPath(to.query.redirect))
     return
   }
 
