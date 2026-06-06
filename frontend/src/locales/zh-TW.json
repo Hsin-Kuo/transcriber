@@ -297,7 +297,7 @@
   },
   "transcription": {
     "taskType": "任務類型",
-    "paragraph": "段落",
+    "paragraph": "文件",
     "subtitle": "字幕",
     "paragraphHint": "合併文字並添加標點符號，適合文章或筆記",
     "subtitleHint": "保留時間軸資訊，自動停用標點符號，適合字幕製作",
@@ -343,7 +343,7 @@
   },
   "taskList": {
     "all": "全部",
-    "paragraph": "段落",
+    "paragraph": "文件",
     "subtitle": "字幕",
     "hasAudio": "音檔",
     "taskName": "任務名稱",
@@ -479,7 +479,7 @@
     "copied": "已複製",
     "delete": "刪除",
     "viewMode": "檢視模式",
-    "paragraph": "段落",
+    "paragraph": "文件",
     "subtitle": "字幕",
     "saving": "儲存中",
     "editMode": "編輯模式",
