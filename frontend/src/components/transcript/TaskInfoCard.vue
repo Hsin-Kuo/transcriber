@@ -52,9 +52,11 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useDateFormatter } from '../../composables/useDateFormatter'
 import TaskTagsSection from '../task/TaskTagsSection.vue'
 
-const { t: $t, locale } = useI18n()
+const { t: $t } = useI18n()
+const { formatDateTime } = useDateFormatter()
 
 // Props
 const props = defineProps({
@@ -89,35 +91,7 @@ const isEditingTags = ref(false)
 // Computed
 const formattedDate = computed(() => {
   if (!props.updatedAt) return '-'
-
-  try {
-    // 處理 Unix timestamp (秒) 或 ISO 字串
-    let date
-    if (typeof props.updatedAt === 'number') {
-      date = new Date(props.updatedAt * 1000)
-    } else {
-      date = new Date(props.updatedAt)
-    }
-
-    if (isNaN(date.getTime())) return String(props.updatedAt)
-
-    const localeCode = locale.value === 'zh-TW' ? 'zh-TW' : 'en-US'
-
-    const datePart = date.toLocaleDateString(localeCode, {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    })
-
-    const timePart = date.toLocaleTimeString(localeCode, {
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-
-    return `${datePart} ${timePart}`
-  } catch {
-    return String(props.updatedAt)
-  }
+  return formatDateTime(props.updatedAt)
 })
 
 // 計算字詞數

@@ -73,7 +73,7 @@
 - claim 後處理失敗會 release + 送 Sentry + 拋 500 讓藍新重發
 
 ### B10. CSP 啟用 + auth/upload rate limit ✅
-- CSP Report-Only（含 OAuth / Stripe / Sentry / 藍新 form-action）
+- CSP Report-Only（含 OAuth / Sentry / 藍新 form-action）
 - auth zone 3r/m、upload zone 10r/m、`/subscriptions/notify/*` bypass
 - [ ] **手動**：上線後一週檢視 CSP 違規報告再切強制模式
 

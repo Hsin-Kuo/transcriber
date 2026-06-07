@@ -12,7 +12,7 @@ from typing import Optional, Dict, Tuple
 from datetime import datetime, date, timedelta
 
 from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad, unpad
+from Crypto.Util.Padding import pad
 import httpx
 
 from .config_loader import get_parameter
@@ -25,6 +25,13 @@ PERIOD_TIMES_YEARLY = 10
 PERIOD_START_IMMEDIATE = 2   # 立即執行委託金額授權（新訂閱、升級）
 PERIOD_START_SCHEDULED = 3   # 不授權，首扣日由 PeriodFirstdate 指定（降級排程）
 # 注意：PeriodStartType=1 是十元驗證，不適合訂閱場景
+
+# 藍新部分 server-to-server API（如 AlterStatus）前有 Akamai WAF，會擋掉
+# python-httpx 預設 UA 而回 403。所有對藍新的後端請求都帶這個瀏覽器型 UA。
+_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
 
 
 class NewebpayService:
@@ -74,11 +81,28 @@ class NewebpayService:
         cipher = AES.new(key, AES.MODE_CBC, iv)
         return cipher.encrypt(pad(data.encode("utf-8"), AES.block_size)).hex()
 
+    @staticmethod
+    def _strip_padding(raw: bytes) -> bytes:
+        """容忍式去 padding。
+
+        藍新的 AES 回傳採非標準 padding：pad 長度可能「超過」block size（實測定期定額
+        Period 出現過 19），標準 PKCS7 unpad 會因 pad 值 > 16 而拒絕。這裡改以「最後一個
+        byte 當 pad 長度」手動移除：只要尾端 pad_len 個 byte 全等於 pad_len 即視為 padding。
+        同時相容一般 PKCS7（pad_len ≤ 16）。
+        """
+        if not raw:
+            return raw
+        pad_len = raw[-1]
+        if 0 < pad_len <= len(raw) and all(b == pad_len for b in raw[-pad_len:]):
+            return raw[:-pad_len]
+        return raw
+
     def _aes_decrypt(self, data: str) -> str:
         key = self.hash_key.encode("utf-8")
         iv = self.hash_iv.encode("utf-8")
         cipher = AES.new(key, AES.MODE_CBC, iv)
-        return unpad(cipher.decrypt(bytes.fromhex(data)), AES.block_size).decode("utf-8")
+        raw = cipher.decrypt(bytes.fromhex(data))
+        return self._strip_padding(raw).decode("utf-8")
 
     def _sha256_sign(self, trade_info: str) -> str:
         raw = f"HashKey={self.hash_key}&{trade_info}&HashIV={self.hash_iv}"
@@ -312,7 +336,13 @@ class NewebpayService:
         }
         post_data = self._aes_encrypt(urllib.parse.urlencode(params))
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        # 藍新的 AlterStatus 端點前有 WAF（Akamai），會擋掉 python-httpx 預設 User-Agent
+        # 而回 403 Access Denied，導致終止委託靜默失敗（取消/降級/升級清理舊約都會壞）。
+        # 必須帶瀏覽器型 User-Agent。
+        async with httpx.AsyncClient(
+            timeout=10.0,
+            headers={"User-Agent": _BROWSER_USER_AGENT},
+        ) as client:
             resp = await client.post(
                 self.alter_status_url,
                 data={"MerchantID_": self.merchant_id, "PostData_": post_data},

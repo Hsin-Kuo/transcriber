@@ -5,8 +5,13 @@
           <h1 class="auth-title">重設密碼</h1>
           <p class="auth-subtitle">Sound Lite 轉錄服務</p>
 
+          <!-- 檢查連結有效性中（避免過期連結先閃出表單）-->
+          <div v-if="checking" class="checking-state">
+            <p class="form-description">檢查連結中...</p>
+          </div>
+
           <!-- 無效 token 狀態 -->
-          <div v-if="invalidToken" class="error-state">
+          <div v-else-if="invalidToken" class="error-state">
             <div class="error-icon">⚠️</div>
             <p class="error-title">連結無效或已過期</p>
             <p class="error-subtitle">
@@ -144,6 +149,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
+import api from '../../utils/api'
 
 const router = useRouter()
 const route = useRoute()
@@ -158,6 +164,7 @@ const loading = ref(false)
 const error = ref('')
 const success = ref(false)
 const invalidToken = ref(false)
+const checking = ref(true)
 
 const passwordChecks = ref({
   length: false,
@@ -183,11 +190,21 @@ function validatePassword() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   // 從 URL 獲取 token
   token.value = route.query.token || ''
   if (!token.value) {
     invalidToken.value = true
+    checking.value = false
+    return
+  }
+  // 點開連結當下就驗證有效性 / 是否過期，過期/無效直接顯示重新申請
+  try {
+    await api.get('/auth/reset-password', { params: { token: token.value } })
+  } catch {
+    invalidToken.value = true
+  } finally {
+    checking.value = false
   }
 })
 
@@ -468,28 +485,28 @@ async function handleSubmit() {
 
 .success-message {
   padding: 24px;
-  background: #d4edda;
+  background: var(--color-success-bg);
   border-radius: 12px;
   text-align: center;
-  border: 1px solid #c3e6cb;
+  border: 1px solid color-mix(in srgb, var(--color-success) 30%, transparent);
 }
 
 .success-icon {
   font-size: 3rem;
   margin-bottom: 12px;
-  color: #155724;
+  color: var(--color-success-dark);
 }
 
 .success-title {
   font-size: 1.2rem;
   font-weight: 700;
-  color: #155724;
+  color: var(--color-success-dark);
   margin: 0 0 12px 0;
 }
 
 .success-subtitle {
   font-size: 0.95rem;
-  color: #155724;
+  color: var(--color-success-dark);
   margin: 0 0 20px 0;
   line-height: 1.5;
 }

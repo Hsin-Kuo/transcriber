@@ -24,14 +24,14 @@
               :disabled="submitting"
               @click="confirmVerification"
             >
-              {{ submitting ? '驗證中...' : '完成驗證並登入' }}
+              {{ submitting ? '驗證中...' : '完成驗證' }}
             </button>
           </div>
 
           <!-- 3. 驗證成功（短暫顯示後跳轉） -->
           <div v-else-if="state === 'success'" class="success-state">
             <h2>Email 驗證成功！</h2>
-            <p class="success-message">已自動登入，即將前往主頁...</p>
+            <p class="success-message">即將前往登入頁，請使用您的帳號登入...</p>
           </div>
 
           <!-- 4. 連結過期：提供重發按鈕 -->
@@ -79,13 +79,11 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import api, { TokenManager } from '../../utils/api'
-import { useAuthStore } from '../../stores/auth'
+import api from '../../utils/api'
 import ElectricBorder from '../../components/shared/ElectricBorder.vue'
 
 const router = useRouter()
 const route = useRoute()
-const authStore = useAuthStore()
 
 // 'checking' | 'ready' | 'success' | 'expired' | 'error'
 const state = ref('checking')
@@ -132,11 +130,10 @@ async function confirmVerification() {
   if (submitting.value) return
   submitting.value = true
   try {
-    const { data } = await api.post('/auth/verify-email', { token })
-    TokenManager.setAccessToken(data.access_token)
-    await authStore.fetchCurrentUser()
+    await api.post('/auth/verify-email', { token })
     state.value = 'success'
-    setTimeout(() => router.push('/'), 1200)
+    // 不自動登入：導去登入頁並預填 email，由使用者自行登入
+    setTimeout(() => router.push({ path: '/login', query: { email: email.value } }), 1500)
   } catch (err) {
     const status = err.response?.status
     const detail = err.response?.data?.detail

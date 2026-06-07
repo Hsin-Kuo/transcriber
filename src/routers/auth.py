@@ -141,11 +141,28 @@ async def register(
     # 檢查 Email 是否已存在
     existing_user = await user_repo.get_by_email(user_data.email)
     if existing_user:
-        # 為防止 email 枚舉攻擊，回傳與新註冊相同的訊息
-        # 可選：發送「有人嘗試用您的 email 註冊」的通知信
+        # 防 email 枚舉：HTTP response 與新註冊完全一致，不洩漏帳號是否存在。
+        # 但「寄給信箱真正擁有者」的信不會洩漏給攻擊者，故依帳號狀態寄不同信：
+        #   - 已驗證 → 「帳號已存在」通知（引導登入 / 忘記密碼）
+        #   - 註冊過但未驗證 → 重寄驗證信（換新 token + 24h），協助完成註冊
+        if existing_user.get("email_verified"):
+            await email_service.send_account_exists_email(to_email=user_data.email)
+            dup_action = "register_duplicate_verified"
+        else:
+            new_token = secrets.token_urlsafe(32)
+            await user_repo.update(str(existing_user["_id"]), {
+                "verification_token": None,  # 清 legacy plaintext
+                "verification_token_hash": hash_token(new_token),
+                "verification_expires": get_utc_timestamp() + (24 * 60 * 60),
+            })
+            await email_service.send_verification_email(
+                to_email=user_data.email,
+                verification_token=new_token,
+            )
+            dup_action = "register_duplicate_unverified_resent"
         await audit_logger.log_auth(
             request=request,
-            action="register_duplicate",
+            action=dup_action,
             user_id=str(existing_user["_id"]),
             status_code=200,
             message=f"重複註冊嘗試: {user_data.email}"
@@ -280,17 +297,17 @@ async def verify_email_preflight(
     }
 
 
-@router.post("/verify-email", response_model=TokenResponse)
+@router.post("/verify-email")
 async def verify_email(
     payload: VerifyEmailRequest,
     request: Request,
-    response: Response,
     db=Depends(get_database)
 ):
-    """完成 Email 驗證並自動登入。
+    """完成 Email 驗證（不自動登入）。
 
     必須由使用者明確點擊前端按鈕觸發 → 防 link-preview bot 預掃消耗 token。
-    成功後寫入 refresh cookie 並回傳 access token，使用者免再次登入。
+    驗證成功後不發 token、不寫 refresh cookie，避免覆蓋瀏覽器內其他已登入的
+    session（refresh cookie 為 domain 共用一份）；改由使用者自行登入。
     """
     user_repo = UserRepository(db)
     audit_logger = get_audit_logger()
@@ -342,29 +359,15 @@ async def verify_email(
         "verification_expires": None,
     })
 
-    # 自動登入：發 access + refresh，refresh 寫 httpOnly cookie
-    access_token = create_access_token({
-        "sub": str(user["_id"]),
-        "email": user["email"],
-        "role": user["role"],
-    })
-    refresh_token_value = create_refresh_token({
-        "sub": str(user["_id"]),
-        "email": user["email"],
-        "role": user["role"],
-    })
-    await user_repo.save_refresh_token(str(user["_id"]), refresh_token_value)
-    set_refresh_cookie(response, refresh_token_value)
-
     await audit_logger.log_auth(
         request=request,
         action="verify_email",
         user_id=str(user["_id"]),
         status_code=200,
-        message=f"Email 驗證成功並自動登入: {user['email']}"
+        message=f"Email 驗證成功: {user['email']}"
     )
 
-    return TokenResponse(access_token=access_token, token_type="bearer")
+    return {"verified": True, "email": user["email"]}
 
 
 @router.post("/resend-verification")
@@ -1176,6 +1179,49 @@ async def forgot_password(
     )
 
     return success_message
+
+
+@router.get("/reset-password")
+async def reset_password_preflight(
+    token: str,
+    db=Depends(get_database)
+):
+    """預檢密碼重設 token 是否有效（**不消耗、不寫 DB**）。
+
+    給前端在渲染重設表單前確認 token 仍有效，讓過期/無效連結能在「點開當下」
+    就提示重新申請，而不是等使用者填完送出才被擋。唯讀，故 mail gateway /
+    連結預掃 bot 的自動 GET 不會消耗 token。
+
+    Args:
+        token: 密碼重設 token (from URL query parameter)
+        db: 資料庫實例
+
+    Returns:
+        {"valid": True, "expires_at": ...}
+
+    Raises:
+        HTTPException: 400 token 無效或已過期
+    """
+    user_repo = UserRepository(db)
+    user = await user_repo.get_by_password_reset_token(token)
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="重設連結無效或已過期"
+        )
+
+    reset_expires = user.get("password_reset_expires")
+    if reset_expires:
+        if hasattr(reset_expires, 'timestamp'):
+            reset_expires = int(reset_expires.timestamp())
+        if reset_expires < get_utc_timestamp():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="重設連結已過期，請重新申請"
+            )
+
+    return {"valid": True, "expires_at": reset_expires}
 
 
 @router.post("/reset-password")

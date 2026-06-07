@@ -154,7 +154,7 @@ graph TB
     subgraph "External Services"
         MongoDB[(MongoDB Atlas<br/>ap-northeast-1)]
         Resend[Resend<br/>Email]
-        Stripe[Stripe<br/>Subscriptions]
+        Newebpay[藍新 Newebpay<br/>訂閱付款]
         Google[Google<br/>OAuth · Gemini API]
     end
 
@@ -174,7 +174,7 @@ graph TB
     API --> SQS
     API --> SSM
     API --> Resend
-    API --> Stripe
+    API --> Newebpay
     API --> Google
 
     SQS -->|Poll| Worker

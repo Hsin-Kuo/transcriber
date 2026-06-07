@@ -247,10 +247,10 @@ async function handleSubmit() {
 
 .success-message {
   padding: 24px;
-  background: #d4edda;
+  background: var(--color-success-bg);
   border-radius: 12px;
   text-align: center;
-  border: 1px solid #c3e6cb;
+  border: 1px solid color-mix(in srgb, var(--color-success) 30%, transparent);
 }
 
 .success-icon {
@@ -261,25 +261,25 @@ async function handleSubmit() {
 .success-title {
   font-size: 1.1rem;
   font-weight: 700;
-  color: #155724;
+  color: var(--color-success-dark);
   margin: 0 0 12px 0;
 }
 
 .success-subtitle {
   font-size: 0.95rem;
-  color: #155724;
+  color: var(--color-success-dark);
   margin: 0 0 16px 0;
   line-height: 1.5;
 }
 
 .success-subtitle strong {
   font-weight: 700;
-  color: #0d3f1a;
+  color: var(--color-success-dark);
 }
 
 .success-note {
   font-size: 0.85rem;
-  color: #155724;
+  color: var(--color-success-dark);
   margin: 0 0 20px 0;
   line-height: 1.6;
 }

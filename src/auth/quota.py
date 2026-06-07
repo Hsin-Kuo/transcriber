@@ -3,20 +3,19 @@ import asyncio
 from datetime import datetime, timedelta
 from fastapi import HTTPException, status
 
-from src.models.quota import QUOTA_TIERS, QuotaTier
+from src.models.quota import QUOTA_TIERS, QuotaTier, tier_default
 from src.utils.time_utils import get_utc_timestamp, timestamp_to_datetime
 from src.utils.logger import get_logger
 
 log = get_logger(__name__)
 
+# pipeline 在 DB 端無法跑 tier 判斷，缺欄位時對齊 FREE 設定（唯一真實來源）
+_FREE_DURATION_DEFAULT = QUOTA_TIERS[QuotaTier.FREE]["max_duration_minutes"]
 
-def _get_tier_default(user: dict, field: str, fallback):
-    tier_str = user.get("quota", {}).get("tier", "free")
-    try:
-        tier_enum = QuotaTier(tier_str)
-        return QUOTA_TIERS[tier_enum].get(field, fallback)
-    except (ValueError, KeyError):
-        return fallback
+
+def _get_tier_default(user: dict, field: str, fallback=None):
+    # 對齊 QUOTA_TIERS（tier 不明時退回 FREE 設定，而非硬編 fallback）
+    return tier_default(user, field)
 
 
 class QuotaManager:
@@ -33,7 +32,7 @@ class QuotaManager:
 
         duration_minutes = audio_duration / 60
         current_usage = usage.get("duration_minutes", 0)
-        plan_limit = quota.get("max_duration_minutes") or _get_tier_default(user, "max_duration_minutes", 60)
+        plan_limit = quota.get("max_duration_minutes") or _get_tier_default(user, "max_duration_minutes")
         plan_remaining = max(0.0, plan_limit - current_usage)
         extra_remaining = max(0.0, extra_quota.get("duration_minutes", 0))
         total_available = plan_remaining + extra_remaining
@@ -60,7 +59,7 @@ class QuotaManager:
     async def check_concurrent_tasks(user: dict, active_count: int):
         """檢查並發任務數"""
         quota = user.get("quota", {})
-        max_concurrent = quota.get("max_concurrent_tasks") or _get_tier_default(user, "max_concurrent_tasks", 1)
+        max_concurrent = quota.get("max_concurrent_tasks") or _get_tier_default(user, "max_concurrent_tasks")
 
         if active_count >= max_concurrent:
             raise HTTPException(
@@ -79,7 +78,7 @@ class QuotaManager:
     def _ai_summary_plan_limit(user: dict) -> int:
         """取得用戶的方案 AI 摘要上限（quota 未設定時 fallback 到 tier 預設）"""
         quota = user.get("quota", {}) or {}
-        return quota.get("max_ai_summaries") or _get_tier_default(user, "max_ai_summaries", 3)
+        return quota.get("max_ai_summaries") or _get_tier_default(user, "max_ai_summaries")
 
     @staticmethod
     async def reserve_ai_summary(db, user_id: str, user: dict = None):
@@ -375,7 +374,7 @@ def build_transcription_consumption_pipeline(duration_minutes: float, now_ts: in
                 "$max": [
                     0,
                     {"$subtract": [
-                        {"$ifNull": ["$quota.max_duration_minutes", 60]},
+                        {"$ifNull": ["$quota.max_duration_minutes", _FREE_DURATION_DEFAULT]},
                         {"$ifNull": ["$usage.duration_minutes", 0]},
                     ]},
                 ]

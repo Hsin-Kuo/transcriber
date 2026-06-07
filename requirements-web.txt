@@ -46,9 +46,6 @@ jinja2
 # Resend (Email 服務)
 resend
 
-# Stripe (訂閱付款)
-stripe
-
 # AWS SDK
 boto3
 
