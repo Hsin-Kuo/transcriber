@@ -7,7 +7,7 @@
         <line x1="8" y1="2" x2="8" y2="6"></line>
         <line x1="3" y1="10" x2="21" y2="10"></line>
       </svg>
-      {{ formatDate(createdAt) }}
+      {{ formatDateTime(createdAt) }}
     </div>
     <div v-if="textLength" class="meta-item">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -27,9 +27,9 @@
 </template>
 
 <script setup>
-import { useI18n } from 'vue-i18n'
+import { useDateFormatter } from '../../composables/useDateFormatter'
 
-const { locale } = useI18n()
+const { formatDateTime } = useDateFormatter()
 
 defineProps({
   createdAt: [String, Number],
@@ -45,37 +45,6 @@ defineProps({
   }
 })
 
-function formatDate(dateValue) {
-  if (!dateValue) return ''
-  try {
-    // 處理 Unix timestamp (秒) 或 ISO 字串
-    let date
-    if (typeof dateValue === 'number') {
-      date = new Date(dateValue * 1000)
-    } else {
-      date = new Date(dateValue)
-    }
-
-    if (isNaN(date.getTime())) return String(dateValue)
-
-    const localeCode = locale.value === 'zh-TW' ? 'zh-TW' : 'en-US'
-
-    const datePart = date.toLocaleDateString(localeCode, {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    })
-
-    const timePart = date.toLocaleTimeString(localeCode, {
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-
-    return `${datePart} ${timePart}`
-  } catch {
-    return String(dateValue)
-  }
-}
 </script>
 
 <style scoped>

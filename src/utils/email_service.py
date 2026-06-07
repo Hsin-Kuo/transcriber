@@ -275,6 +275,59 @@ class EmailService:
             text_content=text_content
         )
 
+    async def send_account_exists_email(
+        self,
+        to_email: str
+    ) -> bool:
+        """發送「帳號已存在」通知信。
+
+        當有人用一個『已驗證』的 email 重複註冊時寄送。信只會送到信箱真正
+        擁有者，不會洩漏帳號是否存在給攻擊者（註冊 API 的 HTTP response 仍維持一致）。
+
+        Args:
+            to_email: 收件人 email
+
+        Returns:
+            是否發送成功
+        """
+        login_url = f"{self.frontend_url}/login"
+        forgot_url = f"{self.frontend_url}/forgot-password"
+
+        intro_html = (
+            '<h2 style="margin-top: 0; color: #44465b;">您已經有 Sound Lite 帳號了</h2>'
+            '<p>我們收到一筆使用此 email 的註冊請求，但這個信箱已經註冊過帳號，'
+            '您不需要重新註冊，直接登入即可：</p>'
+        )
+        extra_html = (
+            f'<p style="margin: 20px 0 8px 0;">忘記密碼了嗎？'
+            f'<a href="{forgot_url}" style="color: #dd8448;">點此重設密碼</a>。</p>'
+            '<p style="color: #666; font-size: 14px;">如果這不是您本人的操作，'
+            '可以安全地忽略此郵件，您的帳號未受到任何影響。</p>'
+        )
+        html_content = self._render_branded_email(
+            heading="帳號已存在",
+            intro_html=intro_html,
+            cta_label="前往登入",
+            cta_url=login_url,
+            extra_html=extra_html,
+            preheader="此 email 已註冊帳號，直接登入即可",
+        )
+
+        text_content = self._render_branded_text(
+            f"您已經有 Sound Lite 帳號了\n\n"
+            f"我們收到一筆使用此 email 的註冊請求，但這個信箱已經註冊過帳號。\n"
+            f"直接登入即可：\n{login_url}\n\n"
+            f"忘記密碼？請至：{forgot_url}\n\n"
+            f"如果這不是您本人的操作，可以安全地忽略此郵件，您的帳號未受影響。"
+        )
+
+        return await self._send_email(
+            to_email=to_email,
+            subject="您已經有 Sound Lite 帳號了 - Sound Lite",
+            html_content=html_content,
+            text_content=text_content
+        )
+
     async def send_admin_action_notification(
         self,
         to_email: str,

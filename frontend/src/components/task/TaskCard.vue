@@ -231,34 +231,12 @@
 import { ref, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTaskHelpers } from '../../composables/task/useTaskHelpers'
+import { useDateFormatter } from '../../composables/useDateFormatter'
 import TaskTagsSection from './TaskTagsSection.vue'
 import BottomSheet from '../common/BottomSheet.vue'
 
-const { t: $t, locale } = useI18n()
-
-// 格式化時間戳
-function formatTimestamp(value) {
-  if (!value) return ''
-  try {
-    let date
-    if (typeof value === 'number') {
-      date = new Date(value * 1000)
-    } else {
-      date = new Date(value)
-    }
-    if (isNaN(date.getTime())) return String(value)
-    const localeCode = locale.value === 'zh-TW' ? 'zh-TW' : 'en-US'
-    return date.toLocaleString(localeCode, {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-  } catch {
-    return String(value)
-  }
-}
+const { t: $t } = useI18n()
+const { formatDateTime: formatTimestamp } = useDateFormatter()
 const {
   getStatusText,
   getProgressWidth,

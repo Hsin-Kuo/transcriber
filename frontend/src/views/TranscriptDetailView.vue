@@ -1149,12 +1149,17 @@ usePageLifecycle({
    避免一次 patch 數百個 span 的 class —— Safari 上會明顯卡頓）
    只套用到 .marker-wrapper 內的 .text-part：原本只有這些 span 有 click handler */
 .transcript-display.alt-pressed .marker-wrapper .text-part {
-  background-color: rgba(229, 179, 133, 0.25);
+  background-color: rgba(var(--color-primary-rgb), 0.25);
   cursor: pointer;
 }
 
+/* 深色模式：primary 橘疊在深底上偏暗，alpha 拉高以維持可辨識度 */
+[data-theme="dark"] .transcript-display.alt-pressed .marker-wrapper .text-part {
+  background-color: rgba(var(--color-primary-rgb), 0.35);
+}
+
 .transcript-display.alt-pressed .marker-wrapper .text-part:hover {
-  background-color: rgba(148, 171, 204, 0.3);
+  background-color: rgba(var(--color-divider-rgb), 0.4);
 }
 
 /* 音檔已刪除：Alt 仍亮 segment 色塊與 timecode 供檢視，但停用 seek，

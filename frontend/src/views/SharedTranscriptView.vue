@@ -160,8 +160,10 @@ import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import { API_BASE } from '../utils/api'
 import { NEW_ENDPOINTS } from '../api/endpoints'
+import { useDateFormatter } from '../composables/useDateFormatter'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
+const { formatDateTime } = useDateFormatter()
 const route = useRoute()
 
 const loading = ref(true)
@@ -197,11 +199,7 @@ onMounted(async () => {
 
 function formatDate(dateStr) {
   if (!dateStr) return ''
-  const d = new Date(dateStr)
-  return d.toLocaleDateString(locale.value, {
-    year: 'numeric', month: 'short', day: 'numeric',
-    hour: '2-digit', minute: '2-digit'
-  })
+  return formatDateTime(dateStr, { month: 'short' })
 }
 
 function formatTime(seconds) {

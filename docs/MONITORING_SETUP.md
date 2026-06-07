@@ -80,7 +80,7 @@ curl -s https://soundlite.app/health \
 
 - **Worker heartbeat collection 直接監控**：原本想用 Lambda 查 `worker_heartbeats`，但 SQS oldest message age 已能覆蓋同樣故障模式（worker 卡住 → SQS 訊息堆積 → age 上升 → 告警）。Heartbeat 留作 debug 用途，不另設 alarm。
 - **MongoDB Atlas 監控**：M0 tier 沒有完整 metric。升 M2 後可開 Atlas 內建的 connection / op latency alarm。
-- **Stripe / 藍新 webhook 失敗率**：等真上線跑一陣子，用 Sentry 看就好，不必過早 alarm。
+- **藍新 webhook 失敗率**：等真上線跑一陣子，用 Sentry 看就好，不必過早 alarm。
 
 ---
 

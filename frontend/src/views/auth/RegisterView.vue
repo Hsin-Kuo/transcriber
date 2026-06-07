@@ -362,7 +362,7 @@ function handleGoogleError(err) {
   padding: 12px 16px;
   border: 2px solid rgba(160, 145, 124, 0.3);
   border-radius: 8px;
-  background: white;
+  background: var(--color-white);
   color: var(--main-text);
   font-size: 1rem;
   transition: all 0.2s ease;
@@ -424,7 +424,7 @@ function handleGoogleError(err) {
   gap: 6px;
   margin-top: 8px;
   padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--upload-bg);
   border-radius: 8px;
   border: 1px solid rgba(160, 145, 124, 0.2);
 }
@@ -487,7 +487,7 @@ function handleGoogleError(err) {
 
 .btn-secondary {
   padding: 14px 24px;
-  background: white;
+  background: var(--color-white);
   color: var(--main-primary);
   border: 2px solid var(--main-primary);
   border-radius: 8px;
@@ -532,7 +532,7 @@ function handleGoogleError(err) {
 .quota-info {
   margin-top: 30px;
   padding: 20px;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--upload-bg);
   border-radius: 12px;
   border: 1px solid rgba(160, 145, 124, 0.2);
 }

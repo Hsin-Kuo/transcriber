@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { resolveLandingPath } from '../utils/loginRedirect'
 
 const TranscriptionView = () => import('../views/TranscriptionView.vue')
 const TasksView = () => import('../views/TasksView.vue')
@@ -95,8 +96,10 @@ const routes = [
     name: 'verifyEmail',
     component: VerifyEmailView,
     meta: {
+      // 不設 guest：驗證連結為 token-based，須能在「瀏覽器已有另一帳號登入」時
+      // 照常驗證；hideNav 維持獨立頁外觀。
       title: 'Email 驗證',
-      guest: true
+      hideNav: true
     }
   },
   {
@@ -104,8 +107,10 @@ const routes = [
     name: 'verifyPending',
     component: VerifyPendingView,
     meta: {
+      // 不設 guest：與驗證流程一致，不因已登入其他帳號被導走；
+      // 元件本身有「沒帶 email 就回 /register」的狀態守衛。hideNav 維持獨立頁外觀。
       title: '請查看您的信箱',
-      guest: true
+      hideNav: true
     }
   },
   {
@@ -113,8 +118,10 @@ const routes = [
     name: 'forgotPassword',
     component: ForgotPasswordView,
     meta: {
+      // 不設 guest：忘記/重設密碼以 email token 為憑證，須能在「瀏覽器已有
+      // 另一帳號登入」時照常使用；hideNav 維持獨立頁外觀（隱藏導覽列）。
       title: '忘記密碼',
-      guest: true
+      hideNav: true
     }
   },
   {
@@ -122,8 +129,10 @@ const routes = [
     name: 'resetPassword',
     component: ResetPasswordView,
     meta: {
+      // 不設 guest：見 forgot-password 說明。重設連結為 token-based，
+      // 不應因瀏覽器已登入其他帳號而被 guard 導走。
       title: '重設密碼',
-      guest: true
+      hideNav: true
     }
   },
   {
@@ -161,9 +170,10 @@ router.beforeEach(async (to, from, next) => {
     return
   }
 
-  // 訪客頁面（已登入用戶不應訪問）
+  // 訪客頁面（已登入用戶不應訪問）：套用與登入相同的落點邏輯
+  // —— 有未刪除任務導任務列表，否則上傳頁（尊重 redirect query）
   if (to.meta.guest && authStore.isAuthenticated) {
-    next({ name: 'transcription' })
+    next(await resolveLandingPath(to.query.redirect))
     return
   }
 
