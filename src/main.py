@@ -100,7 +100,13 @@ else:
 app = FastAPI(
     title="Sound Lite 轉錄服務",
     description="基於三層架構的音檔轉錄服務",
-    version="3.0.0"
+    version="3.0.0",
+    # 生產環境關閉互動式文件與 OpenAPI schema 匯出，避免完整 API map（endpoint /
+    # 參數 / validation 規則）外洩成逆向地圖；本地保留方便開發。
+    # defense-in-depth：即使 SG 收掉對外 8000，這層仍擋住內網橫向探測。
+    docs_url="/docs" if DEPLOY_ENV == "local" else None,
+    redoc_url="/redoc" if DEPLOY_ENV == "local" else None,
+    openapi_url="/openapi.json" if DEPLOY_ENV == "local" else None,
 )
 
 # Request ID middleware：注入 request_id 到所有 log + Sentry tag
