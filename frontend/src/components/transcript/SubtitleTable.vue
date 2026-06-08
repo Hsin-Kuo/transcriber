@@ -463,7 +463,7 @@ onUnmounted(() => {
   padding: 4px 10px;
   background: var(--main-bg);
   border-radius: 8px;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--main-primary);
   transition: all 0.2s ease;
@@ -667,8 +667,8 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 
-/* 內容欄 */
-.col-content {
+/* 內容欄（僅限 body td：字體偏好不可套到表頭，否則「內容」表頭會跟著換字體/字級） */
+td.col-content {
   padding: 12px;
   font-size: var(--content-font-size, 15px);
   font-weight: var(--content-font-weight, 400);
