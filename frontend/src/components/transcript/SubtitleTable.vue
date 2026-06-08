@@ -376,6 +376,18 @@ onUnmounted(() => {
   margin-right: -12px;
 }
 
+/* 時間、講者欄表頭置中（與內容對齊一致）；內容欄維持靠左 */
+.subtitle-table thead th.col-time,
+.subtitle-table thead th.col-speaker {
+  text-align: center;
+}
+
+/* 時間欄是第一欄，th:first-child 的 padding-left:24px 不對稱（右側僅 12px），
+   會讓置中後的「時間」表頭視覺偏右；改回對稱 padding，與 body .col-time（padding:12px）一致 */
+.subtitle-table thead th.col-time {
+  padding-left: 12px;
+}
+
 .subtitle-table thead {
   position: relative;
   z-index: 10;
@@ -401,7 +413,7 @@ onUnmounted(() => {
 .col-time {
   width: 120px;
   padding: 12px;
-  text-align: right;
+  text-align: center;
   font-family: 'Courier New', monospace;
   font-size: 13px;
   color: var(--main-text-light);
