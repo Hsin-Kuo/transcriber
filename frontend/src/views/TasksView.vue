@@ -415,8 +415,7 @@ function connectTaskSSE(taskId) {
             showNotification({
               title: t('tasksView.transcriptionComplete'),
               message: `「${task.custom_name || task.filename || task.file?.filename}」已完成`,
-              type: 'success',
-              duration: 5000
+              type: 'success'
             })
           }
         }
@@ -427,8 +426,7 @@ function connectTaskSSE(taskId) {
             showNotification({
               title: t('tasksView.transcriptionFailed'),
               message: `「${task.custom_name || task.filename || task.file?.filename}」轉錄失敗`,
-              type: 'error',
-              duration: 5000
+              type: 'error'
             })
           }
         }

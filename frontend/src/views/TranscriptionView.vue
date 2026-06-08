@@ -261,6 +261,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import ElectricBorder from '../components/shared/ElectricBorder.vue'
 import UploadZone from '../components/UploadZone.vue'
 import MergeModal from '../components/merge/MergeModal.vue'
@@ -274,6 +275,7 @@ import { useTaskTags } from '../composables/task/useTaskTags'
 import { useAuthStore } from '../stores/auth'
 
 const { t: $t, locale } = useI18n()
+const router = useRouter()
 const { tagsData, fetchTagColors } = useTaskTags($t)
 
 const authStore = useAuthStore()
@@ -360,7 +362,6 @@ function filterOversizedFiles(files) {
               max: MAX_UPLOAD_SIZE_MB,
             }),
       type: 'warning',
-      duration: 5000,
     })
   }
   return files.filter((f) => !exceedsMaxSize(f))
@@ -386,8 +387,7 @@ function handleFilesUpload(files) {
       showNotification({
         title: $t('batchUpload.tooManyFiles'),
         message: $t('batchUpload.maxFilesMessage', { max: MAX_BATCH_FILES, count: files.length }),
-        type: 'warning',
-        duration: 5000
+        type: 'warning'
       })
     }
     // 只取前 10 個檔案
@@ -483,10 +483,12 @@ async function confirmAndUpload() {
       showNotification({
         title: $t('transcription.transcribing'),
         message: message,
-        type: 'processing',
-        duration: 5000  // 5秒後自動關閉
+        type: 'processing'
       })
     }
+
+    // 轉錄已建立，自動跳轉到任務列表頁查看進度
+    router.push({ name: 'tasks' })
   } catch (error) {
     console.error($t('transcription.errorUpload') + ':', error)
     const detail = error.response?.data?.detail
@@ -495,8 +497,7 @@ async function confirmAndUpload() {
       showNotification({
         title: $t('transcription.uploadFailed'),
         message: errorMsg,
-        type: 'error',
-        duration: 5000
+        type: 'error'
       })
     } else {
       alert($t('transcription.uploadFailedMessage', { message: errorMsg }))
@@ -586,15 +587,13 @@ async function confirmBatchUpload(formData) {
             created: result.created,
             failed: result.failed
           }),
-          type: 'warning',
-          duration: 8000
+          type: 'warning'
         })
       } else {
         showNotification({
           title: $t('batchUpload.success'),
           message: $t('batchUpload.successMessage', { count: result.created }),
-          type: 'success',
-          duration: 5000
+          type: 'success'
         })
       }
     }
@@ -610,8 +609,7 @@ async function confirmBatchUpload(formData) {
       showNotification({
         title: $t('batchUpload.failed'),
         message: errorMsg,
-        type: 'error',
-        duration: 5000
+        type: 'error'
       })
     }
   } finally {
