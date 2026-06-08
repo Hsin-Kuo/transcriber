@@ -78,7 +78,7 @@ export function useTranscriptData() {
         status: task.status,
         filename: task.file?.filename || task.filename,
         custom_name: task.custom_name,
-        created_at: task.timestamps?.completed_at || task.timestamps?.created_at,  // Header 用（完成時間）
+        created_at: task.timestamps?.created_at || task.created_at,  // Header 用（上傳時間，與任務列表一致）
         updated_at: task.timestamps?.updated_at || task.updated_at,  // TaskInfoCard 用（編輯時間）
         text_length: task.result?.text_length || task.text_length,
         duration_text: task.duration_text,
