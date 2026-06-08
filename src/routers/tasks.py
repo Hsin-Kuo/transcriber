@@ -237,7 +237,8 @@ async def _clear_expired_audio_in_db(task_repo: TaskRepository, task_id: str) ->
     讓 has_audio=true 篩選在後續查詢中能正確排除這些任務。"""
     await task_repo.update(task_id, {
         "result.audio_file": None,
-        "result.audio_filename": None
+        "result.audio_filename": None,
+        "audio_expired": True  # 持久化過期標記，供詳情頁可靠顯示過期提示
     })
 
 
@@ -275,14 +276,20 @@ async def get_task(
     retention_days = await get_user_retention_days(task_service.task_repo.db, str(current_user["_id"]))
     enriched_task["audio_retention_days"] = retention_days
 
-    # 若音檔已過期，清除 audio_file 並標記
+    # 音檔過期判定 —— 不可只靠「路徑還在且過期」，否則列表端點的背景清理
+    # （_clear_expired_audio_in_db）把 result.audio_file 清成 None 後，詳情頁
+    # 旗標會永遠是 False、過期提示消失。改用：DB 既有旗標 OR 由 completed_at 回推。
+    # （_save_compact_audio 完成時必寫 audio_file，故「已完成且無音檔」即代表已過期被清。）
     audio_file = enriched_task.get("result", {}).get("audio_file")
-    if audio_file and is_audio_expired(enriched_task, retention_days):
-        enriched_task["audio_expired"] = True
+    audio_expired = bool(enriched_task.get("audio_expired")) or (
+        enriched_task.get("status") == "completed"
+        and not enriched_task.get("keep_audio")
+        and is_audio_expired(enriched_task, retention_days)
+    )
+    enriched_task["audio_expired"] = audio_expired
+    if audio_expired and audio_file:
         enriched_task["result"]["audio_file"] = None
         enriched_task["result"]["audio_filename"] = None
-    else:
-        enriched_task["audio_expired"] = False
 
     return enriched_task
 
