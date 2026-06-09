@@ -28,14 +28,15 @@
 </template>
 
 <script setup>
-import { ref, provide, computed, onMounted, onUnmounted } from 'vue'
+import { ref, provide, computed, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import ElectricBorder from './components/shared/ElectricBorder.vue'
 import Navigation from './components/shared/Navigation.vue'
 import NotificationToast from './components/NotificationToast.vue'
-import PlanPanel from './components/PlanPanel.vue'
-import QuotaExceededModal from './components/QuotaExceededModal.vue'
+// 方案面板與額度對話框只在使用者主動觸發時才需要 → 延後載入，不進主 bundle
+const PlanPanel = defineAsyncComponent(() => import('./components/PlanPanel.vue'))
+const QuotaExceededModal = defineAsyncComponent(() => import('./components/QuotaExceededModal.vue'))
 import { useAuthStore } from './stores/auth'
 import { useUiStore } from './stores/ui'
 

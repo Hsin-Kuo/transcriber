@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <div v-if="quota" class="quota-overlay" @click.self="close">
-      <div class="quota-modal" role="dialog" aria-modal="true" :aria-label="$t('quotaModal.title')">
+      <div ref="modalRef" class="quota-modal" role="dialog" aria-modal="true" :aria-label="$t('quotaModal.title')">
         <div class="quota-icon" aria-hidden="true">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10" />
@@ -24,16 +24,22 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useUiStore } from '../stores/ui'
 import { useAuthStore } from '../stores/auth'
+import { useFocusTrap } from '../composables/useFocusTrap'
 
 const { t: $t } = useI18n()
 const uiStore = useUiStore()
 const authStore = useAuthStore()
 
 const quota = computed(() => uiStore.quotaModal)
+
+// 鍵盤焦點困在對話框內（與其他 modal 一致的 a11y 行為）
+const modalRef = ref(null)
+const isOpen = computed(() => !!quota.value)
+useFocusTrap(modalRef, isOpen)
 const isFree = computed(() => (authStore.quota?.tier || 'free') === 'free')
 
 const message = computed(() =>

@@ -585,6 +585,14 @@ async function confirmBatchUpload(formData) {
       }
     })
 
+    // 若有檔案因額度不足失敗，開啟引導購買對話框
+    const quotaErr = (result.tasks || [])
+      .map(t => t.error)
+      .find(e => e && typeof e === 'object' && e.code === 'QUOTA_EXCEEDED')
+    if (quotaErr && typeof quotaErr === 'object') {
+      uiStore.showQuotaModal(quotaErr.quota?.type || 'duration_minutes')
+    }
+
     // 顯示結果通知
     if (showNotification) {
       if (result.failed > 0) {

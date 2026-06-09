@@ -76,8 +76,18 @@ export interface TranscriptionCreateResponse {
 }
 
 export interface BatchCreateResponse {
-  tasks: Array<{ task_id: string; filename: string; status: string }>
+  batch_id?: string
   total: number
+  created?: number
+  failed?: number
+  tasks: Array<{
+    task_id?: string
+    filename: string
+    status: string
+    queue_position?: number
+    // 失敗時的錯誤；額度不足為結構化物件 { code, message, quota }
+    error?: string | { code?: string; message?: string; quota?: { type?: string } }
+  }>
 }
 
 export interface SummaryContent {
