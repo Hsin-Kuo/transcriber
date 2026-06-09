@@ -14,60 +14,90 @@
       <div class="summary-card">
         <h2>{{ $t('userSettings.checkout.orderSummary') }}</h2>
 
-        <div class="summary-plan">
-          <span class="summary-label">{{ $t('userSettings.checkout.plan') }}</span>
-          <span class="summary-value plan-name">{{ planLabel }}</span>
-        </div>
-        <div class="summary-row">
-          <span class="summary-label">{{ $t('userSettings.checkout.billingCycle') }}</span>
-          <span class="summary-value">{{ billing === 'yearly' ? $t('userSettings.checkout.yearly') : $t('userSettings.checkout.monthly') }}</span>
-        </div>
+        <!-- 加購模式：品項 + 份數 + 單價 -->
+        <template v-if="isAddon">
+          <div class="summary-plan">
+            <span class="summary-label">{{ $t('userSettings.checkout.addonItem') }}</span>
+            <span class="summary-value plan-name">{{ addonLabel(addon) }}</span>
+          </div>
+          <div class="summary-row qty-row">
+            <span class="summary-label">{{ $t('userSettings.checkout.quantity') }}</span>
+            <div class="qty-stepper">
+              <button class="qty-btn" :disabled="effectiveQty <= 1" @click="decQty" :aria-label="$t('userSettings.checkout.decreaseQty')">−</button>
+              <input class="qty-input" type="number" min="1" max="99" v-model.number="quantity" @change="clampQty" />
+              <button class="qty-btn" :disabled="effectiveQty >= 99" @click="incQty" :aria-label="$t('userSettings.checkout.increaseQty')">+</button>
+            </div>
+          </div>
+          <div class="summary-row">
+            <span class="summary-label">{{ $t('userSettings.checkout.unitPrice') }}</span>
+            <span class="summary-value">NT${{ addon?.price_twd }} × {{ effectiveQty }}</span>
+          </div>
 
-        <div class="summary-divider"></div>
+          <div class="summary-divider"></div>
 
-        <div class="summary-row total">
-          <span class="summary-label">{{ $t('userSettings.checkout.total') }}</span>
-          <span class="summary-value">NT${{ totalPrice }}{{ billing === 'yearly' ? $t('userSettings.checkout.perYear') : $t('userSettings.checkout.perMonth') }}</span>
-        </div>
+          <div class="summary-row total">
+            <span class="summary-label">{{ $t('userSettings.checkout.total') }}</span>
+            <span class="summary-value">NT${{ totalPrice }}</span>
+          </div>
+        </template>
+
+        <!-- 訂閱模式：方案 + 計費週期 -->
+        <template v-else>
+          <div class="summary-plan">
+            <span class="summary-label">{{ $t('userSettings.checkout.plan') }}</span>
+            <span class="summary-value plan-name">{{ planLabel }}</span>
+          </div>
+          <div class="summary-row">
+            <span class="summary-label">{{ $t('userSettings.checkout.billingCycle') }}</span>
+            <span class="summary-value">{{ billing === 'yearly' ? $t('userSettings.checkout.yearly') : $t('userSettings.checkout.monthly') }}</span>
+          </div>
+
+          <div class="summary-divider"></div>
+
+          <div class="summary-row total">
+            <span class="summary-label">{{ $t('userSettings.checkout.total') }}</span>
+            <span class="summary-value">NT${{ totalPrice }}{{ billing === 'yearly' ? $t('userSettings.checkout.perYear') : $t('userSettings.checkout.perMonth') }}</span>
+          </div>
+        </template>
 
         <!-- 電子發票 -->
         <div class="invoice-section">
-          <h3 class="invoice-title">電子發票</h3>
+          <h3 class="invoice-title">{{ $t('userSettings.checkout.invoiceTitle') }}</h3>
           <div class="invoice-type-toggle">
             <button
               class="invoice-type-btn"
               :class="{ active: invoiceType === 'personal' }"
               @click="invoiceType = 'personal'"
-            >個人</button>
+            >{{ $t('userSettings.checkout.invoicePersonal') }}</button>
             <button
               class="invoice-type-btn"
               :class="{ active: invoiceType === 'company' }"
               @click="invoiceType = 'company'"
-            >公司</button>
+            >{{ $t('userSettings.checkout.invoiceCompany') }}</button>
           </div>
 
           <template v-if="invoiceType === 'personal'">
             <div class="form-group">
-              <label>手機條碼載具（選填）</label>
-              <input v-model="carrierNum" type="text" placeholder="/XXXXXXX" class="form-input" />
-              <span class="form-hint">格式：/ 開頭，7 位英數字</span>
+              <label>{{ $t('userSettings.checkout.carrierLabel') }}</label>
+              <input v-model="carrierNum" type="text" :placeholder="$t('userSettings.checkout.carrierPlaceholder')" class="form-input" />
+              <span class="form-hint">{{ $t('userSettings.checkout.carrierHint') }}</span>
             </div>
           </template>
 
           <template v-else>
             <div class="form-group">
-              <label>統一編號</label>
-              <input v-model="companyTaxId" type="text" placeholder="12345678" class="form-input" maxlength="8" />
+              <label>{{ $t('userSettings.checkout.companyTaxId') }}</label>
+              <input v-model="companyTaxId" type="text" :placeholder="$t('userSettings.checkout.companyTaxIdPlaceholder')" class="form-input" maxlength="8" />
             </div>
             <div class="form-group">
-              <label>公司名稱</label>
-              <input v-model="companyName" type="text" placeholder="某某股份有限公司" class="form-input" />
+              <label>{{ $t('userSettings.checkout.companyName') }}</label>
+              <input v-model="companyName" type="text" :placeholder="$t('userSettings.checkout.companyNamePlaceholder')" class="form-input" />
             </div>
           </template>
 
           <label class="save-label">
             <input v-model="saveInvoice" type="checkbox" />
-            記住我的發票資訊
+            {{ $t('userSettings.checkout.saveInvoice') }}
           </label>
         </div>
 
@@ -86,7 +116,7 @@
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
             <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
           </svg>
-          由藍新金流安全處理，訂閱後每月自動扣款
+          {{ isAddon ? $t('userSettings.checkout.oneTimeNote') : $t('userSettings.checkout.subscriptionNote') }}
         </p>
       </div>
     </div>
@@ -98,16 +128,25 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useI18n } from 'vue-i18n'
+import { useAddonLabel } from '../composables/useAddonLabel'
+import { tierPrice } from '../constants/pricing'
 
 const { t: $t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const addonLabel = useAddonLabel()
 
 const plan = ref(route.query.plan || 'basic')
 const billing = ref(route.query.billing || 'monthly')
 const paying = ref(false)
 const errorMsg = ref(null)
+
+// 加購模式（route.query.addon = package _id）
+const isAddon = computed(() => !!route.query.addon)
+const addonId = ref(route.query.addon || null)
+const addon = ref(null)       // 套餐明細：{ _id, label, price_twd, type, amount }
+const quantity = ref(1)
 
 const invoiceType = ref('personal')
 const carrierNum = ref('')
@@ -115,12 +154,25 @@ const companyTaxId = ref('')
 const companyName = ref('')
 const saveInvoice = ref(true)
 
-// 預填已儲存的發票資訊
-onMounted(() => {
-  if (plan.value === 'free') {
+onMounted(async () => {
+  if (isAddon.value) {
+    // 加購模式：載入套餐明細，找不到就退回設定頁
+    try {
+      const pkgs = await authStore.getPackages()
+      addon.value = (pkgs || []).find(p => p._id === addonId.value) || null
+    } catch (e) {
+      addon.value = null
+    }
+    if (!addon.value) {
+      router.push('/settings')
+      return
+    }
+  } else if (plan.value === 'free') {
     router.push('/settings')
     return
   }
+
+  // 預填已儲存的發票資訊
   const info = authStore.user?.invoice_info
   if (info) {
     invoiceType.value = info.type || 'personal'
@@ -130,9 +182,23 @@ onMounted(() => {
   }
 })
 
-const prices = { basic_monthly: 299, basic_yearly: 3289, pro_monthly: 899, pro_yearly: 9889 }
 const planLabel = computed(() => ({ basic: 'Basic', pro: 'Pro' })[plan.value] || plan.value)
-const totalPrice = computed(() => prices[`${plan.value}_${billing.value}`] || 0)
+
+// 有效份數：clamp 到 1–99，供總價與送出使用（即使輸入框暫時為空也不會算出 0/NaN）
+const effectiveQty = computed(() => {
+  const n = parseInt(quantity.value, 10)
+  if (isNaN(n) || n < 1) return 1
+  return n > 99 ? 99 : n
+})
+
+const totalPrice = computed(() => {
+  if (isAddon.value) return addon.value ? addon.value.price_twd * effectiveQty.value : 0
+  return tierPrice(plan.value, billing.value)
+})
+
+function incQty() { quantity.value = Math.min(99, effectiveQty.value + 1) }
+function decQty() { quantity.value = Math.max(1, effectiveQty.value - 1) }
+function clampQty() { quantity.value = effectiveQty.value }
 
 async function handlePay() {
   paying.value = true
@@ -146,7 +212,9 @@ async function handlePay() {
       company_name: invoiceType.value === 'company' ? companyName.value : '',
       save_invoice: saveInvoice.value,
     }
-    const result = await authStore.createCheckoutSession(plan.value, billing.value, invoiceData)
+    const result = isAddon.value
+      ? await authStore.purchaseExtraQuota(addonId.value, effectiveQty.value, invoiceData)
+      : await authStore.createCheckoutSession(plan.value, billing.value, invoiceData)
     authStore.submitNewebpayForm(result.form)
   } catch (err) {
     errorMsg.value = err.response?.data?.detail || $t('userSettings.checkout.error')
@@ -228,6 +296,56 @@ async function handlePay() {
   background: var(--color-divider, rgba(163, 177, 198, 0.2));
   margin: 12px 0;
 }
+
+/* 份數 stepper */
+.qty-row { padding: 8px 0; }
+
+.qty-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.qty-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-divider, rgba(163, 177, 198, 0.4));
+  border-radius: 6px;
+  background: var(--upload-bg, #fff);
+  color: var(--main-text);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.qty-btn:hover:not(:disabled) {
+  border-color: var(--main-primary);
+  color: var(--main-primary);
+}
+
+.qty-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.qty-input {
+  width: 48px;
+  height: 28px;
+  text-align: center;
+  border: 1px solid var(--color-divider, rgba(163, 177, 198, 0.4));
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--main-text);
+  background: var(--upload-bg, #fff);
+  -moz-appearance: textfield;
+}
+
+.qty-input::-webkit-outer-spin-button,
+.qty-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.qty-input:focus { outline: none; border-color: var(--main-primary); }
 
 /* 發票區塊 */
 .invoice-section {

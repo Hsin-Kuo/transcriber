@@ -261,6 +261,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import ElectricBorder from '../components/shared/ElectricBorder.vue'
 import UploadZone from '../components/UploadZone.vue'
 import MergeModal from '../components/merge/MergeModal.vue'
@@ -272,11 +273,15 @@ import { exceedsMaxSize, MAX_UPLOAD_SIZE_MB } from '../utils/chunkedUpload.js'
 import { useCollapsibleRows } from '../composables/useCollapsibleRows'
 import { useTaskTags } from '../composables/task/useTaskTags'
 import { useAuthStore } from '../stores/auth'
+import { useUiStore } from '../stores/ui'
+import { quotaErrorFromDetail } from '../utils/quotaError'
 
 const { t: $t, locale } = useI18n()
+const router = useRouter()
 const { tagsData, fetchTagColors } = useTaskTags($t)
 
 const authStore = useAuthStore()
+const uiStore = useUiStore()
 // 音檔保留天數依方案動態顯示（FREE=3、付費方案=7），未取得時 fallback 3
 const audioRetentionDays = computed(() => authStore.quota?.audio_retention_days || 3)
 
@@ -360,7 +365,6 @@ function filterOversizedFiles(files) {
               max: MAX_UPLOAD_SIZE_MB,
             }),
       type: 'warning',
-      duration: 5000,
     })
   }
   return files.filter((f) => !exceedsMaxSize(f))
@@ -386,8 +390,7 @@ function handleFilesUpload(files) {
       showNotification({
         title: $t('batchUpload.tooManyFiles'),
         message: $t('batchUpload.maxFilesMessage', { max: MAX_BATCH_FILES, count: files.length }),
-        type: 'warning',
-        duration: 5000
+        type: 'warning'
       })
     }
     // 只取前 10 個檔案
@@ -483,23 +486,30 @@ async function confirmAndUpload() {
       showNotification({
         title: $t('transcription.transcribing'),
         message: message,
-        type: 'processing',
-        duration: 5000  // 5秒後自動關閉
+        type: 'processing'
       })
     }
+
+    // 轉錄已建立，自動跳轉到任務列表頁查看進度
+    router.push({ name: 'tasks' })
   } catch (error) {
     console.error($t('transcription.errorUpload') + ':', error)
     const detail = error.response?.data?.detail
-    const errorMsg = typeof detail === 'object' ? detail?.message : (detail || error.message)
-    if (showNotification) {
-      showNotification({
-        title: $t('transcription.uploadFailed'),
-        message: errorMsg,
-        type: 'error',
-        duration: 5000
-      })
+    // 額度不足 → 改用引導購買的對話框（而非一般錯誤 toast）
+    const quota = quotaErrorFromDetail(detail)
+    if (quota) {
+      uiStore.showQuotaModal(quota.type)
     } else {
-      alert($t('transcription.uploadFailedMessage', { message: errorMsg }))
+      const errorMsg = typeof detail === 'object' ? detail?.message : (detail || error.message)
+      if (showNotification) {
+        showNotification({
+          title: $t('transcription.uploadFailed'),
+          message: errorMsg,
+          type: 'error'
+        })
+      } else {
+        alert($t('transcription.uploadFailedMessage', { message: errorMsg }))
+      }
     }
   } finally {
     uploading.value = false
@@ -577,6 +587,12 @@ async function confirmBatchUpload(formData) {
       }
     })
 
+    // 若有檔案因額度不足失敗，開啟引導購買對話框
+    const batchQuota = (result.tasks || []).map(t => quotaErrorFromDetail(t.error)).find(Boolean)
+    if (batchQuota) {
+      uiStore.showQuotaModal(batchQuota.type)
+    }
+
     // 顯示結果通知
     if (showNotification) {
       if (result.failed > 0) {
@@ -586,15 +602,13 @@ async function confirmBatchUpload(formData) {
             created: result.created,
             failed: result.failed
           }),
-          type: 'warning',
-          duration: 8000
+          type: 'warning'
         })
       } else {
         showNotification({
           title: $t('batchUpload.success'),
           message: $t('batchUpload.successMessage', { count: result.created }),
-          type: 'success',
-          duration: 5000
+          type: 'success'
         })
       }
     }
@@ -610,8 +624,7 @@ async function confirmBatchUpload(formData) {
       showNotification({
         title: $t('batchUpload.failed'),
         message: errorMsg,
-        type: 'error',
-        duration: 5000
+        type: 'error'
       })
     }
   } finally {
