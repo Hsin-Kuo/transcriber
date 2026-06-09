@@ -187,7 +187,11 @@ api.interceptors.response.use(
     // 429 Rate Limit：debounce 避免同時多個請求失敗時重複通知
     // _silentRateLimit 旗標讓背景 polling 類請求（verify-pending 等）不觸發全域 toast
     if (error.response?.status === 429) {
-      if (!originalRequest?._silentRateLimit && !rateLimitNotifyTimer) {
+      // 額度不足（QUOTA_EXCEEDED）雖也是 429，但由頁面層的額度對話框處理，
+      // 不觸發全域「請求太頻繁」toast，避免訊息互相干擾。
+      const detail = (error.response.data as { detail?: { code?: string } })?.detail
+      const isQuota = !!detail && typeof detail === 'object' && detail.code === 'QUOTA_EXCEEDED'
+      if (!isQuota && !originalRequest?._silentRateLimit && !rateLimitNotifyTimer) {
         window.dispatchEvent(new CustomEvent('api:rate-limited'))
         rateLimitNotifyTimer = setTimeout(() => { rateLimitNotifyTimer = null }, 3000)
       }

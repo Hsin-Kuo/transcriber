@@ -123,7 +123,17 @@ class ReservationRepository:
                         if duration_minutes > available:
                             raise HTTPException(
                                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                                detail="轉錄時長配額不足"
+                                detail={
+                                    "code": "QUOTA_EXCEEDED",
+                                    "message": "轉錄時長配額不足",
+                                    "quota": {
+                                        "type": "duration_minutes",
+                                        "plan_remaining": round(plan_remaining, 1),
+                                        "extra_remaining": round(extra, 1),
+                                        "available": round(max(0.0, available), 1),
+                                        "requested": round(duration_minutes, 1),
+                                    },
+                                },
                             )
 
                         # 4. Sentinel write：寫 user doc，強制平行 txn 在此衝突

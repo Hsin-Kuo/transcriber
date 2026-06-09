@@ -308,6 +308,16 @@
       "saveInvoice": "Remember my invoice info"
     }
   },
+  "quotaModal": {
+    "title": "Quota exhausted",
+    "durationMessage": "You've used up this month's transcription minutes.",
+    "aiMessage": "You've used up this month's AI summary credits.",
+    "upgradeCta": "Upgrade plan",
+    "addonCta": "Buy add-on credits",
+    "upgradeHint": "Upgrade for more quota and keep transcribing right away.",
+    "addonHint": "Buy add-on credits to keep going now — credits carry over each month.",
+    "later": "Maybe later"
+  },
   "navigation": {
     "expandSidebar": "Expand Sidebar",
     "collapseSidebar": "Collapse Sidebar",

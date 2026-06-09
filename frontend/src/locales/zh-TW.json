@@ -308,6 +308,16 @@
       "saveInvoice": "記住我的發票資訊"
     }
   },
+  "quotaModal": {
+    "title": "額度不足",
+    "durationMessage": "本月的轉錄時數已用完。",
+    "aiMessage": "本月的 AI 摘要次數已用完。",
+    "upgradeCta": "升級方案",
+    "addonCta": "加購額度",
+    "upgradeHint": "升級方案可獲得更多額度，立即繼續轉錄。",
+    "addonHint": "可單筆加購額度，立即繼續轉錄；額度跨月保留。",
+    "later": "稍後再說"
+  },
   "navigation": {
     "expandSidebar": "展開側欄",
     "collapseSidebar": "收合側欄",

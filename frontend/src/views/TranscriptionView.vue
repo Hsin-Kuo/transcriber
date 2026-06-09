@@ -273,12 +273,14 @@ import { exceedsMaxSize, MAX_UPLOAD_SIZE_MB } from '../utils/chunkedUpload.js'
 import { useCollapsibleRows } from '../composables/useCollapsibleRows'
 import { useTaskTags } from '../composables/task/useTaskTags'
 import { useAuthStore } from '../stores/auth'
+import { useUiStore } from '../stores/ui'
 
 const { t: $t, locale } = useI18n()
 const router = useRouter()
 const { tagsData, fetchTagColors } = useTaskTags($t)
 
 const authStore = useAuthStore()
+const uiStore = useUiStore()
 // 音檔保留天數依方案動態顯示（FREE=3、付費方案=7），未取得時 fallback 3
 const audioRetentionDays = computed(() => authStore.quota?.audio_retention_days || 3)
 
@@ -492,15 +494,20 @@ async function confirmAndUpload() {
   } catch (error) {
     console.error($t('transcription.errorUpload') + ':', error)
     const detail = error.response?.data?.detail
-    const errorMsg = typeof detail === 'object' ? detail?.message : (detail || error.message)
-    if (showNotification) {
-      showNotification({
-        title: $t('transcription.uploadFailed'),
-        message: errorMsg,
-        type: 'error'
-      })
+    // 額度不足 → 改用引導購買的對話框（而非一般錯誤 toast）
+    if (typeof detail === 'object' && detail?.code === 'QUOTA_EXCEEDED') {
+      uiStore.showQuotaModal(detail?.quota?.type || 'duration_minutes')
     } else {
-      alert($t('transcription.uploadFailedMessage', { message: errorMsg }))
+      const errorMsg = typeof detail === 'object' ? detail?.message : (detail || error.message)
+      if (showNotification) {
+        showNotification({
+          title: $t('transcription.uploadFailed'),
+          message: errorMsg,
+          type: 'error'
+        })
+      } else {
+        alert($t('transcription.uploadFailedMessage', { message: errorMsg }))
+      }
     }
   } finally {
     uploading.value = false

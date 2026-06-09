@@ -110,7 +110,7 @@
         </div>
         <div class="plan-indicator-actions">
           <button class="plan-btn plan-btn-outline" @click="openPricing">{{ $t('userSettings.showPlan') }}</button>
-          <button class="plan-btn plan-btn-primary" @click="showPlanPanel = true"><svg class="plan-btn-icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M8,1 A7,7 0 1,0 8,15 A7,7 0 1,0 8,1 Z M8,6.5 A1.5,1.5 0 1,1 8,9.5 A1.5,1.5 0 1,1 8,6.5 Z M7.5,1 L8.5,1 L8.5,5.5 L7.5,5.5 Z" fill="currentColor" fill-rule="evenodd" /></svg>{{ $t('userSettings.upgrade') }}</button>
+          <button class="plan-btn plan-btn-primary" @click="uiStore.openPlanPanel()"><svg class="plan-btn-icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M8,1 A7,7 0 1,0 8,15 A7,7 0 1,0 8,1 Z M8,6.5 A1.5,1.5 0 1,1 8,9.5 A1.5,1.5 0 1,1 8,6.5 Z M7.5,1 L8.5,1 L8.5,5.5 L7.5,5.5 Z" fill="currentColor" fill-rule="evenodd" /></svg>{{ $t('userSettings.upgrade') }}</button>
         </div>
 
         <!-- Subscription management (only for paid users) -->
@@ -620,7 +620,6 @@
         </div>
       </div>
     </div>
-    <PlanPanel v-model="showPlanPanel" :current-tier="currentTier" @plan-changed="handlePlanChanged" />
     <BillingPanel v-model="showBillingPanel" @cancelled="showToast($t('userSettings.subscription.cancelSuccess'))" />
 
 
@@ -643,12 +642,13 @@ import { useI18n } from 'vue-i18n'
 import api from '../utils/api'
 import { detectTimezone, detectTheme } from '../utils/defaults'
 import GoogleSignInButton from '../components/GoogleSignInButton.vue'
-import PlanPanel from '../components/PlanPanel.vue'
 import BillingPanel from '../components/BillingPanel.vue'
+import { useUiStore } from '../stores/ui'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+const uiStore = useUiStore()
 const { t: $t, locale } = useI18n()
 const { formatDate: formatDateTz } = useDateFormatter()
 
@@ -676,8 +676,7 @@ const newPasswordChecks = ref({
   hasNumber: false
 })
 
-// Plan panel
-const showPlanPanel = ref(false)
+// Billing / plan
 const showBillingPanel = ref(false)
 
 // 「檢視方案」導向官網定價頁（新分頁）
@@ -700,14 +699,6 @@ function showToast(msg, type = 'success') {
   toastType.value = type
   clearTimeout(toastTimer)
   toastTimer = setTimeout(() => { toastMsg.value = '' }, 3500)
-}
-
-function handlePlanChanged(event) {
-  if (event.action === 'upgraded') {
-    showToast($t('userSettings.subscription.upgradedSuccess'))
-  } else if (event.action === 'downgraded') {
-    showToast($t('userSettings.subscription.downgradedSuccess'))
-  }
 }
 
 function formatDate(timestamp) {
