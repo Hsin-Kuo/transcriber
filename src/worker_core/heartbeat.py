@@ -21,12 +21,16 @@ log = get_logger(__name__)
 
 _HEARTBEAT_INTERVAL_SECONDS = 60
 _worker_id_cache: Optional[str] = None
+_lifecycle_cache: Optional[str] = None
 _heartbeat_thread_started = False
 _heartbeat_lock = threading.Lock()
 
 
-def _fetch_ec2_instance_id() -> Optional[str]:
-    """從 EC2 IMDSv2 取得 instance-id，失敗回 None（本地開發用）"""
+def _fetch_imds(path: str) -> Optional[str]:
+    """從 EC2 IMDSv2 取得指定 metadata path，失敗回 None（本地開發用）。
+
+    path 例如 "instance-id" / "instance-life-cycle"。
+    """
     try:
         token_req = urllib.request.Request(
             "http://169.254.169.254/latest/api/token",
@@ -36,11 +40,11 @@ def _fetch_ec2_instance_id() -> Optional[str]:
         with urllib.request.urlopen(token_req, timeout=1) as resp:
             token = resp.read().decode()
 
-        id_req = urllib.request.Request(
-            "http://169.254.169.254/latest/meta-data/instance-id",
+        meta_req = urllib.request.Request(
+            f"http://169.254.169.254/latest/meta-data/{path}",
             headers={"X-aws-ec2-metadata-token": token},
         )
-        with urllib.request.urlopen(id_req, timeout=1) as resp:
+        with urllib.request.urlopen(meta_req, timeout=1) as resp:
             return resp.read().decode()
     except Exception:
         return None
@@ -56,8 +60,21 @@ def get_worker_id() -> str:
     if env_id:
         _worker_id_cache = env_id
     else:
-        _worker_id_cache = _fetch_ec2_instance_id() or socket.gethostname()
+        _worker_id_cache = _fetch_imds("instance-id") or socket.gethostname()
     return _worker_id_cache
+
+
+def get_worker_lifecycle() -> str:
+    """實例計費型態："spot" / "on-demand"；非 EC2（本地開發）為 "unknown"。
+
+    供 Web Server / 後台統計 Spot 命中率，不必再翻 Lambda CloudWatch log。
+    """
+    global _lifecycle_cache
+    if _lifecycle_cache is not None:
+        return _lifecycle_cache
+
+    _lifecycle_cache = _fetch_imds("instance-life-cycle") or "unknown"
+    return _lifecycle_cache
 
 
 def write_heartbeat(
@@ -71,6 +88,7 @@ def write_heartbeat(
         update = {
             "$set": {
                 "worker_id": get_worker_id(),
+                "lifecycle": get_worker_lifecycle(),
                 "status": status,
                 "last_heartbeat_at": now,
             }
