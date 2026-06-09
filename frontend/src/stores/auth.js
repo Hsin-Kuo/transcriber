@@ -310,8 +310,8 @@ export const useAuthStore = defineStore('auth', () => {
     return response.data  // { form, order_no, action, ... }
   }
 
-  async function purchaseExtraQuota(packageId, invoiceData = {}) {
-    const response = await api.post('/subscriptions/purchase-extra', { package_id: packageId, ...invoiceData })
+  async function purchaseExtraQuota(packageId, quantity = 1, invoiceData = {}) {
+    const response = await api.post('/subscriptions/purchase-extra', { package_id: packageId, quantity, ...invoiceData })
     return response.data  // { form, order_no }
   }
 

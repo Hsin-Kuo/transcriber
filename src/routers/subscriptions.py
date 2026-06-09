@@ -5,7 +5,7 @@ from datetime import datetime, date, timedelta
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 
 from ..auth.dependencies import get_current_user
@@ -66,6 +66,7 @@ class ChangePlanRequest(BaseModel):
 
 class PurchaseExtraRequest(BaseModel):
     package_id: str
+    quantity: int = Field(default=1, ge=1, le=99)  # 購買份數（1–99）
     invoice_type: Optional[str] = None
     carrier_type: Optional[str] = None
     carrier_num: Optional[str] = None
@@ -481,6 +482,12 @@ async def purchase_extra_quota(
 
     svc = get_newebpay_service()
 
+    # 份數：總金額與加購額度皆 × quantity
+    qty = request.quantity
+    total_amount = package["price_twd"] * qty
+    unit_amount = package.get("amount", 0)
+    item_desc = package["label"] if qty == 1 else f'{package["label"]} ×{qty}'
+
     order_no = svc.generate_order_no("SLEXT")
     await build_order_settlement(db).open_pending({
         "user_id": user_id,
@@ -488,13 +495,13 @@ async def purchase_extra_quota(
         "type": "extra_quota",
         "tier": None,
         "billing_cycle": None,
-        "amount_twd": package["price_twd"],
+        "amount_twd": total_amount,
         "status": "pending",
         "period_no": None,
         "auth_times": 0,
         "newebpay_trade_no": None,
-        "extra_duration_minutes": package.get("amount", 0) if package["type"] == "duration" else 0,
-        "extra_ai_summaries": package.get("amount", 0) if package["type"] == "ai_summaries" else 0,
+        "extra_duration_minutes": unit_amount * qty if package["type"] == "duration" else 0,
+        "extra_ai_summaries": unit_amount * qty if package["type"] == "ai_summaries" else 0,
     })
 
     invoice_params = {
@@ -506,8 +513,8 @@ async def purchase_extra_quota(
 
     form = svc.create_mpg_form(
         order_no=order_no,
-        amount_twd=package["price_twd"],
-        item_desc=package["label"],
+        amount_twd=total_amount,
+        item_desc=item_desc,
         email=current_user["email"],
         return_url=_return_url(),
         notify_url=_notify_url("mpg"),

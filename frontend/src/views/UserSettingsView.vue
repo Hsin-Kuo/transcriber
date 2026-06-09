@@ -109,7 +109,7 @@
           </div>
         </div>
         <div class="plan-indicator-actions">
-          <button class="plan-btn plan-btn-outline" @click="showPlanPanel = true">{{ $t('userSettings.showPlan') }}</button>
+          <button class="plan-btn plan-btn-outline" @click="openPricing">{{ $t('userSettings.showPlan') }}</button>
           <button class="plan-btn plan-btn-primary" @click="showPlanPanel = true"><svg class="plan-btn-icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M8,1 A7,7 0 1,0 8,15 A7,7 0 1,0 8,1 Z M8,6.5 A1.5,1.5 0 1,1 8,9.5 A1.5,1.5 0 1,1 8,6.5 Z M7.5,1 L8.5,1 L8.5,5.5 L7.5,5.5 Z" fill="currentColor" fill-rule="evenodd" /></svg>{{ $t('userSettings.upgrade') }}</button>
         </div>
 
@@ -679,6 +679,11 @@ const newPasswordChecks = ref({
 // Plan panel
 const showPlanPanel = ref(false)
 const showBillingPanel = ref(false)
+
+// 「檢視方案」導向官網定價頁（新分頁）
+function openPricing() {
+  window.open('https://soundlite.app/pricing', '_blank', 'noopener,noreferrer')
+}
 
 // Subscription management
 const toastMsg = ref('')
