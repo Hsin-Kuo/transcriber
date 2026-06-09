@@ -276,16 +276,22 @@ async def get_task(
     retention_days = await get_user_retention_days(task_service.task_repo.db, str(current_user["_id"]))
     enriched_task["audio_retention_days"] = retention_days
 
-    # 音檔過期判定 —— 不可只靠「路徑還在且過期」，否則列表端點的背景清理
-    # （_clear_expired_audio_in_db）把 result.audio_file 清成 None 後，詳情頁
-    # 旗標會永遠是 False、過期提示消失。改用：DB 既有旗標 OR 由 completed_at 回推。
-    # （_save_compact_audio 完成時必寫 audio_file，故「已完成且無音檔」即代表已過期被清。）
+    # 音檔過期判定（優先級）：
+    #   1) DB 既有旗標（列表端點清音檔時已寫入）→ 直接採信
+    #   2) 路徑還在 → 用 is_audio_expired（可從路徑推得「原方案」保留天數，最準）
+    #   3) 路徑已被清空 → 完成且非手動保留的任務原本必有音檔（_save_compact_audio
+    #      早於標記完成），故無音檔即代表已過期被清；不再用「當前方案」保留天數回推，
+    #      避免使用者升/降方案後對 backlog 任務誤判。
     audio_file = enriched_task.get("result", {}).get("audio_file")
-    audio_expired = bool(enriched_task.get("audio_expired")) or (
-        enriched_task.get("status") == "completed"
-        and not enriched_task.get("keep_audio")
-        and is_audio_expired(enriched_task, retention_days)
-    )
+    if enriched_task.get("audio_expired"):
+        audio_expired = True
+    elif audio_file:
+        audio_expired = is_audio_expired(enriched_task, retention_days)
+    else:
+        audio_expired = (
+            enriched_task.get("status") == "completed"
+            and not enriched_task.get("keep_audio")
+        )
     enriched_task["audio_expired"] = audio_expired
     if audio_expired and audio_file:
         enriched_task["result"]["audio_file"] = None

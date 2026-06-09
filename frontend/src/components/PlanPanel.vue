@@ -131,10 +131,13 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
 import { useFocusTrap } from '../composables/useFocusTrap'
+import { useAddonLabel } from '../composables/useAddonLabel'
+import { TIER_PRICES } from '../constants/pricing'
 
 const { t: $t } = useI18n()
 const router = useRouter()
 const authStore = useAuthStore()
+const addonLabel = useAddonLabel()
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -168,13 +171,6 @@ watch(() => props.modelValue, (open) => {
 function buyAddon(addon) {
   emit('update:modelValue', false)
   router.push({ path: '/checkout', query: { addon: addon._id } })
-}
-
-// 品項顯示名稱依 type+amount 由 i18n 組出（DB label 僅作後端/admin 用）
-function addonLabel(pkg) {
-  if (pkg?.type === 'duration') return $t('userSettings.checkout.addonDurationLabel', { n: pkg.amount })
-  if (pkg?.type === 'ai_summaries') return $t('userSettings.checkout.addonAiLabel', { n: pkg.amount })
-  return pkg?.label || ''
 }
 
 function isUpgrade(planKey) {
@@ -290,14 +286,8 @@ const plans = [
   }
 ]
 
-const twd = {
-  free:  { monthly: 0,   yearly: 0 },
-  basic: { monthly: 299, yearly: 3289 },
-  pro:   { monthly: 899, yearly: 9889 },
-}
-
 function getPrice(plan) {
-  const prices = twd[plan.key] || { monthly: 0, yearly: 0 }
+  const prices = TIER_PRICES[plan.key] || { monthly: 0, yearly: 0 }
   if (billing.value === 'yearly') {
     return prices.yearly > 0
       ? `NT$${Math.round(prices.yearly / 12)}`

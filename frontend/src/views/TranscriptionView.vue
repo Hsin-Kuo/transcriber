@@ -274,6 +274,7 @@ import { useCollapsibleRows } from '../composables/useCollapsibleRows'
 import { useTaskTags } from '../composables/task/useTaskTags'
 import { useAuthStore } from '../stores/auth'
 import { useUiStore } from '../stores/ui'
+import { quotaErrorFromDetail } from '../utils/quotaError'
 
 const { t: $t, locale } = useI18n()
 const router = useRouter()
@@ -495,8 +496,9 @@ async function confirmAndUpload() {
     console.error($t('transcription.errorUpload') + ':', error)
     const detail = error.response?.data?.detail
     // 額度不足 → 改用引導購買的對話框（而非一般錯誤 toast）
-    if (typeof detail === 'object' && detail?.code === 'QUOTA_EXCEEDED') {
-      uiStore.showQuotaModal(detail?.quota?.type || 'duration_minutes')
+    const quota = quotaErrorFromDetail(detail)
+    if (quota) {
+      uiStore.showQuotaModal(quota.type)
     } else {
       const errorMsg = typeof detail === 'object' ? detail?.message : (detail || error.message)
       if (showNotification) {
@@ -586,11 +588,9 @@ async function confirmBatchUpload(formData) {
     })
 
     // 若有檔案因額度不足失敗，開啟引導購買對話框
-    const quotaErr = (result.tasks || [])
-      .map(t => t.error)
-      .find(e => e && typeof e === 'object' && e.code === 'QUOTA_EXCEEDED')
-    if (quotaErr && typeof quotaErr === 'object') {
-      uiStore.showQuotaModal(quotaErr.quota?.type || 'duration_minutes')
+    const batchQuota = (result.tasks || []).map(t => quotaErrorFromDetail(t.error)).find(Boolean)
+    if (batchQuota) {
+      uiStore.showQuotaModal(batchQuota.type)
     }
 
     // 顯示結果通知

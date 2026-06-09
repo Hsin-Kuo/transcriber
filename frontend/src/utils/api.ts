@@ -4,6 +4,7 @@
 /// <reference types="vite/client" />
 import axios, { AxiosError } from 'axios'
 import type { AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
+import { quotaErrorFromResponse } from './quotaError'
 
 // 未設定 VITE_API_URL 時：開發環境（含 vitest）走 hostname:8000，
 // 生產 build same-origin 由 nginx 反代。
@@ -189,8 +190,7 @@ api.interceptors.response.use(
     if (error.response?.status === 429) {
       // 額度不足（QUOTA_EXCEEDED）雖也是 429，但由頁面層的額度對話框處理，
       // 不觸發全域「請求太頻繁」toast，避免訊息互相干擾。
-      const detail = (error.response.data as { detail?: { code?: string } })?.detail
-      const isQuota = !!detail && typeof detail === 'object' && detail.code === 'QUOTA_EXCEEDED'
+      const isQuota = !!quotaErrorFromResponse(error)
       if (!isQuota && !originalRequest?._silentRateLimit && !rateLimitNotifyTimer) {
         window.dispatchEvent(new CustomEvent('api:rate-limited'))
         rateLimitNotifyTimer = setTimeout(() => { rateLimitNotifyTimer = null }, 3000)

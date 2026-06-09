@@ -315,9 +315,15 @@ export const useAuthStore = defineStore('auth', () => {
     return response.data  // { form, order_no }
   }
 
+  // 加購套餐目錄近乎靜態，session 內快取，避免 PlanPanel 重開 / CheckoutView 重複抓
+  let packagesPromise = null
   async function getPackages() {
-    const response = await api.get('/subscriptions/packages')
-    return response.data.packages
+    if (!packagesPromise) {
+      packagesPromise = api.get('/subscriptions/packages')
+        .then(r => r.data.packages)
+        .catch(err => { packagesPromise = null; throw err })  // 失敗不快取，允許重試
+    }
+    return packagesPromise
   }
 
   async function getOrders(skip = 0, limit = 6) {

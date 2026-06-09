@@ -23,14 +23,14 @@
           <div class="summary-row qty-row">
             <span class="summary-label">{{ $t('userSettings.checkout.quantity') }}</span>
             <div class="qty-stepper">
-              <button class="qty-btn" :disabled="quantity <= 1" @click="decQty" :aria-label="$t('userSettings.checkout.decreaseQty')">−</button>
+              <button class="qty-btn" :disabled="effectiveQty <= 1" @click="decQty" :aria-label="$t('userSettings.checkout.decreaseQty')">−</button>
               <input class="qty-input" type="number" min="1" max="99" v-model.number="quantity" @change="clampQty" />
-              <button class="qty-btn" :disabled="quantity >= 99" @click="incQty" :aria-label="$t('userSettings.checkout.increaseQty')">+</button>
+              <button class="qty-btn" :disabled="effectiveQty >= 99" @click="incQty" :aria-label="$t('userSettings.checkout.increaseQty')">+</button>
             </div>
           </div>
           <div class="summary-row">
             <span class="summary-label">{{ $t('userSettings.checkout.unitPrice') }}</span>
-            <span class="summary-value">NT${{ addon?.price_twd }} × {{ quantity }}</span>
+            <span class="summary-value">NT${{ addon?.price_twd }} × {{ effectiveQty }}</span>
           </div>
 
           <div class="summary-divider"></div>
@@ -128,11 +128,14 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useI18n } from 'vue-i18n'
+import { useAddonLabel } from '../composables/useAddonLabel'
+import { tierPrice } from '../constants/pricing'
 
 const { t: $t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const addonLabel = useAddonLabel()
 
 const plan = ref(route.query.plan || 'basic')
 const billing = ref(route.query.billing || 'monthly')
@@ -179,28 +182,23 @@ onMounted(async () => {
   }
 })
 
-const prices = { basic_monthly: 299, basic_yearly: 3289, pro_monthly: 899, pro_yearly: 9889 }
 const planLabel = computed(() => ({ basic: 'Basic', pro: 'Pro' })[plan.value] || plan.value)
-const totalPrice = computed(() => {
-  if (isAddon.value) return addon.value ? addon.value.price_twd * quantity.value : 0
-  return prices[`${plan.value}_${billing.value}`] || 0
+
+// 有效份數：clamp 到 1–99，供總價與送出使用（即使輸入框暫時為空也不會算出 0/NaN）
+const effectiveQty = computed(() => {
+  const n = parseInt(quantity.value, 10)
+  if (isNaN(n) || n < 1) return 1
+  return n > 99 ? 99 : n
 })
 
-// 品項顯示名稱依 type+amount 由 i18n 組出（DB label 僅作後端/admin 用）
-function addonLabel(pkg) {
-  if (pkg?.type === 'duration') return $t('userSettings.checkout.addonDurationLabel', { n: pkg.amount })
-  if (pkg?.type === 'ai_summaries') return $t('userSettings.checkout.addonAiLabel', { n: pkg.amount })
-  return pkg?.label || ''
-}
+const totalPrice = computed(() => {
+  if (isAddon.value) return addon.value ? addon.value.price_twd * effectiveQty.value : 0
+  return tierPrice(plan.value, billing.value)
+})
 
-function incQty() { if (quantity.value < 99) quantity.value++ }
-function decQty() { if (quantity.value > 1) quantity.value-- }
-function clampQty() {
-  let n = parseInt(quantity.value, 10)
-  if (isNaN(n) || n < 1) n = 1
-  if (n > 99) n = 99
-  quantity.value = n
-}
+function incQty() { quantity.value = Math.min(99, effectiveQty.value + 1) }
+function decQty() { quantity.value = Math.max(1, effectiveQty.value - 1) }
+function clampQty() { quantity.value = effectiveQty.value }
 
 async function handlePay() {
   paying.value = true
@@ -215,7 +213,7 @@ async function handlePay() {
       save_invoice: saveInvoice.value,
     }
     const result = isAddon.value
-      ? await authStore.purchaseExtraQuota(addonId.value, quantity.value, invoiceData)
+      ? await authStore.purchaseExtraQuota(addonId.value, effectiveQty.value, invoiceData)
       : await authStore.createCheckoutSession(plan.value, billing.value, invoiceData)
     authStore.submitNewebpayForm(result.form)
   } catch (err) {
