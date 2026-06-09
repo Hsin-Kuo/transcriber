@@ -41,6 +41,7 @@ class QuotaManager:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail={
+                    "code": "QUOTA_EXCEEDED",
                     "message": f"轉錄時數不足（方案剩餘 {plan_remaining:.1f} 分鐘，額外額度 {extra_remaining:.1f} 分鐘）",
                     "quota": {
                         "plan_used": current_usage,
@@ -141,6 +142,7 @@ class QuotaManager:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail={
+                    "code": "QUOTA_EXCEEDED",
                     "message": "AI 摘要次數不足",
                     "quota": {"type": "ai_summaries"},
                 }

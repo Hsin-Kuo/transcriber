@@ -179,9 +179,12 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { summaryService, taskService } from '../../api/services'
 import { useAuthStore } from '../../stores/auth'
+import { useUiStore } from '../../stores/ui'
+import { quotaErrorFromResponse } from '../../utils/quotaError'
 
 const { t: $t } = useI18n()
 const authStore = useAuthStore()
+const uiStore = useUiStore()
 
 // Props
 const props = defineProps({
@@ -441,8 +444,11 @@ async function generateSummary() {
     }
   } catch (err) {
     console.error('生成摘要失敗:', err)
-    if (err.response?.status === 429 && err.response?.data?.detail?.quota?.type === 'ai_summaries') {
+    const quota = quotaErrorFromResponse(err)
+    if (quota?.type === 'ai_summaries') {
       error.value = err.response.data.detail.message
+      // 額度不足 → 開啟引導購買對話框（加購 AI 摘要次數）
+      uiStore.showQuotaModal('ai_summaries')
       // 重新拉取用戶資料以更新配額顯示
       await authStore.fetchCurrentUser()
     } else {

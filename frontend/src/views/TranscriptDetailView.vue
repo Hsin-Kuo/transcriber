@@ -252,14 +252,13 @@ class="transcript-layout"
           </template>
         </div>
 
-        <!-- C-alt) 音檔已過期時顯示提示 icon -->
+        <!-- C-alt) 音檔已過期時顯示提示 icon（展開/收合皆顯示） -->
         <div
           v-if="currentTranscript.audioExpired"
-          v-show="!isEffectivelyCollapsed"
           class="audio-expired-info"
         >
           <div class="audio-expired-icon-wrapper">
-            <svg class="audio-expired-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <svg class="audio-expired-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="10" />
               <line x1="12" y1="8" x2="12" y2="12" />
               <line x1="12" y1="16" x2="12.01" y2="16" />
@@ -436,7 +435,7 @@ class="transcript-layout"
       v-if="currentTranscript.audioExpired"
       class="mobile-audio-player mobile-audio-expired-info"
     >
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="10" />
         <line x1="12" y1="8" x2="12" y2="12" />
         <line x1="12" y1="16" x2="12.01" y2="16" />
@@ -1712,6 +1711,25 @@ usePageLifecycle({
 
 .audio-expired-icon-wrapper:hover .audio-expired-tooltip {
   display: block;
+}
+
+/* 收合時：tooltip 改往右彈（與收合控制項的 pop-right 一致），
+   避免 220px 寬的提示往左溢出窄欄、被左側 nav 擋住 */
+.left-panel.collapsed .audio-expired-tooltip {
+  left: calc(100% + 12px);
+  bottom: auto;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 99999;
+}
+
+.left-panel.collapsed .audio-expired-tooltip::after {
+  top: 50%;
+  left: auto;
+  right: 100%;
+  transform: translateY(-50%);
+  border-top-color: transparent;
+  border-right-color: var(--nav-bg);
 }
 
 /* 手機版過期提示 */
