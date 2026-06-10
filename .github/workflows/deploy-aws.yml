@@ -33,7 +33,7 @@ jobs:
               --exclude='admin-frontend' \
               --exclude='.git' \
               -czvf backend.tar.gz \
-              src deploy requirements-web.txt requirements.txt
+              src scripts deploy requirements-web.txt requirements.txt
 
       # ===== Frontend 建置 =====
       - name: Setup Node.js
