@@ -358,6 +358,19 @@
     "uploadFailedMessage": "Upload failed: {message}",
     "errorUpload": "Upload failed"
   },
+  "globalUpload": {
+    "statusUploading": "Uploading",
+    "statusDone": "Transcription task created",
+    "statusError": "Upload failed",
+    "statusCancelled": "Upload cancelled",
+    "mergeLabel": "{count} files (merge)",
+    "batchLabel": "{count} files",
+    "batchProgress": "File {current}/{total}",
+    "processing": "Processing…",
+    "view": "View",
+    "cancel": "Cancel",
+    "close": "Close"
+  },
   "uploadZone": {
     "clickToUpload": "Click to upload or drag and drop",
     "supportedFormats": "Supports audio (M4A, MP3, WAV) and video (MP4, MOV, AVI) formats",

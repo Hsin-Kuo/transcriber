@@ -358,6 +358,19 @@
     "uploadFailedMessage": "上傳失敗：{message}",
     "errorUpload": "上傳失敗"
   },
+  "globalUpload": {
+    "statusUploading": "上傳中",
+    "statusDone": "已建立轉錄任務",
+    "statusError": "上傳失敗",
+    "statusCancelled": "已取消上傳",
+    "mergeLabel": "{count} 個檔案（合併）",
+    "batchLabel": "{count} 個檔案",
+    "batchProgress": "第 {current}/{total} 個",
+    "processing": "處理中…",
+    "view": "查看",
+    "cancel": "取消",
+    "close": "關閉"
+  },
   "uploadZone": {
     "clickToUpload": "點擊或拖曳檔案",
     "supportedFormats": "支援音訊（M4A、MP3、WAV）及影片（MP4、MOV、AVI）格式",
