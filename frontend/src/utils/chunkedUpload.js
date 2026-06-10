@@ -43,12 +43,14 @@ export function exceedsMaxSize(file) {
  * @param {File} file - 要上傳的檔案
  * @param {object} options
  * @param {function} [options.onProgress] - 進度回調 (0-100)
+ * @param {AbortSignal} [options.signal] - 取消信號；abort 後進行中的請求會中止、整體 throw
  * @returns {Promise<string>} upload_id
  */
-export async function uploadChunked(file, { onProgress } = {}) {
+export async function uploadChunked(file, { onProgress, signal } = {}) {
   // 1. 初始化上傳
   const initRes = await api.post(NEW_ENDPOINTS.uploads.init, null, {
     params: { filename: file.name, total_size: file.size },
+    signal,
   })
   const { upload_id, total_chunks } = initRes.data
 
@@ -59,6 +61,11 @@ export async function uploadChunked(file, { onProgress } = {}) {
 
   async function worker() {
     while (!aborted && queue.length > 0) {
+      // 使用者取消：停止取新 chunk，讓 worker 收斂
+      if (signal?.aborted) {
+        aborted = true
+        return
+      }
       // JS single-thread，shift() 原子；多 worker 不會搶到同 index
       const i = queue.shift()
       if (i === undefined) return
@@ -66,13 +73,13 @@ export async function uploadChunked(file, { onProgress } = {}) {
         const start = i * CHUNK_SIZE
         const end = Math.min(start + CHUNK_SIZE, file.size)
         const blob = file.slice(start, end)
-        await uploadChunkWithRetry(upload_id, i, blob)
+        await uploadChunkWithRetry(upload_id, i, blob, signal)
         completed++
         if (onProgress) {
           onProgress(Math.round((completed / total_chunks) * 100))
         }
       } catch (err) {
-        // 任一 chunk 重試耗盡：通知其他 worker 停下、整體 fail-fast
+        // 任一 chunk 重試耗盡（或被取消）：通知其他 worker 停下、整體 fail-fast
         aborted = true
         throw err
       }
@@ -83,7 +90,7 @@ export async function uploadChunked(file, { onProgress } = {}) {
   await Promise.all(Array.from({ length: workerCount }, () => worker()))
 
   // 3. 完成組裝
-  const completeRes = await api.post(NEW_ENDPOINTS.uploads.complete(upload_id))
+  const completeRes = await api.post(NEW_ENDPOINTS.uploads.complete(upload_id), null, { signal })
   return completeRes.data.upload_id
 }
 
@@ -91,7 +98,7 @@ export async function uploadChunked(file, { onProgress } = {}) {
  * 上傳單個 chunk，失敗自動重試
  * 只對 transient 錯誤（網路 / 5xx / 429）重試；4xx (400/403/404/409/413) 是永久錯誤直接 throw
  */
-async function uploadChunkWithRetry(uploadId, chunkIndex, blob) {
+async function uploadChunkWithRetry(uploadId, chunkIndex, blob, signal) {
   let lastError
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
@@ -103,11 +110,16 @@ async function uploadChunkWithRetry(uploadId, chunkIndex, blob) {
         {
           headers: { 'Content-Type': 'multipart/form-data' },
           timeout: 600000, // 10 分鐘（單片最大 90MB）
+          signal,
         },
       )
       return
     } catch (err) {
       lastError = err
+      // 使用者取消（axios CanceledError）：不重試，直接往上拋
+      if (signal?.aborted || err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError') {
+        throw err
+      }
       // 4xx 永久錯誤不重試（429 例外：rate limit 是 transient）
       const status = err?.response?.status
       if (status && status >= 400 && status < 500 && status !== 429) {
