@@ -10,6 +10,8 @@
       </router-view>
     </main>
     <NotificationToast ref="notificationToast" />
+    <!-- 全域上傳進度浮層：跳頁也持續顯示大檔上傳進度 -->
+    <GlobalUploadProgress />
     <!-- 全域方案面板 / 額度不足對話框（任何頁面可觸發）-->
     <PlanPanel v-model="uiStore.planPanelOpen" :current-tier="currentTier" @plan-changed="handlePlanChanged" />
     <QuotaExceededModal />
@@ -34,6 +36,7 @@ import { useI18n } from 'vue-i18n'
 import ElectricBorder from './components/shared/ElectricBorder.vue'
 import Navigation from './components/shared/Navigation.vue'
 import NotificationToast from './components/NotificationToast.vue'
+import GlobalUploadProgress from './components/GlobalUploadProgress.vue'
 // 方案面板與額度對話框只在使用者主動觸發時才需要 → 延後載入，不進主 bundle
 const PlanPanel = defineAsyncComponent(() => import('./components/PlanPanel.vue'))
 const QuotaExceededModal = defineAsyncComponent(() => import('./components/QuotaExceededModal.vue'))
