@@ -2,14 +2,17 @@
  * 分片上傳工具 — 解決 Cloudflare 100MB 上傳限制
  *
  * 檔案 < 95MB：不需要分片，走原本的單次上傳
- * 檔案 >= 95MB：自動切片（每片 90MB），逐片上傳後由後端組裝
+ * 檔案 >= 95MB：自動切片後逐片上傳，由後端組裝。
+ * 切片大小以後端 /uploads/init 回傳的 chunk_size 為準（單一真實來源，
+ * 避免前後端 chunk size drift）；CHUNK_SIZE 僅作為舊後端未回傳時的 fallback。
  */
 
-import api from './api.js'
+import api, { ensureFreshAccessToken } from './api.js'
 import { NEW_ENDPOINTS } from '../api/endpoints.js'
 
 const CHUNK_THRESHOLD = 95 * 1024 * 1024 // 95 MB
-const CHUNK_SIZE = 90 * 1024 * 1024 // 90 MB
+// fallback only：實際切片大小以後端回傳的 chunk_size 為準（見 uploadChunked）
+const CHUNK_SIZE = 16 * 1024 * 1024 // 16 MB
 const MAX_RETRIES = 3
 const RETRY_DELAY_MS = 2000
 // 對齊後端 USER_CHUNK_CONCURRENCY（src/routers/uploads.py）。
@@ -53,6 +56,8 @@ export async function uploadChunked(file, { onProgress, signal } = {}) {
     signal,
   })
   const { upload_id, total_chunks } = initRes.data
+  // 切片大小以後端為準，舊後端未回傳時 fallback 到本地常數
+  const chunkSize = initRes.data.chunk_size || CHUNK_SIZE
 
   // 2. Worker pool 並行上傳（PARALLEL_CHUNKS 個 worker 從共享 queue 各自取 index）
   const queue = Array.from({ length: total_chunks }, (_, i) => i)
@@ -70,8 +75,8 @@ export async function uploadChunked(file, { onProgress, signal } = {}) {
       const i = queue.shift()
       if (i === undefined) return
       try {
-        const start = i * CHUNK_SIZE
-        const end = Math.min(start + CHUNK_SIZE, file.size)
+        const start = i * chunkSize
+        const end = Math.min(start + chunkSize, file.size)
         const blob = file.slice(start, end)
         await uploadChunkWithRetry(upload_id, i, blob, signal)
         completed++
@@ -89,7 +94,8 @@ export async function uploadChunked(file, { onProgress, signal } = {}) {
   const workerCount = Math.min(PARALLEL_CHUNKS, total_chunks)
   await Promise.all(Array.from({ length: workerCount }, () => worker()))
 
-  // 3. 完成組裝
+  // 3. 完成組裝（送出前同樣確保 token 新鮮，避免最後一步被 401 卡住）
+  await ensureFreshAccessToken()
   const completeRes = await api.post(NEW_ENDPOINTS.uploads.complete(upload_id), null, { signal })
   return completeRes.data.upload_id
 }
@@ -102,6 +108,9 @@ async function uploadChunkWithRetry(uploadId, chunkIndex, blob, signal) {
   let lastError
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
+      // 送出前主動刷新：大檔上傳跨越 token 效期時，先換新 token 再傳，
+      // 避免整片上傳完才被 401 打回、又得重傳整片
+      await ensureFreshAccessToken()
       const form = new FormData()
       form.append('file', blob)
       await api.post(
@@ -109,7 +118,7 @@ async function uploadChunkWithRetry(uploadId, chunkIndex, blob, signal) {
         form,
         {
           headers: { 'Content-Type': 'multipart/form-data' },
-          timeout: 600000, // 10 分鐘（單片最大 90MB）
+          timeout: 600000, // 10 分鐘（給慢線路充足餘裕）
           signal,
         },
       )
