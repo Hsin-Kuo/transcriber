@@ -27,7 +27,10 @@ from ..utils.logger import get_logger
 router = APIRouter(prefix="/uploads", tags=["Uploads"])
 log = get_logger(__name__)
 
-CHUNK_SIZE = 90 * 1024 * 1024  # 90 MB — 單片上限
+# 切片大小（前端以 /uploads/init 回傳的 chunk_size 為準切片）。
+# 16MB（遠小於 Cloudflare 100MB 上限）：單片上傳快、失敗重傳浪費小、
+# 不易跨越 access token 效期，進度更平滑。
+CHUNK_SIZE = 16 * 1024 * 1024  # 16 MB
 # 單檔上限：以環境變數 MAX_UPLOAD_SIZE_MB 設定（預設 3072 MB = 3 GB）
 MAX_UPLOAD_SIZE_MB = int(os.environ.get("MAX_UPLOAD_SIZE_MB", "3072"))
 MAX_UPLOAD_SIZE = MAX_UPLOAD_SIZE_MB * 1024 * 1024
