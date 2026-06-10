@@ -1,7 +1,10 @@
 # ===== AWS AI Worker 依賴（含 ML 模型）=====
 
 # Whisper 相關
-faster-whisper
+# 釘版本：large-v3-turbo 與 BatchedInferencePipeline 需 faster-whisper>=1.0；
+# 釘死確保 GPU Worker 開機 pip install 可重現，避免抓到未測過的新版（連帶釘 ctranslate2 後端）
+faster-whisper==1.2.1
+ctranslate2==4.7.1
 
 # Speaker Diarization
 pyannote.audio
