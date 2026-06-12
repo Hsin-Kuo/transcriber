@@ -126,7 +126,7 @@
 </template>
 
 <script setup>
-import { ref, toRef, watch } from 'vue'
+import { ref, toRef, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
@@ -165,7 +165,10 @@ async function loadAddons() {
 }
 
 watch(() => props.modelValue, (open) => {
-  if (open) loadAddons()
+  if (open) {
+    loadPlans()
+    loadAddons()
+  }
 })
 
 function buyAddon(addon) {
@@ -241,50 +244,20 @@ async function selectPlan(planKey) {
 
 const billing = ref('monthly')
 
-const plans = [
-  {
-    key: 'free',
-    duration: 180,
-    concurrent: 1,
-    aiSummaries: 3,
-    audioRetention: 3,
-    keepAudio: 0,
-    features: {
-      speaker_diarization: true,
-      punctuation: true,
-      batch_operations: false,
-      priority_processing: false
-    }
-  },
-  {
-    key: 'basic',
-    duration: 600,
-    concurrent: 2,
-    aiSummaries: 30,
-    audioRetention: 7,
-    keepAudio: 10,
-    features: {
-      speaker_diarization: true,
-      punctuation: true,
-      batch_operations: true,
-      priority_processing: false
-    }
-  },
-  {
-    key: 'pro',
-    duration: 3000,
-    concurrent: 5,
-    aiSummaries: 100,
-    audioRetention: 7,
-    keepAudio: 30,
-    features: {
-      speaker_diarization: true,
-      punctuation: true,
-      batch_operations: true,
-      priority_processing: true
-    }
+// 方案定義（額度 + features）的唯一真實來源在後端 QUOTA_TIERS，透過 /subscriptions/tiers 下發。
+// 價格仍由前端 pricing.js 提供（綁金流設定，見該檔註解）。
+const plans = ref([])
+
+async function loadPlans() {
+  if (plans.value.length) return
+  try {
+    plans.value = (await authStore.getTiers()) || []
+  } catch (e) {
+    plans.value = []  // 載入失敗不影響面板開啟；不 hardcode fallback 以維持單一來源
   }
-]
+}
+
+onMounted(loadPlans)
 
 function getPrice(plan) {
   const prices = TIER_PRICES[plan.key] || { monthly: 0, yearly: 0 }

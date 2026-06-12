@@ -27,6 +27,51 @@ from src.auth.quota import (  # noqa: E402
     build_ai_summary_consumption_pipeline,
     build_transcription_consumption_pipeline,
 )
+from src.models.quota import has_feature, public_tier_plans  # noqa: E402
+
+
+class TestHasFeature:
+    """feature gating 的唯一真實來源——batch_operations 等 flag。"""
+
+    def test_free_lacks_batch_operations(self):
+        assert has_feature({"quota": {"tier": "free", "features": {"batch_operations": False}}}, "batch_operations") is False
+
+    def test_free_has_speaker_diarization(self):
+        # free 方案提供說話者辨識（與方案頁一致），不做 gating
+        assert has_feature({"quota": {"tier": "free"}}, "speaker_diarization") is True
+
+
+class TestPublicTierPlans:
+    """方案頁資料的唯一真實來源——前端 PlanPanel 改抓此 API，不再自行 hardcode。"""
+
+    def test_returns_free_basic_pro_only(self):
+        # enterprise 走業務洽談，不在自助方案頁
+        assert [p["key"] for p in public_tier_plans()] == ["free", "basic", "pro"]
+
+    def test_shape_matches_frontend_fields(self):
+        free = next(p for p in public_tier_plans() if p["key"] == "free")
+        assert set(free) == {"key", "duration", "concurrent", "aiSummaries", "audioRetention", "keepAudio", "features"}
+        assert free["duration"] == 180
+        assert free["features"]["batch_operations"] is False
+        assert free["features"]["speaker_diarization"] is True
+
+    def test_no_price_leaked(self):
+        # 價格綁金流設定，不從此 API 下發
+        assert all("price" not in p and "name" not in p for p in public_tier_plans())
+
+    def test_basic_has_batch_operations(self):
+        assert has_feature({"quota": {"tier": "basic", "features": {"batch_operations": True}}}, "batch_operations") is True
+
+    def test_legacy_doc_missing_features_falls_back_to_tier(self):
+        # 舊 user 文件缺 features → 退回該 tier 在 QUOTA_TIERS 的預設，不可誤判為有權限
+        assert has_feature({"quota": {"tier": "free"}}, "batch_operations") is False
+        assert has_feature({"quota": {"tier": "basic"}}, "batch_operations") is True
+
+    def test_missing_quota_defaults_to_free(self):
+        assert has_feature({}, "batch_operations") is False
+
+    def test_unknown_feature_is_false(self):
+        assert has_feature({"quota": {"tier": "pro"}}, "nonexistent_feature") is False
 
 
 class TestGetTierDefault:

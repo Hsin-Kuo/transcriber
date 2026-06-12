@@ -13,7 +13,7 @@ from ..database.mongodb import get_database
 from ..database.repositories.user_repo import UserRepository
 from ..database.repositories.order_repo import OrderRepository
 from ..database.repositories.processed_webhook_repo import ProcessedWebhookRepository
-from ..models.quota import QuotaTier, QUOTA_TIERS, is_upgrade
+from ..models.quota import QuotaTier, QUOTA_TIERS, is_upgrade, public_tier_plans
 from ..services.order_settlement import build_order_settlement, PaymentNotification
 from ..utils.newebpay_service import get_newebpay_service
 from ..utils.time_utils import get_utc_timestamp
@@ -521,6 +521,15 @@ async def purchase_extra_quota(
         **invoice_params,
     )
     return {"form": form, "order_no": order_no}
+
+
+@router.get("/tiers")
+async def list_tiers():
+    """方案功能與額度（feature flags + limits）的唯一真實來源，供前端方案頁顯示。
+
+    免登入。價格不在此回傳——價格綁金流設定（見前端 pricing.js）。
+    """
+    return {"tiers": public_tier_plans()}
 
 
 @router.get("/packages")

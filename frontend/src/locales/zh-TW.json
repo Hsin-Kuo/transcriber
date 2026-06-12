@@ -310,8 +310,11 @@
   },
   "quotaModal": {
     "title": "額度不足",
+    "featureTitle": "需要升級方案",
     "durationMessage": "本月的轉錄時數已用完。",
     "aiMessage": "本月的 AI 摘要次數已用完。",
+    "batchMessage": "批次上傳為 Basic 以上方案的功能。",
+    "batchHint": "升級至 Basic 以上方案即可一次上傳多個檔案。",
     "upgradeCta": "升級方案",
     "addonCta": "加購額度",
     "upgradeHint": "升級方案可獲得更多額度，立即繼續轉錄。",

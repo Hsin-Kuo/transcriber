@@ -326,6 +326,17 @@ export const useAuthStore = defineStore('auth', () => {
     return packagesPromise
   }
 
+  // 方案定義（額度 + features）的唯一真實來源在後端 QUOTA_TIERS，session 內快取
+  let tiersPromise = null
+  async function getTiers() {
+    if (!tiersPromise) {
+      tiersPromise = api.get('/subscriptions/tiers')
+        .then(r => r.data.tiers)
+        .catch(err => { tiersPromise = null; throw err })  // 失敗不快取，允許重試
+    }
+    return tiersPromise
+  }
+
   async function getOrders(skip = 0, limit = 6) {
     const response = await api.get('/subscriptions/orders', { params: { skip, limit } })
     return response.data  // { orders, has_more }
@@ -432,6 +443,7 @@ export const useAuthStore = defineStore('auth', () => {
     changePlan,
     purchaseExtraQuota,
     getPackages,
+    getTiers,
     getOrders,
     submitNewebpayForm,
   }

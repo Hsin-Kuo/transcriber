@@ -82,6 +82,7 @@ export const NEW_ENDPOINTS = {
     change: '/subscriptions/change',
     purchaseExtra: '/subscriptions/purchase-extra',
     packages: '/subscriptions/packages',
+    tiers: '/subscriptions/tiers',
     orders: '/subscriptions/orders',
   },
 } as const

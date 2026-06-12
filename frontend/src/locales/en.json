@@ -310,8 +310,11 @@
   },
   "quotaModal": {
     "title": "Quota exhausted",
+    "featureTitle": "Upgrade required",
     "durationMessage": "You've used up this month's transcription minutes.",
     "aiMessage": "You've used up this month's AI summary credits.",
+    "batchMessage": "Batch upload is available on Basic plans and above.",
+    "batchHint": "Upgrade to Basic or higher to upload multiple files at once.",
     "upgradeCta": "Upgrade plan",
     "addonCta": "Buy add-on credits",
     "upgradeHint": "Upgrade for more quota and keep transcribing right away.",
