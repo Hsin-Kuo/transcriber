@@ -86,16 +86,28 @@ class TestSubscriptionSettle:
             for c in order_repo.update_by_order_no.await_args_list
         )
 
-    async def test_renewal_rolls_period_without_quota_reset_to_tier(self):
+    async def test_monthly_renewal_reapplies_latest_quota(self):
+        # D4：月繳續扣 → 重套最新方案額度（短週期，等同每月重新訂閱）
         user = {"subscription": {"status": "active", "tier": "basic", "created_at": 111}}
-        s, order_repo, user_repo, _ = _make(order=_order(status="paid"), user=user)
+        s, order_repo, user_repo, _ = _make(order=_order(billing_cycle="monthly", status="paid"), user=user)
         r = await s.settle(PaymentNotification(
             order_no="SLSUB1", success=True, is_first_payment=False, period_no="P2", auth_times=2,
         ))
         assert r.outcome == SettleOutcome.RENEWED
         user_repo.update_subscription.assert_awaited_once()
         user_repo.reset_monthly_usage.assert_awaited_once()
-        # 續扣不重設 tier quota（避免覆蓋升級後的 quota）
+        user_repo.update_quota.assert_awaited_once_with("u1", build_quota_from_tier("basic"))
+
+    async def test_yearly_renewal_keeps_quota_frozen(self):
+        # D4：年繳續扣不重套 tier quota，維持繳費當下方案直到換約（週期內由 lazy refill 補額但不改額度）
+        user = {"subscription": {"status": "active", "tier": "pro", "created_at": 111}}
+        s, order_repo, user_repo, _ = _make(order=_order(tier="pro", billing_cycle="yearly", status="paid"), user=user)
+        r = await s.settle(PaymentNotification(
+            order_no="SLSUB1", success=True, is_first_payment=False, period_no="P2", auth_times=2,
+        ))
+        assert r.outcome == SettleOutcome.RENEWED
+        user_repo.update_subscription.assert_awaited_once()
+        user_repo.reset_monthly_usage.assert_awaited_once()
         user_repo.update_quota.assert_not_awaited()
 
     async def test_renewal_failure_expires_to_free(self):

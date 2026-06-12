@@ -1,9 +1,10 @@
 """配額管理器"""
 import asyncio
 from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 from fastapi import HTTPException, status
 
-from src.models.quota import QUOTA_TIERS, QuotaTier, tier_default
+from src.models.quota import QUOTA_TIERS, QuotaTier, tier_default, build_quota_from_tier
 from src.utils.time_utils import get_utc_timestamp, timestamp_to_datetime
 from src.utils.logger import get_logger
 
@@ -11,6 +12,31 @@ log = get_logger(__name__)
 
 # pipeline 在 DB 端無法跑 tier 判斷，缺欄位時對齊 FREE 設定（唯一真實來源）
 _FREE_DURATION_DEFAULT = QUOTA_TIERS[QuotaTier.FREE]["max_duration_minutes"]
+
+
+def _to_datetime(value):
+    """把 timestamp(float) / datetime 統一成 naive UTC datetime；無法辨識回 None。"""
+    if isinstance(value, (int, float)):
+        return datetime.utcfromtimestamp(value)
+    if isinstance(value, datetime):
+        return value
+    return None
+
+
+def _months_elapsed(anchor: datetime, point: datetime) -> int:
+    """anchor → point 之間經過的完整月數（週月制；relativedelta 自動處理 1/31→2/28）。"""
+    if point < anchor:
+        return 0
+    delta = relativedelta(point, anchor)
+    return delta.years * 12 + delta.months
+
+
+def _due_monthly_refill(period_start: datetime, last_reset: datetime, now: datetime) -> bool:
+    """計費週期內：當 now 已跨入比 last_reset 更後面的「週月格」時為 True（冪等）。
+
+    以 period_start 為錨，讓年繳訂閱在年度週期內也能每月 refill（不必等續扣）。
+    """
+    return _months_elapsed(period_start, now) > _months_elapsed(period_start, last_reset)
 
 
 def _get_tier_default(user: dict, field: str, fallback=None):
@@ -210,13 +236,15 @@ class QuotaManager:
         return result.modified_count
 
     @staticmethod
-    async def _reset_monthly_quota_if_needed(user: dict, usage: dict, db=None) -> dict:
+    async def _reset_monthly_quota_if_needed(user: dict, usage: dict, db=None, now: datetime = None) -> dict:
         """
         重置每月配額（如需要）+ 偵測訂閱到期。
 
-        付費用戶：比對 current_period_start 是否 > last_reset
+        付費用戶：新計費週期開始、或計費週期內每跨一個「週月」（解年繳一年只補一次）
         免費用戶：日曆月制
         到期偵測：current_period_end < now → 自動降為 free
+
+        now 可注入（測試用）；預設為 utcnow()。
         """
         last_reset = usage.get("last_reset")
         if not last_reset:
@@ -225,48 +253,40 @@ class QuotaManager:
         if isinstance(last_reset, (int, float)):
             last_reset = timestamp_to_datetime(last_reset)
 
-        now = datetime.utcnow()
+        now = now or datetime.utcnow()
         sub = user.get("subscription", {})
         sub_status = sub.get("status")
+        billing_cycle = sub.get("billing_cycle")
         should_reset = False
+        reset_reason = None
 
         # ── 訂閱到期偵測 ───────────────────────────────────────
         if sub_status == "active":
-            period_end = sub.get("current_period_end")
-            if period_end:
-                if isinstance(period_end, (int, float)):
-                    period_end_dt = datetime.utcfromtimestamp(period_end)
-                elif isinstance(period_end, datetime):
-                    period_end_dt = period_end
-                else:
-                    period_end_dt = None
-
-                if period_end_dt and period_end_dt < now:
-                    # 訂閱已到期，降為 free
-                    if db is not None:
-                        try:
-                            await QuotaManager._expire_subscription(db, user)
-                        except Exception as e:
-                            log.warning("quota.subscription.expire.writeback_failed", error=str(e))
-                    # 繼續走免費用戶邏輯
-                    sub_status = "expired"
+            period_end_dt = _to_datetime(sub.get("current_period_end"))
+            if period_end_dt and period_end_dt < now:
+                # 訂閱已到期，降為 free
+                if db is not None:
+                    try:
+                        await QuotaManager._expire_subscription(db, user)
+                    except Exception as e:
+                        log.warning("quota.subscription.expire.writeback_failed", error=str(e))
+                # 繼續走免費用戶邏輯
+                sub_status = "expired"
 
         # ── 重置判斷 ────────────────────────────────────────────
+        # active/trialing：在「新計費週期開始」或「週期內每跨一個週月」時 refill。
+        #   後者讓年繳訂閱在年度週期內也能每月補額（不必等一年才續扣一次）。
         if sub_status in ("active", "trialing"):
-            period_start = sub.get("current_period_start")
-            if period_start:
-                if isinstance(period_start, (int, float)):
-                    period_start_dt = datetime.utcfromtimestamp(period_start)
-                elif isinstance(period_start, datetime):
-                    period_start_dt = period_start
-                else:
-                    period_start_dt = None
-
-                if period_start_dt and period_start_dt > last_reset:
-                    should_reset = True
+            period_start_dt = _to_datetime(sub.get("current_period_start"))
+            if period_start_dt:
+                if period_start_dt > last_reset:
+                    should_reset, reset_reason = True, "billing_period_start"
+                elif _due_monthly_refill(period_start_dt, last_reset, now):
+                    should_reset, reset_reason = True, "monthly_anniversary"
         else:
+            # free / 到期降級 / 無訂閱：日曆月制
             if now.month != last_reset.month or now.year != last_reset.year:
-                should_reset = True
+                should_reset, reset_reason = True, "calendar_month"
 
         if should_reset:
             new_usage = {
@@ -278,23 +298,50 @@ class QuotaManager:
                 "total_duration_minutes": usage.get("total_duration_minutes", 0),
                 "total_ai_summaries": usage.get("total_ai_summaries", 0),
             }
+
+            # D4：是否在 refill 時重套最新方案（額度 + features）。
+            #   - 年繳訂閱「週期內」refill 不重套 → 凍結繳費當下的額度直到換約。
+            #   - free / 到期降級 / 月繳 → 重套最新，讓 QUOTA_TIERS 調整在下個週期自動生效（免 backfill）。
+            yearly_intra_period = (
+                sub_status in ("active", "trialing") and billing_cycle == "yearly"
+            )
+            fresh_quota = None
+            if not yearly_intra_period:
+                tier = (user.get("quota") or {}).get("tier") or QuotaTier.FREE.value
+                try:
+                    fresh_quota = build_quota_from_tier(tier)
+                except (KeyError, ValueError):
+                    fresh_quota = None  # 無法辨識的 tier 不覆寫，避免破壞資料
+
             if db is not None:
                 try:
                     from bson import ObjectId
+                    set_fields = {
+                        "usage.transcriptions": 0,
+                        "usage.duration_minutes": 0,
+                        "usage.ai_summaries": 0,
+                        "usage.last_reset": now,
+                        "updated_at": get_utc_timestamp(),
+                    }
+                    if fresh_quota is not None:
+                        set_fields["quota"] = fresh_quota
                     await db.users.update_one(
                         {"_id": ObjectId(str(user["_id"]))},
-                        {
-                            "$set": {
-                                "usage.transcriptions": 0,
-                                "usage.duration_minutes": 0,
-                                "usage.ai_summaries": 0,
-                                "usage.last_reset": now,
-                                "updated_at": get_utc_timestamp(),
-                            }
-                        }
+                        {"$set": set_fields},
                     )
                 except Exception as e:
                     log.warning("quota.monthly_reset.writeback_failed", error=str(e))
+
+            log.info(
+                "quota.monthly_reset",
+                user_id=str(user.get("_id")),
+                reason=reset_reason,
+                reapplied_quota=fresh_quota is not None,
+            )
+
+            # 同步記憶體中的 user，讓同一請求後續讀到的是新方案
+            if fresh_quota is not None:
+                user["quota"] = fresh_quota
             return new_usage
 
         return usage
@@ -324,6 +371,8 @@ class QuotaManager:
                 }
             }
         )
+        # 同步 in-memory user，避免同一次呼叫後續（月配額重置的 tier 重套）讀到 stale 的付費 tier
+        user["quota"] = free_quota
         log.warning("quota.subscription.expired", user_id=user_id, downgraded_to="free")
 
     @staticmethod
