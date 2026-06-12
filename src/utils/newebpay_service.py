@@ -18,8 +18,12 @@ import httpx
 from .config_loader import get_parameter
 
 
+# PeriodTimes = 藍新定期定額的「授權期數」（含 PeriodStartType=2 的首期立即授權）。
+# 月繳：99 期 → 每月自動續扣 ~8 年（標準訂閱，結帳已揭露自動扣款）。
+# 年繳：1 期 → 只扣首期、不自動續訂；一年後 current_period_end 過即降 free，需手動再購。
+#   （刻意設計為一次性：結帳僅揭露月繳自動扣款，年繳不做未揭露的年度自動扣款）
 PERIOD_TIMES_MONTHLY = 99
-PERIOD_TIMES_YEARLY = 10
+PERIOD_TIMES_YEARLY = 1
 
 # 定期定額 PeriodStartType
 PERIOD_START_IMMEDIATE = 2   # 立即執行委託金額授權（新訂閱、升級）

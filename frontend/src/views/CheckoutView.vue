@@ -116,7 +116,7 @@
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
             <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
           </svg>
-          {{ isAddon ? $t('userSettings.checkout.oneTimeNote') : $t('userSettings.checkout.subscriptionNote') }}
+          {{ secureNote }}
         </p>
       </div>
     </div>
@@ -183,6 +183,13 @@ onMounted(async () => {
 })
 
 const planLabel = computed(() => ({ basic: 'Basic', pro: 'Pro' })[plan.value] || plan.value)
+
+// 安全/扣款揭露文案：加購=一次性；月繳=每月自動扣款；年繳=一次性、到期不自動續訂
+const secureNote = computed(() => {
+  if (isAddon.value) return $t('userSettings.checkout.oneTimeNote')
+  if (billing.value === 'yearly') return $t('userSettings.checkout.subscriptionNoteYearly')
+  return $t('userSettings.checkout.subscriptionNote')
+})
 
 // 有效份數：clamp 到 1–99，供總價與送出使用（即使輸入框暫時為空也不會算出 0/NaN）
 const effectiveQty = computed(() => {
