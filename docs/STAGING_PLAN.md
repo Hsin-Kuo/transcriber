@@ -85,6 +85,8 @@
 | 藍新測試金鑰 | **未申請** | 付款測試延後，其他先建好 |
 | SSM 路徑 | `/transcriber-staging/*`（獨立 prefix） | 與 prod `/transcriber/*` 完全隔離，不會互相覆蓋 |
 | CORS | staging server 只允許 `https://staging.soundlite.app` | 防止跨環境 cookie 混用 |
+| 對外入口 | **單一網域 `staging.soundlite.app`**（landing / app / 後台不拆子網域；先不部 admin） | prod 拆三個子網域是上線需求；staging 只為驗證，單一入口最省設定、CORS/cookie 也單純 |
+| 存取控制 | **Cloudflare Access 鎖定**（email/IP allowlist），第一天就開 | 共用 prod GPU + 真實網域，避免被搜尋引擎索引、外人誤用帳號或消耗 GPU |
 
 ---
 
@@ -92,7 +94,7 @@
 
 - **域名**：`staging.soundlite.app`（Cloudflare DNS 已控同 zone，加 A record 即可）
 - **TLS**：Cloudflare proxied + auto TLS（同 prod）
-- **存取限制**：建議加 Cloudflare Access 鎖 IP，避免被搜尋引擎索引
+- **存取限制**：Cloudflare Access 鎖定（已決策，見上表），避免被搜尋引擎索引 / 外人誤用
 
 ### 月費預估
 
@@ -634,7 +636,6 @@ python scripts/smoke_test_isolation.py \
 ## 未決項目（後續）
 
 - [ ] 藍新測試環境申請（金流測試 blocker）
-- [ ] Cloudflare Access 鎖 staging（避免被搜尋引擎索引）
 - [ ] CloudWatch alarm：staging worker_heartbeats 異常告警
 - [ ] Atlas 備份 restore 演練（升 M2 後可做）
 - [ ] Playwright E2E 4 條黃金路徑（依賴 staging 環境）
