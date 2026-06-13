@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <div v-if="quota" class="quota-overlay" @click.self="close">
-      <div ref="modalRef" class="quota-modal" role="dialog" aria-modal="true" :aria-label="$t('quotaModal.title')">
+      <div ref="modalRef" class="quota-modal" role="dialog" aria-modal="true" :aria-label="title">
         <div class="quota-icon" aria-hidden="true">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10" />
@@ -10,7 +10,7 @@
           </svg>
         </div>
 
-        <h2 class="quota-title">{{ $t('quotaModal.title') }}</h2>
+        <h2 class="quota-title">{{ title }}</h2>
         <p class="quota-message">{{ message }}</p>
         <p class="quota-hint">{{ ctaHint }}</p>
 
@@ -42,15 +42,25 @@ const isOpen = computed(() => !!quota.value)
 useFocusTrap(modalRef, isOpen)
 const isFree = computed(() => (authStore.quota?.tier || 'free') === 'free')
 
-const message = computed(() =>
-  quota.value?.type === 'ai_summaries'
-    ? $t('quotaModal.aiMessage')
-    : $t('quotaModal.durationMessage')
+// batch_operations 是「方案不含此功能」的 feature gate，與「額度用完」語意不同 → 標題另開
+const isFeatureGate = computed(() => quota.value?.type === 'batch_operations')
+
+const title = computed(() =>
+  isFeatureGate.value ? $t('quotaModal.featureTitle') : $t('quotaModal.title')
 )
+
+const message = computed(() => {
+  if (quota.value?.type === 'batch_operations') return $t('quotaModal.batchMessage')
+  if (quota.value?.type === 'ai_summaries') return $t('quotaModal.aiMessage')
+  return $t('quotaModal.durationMessage')
+})
 
 // 免費用戶引導升級；付費用戶引導加購（後端僅付費訂閱可加購）
 const ctaLabel = computed(() => isFree.value ? $t('quotaModal.upgradeCta') : $t('quotaModal.addonCta'))
-const ctaHint = computed(() => isFree.value ? $t('quotaModal.upgradeHint') : $t('quotaModal.addonHint'))
+const ctaHint = computed(() => {
+  if (isFeatureGate.value) return $t('quotaModal.batchHint')
+  return isFree.value ? $t('quotaModal.upgradeHint') : $t('quotaModal.addonHint')
+})
 
 function close() {
   uiStore.closeQuotaModal()

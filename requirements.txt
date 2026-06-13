@@ -20,6 +20,10 @@ python-multipart
 motor
 aiofiles
 
+# 日期運算（配額週月 refill 用 relativedelta）；原為 pyannote 的 transitive 依賴，
+# 計費路徑直接 import 故顯式宣告，避免上游移除時生產環境 ImportError
+python-dateutil
+
 # 結構化 logging
 structlog
 

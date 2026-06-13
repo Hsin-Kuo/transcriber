@@ -391,6 +391,12 @@ function handleFileUpload(file) {
 function handleFilesUpload(files) {
   if (!files || files.length === 0) return
 
+  // 方案功能檢查：批次上傳僅 Basic 以上方案可用（後端亦會強制擋下）
+  if (!authStore.quota?.features?.batch_operations) {
+    uiStore.showQuotaModal('batch_operations')
+    return
+  }
+
   files = filterOversizedFiles(files)
   if (files.length === 0) return
 
