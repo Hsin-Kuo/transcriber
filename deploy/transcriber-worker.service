@@ -1,0 +1,31 @@
+# Transcriber GPU Worker — canonical systemd unit（repo-as-source）
+#
+# prod 與 staging 共用這一份。環境差異全放在每台機器的 /opt/transcriber/.env.worker
+# （DEPLOY_BRANCH / APP_ENV / S3_BUCKET / SQS_QUEUE_URL / SENTRY_ENVIRONMENT …）。
+#
+# 部署：deploy/deploy-gpu-worker.sh 把本檔 cp 到 /etc/systemd/system/，禁止直接 SSH 改
+# EC2 上的 unit（過去 prod worker 的 unit 是手改、與 repo drift，已於此收斂）。
+#
+# 開機自我更新：ExecStartPre 依 .env.worker 的 DEPLOY_BRANCH 抓對應分支
+# （prod=aws / staging=staging）再 pip install，故每次手動 start 都跑該分支最新碼。
+
+[Unit]
+Description=Transcriber AI Worker (GPU)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/opt/transcriber
+EnvironmentFile=/opt/transcriber/.env.worker
+Environment="PYTHONUNBUFFERED=1"
+Environment="PATH=/usr/local/bin:/home/ec2-user/.local/bin:/usr/bin:/bin"
+ExecStartPre=/bin/bash -c 'cd /opt/transcriber && git fetch origin ${DEPLOY_BRANCH} && git reset --hard origin/${DEPLOY_BRANCH}'
+ExecStartPre=/bin/bash -c 'cd /opt/transcriber && pip install -r requirements.txt -q 2>&1 | tail -1'
+ExecStart=/usr/bin/python3.12 -m src.worker
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
