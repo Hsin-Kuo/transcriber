@@ -75,7 +75,7 @@
 ### B10. CSP 啟用 + auth/upload rate limit ✅
 - CSP Report-Only（含 OAuth / Sentry / 藍新 form-action）
 - auth zone 3r/m、upload zone 10r/m、`/subscriptions/notify/*` bypass
-- [ ] **手動**：上線後一週檢視 CSP 違規報告再切強制模式
+- [x] **手動**：CSP 違規報告檢視後已切強制模式（2026-05-25）
 
 ---
 
@@ -155,8 +155,7 @@
 
 ## 手動 todo（需你動手）
 
-1. **CSP Report-Only → Enforce 切換**（B10 後續）
-   - 上線後一週看 Sentry CSP violations，無誤就改成 enforce header
+1. ~~**CSP Report-Only → Enforce 切換**（B10 後續）~~ ✅ 已於 2026-05-25 切換強制模式
 2. **B1 staging 環境**（待 AWS console 操作）
    - 順帶辦藍新測試環境帳號（金流測試 blocker）
 3. **Atlas M0 → M2 升級**（prod 還在 M0、無備份）
