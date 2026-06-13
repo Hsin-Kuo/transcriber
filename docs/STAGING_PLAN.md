@@ -45,7 +45,7 @@
 
 | # | 項目 | 狀態 | 處理 |
 |---|------|------|------|
-| P1 | **On-Demand G 配額 = 4 vCPU（硬天花板）** | 🔴 Blocker | 實測 On-Demand G 與 Spot G 配額**都只有 4**，g4dn.xlarge 吃滿 4。staging on-demand worker 與 **prod on-demand 備援 worker 無法同時存在**——prod spot 中斷 failover 時若你正在測 staging，其中一台起不來。**先申請 On-Demand G 配額加到 8**，或明確接受「prod failover 期間暫停 staging 測試」 |
+| P1 | **On-Demand G 配額 = 4 vCPU（硬天花板）** | 🟡 申請已送出（2026-06-14，待審批） | 實測 On-Demand G 與 Spot G 配額**都只有 4**，g4dn.xlarge 吃滿 4。staging on-demand worker 與 **prod on-demand 備援 worker 無法同時存在**。已透過 Console 送出 On-Demand G 4→8 申請；批准前若 prod failover，暫停 staging 測試 |
 | P2 | **`transcriber.service` 無 `EnvironmentFile`** | 🔴 必修 | web env 靠 `main.py` 的 `load_dotenv()` 在執行期讀，systemd 不知道 → 無法用 `${WEB_CONCURRENCY}`。需給 unit 加 `EnvironmentFile=-/opt/transcriber/.env` + `Environment=WEB_CONCURRENCY=2`（見 2-D） |
 | P3 | **Atlas M2 無 PITR** | 🟡 前提修正 | M2/M5 shared tier 只有每日快照；PITR 需 M10+。若 staging 只為驗證，每日快照夠用；別把它當 PITR 演練 |
 | P4 | 無 `Makefile` | 🟢 註記 | `staging-worker-up` 改成新增一支 shell script |
