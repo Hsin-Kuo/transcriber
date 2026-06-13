@@ -1,9 +1,76 @@
 # Staging 環境建置計畫（B1）
 
 > 建立日期：2026-05-17
-> 最後更新：2026-05-22
+> 最後更新：2026-06-13（現況對齊校對）
 > 對應 LAUNCH_READINESS_PLAN：B1
 > 目的：建立可在上線前驗證所有改動的 staging 環境，避免直接 push prod
+
+---
+
+## ⚠️ 現況對齊（2026-06-13 校對）
+
+> 本計畫主體寫於 2026-05-22。已逐檔對齊現況：**Phase 2 的 dispatch 架構描述仍準確**
+> （`worker_dispatch._dispatch` / `sqs_consumer._verify_message_signature` /
+> `worker_core/db.get_db()` / `worker_core/config` 與計畫描述一致）。
+> 但 2026-05-22 之後有幾項變動會卡到 staging，**執行前務必先處理以下 delta**。
+
+### 仍然正確（不用改）
+- Phase 2 環境路由設計（SQS payload 加 `env`、worker 依此切 DB/S3/secret）
+- Phase 1 AWS 資源 CLI（SQS / S3 / SSM / IAM / EC2 指令仍可用）
+- Rollback 策略（`WORKER_DUAL_ENV=false` kill switch）
+- HMAC per-env secret 隔離原則
+
+### Delta 1 — `uvicorn --workers 2` 在 t3.micro 會 OOM 🔴（必處理）
+- 現況：`deploy/transcriber.service:23` **寫死** `--workers 2`（2026-05-30 multi-worker 後）。
+- 問題：staging 用 t3.micro（1 vCPU / 1 GiB），跑 2 個 uvicorn worker + 應用依賴會記憶體不足／thrash。
+- **修正（擇一）**：
+  - **(推薦) 參數化 worker 數**：unit 改 `Environment=WEB_CONCURRENCY=2` +
+    `ExecStart=... --workers ${WEB_CONCURRENCY}`；staging 的 `.env` 設 `WEB_CONCURRENCY=1`。
+    `EnvironmentFile` 載入順序在 `Environment=` 之後，可覆寫。prod 行為不變（預設 2）。
+  - 或 staging 直接用 **t3.small**（+$4/月，與 prod 一致，省掉參數化）。
+
+### Delta 2 — `.env.aws` 是單一 canonical 檔 🔴（必處理）
+- 現況：`deploy/.env.aws` **已 commit 進 repo**（不含密鑰——密鑰全走 SSM `/transcriber/*`，
+  檔內只有 `DEPLOY_ENV` / `APP_ROLE` / `S3_BUCKET` / `SQS_QUEUE_URL` / `CORS_ORIGINS` / `FRONTEND_URL` 等非敏感值）。
+  `deploy/deploy-web.sh:30` 寫死 `cp deploy/.env.aws → .env`；`deploy-aws.yml` 每次 deploy 也 sync 同一份。
+- 問題：staging 不能共用 prod 的 `.env.aws`（bucket / SQS / CORS / FRONTEND_URL 全不同）。
+- **修正**：照同模式**新增（並 commit）`deploy/.env.aws.staging`**——只放非敏感 staging 值
+  （`APP_ENV=staging` + `WEB_CONCURRENCY=1` + staging bucket/SQS/CORS/FRONTEND_URL），
+  密鑰仍由 SSM `/transcriber-staging/*` 載入（靠 Delta 5 的 `get_ssm_prefix()` 路由）。
+  `deploy-staging.yml` 改 `cp deploy/.env.aws.staging`。**不要把任何密鑰寫進此檔**（維持與 `.env.aws` 相同慣例）。
+
+### Delta 3 — `env` 欄位改加在 model 層，worker_dispatch 不用動 🟡（簡化）
+- 計畫 2-C 說「在 `_dispatch()` 加 `"env": APP_ENV`」。現況 `worker_dispatch._dispatch` 用
+  `self._sign(job.model_dump())`，所以**只要在 `TranscriptionJob`（`src/models/worker_job.py`）加
+  `env: str = "prod"` 欄位**，`model_dump()` 自動帶上、HMAC 自然涵蓋，`worker_dispatch.py` 零改動。
+- model 已是 `extra="ignore"`（forward-compat），舊 worker 收到也安全忽略。
+- web server 端 `env` 值來源：用 `config_loader.APP_ENV`（Delta 5 一起加）→ 建 `TranscriptionJob` 時填入。
+
+### Delta 4 — health check hostname 是 `my.soundlite.app` 不是 `soundlite.app` 🟡
+- 現況：`deploy-aws.yml:216` 實際打 `https://my.soundlite.app/health`（prod app 在 `my.` 子網域，
+  `soundlite.app` 是 landing、`admin.soundlite.app` 是後台）。
+- **修正**：Phase 3 的 `deploy-staging.yml` health check 與 nginx `server_name` 用統一的 staging
+  hostname（建議 `staging.soundlite.app` 單一入口，不分 landing/app/admin）。
+
+### Delta 5 — `APP_ENV` 常數尚未存在 🟡
+- 現況：`config_loader.py` 只有 `DEPLOY_ENV`，**還沒有 `APP_ENV` / `get_ssm_prefix()`**（計畫 2-C 是規劃，未實作）。
+- 確認計畫 2-C / 2-B 的程式改動全部仍是 **TODO**（尚未動工），照原計畫實作即可。
+
+### Delta 6 — 新增 collection 會自動建立（只需驗證）🟢
+- 2026-05-22 後新增 `chunk_uploads` / `reservations` / `rate_limits` / `worker_heartbeats` 等 collection，
+  各 repo 啟動時 `create_indexes`（獨立 try/except）。**fresh staging DB 首次開機自動建好**，無需手動。
+- Phase 4 多驗一項：確認 `users` 的 `email_unique_partial` index 正確建立（避開 Atlas 舊 `email_1` drift）。
+
+### Delta 7 — 配額/金流 #86 背景任務 🟢
+- 月度 refill + 訂閱到期 sweep 會在 staging web server 跑、打 staging DB，無害。
+- `QUOTA_TIERS` 為程式內權威來源（`/subscriptions/tiers` 下發），staging 行為與 prod 一致。
+- 藍新：staging 設 `NEWEBPAY_ENV=sandbox` + 自己的 sandbox 金鑰（金流測試仍延後，見「未決項目」）。
+
+### 對齊後的執行順序（取代下方「上線順序」的前置）
+1. **先做 Delta 1 + 3 + 5 的程式改動**（worker 數參數化、`APP_ENV`/`get_ssm_prefix`、`TranscriptionJob.env`、Phase 2 worker dual-queue），本地測過再上。
+2. 再走 Phase 1 AWS 資源建置（含 `deploy/.env.aws.staging`，Delta 2）。
+3. dual-queue 改動 push `aws` → prod GPU worker auto-pull，設 `WORKER_DUAL_ENV=true`。
+4. Phase 3 `deploy-staging.yml`（hostname 用 Delta 4 的值）→ 部署 staging → Phase 4 驗證。
 
 ---
 
