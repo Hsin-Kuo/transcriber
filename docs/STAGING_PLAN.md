@@ -31,11 +31,28 @@
 
 | 項目 | 決策 |
 |------|------|
-| MongoDB tier | Staging **M2**（取得 PITR 備份；順便當 prod 升 M2 的演練） |
+| MongoDB tier | Staging **M2**（每日快照備份；⚠️ **PITR 需 M10+ dedicated**，M2/M5 shared tier 沒有 PITR） |
 | Staging web server | **新開 t3.micro** |
 | SSM 路徑 | `/transcriber-staging/*`（與 prod `/transcriber/*` 完全隔離） |
 | 對外入口 | **單一網域 `staging.soundlite.app`**（不拆 landing/app/admin；先不部 admin） |
 | CORS | 只允許 `https://staging.soundlite.app` |
+
+---
+
+## ⚠️ 前置條件 / 可行性複查（2026-06-14）
+
+落地前必須先處理，否則會卡住：
+
+| # | 項目 | 狀態 | 處理 |
+|---|------|------|------|
+| P1 | **On-Demand G 配額 = 4 vCPU（硬天花板）** | 🔴 Blocker | 實測 On-Demand G 與 Spot G 配額**都只有 4**，g4dn.xlarge 吃滿 4。staging on-demand worker 與 **prod on-demand 備援 worker 無法同時存在**——prod spot 中斷 failover 時若你正在測 staging，其中一台起不來。**先申請 On-Demand G 配額加到 8**，或明確接受「prod failover 期間暫停 staging 測試」 |
+| P2 | **`transcriber.service` 無 `EnvironmentFile`** | 🔴 必修 | web env 靠 `main.py` 的 `load_dotenv()` 在執行期讀，systemd 不知道 → 無法用 `${WEB_CONCURRENCY}`。需給 unit 加 `EnvironmentFile=-/opt/transcriber/.env` + `Environment=WEB_CONCURRENCY=2`（見 2-D） |
+| P3 | **Atlas M2 無 PITR** | 🟡 前提修正 | M2/M5 shared tier 只有每日快照；PITR 需 M10+。若 staging 只為驗證，每日快照夠用；別把它當 PITR 演練 |
+| P4 | 無 `Makefile` | 🟢 註記 | `staging-worker-up` 改成新增一支 shell script |
+
+**已驗證可行**：`get_parameter` 單點 prefix 路由 ✓；`load_dotenv()` 早於 config_loader import ✓；
+t3.micro web 可行（`APP_ROLE=server` 不載入模型）✓；worker unit `EnvironmentFile`+`${DEPLOY_BRANCH}` ✓；
+Access bypass 路徑自帶驗證 ✓。
 
 ---
 
@@ -78,7 +95,7 @@ Cloudflare zone。
 |------|------|------|
 | Staging Web EC2 t3.micro (24/7) | ~8 | 依 ap-northeast-1 on-demand 定價 |
 | Web EBS 20GB gp3 | ~1.6 | |
-| Atlas M2 | 9 | PITR 備份 |
+| Atlas M2 | 9 | 每日快照（非 PITR；PITR 需 M10+） |
 | **GPU Worker EBS（停機也算）** | ~3 | 40GB gp3；models+deps，不需 100GB |
 | GPU Worker 計算（僅測試時） | ~2~3 | on-demand g4dn ~$0.526/hr × 每月幾小時，5 分鐘自停 |
 | S3 + SQS + transfer | <1 | 極小量 |
@@ -198,8 +215,11 @@ aws ec2 run-instances \
   --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"VolumeSize":40,"VolumeType":"gp3"}}]'
 ```
 
-> ⚠️ **GPU 配額**：staging worker 多吃 on-demand G 配額。因手動啟動、只在測試時跑，與 prod
-> on-demand 備援「同時運行」機率極低；真撞到再申請加配額。建好後 `stop-instances` 讓它待命。
+> 🔴 **GPU 配額（見前置條件 P1）**：On-Demand G 配額**只有 4 vCPU**，g4dn.xlarge 吃滿 4 →
+> staging worker 與 **prod on-demand 備援無法同時存在**。這不是機率問題，是硬天花板：prod spot
+> 中斷 failover 到 on-demand 備援、而你正在測 staging 時，其中一台起不來。**建議先申請 On-Demand G
+> 配額加到 8** 再依賴此 worker；否則明確接受「prod failover 期間暫停 staging 測試」。
+> 建好後 `stop-instances` 讓它待命。
 
 ### 完成後記錄
 
@@ -222,15 +242,16 @@ aws ec2 run-instances \
 
 ```python
 # src/utils/config_loader.py
-APP_ENV = os.getenv("APP_ENV", "prod")   # "prod" | "staging"
-
 def get_parameter(name: str, fallback_env: Optional[str] = None, default: str = "") -> str:
-    if APP_ENV == "staging" and name.startswith("/transcriber/"):
+    # 呼叫時讀 APP_ENV（非 module 全域）——徹底避開 import 時序疑慮
+    if os.getenv("APP_ENV", "prod") == "staging" and name.startswith("/transcriber/"):
         name = name.replace("/transcriber/", "/transcriber-staging/", 1)
-    # ...（其餘維持現狀）
+    # ...（cache key 用改寫後的 name；其餘維持現狀）
 ```
 
 **對 prod 影響**：零。`APP_ENV` 預設 `prod`，不改寫。`fallback_env`（本地 .env）行為不變。
+> 在函式內讀 `APP_ENV` 而非 module 全域：雖然實證 `load_dotenv()` 已早於 config_loader import
+> （main.py 1-19 行只 import 標準庫+fastapi），呼叫時讀更穩、零時序風險。
 
 ### 2-B. Worker systemd unit 收成 repo-as-source（補 IaC 破口）
 
@@ -304,9 +325,16 @@ FRONTEND_URL=https://staging.soundlite.app
 SENTRY_ENVIRONMENT=staging-server
 ```
 
-> **t3.micro worker 數**：`deploy/transcriber.service` 目前寫死 `--workers 2`，在 1GiB 機器會 OOM。
-> 把它改成 `Environment=WEB_CONCURRENCY=2` + `ExecStart=... --workers ${WEB_CONCURRENCY}`，
-> 由 `.env` 覆寫（staging=1）。prod 維持預設 2，行為不變。
+> **t3.micro worker 數（修正 P2）**：`deploy/transcriber.service` 寫死 `--workers 2`，1GiB 機器會 OOM。
+> ⚠️ 但該 unit **目前沒有 `EnvironmentFile`**，web env 全靠 `main.py` 的 `load_dotenv()` 在執行期讀，
+> systemd 看不到 `.env` 的 `WEB_CONCURRENCY` → 直接用 `${WEB_CONCURRENCY}` 會展成空字串 → crash。
+> **正解**（三步）：
+> 1. unit 加 `EnvironmentFile=-/opt/transcriber/.env`（`-` = 檔案不存在也不報錯，prod 安全）
+> 2. unit 加 `Environment=WEB_CONCURRENCY=2`（預設值；EnvironmentFile 載入順序在後，會覆寫它）
+> 3. `ExecStart=... --workers ${WEB_CONCURRENCY}`；staging `.env` 設 `WEB_CONCURRENCY=1`，prod `.env` 不設 → 維持預設 2
+>
+> 注意：`.env` 須維持 systemd EnvironmentFile 可解析格式（`KEY=value` + `#` 註解，勿用 `export`）。
+> `deploy/.env.aws` 現狀符合。
 
 ---
 
@@ -381,7 +409,7 @@ jobs:
 ## Phase 4 — 驗證 Checklist
 
 > 跑前先手動啟動 staging worker：`aws ec2 start-instances --instance-ids <staging-gpu-id>`
-> （建議包成 `make staging-worker-up`）。測完它會 5 分鐘 idle 自停。
+> （建議新增一支 shell script，如 `scripts/staging-worker-up.sh`；repo 目前無 Makefile）。測完它會 5 分鐘 idle 自停。
 
 ### 環境隔離（最關鍵）
 - [ ] staging 上傳一個小 mp3 → 任務進 **staging** SQS → **staging** worker 處理 → 結果寫回 **staging** Atlas
@@ -442,7 +470,7 @@ jobs:
 |---------|---------|------|
 | Staging web 壞了 | `sudo transcriber-rollback --prev` | <2 min |
 | Staging worker 改壞 | 完全不影響 prod（獨立實例 + 獨立 queue/bucket/secret）；改 `.env.worker` 或回退 `staging` 分支即可 | — |
-| Staging Atlas 資料異常 | 不影響 prod（獨立 cluster）；M2 有 PITR 可回 | — |
+| Staging Atlas 資料異常 | 不影響 prod（獨立 cluster）；M2 每日快照可回（非 PITR） | — |
 | 錯誤分支誤入 prod | 不可能：Promotion Guard 擋非 `staging→aws`；`aws` 還要 Environment approve | — |
 
 > 新設計下 staging 與 prod **物理隔離**，沒有舊版「dual-queue 改壞會波及 prod」的風險，
@@ -480,6 +508,7 @@ jobs:
 
 - [ ] prod hotfix 後門：目前 hotfix 也須走 feature→main→staging→aws 全程；如需緊急繞道再設計
 - [ ] CloudWatch alarm：staging worker_heartbeats 異常告警
-- [ ] Atlas 備份 restore 演練（升 M2 後）
+- [ ] Atlas 每日快照 restore 演練（M2；PITR 須 M10+ 才有）
+- [ ] **（P1）申請 On-Demand G 配額 4→8 vCPU**，讓 staging worker 與 prod 備援可並存
 - [ ] Playwright E2E 4 條黃金路徑（依賴 staging 環境）
 - [ ] `make staging-worker-up` / `down` 包裝腳本
