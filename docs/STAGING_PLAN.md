@@ -221,13 +221,18 @@ aws ec2 run-instances \
 > 配額加到 8** 再依賴此 worker；否則明確接受「prod failover 期間暫停 staging 測試」。
 > 建好後 `stop-instances` 讓它待命。
 
-### 完成後記錄
+### 完成後記錄（2026-06-14 建置中）
 
-| 資源 | 值 |
-|------|-----|
-| Staging Web EC2 id / EIP | （待填） |
-| Staging GPU Worker EC2 id | （待填，啟動腳本用） |
-| Staging SQS URL | `https://sqs.ap-northeast-1.amazonaws.com/696637902131/transcriber-tasks-staging` |
+| 資源 | 值 | 狀態 |
+|------|-----|------|
+| Staging SQS URL | `https://sqs.ap-northeast-1.amazonaws.com/696637902131/transcriber-tasks-staging` | ✅ |
+| Staging S3 bucket | `transcriber-files-staging-696637902131`（AES256 + PAB） | ✅ |
+| IAM policy | `transcriber-ec2-policy` **v4**（加 staging S3/SQS/SSM ARN，最小權限） | ✅ |
+| SSM `/transcriber-staging/*` | jwt-secret, worker-secret（fresh）+ google-client-id, google-api-key-1/2, hf-token, resend-api-key（copy from prod） | ✅ 7/10 |
+| Staging Web EC2 id / EIP | `i-0e328071b52856681` / **`52.196.120.189`**（t3.micro, AMI `ami-0f0e8dab98a36cdd7`） | ✅ 建立（未 provision） |
+| Staging GPU Worker EC2 id | （待 provision 時建；AMI `ami-06daba374fafd57e3`） | ⏳ |
+| Atlas M2 + SSM mongodb-url | Console 建立後填 | ⏳ |
+| SSM newebpay-* / resend-webhook-secret | sandbox 值 / prod 也未設 | ⏳ |
 
 ---
 
