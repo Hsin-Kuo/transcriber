@@ -31,10 +31,10 @@ log = get_logger(__name__)
 # batched(turbo/GPU)的 segment 以 VAD 語音塊為界 → 連續講話會變超長 segment。
 # 在 whisper 輸出當下、用 word timestamps 把長段依「字間停頓 / 長度上限」切成較短碎片
 # （word timestamps 用完即丟，不外流到 orchestrator/diarization/標點，避免碰下游邏輯）。
-# 可調：部 staging 後依實際音檔微調。
-RESEG_MAX_SEGMENT_SEC = 10.0       # 段長硬上限，超過強制切
-RESEG_GAP_THRESHOLD_SEC = 0.6      # 字間停頓 > 此值即切（自然停頓）
-RESEG_MIN_SEGMENT_SEC = 1.5        # 累積未達此長度時，小停頓不切（避免一兩字的碎段）
+# 可調：env 可覆寫（worker 改 .env.worker + 重啟即生效，免重新部署 → 方便現場調）。
+RESEG_MAX_SEGMENT_SEC = float(os.getenv("RESEG_MAX_SEGMENT_SEC", "6"))      # 段長硬上限，超過強制切
+RESEG_GAP_THRESHOLD_SEC = float(os.getenv("RESEG_GAP_THRESHOLD_SEC", "0.4"))  # 字間停頓 > 此值即切
+RESEG_MIN_SEGMENT_SEC = float(os.getenv("RESEG_MIN_SEGMENT_SEC", "1.0"))    # 累積未達此長度時，小停頓不切
 
 
 def _normalize_language(language: Optional[str]) -> Optional[str]:
