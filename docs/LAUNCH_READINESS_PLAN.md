@@ -16,7 +16,7 @@
 ```
 
 ### 剩餘待辦
-- **B1** Staging 環境 — 規劃完整見 [`STAGING_PLAN.md`](./STAGING_PLAN.md)，待 AWS console 操作
+- ~~**B1** Staging 環境~~ ✅ **2026-06-14 完成並端到端驗過**（獨立環境 + 三層分支；見 [`STAGING_PLAN.md`](./STAGING_PLAN.md) / [`DEPLOYMENT.md`](./DEPLOYMENT.md)）
 - **M1 #2** DeploymentMode adapter — 剩 SSE polling / 模型載入等非派發 `is_aws()`（派發分支已由 M1.6 收斂），可選
 - 一些 manual follow-ups（見下方「手動 todo」段落）
 
@@ -28,11 +28,11 @@
 
 ## 🔴 Blocker 清單（9/10）
 
-### B1. 建立 staging 環境 ⏳（規劃完成，待實作）
-- 詳細計畫見 **[STAGING_PLAN.md](./STAGING_PLAN.md)**
-- 已決策：共用 prod GPU、Atlas M2、main→staging 自動+aws→prod 手動、新開 t3.micro
-- 待你決定何時開始實作（Phase 1 需 AWS console 操作 + 部分 cli）
-- **預算**：~$17/月（staging 全部）+ $9/月（prod 升 M2，後續）
+### B1. 建立 staging 環境 ✅（2026-06-14 完成，端到端驗過）
+- 詳細計畫見 **[STAGING_PLAN.md](./STAGING_PLAN.md)**、日常操作見 **[DEPLOYMENT.md](./DEPLOYMENT.md)**
+- 最終設計（與原規劃不同）：**獨立環境**（非共用 prod GPU）、**獨立 on-demand GPU worker**、Atlas **M0**（非 M2）、**三層分支** main→staging→aws + Promotion Guard、新開 t3.micro
+- 已完成：AWS 資源 / Atlas / Cloudflare DNS+Access / 部署 / 金流 sandbox / 轉錄+diarization 端到端 / 資料隔離 + Sentry 無污染驗證 / ML 依賴鎖定 + 乾淨重建驗證
+- **實際月費**：~$16/月（staging；M0 免費）。prod 升 Flex 取得備份 = 獨立任務
 
 ### B2. CI lint/test gate + 補核心測試 ✅
 - [x] `pyproject.toml` 集中 ruff + pytest 設定
@@ -75,7 +75,7 @@
 ### B10. CSP 啟用 + auth/upload rate limit ✅
 - CSP Report-Only（含 OAuth / Sentry / 藍新 form-action）
 - auth zone 3r/m、upload zone 10r/m、`/subscriptions/notify/*` bypass
-- [ ] **手動**：上線後一週檢視 CSP 違規報告再切強制模式
+- [x] **手動**：CSP 違規報告檢視後已切強制模式（2026-05-25）
 
 ---
 
@@ -155,19 +155,17 @@
 
 ## 手動 todo（需你動手）
 
-1. **CSP Report-Only → Enforce 切換**（B10 後續）
-   - 上線後一週看 Sentry CSP violations，無誤就改成 enforce header
-2. **B1 staging 環境**（待 AWS console 操作）
-   - 順帶辦藍新測試環境帳號（金流測試 blocker）
-3. **Atlas M0 → M2 升級**（prod 還在 M0、無備份）
-   - staging 上 M2 順便當升級演練
+1. ~~CSP Report-Only → Enforce 切換~~ ✅ 已切（2026-05-25）
+2. ~~B1 staging 環境~~ ✅ 已完成（2026-06-14，含金流 sandbox）
+3. **prod 升 Atlas Flex 取得備份**（prod 還在 M0、無備份；Atlas 已用 Flex 取代 M2/M5）。注意：staging 用 M0、未做 M2 演練（見 STAGING_PLAN 決策）
+4. **prod 其他待辦**：`admin@example.com` 弱密碼、後端 Sentry 未啟用、BACKEND_URL 未設、web 非 EIP（建 staging 時連帶發現）
 
 ---
 
 ## 完工條件
 
-- [x] 所有 🔴 blocker 完成且驗證（9/10，B1 staging 規劃完成待實作）
-- [ ] staging 跑過完整 E2E 一次無錯 → 待 B1
+- [x] 所有 🔴 blocker 完成且驗證（10/10，B1 staging 已完成）
+- [x] staging 跑過完整 E2E（上傳→轉錄+diarization）一次無錯（2026-06-14）
 - [x] 線上監控（health + heartbeat + sentry）能在 5 分鐘內偵測到異常
 - [x] 確認 rollback 腳本能在 2 分鐘內回到上一版
 
