@@ -21,6 +21,7 @@ from src.utils.config_loader import get_temp_dir
 from src.utils.logger import get_logger
 from src.utils.text_utils import (
     align_segments_to_punctuated_text,
+    split_segments_at_sentence_punctuation,
     convert_segments_punctuation,
 )
 from src.utils.storage_service import save_audio
@@ -310,6 +311,8 @@ class TranscriptionOrchestrator:
                 details={"punctuation_completed": True, "punctuation_model": punct_model},
             )
             aligned = align_segments_to_punctuated_text(segments, punctuated_text)
+            # 依 Gemini 加的句末標點把段切成句子級（中文唯一的句子邊界來源）
+            aligned = split_segments_at_sentence_punctuation(aligned)
             return punctuated_text, aligned, punct_model, punct_tokens
         except TranscriptionCancelled:
             # 取消不是「標點失敗」——不可被 fallback 吞掉,往上拋給 run() 收
