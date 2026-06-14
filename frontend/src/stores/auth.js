@@ -310,14 +310,31 @@ export const useAuthStore = defineStore('auth', () => {
     return response.data  // { form, order_no, action, ... }
   }
 
-  async function purchaseExtraQuota(packageId, invoiceData = {}) {
-    const response = await api.post('/subscriptions/purchase-extra', { package_id: packageId, ...invoiceData })
+  async function purchaseExtraQuota(packageId, quantity = 1, invoiceData = {}) {
+    const response = await api.post('/subscriptions/purchase-extra', { package_id: packageId, quantity, ...invoiceData })
     return response.data  // { form, order_no }
   }
 
+  // 加購套餐目錄近乎靜態，session 內快取，避免 PlanPanel 重開 / CheckoutView 重複抓
+  let packagesPromise = null
   async function getPackages() {
-    const response = await api.get('/subscriptions/packages')
-    return response.data.packages
+    if (!packagesPromise) {
+      packagesPromise = api.get('/subscriptions/packages')
+        .then(r => r.data.packages)
+        .catch(err => { packagesPromise = null; throw err })  // 失敗不快取，允許重試
+    }
+    return packagesPromise
+  }
+
+  // 方案定義（額度 + features）的唯一真實來源在後端 QUOTA_TIERS，session 內快取
+  let tiersPromise = null
+  async function getTiers() {
+    if (!tiersPromise) {
+      tiersPromise = api.get('/subscriptions/tiers')
+        .then(r => r.data.tiers)
+        .catch(err => { tiersPromise = null; throw err })  // 失敗不快取，允許重試
+    }
+    return tiersPromise
   }
 
   async function getOrders(skip = 0, limit = 6) {
@@ -426,6 +443,7 @@ export const useAuthStore = defineStore('auth', () => {
     changePlan,
     purchaseExtraQuota,
     getPackages,
+    getTiers,
     getOrders,
     submitNewebpayForm,
   }

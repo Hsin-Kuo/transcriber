@@ -261,6 +261,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import ElectricBorder from '../components/shared/ElectricBorder.vue'
 import UploadZone from '../components/UploadZone.vue'
 import MergeModal from '../components/merge/MergeModal.vue'
@@ -272,11 +273,17 @@ import { exceedsMaxSize, MAX_UPLOAD_SIZE_MB } from '../utils/chunkedUpload.js'
 import { useCollapsibleRows } from '../composables/useCollapsibleRows'
 import { useTaskTags } from '../composables/task/useTaskTags'
 import { useAuthStore } from '../stores/auth'
+import { useUiStore } from '../stores/ui'
+import { useUploadStore } from '../stores/upload'
+import { quotaErrorFromDetail } from '../utils/quotaError'
 
 const { t: $t, locale } = useI18n()
+const router = useRouter()
 const { tagsData, fetchTagColors } = useTaskTags($t)
 
 const authStore = useAuthStore()
+const uiStore = useUiStore()
+const uploadStore = useUploadStore()
 // 音檔保留天數依方案動態顯示（FREE=3、付費方案=7），未取得時 fallback 3
 const audioRetentionDays = computed(() => authStore.quota?.audio_retention_days || 3)
 
@@ -322,6 +329,15 @@ function formatFileSize(bytes) {
   return (bytes / 1024 / 1024).toFixed(2) + ' MB'
 }
 
+// 是否為使用者主動取消（axios CanceledError）—— 不應彈錯誤通知
+function isUploadCancelled(error) {
+  return (
+    uploadStore.status === 'cancelled' ||
+    error?.code === 'ERR_CANCELED' ||
+    error?.name === 'CanceledError'
+  )
+}
+
 // 獲取所有唯一標籤（canonical 來源：/tags，包含尚未被任何 task 使用的孤兒 tag）
 const allTags = computed(() => tagsData.value.map(t => t.name))
 
@@ -360,7 +376,6 @@ function filterOversizedFiles(files) {
               max: MAX_UPLOAD_SIZE_MB,
             }),
       type: 'warning',
-      duration: 5000,
     })
   }
   return files.filter((f) => !exceedsMaxSize(f))
@@ -376,6 +391,12 @@ function handleFileUpload(file) {
 function handleFilesUpload(files) {
   if (!files || files.length === 0) return
 
+  // 方案功能檢查：批次上傳僅 Basic 以上方案可用（後端亦會強制擋下）
+  if (!authStore.quota?.features?.batch_operations) {
+    uiStore.showQuotaModal('batch_operations')
+    return
+  }
+
   files = filterOversizedFiles(files)
   if (files.length === 0) return
 
@@ -386,8 +407,7 @@ function handleFilesUpload(files) {
       showNotification({
         title: $t('batchUpload.tooManyFiles'),
         message: $t('batchUpload.maxFilesMessage', { max: MAX_BATCH_FILES, count: files.length }),
-        type: 'warning',
-        duration: 5000
+        type: 'warning'
       })
     }
     // 只取前 10 個檔案
@@ -468,38 +488,55 @@ async function confirmAndUpload() {
     formData.append('tags', JSON.stringify(selectedTags.value))
   }
 
+  // 先擷取顯示用資訊：上傳可能在使用者離開本頁後才完成，屆時 pendingFile/mergeMode 已重置
+  const displayName = isMergeMode
+    ? $t('globalUpload.mergeLabel', { count: mergeMode.files.length })
+    : pendingFile.value.name
+
+  // 全域上傳看板：跳頁也持續顯示進度
+  uploadStore.start({ kind: isMergeMode ? 'merge' : 'single', label: displayName })
+
   try {
     // 使用新 API 服務層（大檔自動走分片上傳）
     uploadProgress.value = 0
     await transcriptionService.create(formData, {
-      onProgress: (pct) => { uploadProgress.value = pct }
+      signal: uploadStore.getSignal(),
+      onProgress: (pct) => {
+        uploadProgress.value = pct
+        uploadStore.setProgress(pct)
+      }
     })
 
-    // 顯示轉錄中通知
-    if (showNotification) {
-      const message = isMergeMode
-        ? `正在合併並轉錄 ${mergeMode.files.length} 個檔案`
-        : `正在轉錄「${pendingFile.value.name}」`
-      showNotification({
-        title: $t('transcription.transcribing'),
-        message: message,
-        type: 'processing',
-        duration: 5000  // 5秒後自動關閉
-      })
+    // 上傳完成 → 全域浮層顯示「已建立轉錄任務」（取代原本的「正在轉錄」toast，避免重複訊號）
+    uploadStore.succeed()
+
+    // 轉錄已建立，若使用者仍在上傳頁則自動跳轉到任務列表；
+    // 已離開本頁則不強拉回來，改由全域浮層的「查看」按鈕引導
+    if (router.currentRoute.value.name === 'transcription') {
+      router.push({ name: 'tasks' })
     }
   } catch (error) {
-    console.error($t('transcription.errorUpload') + ':', error)
-    const detail = error.response?.data?.detail
-    const errorMsg = typeof detail === 'object' ? detail?.message : (detail || error.message)
-    if (showNotification) {
-      showNotification({
-        title: $t('transcription.uploadFailed'),
-        message: errorMsg,
-        type: 'error',
-        duration: 5000
-      })
+    // 使用者主動取消：不視為錯誤，看板已標記 cancelled
+    if (isUploadCancelled(error)) {
+      // no-op
     } else {
-      alert($t('transcription.uploadFailedMessage', { message: errorMsg }))
+      console.error($t('transcription.errorUpload') + ':', error)
+      const detail = error.response?.data?.detail
+      const errorMsg = typeof detail === 'object' ? detail?.message : (detail || error.message)
+      uploadStore.fail(errorMsg)
+      // 額度不足 → 改用引導購買的對話框（而非一般錯誤 toast）
+      const quota = quotaErrorFromDetail(detail)
+      if (quota) {
+        uiStore.showQuotaModal(quota.type)
+      } else if (showNotification) {
+        showNotification({
+          title: $t('transcription.uploadFailed'),
+          message: errorMsg,
+          type: 'error'
+        })
+      } else {
+        alert($t('transcription.uploadFailedMessage', { message: errorMsg }))
+      }
     }
   } finally {
     uploading.value = false
@@ -566,16 +603,37 @@ async function confirmBatchUpload(formData) {
   uploading.value = true
   uploadProgress.value = 0
   batchUploadCurrent.value = 0
-  batchUploadTotal.value = formData.getAll('files').length
+  const batchFileCount = formData.getAll('files').length
+  batchUploadTotal.value = batchFileCount
+
+  // 全域上傳看板（批次）
+  uploadStore.start({
+    kind: 'batch',
+    label: $t('globalUpload.batchLabel', { count: batchFileCount }),
+    batchTotal: batchFileCount,
+  })
 
   try {
     const result = await transcriptionService.createBatch(formData, {
-      onProgress: (pct) => { uploadProgress.value = pct },
+      signal: uploadStore.getSignal(),
+      onProgress: (pct) => {
+        uploadProgress.value = pct
+        uploadStore.setProgress(pct)
+      },
       onFileProgress: (current, total) => {
         batchUploadCurrent.value = current
         batchUploadTotal.value = total
+        uploadStore.setFileProgress(current, total)
       }
     })
+
+    uploadStore.succeed()
+
+    // 若有檔案因額度不足失敗，開啟引導購買對話框
+    const batchQuota = (result.tasks || []).map(t => quotaErrorFromDetail(t.error)).find(Boolean)
+    if (batchQuota) {
+      uiStore.showQuotaModal(batchQuota.type)
+    }
 
     // 顯示結果通知
     if (showNotification) {
@@ -586,15 +644,13 @@ async function confirmBatchUpload(formData) {
             created: result.created,
             failed: result.failed
           }),
-          type: 'warning',
-          duration: 8000
+          type: 'warning'
         })
       } else {
         showNotification({
           title: $t('batchUpload.success'),
           message: $t('batchUpload.successMessage', { count: result.created }),
-          type: 'success',
-          duration: 5000
+          type: 'success'
         })
       }
     }
@@ -603,16 +659,19 @@ async function confirmBatchUpload(formData) {
     await fetchTagColors()
 
   } catch (error) {
-    console.error('批次上傳失敗:', error)
-    const detail = error.response?.data?.detail
-    const errorMsg = typeof detail === 'object' ? detail?.message : (detail || error.message)
-    if (showNotification) {
-      showNotification({
-        title: $t('batchUpload.failed'),
-        message: errorMsg,
-        type: 'error',
-        duration: 5000
-      })
+    // 使用者主動取消：不視為錯誤
+    if (!isUploadCancelled(error)) {
+      console.error('批次上傳失敗:', error)
+      const detail = error.response?.data?.detail
+      const errorMsg = typeof detail === 'object' ? detail?.message : (detail || error.message)
+      uploadStore.fail(errorMsg)
+      if (showNotification) {
+        showNotification({
+          title: $t('batchUpload.failed'),
+          message: errorMsg,
+          type: 'error'
+        })
+      }
     }
   } finally {
     uploading.value = false

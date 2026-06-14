@@ -4,6 +4,7 @@
 /// <reference types="vite/client" />
 import axios, { AxiosError } from 'axios'
 import type { AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
+import { quotaErrorFromResponse } from './quotaError'
 
 // 未設定 VITE_API_URL 時：開發環境（含 vitest）走 hostname:8000，
 // 生產 build same-origin 由 nginx 反代。
@@ -122,6 +123,66 @@ function shouldSkipRefresh(url: string | undefined): boolean {
   return AUTH_ENDPOINTS_NO_REFRESH.some((path) => url.includes(path))
 }
 
+// 解出 JWT 的 exp（毫秒）；解不出回 null（交給被動 401 攔截器處理）
+function decodeJwtExpMs(token: string): number | null {
+  try {
+    const payload = token.split('.')[1]
+    if (!payload) return null
+    const decoded = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')))
+    return typeof decoded.exp === 'number' ? decoded.exp * 1000 : null
+  } catch {
+    return null
+  }
+}
+
+// 共用的 token 刷新：並行呼叫會合流到同一次 /auth/refresh（沿用 isRefreshing 鎖 +
+// subscriber 隊列）。被動 401 攔截器與主動刷新都走這支，確保只有單一刷新實作。
+function refreshAccessToken(): Promise<string> {
+  if (isRefreshing) {
+    return new Promise<string>((resolve, reject) => {
+      subscribeTokenRefresh(resolve, reject)
+    })
+  }
+  isRefreshing = true
+  return axios
+    .post<{ access_token: string }>(`${API_BASE}/auth/refresh`, null, { withCredentials: true })
+    .then(({ data }) => {
+      const accessToken = data.access_token
+      TokenManager.setAccessToken(accessToken)
+      onRefreshed(accessToken)
+      isRefreshing = false
+      return accessToken
+    })
+    .catch((refreshError) => {
+      isRefreshing = false
+      onRefreshFailed(refreshError)
+      // 只有 refresh 端點明確拒絕（401/403）才代表 token 真的失效；
+      // 網路錯誤 / 後端暫時 5xx 不清 token，避免短暫故障造成登出
+      const status = (refreshError as AxiosError)?.response?.status
+      if (status === 401 || status === 403) {
+        TokenManager.clearTokens()
+        redirectToLogin('refresh token rejected by backend')
+      }
+      throw refreshError
+    })
+}
+
+// 主動刷新：access token 剩餘效期 < minRemainingSeconds 就先刷新。
+// 供長時間操作（大檔分片上傳）每片送出前呼叫，讓 chunk 不會撞 token 過期 401、
+// 避免整片重傳浪費頻寬。失敗不拋，後續請求自然 fallback 到被動 401 攔截器。
+export async function ensureFreshAccessToken(minRemainingSeconds = 120): Promise<void> {
+  const token = TokenManager.getAccessToken()
+  if (!token) return
+  const expMs = decodeJwtExpMs(token)
+  if (expMs === null) return
+  if (expMs - Date.now() > minRemainingSeconds * 1000) return
+  try {
+    await refreshAccessToken()
+  } catch {
+    /* 主動刷新失敗：交給被動攔截器 */
+  }
+}
+
 api.interceptors.response.use(
   (response: AxiosResponse) => response,
   async (error: AxiosError) => {
@@ -134,52 +195,13 @@ api.interceptors.response.use(
       && !originalRequest._retry
       && !shouldSkipRefresh(originalRequest.url)
     ) {
-      if (isRefreshing) {
-        // 如果正在刷新，將請求加入隊列
-        return new Promise((resolve, reject) => {
-          subscribeTokenRefresh(
-            (token: string) => {
-              originalRequest.headers.Authorization = `Bearer ${token}`
-              resolve(api(originalRequest))
-            },
-            (err: unknown) => reject(err),
-          )
-        })
-      }
-
       originalRequest._retry = true
-      isRefreshing = true
-
       try {
-        // 刷新 Token：refresh_token 由瀏覽器以 httpOnly cookie 自動帶出
-        const response = await axios.post<{ access_token: string }>(
-          `${API_BASE}/auth/refresh`,
-          null,
-          { withCredentials: true },
-        )
-
-        const { access_token } = response.data
-        TokenManager.setAccessToken(access_token)
-
-        // 更新原請求的 header
-        originalRequest.headers.Authorization = `Bearer ${access_token}`
-
-        // 通知所有等待的請求
-        onRefreshed(access_token)
-        isRefreshing = false
-
-        // 重試原請求
+        // refreshAccessToken 內部處理「已在刷新中就掛隊列」的合流，並更新 token
+        const accessToken = await refreshAccessToken()
+        originalRequest.headers.Authorization = `Bearer ${accessToken}`
         return api(originalRequest)
       } catch (refreshError) {
-        isRefreshing = false
-        onRefreshFailed(refreshError)
-        // 只有 refresh 端點明確拒絕（401/403）才代表 token 真的失效
-        // 網路錯誤或後端暫時不可用（5xx）不清 token，避免短暫故障造成登出
-        const status = (refreshError as AxiosError)?.response?.status
-        if (status === 401 || status === 403) {
-          TokenManager.clearTokens()
-          redirectToLogin('refresh token rejected by backend')
-        }
         return Promise.reject(refreshError)
       }
     }
@@ -187,7 +209,10 @@ api.interceptors.response.use(
     // 429 Rate Limit：debounce 避免同時多個請求失敗時重複通知
     // _silentRateLimit 旗標讓背景 polling 類請求（verify-pending 等）不觸發全域 toast
     if (error.response?.status === 429) {
-      if (!originalRequest?._silentRateLimit && !rateLimitNotifyTimer) {
+      // 額度不足（QUOTA_EXCEEDED）雖也是 429，但由頁面層的額度對話框處理，
+      // 不觸發全域「請求太頻繁」toast，避免訊息互相干擾。
+      const isQuota = !!quotaErrorFromResponse(error)
+      if (!isQuota && !originalRequest?._silentRateLimit && !rateLimitNotifyTimer) {
         window.dispatchEvent(new CustomEvent('api:rate-limited'))
         rateLimitNotifyTimer = setTimeout(() => { rateLimitNotifyTimer = null }, 3000)
       }

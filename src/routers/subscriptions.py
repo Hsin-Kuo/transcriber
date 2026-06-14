@@ -5,7 +5,7 @@ from datetime import datetime, date, timedelta
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 
 from ..auth.dependencies import get_current_user
@@ -13,7 +13,7 @@ from ..database.mongodb import get_database
 from ..database.repositories.user_repo import UserRepository
 from ..database.repositories.order_repo import OrderRepository
 from ..database.repositories.processed_webhook_repo import ProcessedWebhookRepository
-from ..models.quota import QuotaTier, QUOTA_TIERS, is_upgrade
+from ..models.quota import QuotaTier, QUOTA_TIERS, is_upgrade, public_tier_plans
 from ..services.order_settlement import build_order_settlement, PaymentNotification
 from ..utils.newebpay_service import get_newebpay_service
 from ..utils.time_utils import get_utc_timestamp
@@ -66,6 +66,7 @@ class ChangePlanRequest(BaseModel):
 
 class PurchaseExtraRequest(BaseModel):
     package_id: str
+    quantity: int = Field(default=1, ge=1, le=99)  # 購買份數（1–99）
     invoice_type: Optional[str] = None
     carrier_type: Optional[str] = None
     carrier_num: Optional[str] = None
@@ -481,6 +482,12 @@ async def purchase_extra_quota(
 
     svc = get_newebpay_service()
 
+    # 份數：總金額與加購額度皆 × quantity
+    qty = request.quantity
+    total_amount = package["price_twd"] * qty
+    unit_amount = package.get("amount", 0)
+    item_desc = package["label"] if qty == 1 else f'{package["label"]} ×{qty}'
+
     order_no = svc.generate_order_no("SLEXT")
     await build_order_settlement(db).open_pending({
         "user_id": user_id,
@@ -488,13 +495,13 @@ async def purchase_extra_quota(
         "type": "extra_quota",
         "tier": None,
         "billing_cycle": None,
-        "amount_twd": package["price_twd"],
+        "amount_twd": total_amount,
         "status": "pending",
         "period_no": None,
         "auth_times": 0,
         "newebpay_trade_no": None,
-        "extra_duration_minutes": package.get("amount", 0) if package["type"] == "duration" else 0,
-        "extra_ai_summaries": package.get("amount", 0) if package["type"] == "ai_summaries" else 0,
+        "extra_duration_minutes": unit_amount * qty if package["type"] == "duration" else 0,
+        "extra_ai_summaries": unit_amount * qty if package["type"] == "ai_summaries" else 0,
     })
 
     invoice_params = {
@@ -506,14 +513,23 @@ async def purchase_extra_quota(
 
     form = svc.create_mpg_form(
         order_no=order_no,
-        amount_twd=package["price_twd"],
-        item_desc=package["label"],
+        amount_twd=total_amount,
+        item_desc=item_desc,
         email=current_user["email"],
         return_url=_return_url(),
         notify_url=_notify_url("mpg"),
         **invoice_params,
     )
     return {"form": form, "order_no": order_no}
+
+
+@router.get("/tiers")
+async def list_tiers():
+    """方案功能與額度（feature flags + limits）的唯一真實來源，供前端方案頁顯示。
+
+    免登入。價格不在此回傳——價格綁金流設定（見前端 pricing.js）。
+    """
+    return {"tiers": public_tier_plans()}
 
 
 @router.get("/packages")

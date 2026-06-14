@@ -1,17 +1,30 @@
-name: Deploy to AWS
+name: Deploy to Staging
+
+# 基於 deploy-aws.yml，差異：
+#   - 觸發分支 aws → staging
+#   - EC2_HOST 改 staging EIP
+#   - environment: staging（無 reviewer；prod 是 production + reviewer approve）
+#   - sync deploy/.env.aws.staging + deploy/nginx-staging.conf
+#   - VITE_SENTRY_ENVIRONMENT=staging
+#   - 只部使用者前端（staging 先不部 admin）
+#   - health check 打 staging.soundlite.app（/health 已在 Cloudflare Access bypass）
+#
+# ⚠️ 依賴 deploy/nginx-staging.conf（server_name staging.soundlite.app、單一入口、
+#    CSP connect-src 指 staging bucket）。首次部署前須先建立該檔。
 
 on:
   push:
     branches:
-      - aws
+      - staging
 
 env:
-  EC2_HOST: 3.112.209.96
+  EC2_HOST: 52.196.120.189
   EC2_USER: ec2-user
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: staging
 
     steps:
       - name: Checkout code
@@ -35,7 +48,7 @@ jobs:
               -czvf backend.tar.gz \
               src scripts deploy requirements-web.txt requirements.txt
 
-      # ===== Frontend 建置 =====
+      # ===== Frontend 建置（僅使用者前端）=====
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
         with:
@@ -48,15 +61,12 @@ jobs:
         env:
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
         run: |
-          # 寫入 .env.production（會覆寫 repo 內的同名檔，所有需要的變數都要列出）
-          # VITE_API_URL 留空 → 前端 fallback 為 same-origin，由 nginx 反代到 :8000。
-          # 切勿在 job env: 段落再設一份，shell env 會覆蓋 .env.production，
-          # 過去因此 hardcode 成舊網域導致 my.soundlite.app 被 CSP 擋 cross-origin。
+          # VITE_API_URL 留空 → same-origin，由 nginx 反代到 :8000
           cat > .env.production <<EOF
           VITE_API_URL=
           VITE_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
           VITE_SENTRY_DSN=${{ secrets.VITE_SENTRY_DSN }}
-          VITE_SENTRY_ENVIRONMENT=production
+          VITE_SENTRY_ENVIRONMENT=staging
           VITE_SENTRY_TRACES_SAMPLE_RATE=0.1
           VITE_SENTRY_RELEASE=${{ github.sha }}
           VITE_BACKEND_PDF_ENABLED=true
@@ -68,27 +78,7 @@ jobs:
         working-directory: frontend
         run: tar -czvf ../frontend.tar.gz dist
 
-      # ===== Admin Frontend 建置 =====
-      - name: Build admin-frontend
-        working-directory: admin-frontend
-        run: |
-          # admin-frontend/.env.production 在 .gitignore，由 CI 從 secrets 產生
-          cat > .env.production <<EOF
-          VITE_SENTRY_DSN=${{ secrets.VITE_SENTRY_DSN_ADMIN }}
-          VITE_SENTRY_ENVIRONMENT=production-admin
-          VITE_SENTRY_TRACES_SAMPLE_RATE=0.1
-          VITE_SENTRY_RELEASE=${{ github.sha }}
-          EOF
-          npm ci
-          npm run build
-
-      - name: Package admin-frontend
-        working-directory: admin-frontend
-        run: tar -czvf ../admin-frontend.tar.gz dist
-
       # ===== SSH 部署 =====
-      # 用 ssh-agent 把 key 載入 agent 記憶體，不落地 disk
-      # 比 echo > .pem 安全：runner 暫存 / log / 殘留檔案都不會看到 key 內容
       - name: Setup SSH agent
         uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555  # v0.10.0
         with:
@@ -103,7 +93,6 @@ jobs:
         run: |
           scp backend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/backend-${SHA}.tar.gz
           scp frontend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/frontend-${SHA}.tar.gz
-          scp admin-frontend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/admin-frontend-${SHA}.tar.gz
 
       - name: Deploy backend
         env:
@@ -111,8 +100,7 @@ jobs:
         run: |
           ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "SHA=${SHA} bash -s" << 'ENDSSH'
           set -e
-          echo "=== Deploying Backend [${SHA}] ==="
-          # 保留釋出檔到 releases/，供 rollback.sh 使用
+          echo "=== Deploying Staging Backend [${SHA}] ==="
           sudo mkdir -p /opt/transcriber/releases
           sudo mv /tmp/backend-${SHA}.tar.gz /opt/transcriber/releases/
           sudo chown ec2-user:ec2-user /opt/transcriber/releases/backend-${SHA}.tar.gz
@@ -122,33 +110,27 @@ jobs:
 
           python3.11 -m pip install --user -r requirements-web.txt -q
 
-          # 更新 Nginx 設定
-          sudo cp /opt/transcriber/deploy/nginx-ec2.conf /etc/nginx/conf.d/transcriber.conf
+          # Nginx（staging 專屬 server block）
+          sudo cp /opt/transcriber/deploy/nginx-staging.conf /etc/nginx/conf.d/transcriber.conf
           sudo rm -f /etc/nginx/conf.d/default.conf
           sudo nginx -t && sudo systemctl reload nginx
 
-          # Sync .env from canonical deploy/.env.aws（帶 timestamp backup）
-          # 之後 .env 變更直接改 repo 的 deploy/.env.aws，push 就會生效。
+          # Sync .env from canonical deploy/.env.aws.staging（帶 timestamp backup）
           if [ -f /opt/transcriber/.env ]; then
               sudo cp /opt/transcriber/.env /opt/transcriber/.env.bak.${SHA}
           fi
-          sudo cp /opt/transcriber/deploy/.env.aws /opt/transcriber/.env
+          sudo cp /opt/transcriber/deploy/.env.aws.staging /opt/transcriber/.env
           sudo chown ec2-user:ec2-user /opt/transcriber/.env
           sudo chmod 600 /opt/transcriber/.env
-          # 只保留最近 5 份 .env backup
           ls -1t /opt/transcriber/.env.bak.* 2>/dev/null | tail -n +6 | xargs -r sudo rm -f
 
-          # Sync systemd unit from canonical deploy/transcriber.service
-          # 包含 --workers 2 + ExecStartPre cleanup（避免 worker startup pkill race）
-          # systemd-analyze verify 擋住語法錯誤的 unit 部署
+          # Sync systemd unit（EnvironmentFile + WEB_CONCURRENCY；.env 設 1）
           sudo cp /opt/transcriber/deploy/transcriber.service /etc/systemd/system/transcriber.service
-          # 確保 ExecStartPre 腳本可執行（tar 通常會保留 +x，保險起見補 chmod）
           chmod +x /opt/transcriber/deploy/pre-start-cleanup.sh
           sudo systemd-analyze verify /etc/systemd/system/transcriber.service
           sudo systemctl daemon-reload
 
           sudo systemctl restart transcriber
-          # 等 service 真的進到 active 狀態（systemctl restart 是同步、但快速 fail 也可能會看到 activating）
           sleep 3
           sudo systemctl is-active --quiet transcriber || {
               echo "[ERROR] transcriber service not active after restart"
@@ -157,15 +139,13 @@ jobs:
               exit 1
           }
 
-          # 安裝/更新 rollback 腳本到固定位置（即使本次部署壞掉，rollback 仍可用）
           sudo install -m 0755 /opt/transcriber/deploy/rollback.sh /usr/local/bin/transcriber-rollback
 
-          # 紀錄當前版本，清理舊釋出（保留最近 5 個 backend/frontend/admin-frontend）
           echo "${SHA}" | sudo tee /opt/transcriber/releases/CURRENT > /dev/null
-          for prefix in backend frontend admin-frontend; do
+          for prefix in backend frontend; do
             ls -1t /opt/transcriber/releases/${prefix}-*.tar.gz 2>/dev/null | tail -n +6 | xargs -r sudo rm -f
           done
-          echo "=== Backend deployed [${SHA}] ==="
+          echo "=== Staging Backend deployed [${SHA}] ==="
           ENDSSH
 
       - name: Deploy frontend
@@ -174,7 +154,7 @@ jobs:
         run: |
           ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "SHA=${SHA} bash -s" << 'ENDSSH'
           set -e
-          echo "=== Deploying Frontend [${SHA}] ==="
+          echo "=== Deploying Staging Frontend [${SHA}] ==="
           sudo mkdir -p /opt/transcriber/releases
           sudo mv /tmp/frontend-${SHA}.tar.gz /opt/transcriber/releases/
           sudo chown ec2-user:ec2-user /opt/transcriber/releases/frontend-${SHA}.tar.gz
@@ -186,32 +166,11 @@ jobs:
           sudo cp -r dist/* /var/www/transcriber/
           sudo chown -R nginx:nginx /var/www/transcriber
           rm -rf /tmp/dist
-          echo "=== Frontend deployed [${SHA}] ==="
-          ENDSSH
-
-      - name: Deploy admin-frontend
-        env:
-          SHA: ${{ github.sha }}
-        run: |
-          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "SHA=${SHA} bash -s" << 'ENDSSH'
-          set -e
-          echo "=== Deploying Admin Frontend [${SHA}] ==="
-          sudo mkdir -p /opt/transcriber/releases
-          sudo mv /tmp/admin-frontend-${SHA}.tar.gz /opt/transcriber/releases/
-          sudo chown ec2-user:ec2-user /opt/transcriber/releases/admin-frontend-${SHA}.tar.gz
-
-          cd /tmp
-          tar -xzf /opt/transcriber/releases/admin-frontend-${SHA}.tar.gz
-          sudo mkdir -p /var/www/admin
-          sudo rm -rf /var/www/admin/*
-          sudo cp -r dist/* /var/www/admin/
-          sudo chown -R nginx:nginx /var/www/admin
-          rm -rf /tmp/dist
-          echo "=== Admin Frontend deployed [${SHA}] ==="
+          echo "=== Staging Frontend deployed [${SHA}] ==="
           ENDSSH
 
       - name: Verify deployment
         run: |
           sleep 5
-          curl -f https://my.soundlite.app/health || exit 1
-          echo "✅ Deployment successful! https://my.soundlite.app"
+          curl -f https://staging.soundlite.app/health || exit 1
+          echo "✅ Staging deployment successful! https://staging.soundlite.app"

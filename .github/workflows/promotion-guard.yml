@@ -1,0 +1,30 @@
+name: Promotion Guard
+
+# 強制三層分支的來源限制（GitHub branch protection 原生無法限制 PR 來源分支）：
+#   feature → main（不限來源）
+#   main    → staging（只有 main 能進）
+#   staging → aws（只有 staging 能進）
+# 設為 staging / aws 的 required status check 才會生效。
+
+on:
+  pull_request:
+    branches: [staging, aws]
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce source branch
+        run: |
+          BASE="${{ github.base_ref }}"
+          HEAD="${{ github.head_ref }}"
+          echo "PR: $HEAD → $BASE"
+          if [ "$BASE" = "staging" ] && [ "$HEAD" != "main" ]; then
+            echo "::error::只有 main 能 PR 進 staging（目前來源：$HEAD）"
+            exit 1
+          fi
+          if [ "$BASE" = "aws" ] && [ "$HEAD" != "staging" ]; then
+            echo "::error::只有 staging 能 PR 進 aws（目前來源：$HEAD）"
+            exit 1
+          fi
+          echo "✅ 來源分支合法：$HEAD → $BASE"

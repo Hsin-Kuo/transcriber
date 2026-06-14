@@ -176,6 +176,10 @@ class OrderSettlement:
             })
             await self.user_repo.update_subscription(user_id, sub)
             await self.user_repo.reset_monthly_usage(user_id, now)
+            # D4：月繳續扣 → 套用最新方案額度（短週期，等同每月重新訂閱）。
+            #   年繳續扣不重套，維持繳費當下的方案直到換約（週期內由 lazy refill 補額但不改額度）。
+            if billing_cycle == "monthly":
+                await self.user_repo.update_quota(user_id, build_quota_from_tier(tier))
             log.info("subscription.renewed", user_id=user_id, type=order_type)
             return SettleResult(SettleOutcome.RENEWED, n.order_no)
 

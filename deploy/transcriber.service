@@ -7,6 +7,11 @@ Type=simple
 User=ec2-user
 WorkingDirectory=/opt/transcriber
 Environment="PATH=/home/ec2-user/.local/bin:/usr/local/bin:/usr/bin"
+# uvicorn worker 數預設 2（prod t3.small）。staging t3.micro（1GiB）跑 2 個會 OOM，
+# 由 .env 的 WEB_CONCURRENCY=1 覆寫。EnvironmentFile 載入順序在 Environment= 之後 →
+# .env 有設就贏、沒設就用預設 2。`-` = 檔案不存在也不報錯（prod 既有 .env、本機開發無妨）。
+Environment="WEB_CONCURRENCY=2"
+EnvironmentFile=-/opt/transcriber/.env
 
 # 清掉上次 crash 殘留的 multiprocessing 子進程。在 master 啟動「前」跑一次，
 # 而不是每個 worker startup hook 跑一次。
@@ -20,7 +25,7 @@ ExecStartPre=/opt/transcriber/deploy/pre-start-cleanup.sh
 
 # 綁 127.0.0.1：nginx 走 loopback 連後端，uvicorn 不需對外。綁 0.0.0.0 會讓
 # 外網經 SG 開放的 8000 直接打進後端、繞過 nginx 的 rate limit / CSP / docs 關閉。
-ExecStart=/home/ec2-user/.local/bin/uvicorn src.main:app --host 127.0.0.1 --port 8000 --workers 2
+ExecStart=/home/ec2-user/.local/bin/uvicorn src.main:app --host 127.0.0.1 --port 8000 --workers ${WEB_CONCURRENCY}
 Restart=always
 RestartSec=5
 

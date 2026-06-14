@@ -76,8 +76,18 @@ export interface TranscriptionCreateResponse {
 }
 
 export interface BatchCreateResponse {
-  tasks: Array<{ task_id: string; filename: string; status: string }>
+  batch_id?: string
   total: number
+  created?: number
+  failed?: number
+  tasks: Array<{
+    task_id?: string
+    filename: string
+    status: string
+    queue_position?: number
+    // 失敗時的錯誤；額度不足為結構化物件 { code, message, quota }
+    error?: string | { code?: string; message?: string; quota?: { type?: string } }
+  }>
 }
 
 export interface SummaryContent {
@@ -104,6 +114,7 @@ export interface ApiMessage {
 
 interface ProgressOptions {
   onProgress?: (percent: number) => void
+  signal?: AbortSignal
 }
 
 interface BatchProgressOptions extends ProgressOptions {
@@ -113,10 +124,10 @@ interface BatchProgressOptions extends ProgressOptions {
 // ========== Transcription Service ==========
 
 export const transcriptionService = {
-  async create(formData: FormData, { onProgress }: ProgressOptions = {}): Promise<TranscriptionCreateResponse> {
+  async create(formData: FormData, { onProgress, signal }: ProgressOptions = {}): Promise<TranscriptionCreateResponse> {
     const file = formData.get('file') as File | null
     if (file && needsChunking(file)) {
-      const uploadId = await uploadChunked(file, { onProgress })
+      const uploadId = await uploadChunked(file, { onProgress, signal })
       formData.delete('file')
       formData.append('upload_id', uploadId)
     }
@@ -129,6 +140,7 @@ export const transcriptionService = {
         let done = 0
         for (const f of mergeFiles) {
           const uploadId = await uploadChunked(f, {
+            signal,
             onProgress: onProgress
               ? (pct: number) => {
                   const overall = Math.round(((done + pct / 100) / mergeFiles.length) * 100)
@@ -148,6 +160,7 @@ export const transcriptionService = {
     const response = await api.post(NEW_ENDPOINTS.transcriptions.create, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 3600000,
+      signal,
     })
     return response.data
   },
@@ -180,7 +193,7 @@ export const transcriptionService = {
     return response.data
   },
 
-  async createBatch(formData: FormData, { onProgress, onFileProgress }: BatchProgressOptions = {}): Promise<BatchCreateResponse> {
+  async createBatch(formData: FormData, { onProgress, onFileProgress, signal }: BatchProgressOptions = {}): Promise<BatchCreateResponse> {
     const files = formData.getAll('files') as File[]
     const chunkedMap: Record<string, string> = {}
     const smallFiles: Array<{ index: number; file: File }> = []
@@ -192,6 +205,7 @@ export const transcriptionService = {
       if (needsChunking(files[i])) {
         if (onFileProgress) onFileProgress(chunkedDone + 1, totalFiles)
         const uploadId = await uploadChunked(files[i], {
+          signal,
           onProgress: onProgress
             ? (pct: number) => {
                 const overall = Math.round(((chunkedDone + pct / 100) / totalFiles) * 100)
@@ -219,6 +233,7 @@ export const transcriptionService = {
     const response = await api.post(NEW_ENDPOINTS.transcriptions.createBatch, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 3600000,
+      signal,
     })
     if (onProgress) onProgress(100)
     return response.data

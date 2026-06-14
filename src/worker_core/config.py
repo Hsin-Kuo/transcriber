@@ -15,7 +15,7 @@ MONGODB_URL: str = get_parameter(
     default="mongodb://localhost:27017",
 )
 MONGODB_DB_NAME: str = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
-DEFAULT_MODEL: str = os.getenv("WHISPER_MODEL", "medium")
+DEFAULT_MODEL: str = os.getenv("WHISPER_MODEL", "large-v3-turbo")
 WORKER_SECRET: str = get_parameter(
     "/transcriber/worker-secret",
     fallback_env="WORKER_SECRET",
