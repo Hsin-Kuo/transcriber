@@ -3,8 +3,13 @@
 職責：提供文本處理相關的工具函數
 """
 
+import difflib
+import re
 import unicodedata
 from typing import List, Dict
+
+# diarization 開啟時 full_text 內嵌的說話者標籤；對齊前需剝除（segments 文字裡沒有）
+_SPEAKER_LABEL_RE = re.compile(r'\[SPEAKER_\d+\]')
 
 # 半形轉全形標點符號對照表
 HALFWIDTH_TO_FULLWIDTH_PUNCTUATION = {
@@ -43,65 +48,89 @@ def convert_punctuation_to_fullwidth(text: str) -> str:
 
 
 def align_segments_to_punctuated_text(segments: List[Dict], punctuated_text: str) -> List[Dict]:
-    """標點處理後，將 punctuated_text 的內容對齊回各 segment。
+    """標點處理後，將 punctuated_text 的內容對齊回各 segment（把標點/句子分回各段）。
 
-    策略：用 Unicode category 定義「內容字符」（字母、數字、CJK；非標點非空白），
-    在 punctuated_text 與原始 segments 之間做 1:1 字符對齊，
-    再按 segment 邊界切出含尾隨標點的 span。
+    用「內容字符」（字母、數字、CJK；非標點非空白）做對齊，**模糊比對**（difflib）
+    以容忍 Gemini 的增/刪/改字——舊版要求嚴格 1:1，Gemini 只要動一個字就整個 fallback，
+    diarization 的 `[SPEAKER_XX]` 標籤更是必然破壞 1:1 → segments 永遠拿不到標點。
 
-    若對齊失敗（字符數量或內容不符，表示 LLM 修改了文字），fallback 回原始 segments。
+    步驟：① 剝掉 full_text 的 `[SPEAKER_XX]` 標籤 ② difflib 對齊 segment↔punct 內容字符，
+    為每段找出在(剝標籤後)文字中的起點 ③ 按相鄰段起點切出含尾隨標點的 span。
+    任何異常或無內容字 → fallback 回原始 segments（不打斷轉錄）。
     """
     if not segments or not punctuated_text:
         return segments
 
-    def is_content(ch: str) -> bool:
-        return unicodedata.category(ch)[0] in ('L', 'N', 'M')
+    try:
+        def is_content(ch: str) -> bool:
+            return unicodedata.category(ch)[0] in ('L', 'N', 'M')
 
-    # 從 punctuated_text 提取內容字符及其位置
-    punct_content = [(i, ch) for i, ch in enumerate(punctuated_text) if is_content(ch)]
+        clean = _SPEAKER_LABEL_RE.sub("", punctuated_text)
 
-    # 從各 segment 依序提取內容字符（帶 segment index）
-    seg_content = []
-    for seg_idx, seg in enumerate(segments):
-        for ch in seg.get("text", ""):
-            if is_content(ch):
-                seg_content.append((seg_idx, ch))
+        punct_content = [(i, ch) for i, ch in enumerate(clean) if is_content(ch)]
+        seg_content = []  # (seg_idx, char)
+        for seg_idx, seg in enumerate(segments):
+            for ch in seg.get("text", ""):
+                if is_content(ch):
+                    seg_content.append((seg_idx, ch))
 
-    # 數量或字符不符 → fallback
-    if len(punct_content) != len(seg_content):
-        return segments
-    for (_, ch_p), (_, ch_s) in zip(punct_content, seg_content, strict=True):
-        if ch_p != ch_s:
+        if not punct_content or not seg_content:
             return segments
 
-    if not punct_content:
+        # difflib 對齊：seg 內容字 index → punct 內容字 index（容忍增刪改）
+        sm = difflib.SequenceMatcher(
+            a=[c for _, c in seg_content], b=[c for _, c in punct_content], autojunk=False
+        )
+        map_arr: List = [None] * len(seg_content)
+        for tag, i1, i2, j1, _j2 in sm.get_opcodes():
+            if tag == "equal":
+                for k in range(i2 - i1):
+                    map_arr[i1 + k] = j1 + k
+            elif tag in ("replace", "delete"):
+                # seg 這段字對到 punct 區塊起點（clamp）；'insert' 的 punct 多字由 slice 自然涵蓋
+                jj = min(j1, len(punct_content) - 1)
+                for k in range(i1, i2):
+                    map_arr[k] = jj
+        # 補未對到的（保險）：用其後第一個有效對應
+        nxt = len(punct_content) - 1
+        for k in range(len(map_arr) - 1, -1, -1):
+            if map_arr[k] is None:
+                map_arr[k] = nxt
+            else:
+                nxt = map_arr[k]
+
+        # 每段第一個內容字在 clean 文字中的位置（強制單調遞增，避免逆序產生負長度 slice）
+        positions: List = [None] * len(segments)
+        prev = 0
+        seen = set()
+        for ci, (seg_idx, _) in enumerate(seg_content):
+            if seg_idx in seen:
+                continue
+            seen.add(seg_idx)
+            pos = max(punct_content[map_arr[ci]][0], prev)
+            positions[seg_idx] = pos
+            prev = pos
+
+        result = []
+        for seg_idx, seg in enumerate(segments):
+            start = positions[seg_idx]
+            if start is None:
+                result.append({**seg, "text": ""})
+                continue
+            nxt_start = next(
+                (positions[k] for k in range(seg_idx + 1, len(segments)) if positions[k] is not None),
+                None,
+            )
+            if nxt_start is not None and nxt_start > start:
+                text = clean[start:nxt_start].rstrip()
+            else:
+                text = clean[start:].strip()
+            result.append({**seg, "text": text})
+
+        return result
+    except Exception:
+        # 對齊出錯不可打斷轉錄 → 回原始 segments
         return segments
-
-    # 記錄每個 segment 在 punctuated_text 中第一個與最後一個內容字符的位置
-    seg_first: Dict[int, int] = {}
-    seg_last: Dict[int, int] = {}
-    for (pos, _), (seg_idx, _) in zip(punct_content, seg_content, strict=True):
-        if seg_idx not in seg_first:
-            seg_first[seg_idx] = pos
-        seg_last[seg_idx] = pos
-
-    # 切出每個 segment 的 span（含尾隨標點，不含下一個 segment 的內容）
-    result = []
-    for seg_idx, seg in enumerate(segments):
-        if seg_idx not in seg_first:
-            result.append({**seg, "text": ""})
-            continue
-
-        start = seg_first[seg_idx]
-        if seg_idx + 1 in seg_first:
-            end = seg_first[seg_idx + 1]
-            text = punctuated_text[start:end].rstrip()
-        else:
-            text = punctuated_text[start:].strip()
-
-        result.append({**seg, "text": text})
-
-    return result
 
 
 # 句末標點（半形與全形都列，因可能在 convert 全形之前執行）
