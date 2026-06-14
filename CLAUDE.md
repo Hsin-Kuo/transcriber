@@ -173,6 +173,12 @@ DEPLOY_ENV=aws    → Web Server (APP_ROLE=server) + GPU Worker (APP_ROLE=worker
                     GPU Worker 空閒 5 分鐘後自行呼叫 shutdown（無 Lambda）
 ```
 
+### prod / staging 環境隔離（APP_ENV）
+- `APP_ENV=prod`（預設）/ `staging` → `config_loader.get_parameter` 把 SSM 前綴 `/transcriber/*`
+  改讀 `/transcriber-staging/*`，達成 secret / 資源隔離（**單點路由**）。
+- staging 與 prod **物理隔離**：獨立 Web EC2 + 獨立 on-demand GPU worker + 獨立 SQS / S3 /
+  Atlas（M0）/ SSM。網址 `staging.soundlite.app`（Cloudflare Access 鎖）。詳見 `docs/STAGING_PLAN.md`。
+
 ### AWS 生產部署架構
 - **Web Server**：EC2 t3.small + Nginx（反向代理 + 靜態檔案 serve）
 - **uvicorn `--workers 2`**：兩個 worker process（每個獨立 event loop），由 systemd 管理
@@ -180,9 +186,12 @@ DEPLOY_ENV=aws    → Web Server (APP_ROLE=server) + GPU Worker (APP_ROLE=worker
   - Per-worker semaphores（`USER_CHUNK_CONCURRENCY`、`GLOBAL_CHUNK_CONCURRENCY`）— 全機並行上限 = 設定值 × workers
 - **前端**：build 後直接部署到 EC2 `/var/www/transcriber`（非 S3+CloudFront）
 - **GPU Worker**：EC2 g4dn.xlarge Spot，`src/worker.py` 作為 SQS consumer
-- **CI/CD**：GitHub Actions，push 到 **`aws` 分支**觸發部署（非 `main`）
+- **CI/CD**：GitHub Actions，**三層分支** `feature → main → staging → aws`（`main` 不部署；
+  push `staging`→`deploy-staging.yml`、push `aws`→`deploy-aws.yml`）。Promotion Guard workflow
+  強制來源分支（只有 main 能進 staging、只有 staging 能進 aws）。環境分支用 merge commit（非 squash）。
   - systemd unit、nginx config、`.env` 都 sync from repo（不准 SSH 手改）
   - `deploy-aws.yml` 含 `systemd-analyze verify` + `systemctl is-active --quiet` 雙保險
+  - GPU worker 佈建/重建：`bash deploy/deploy-gpu-worker.sh [prod|staging]`；依賴鎖在 `requirements-worker.lock`
 
 ### MongoDB Collections
 - `users` — 帳號、角色、使用配額、藍新訂閱 / merchant order 對照
