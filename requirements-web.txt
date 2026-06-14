@@ -53,4 +53,4 @@ boto3
 # pymongo 已包含 bson
 
 # PDF 生成（server-side multi-language CJK PDF；字體在 src/utils/pdf/fonts/）
-reportlab>=4.4,<5.0
+reportlab>=4.5.1,<5.0

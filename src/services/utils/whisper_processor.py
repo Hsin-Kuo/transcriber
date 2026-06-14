@@ -27,6 +27,16 @@ from src.utils.logger import get_logger
 log = get_logger(__name__)
 
 
+# ── 早期重切段參數 ────────────────────────────────────────────
+# batched(turbo/GPU)的 segment 以 VAD 語音塊為界 → 連續講話會變超長 segment。
+# 在 whisper 輸出當下、用 word timestamps 把長段依「字間停頓 / 長度上限」切成較短碎片
+# （word timestamps 用完即丟，不外流到 orchestrator/diarization/標點，避免碰下游邏輯）。
+# 可調：部 staging 後依實際音檔微調。
+RESEG_MAX_SEGMENT_SEC = 10.0       # 段長硬上限，超過強制切
+RESEG_GAP_THRESHOLD_SEC = 0.6      # 字間停頓 > 此值即切（自然停頓）
+RESEG_MIN_SEGMENT_SEC = 1.5        # 累積未達此長度時，小停頓不切（避免一兩字的碎段）
+
+
 def _normalize_language(language: Optional[str]) -> Optional[str]:
     """Map zh-TW/zh-CN to zh for Whisper (which only supports 'zh')."""
     if language in ("zh-TW", "zh-CN"):
@@ -76,6 +86,50 @@ def _collapse_repeated_segments(segments: List[Dict], max_repeat: int = 2) -> Li
             )
         i = j
     return result
+
+
+def _resegment_by_words(segments: List[Dict]) -> List[Dict]:
+    """把(可能很長的) whisper segments 依字間停頓 / 長度切成較短碎片。
+
+    輸入：含 `words`（faster-whisper Word list，或 None）的 segment dict。
+    輸出：純 {start, end, text} 的 segment dict（words 用完即丟，不外流）。
+
+    切點：逐字累積，遇到任一即斷段——
+      - 累積長度 ≥ RESEG_MAX_SEGMENT_SEC（硬上限），或
+      - 與下一字的停頓 > RESEG_GAP_THRESHOLD_SEC 且累積已達 RESEG_MIN_SEGMENT_SEC
+    `words` 為空（無語音段等）→ 原樣保留不切。
+    """
+    out: List[Dict] = []
+
+    def _flush(words_run: list, end: float) -> None:
+        text = "".join(w.word for w in words_run).strip()
+        if text:
+            out.append({"start": round(words_run[0].start, 3), "end": round(end, 3), "text": text})
+
+    for seg in segments:
+        words = seg.get("words")
+        if not words:
+            out.append({"start": seg["start"], "end": seg["end"], "text": seg["text"]})
+            continue
+
+        cur: list = []
+        for i, w in enumerate(words):
+            cur.append(w)
+            seg_len = w.end - cur[0].start
+            nxt_gap = (words[i + 1].start - w.end) if i + 1 < len(words) else None
+            force = seg_len >= RESEG_MAX_SEGMENT_SEC
+            pause = (
+                nxt_gap is not None
+                and nxt_gap > RESEG_GAP_THRESHOLD_SEC
+                and seg_len >= RESEG_MIN_SEGMENT_SEC
+            )
+            if force or pause:
+                _flush(cur, w.end)
+                cur = []
+        if cur:
+            _flush(cur, cur[-1].end)
+
+    return out
 
 
 def transcribe_chunk_worker(
@@ -139,17 +193,19 @@ def transcribe_chunk_worker(
         initial_prompt="以下是繁體中文的逐字稿。" if normalized_lang == "zh" else None,
     )
 
-    # 收集結果（字型轉換由呼叫端的清洗步驟統一處理）
+    # 收集結果（保留 words 供重切段用；字型轉換由呼叫端的清洗步驟統一處理）
     segments = []
     for segment in segments_list:
         segments.append({
             "start": segment.start,
             "end": segment.end,
-            "text": segment.text
+            "text": segment.text,
+            "words": segment.words,
         })
 
-    # 壓縮重複幻覺，再從壓縮後的 segments 重建 full_text
+    # 壓縮重複幻覺 → 依 word timestamps 重切長段 → 重建 full_text
     segments = _collapse_repeated_segments(segments)
+    segments = _resegment_by_words(segments)
     full_text = " ".join(seg["text"] for seg in segments)
     detected_language = info.language
 
@@ -586,7 +642,8 @@ class WhisperProcessor:
             segments_list.append({
                 "start": segment.start,
                 "end": segment.end,
-                "text": segment.text
+                "text": segment.text,
+                "words": segment.words,  # 保留供重切段；不外流（_resegment 後丟棄）
             })
             if progress_callback and total_duration > 0:
                 try:
@@ -595,7 +652,9 @@ class WhisperProcessor:
                     # 進度回報不該打斷轉錄本身
                     log.warning("whisper.progress_callback.failed", error=str(cb_err))
 
+        # 壓縮重複幻覺 → 依 word timestamps 重切長段（batched 的 VAD 長段 → 碎片）
         segments_list = _collapse_repeated_segments(segments_list)
+        segments_list = _resegment_by_words(segments_list)
         return segments_list, detected_language
 
     def _get_audio_duration(self, audio_path: Path) -> int:
