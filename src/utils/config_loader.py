@@ -99,6 +99,10 @@ def get_parameter(name: str, fallback_env: Optional[str] = None, default: str = 
     導致回空 → lru_cache 鎖死空值 → 之後永遠回 500」這種 poison 情境。
     secrets 為空一定是錯，重打 SSM 比 cache 錯誤值好。
 
+    APP_ENV 路由：APP_ENV=staging 時把 `/transcriber/` 前綴改寫成 `/transcriber-staging/`，
+    讓 staging 環境讀自己那組 SSM secret（與 prod 完全隔離）。所有 19 處 SSM 讀取都經過本
+    函式，故路由集中在此單點。在呼叫時讀 APP_ENV（而非 module 全域）以避開 import 時序疑慮。
+
     Args:
         name: SSM 參數名稱（例如 /transcriber/jwt-secret）
         fallback_env: 本地環境變數名稱（例如 JWT_SECRET_KEY）
@@ -107,6 +111,9 @@ def get_parameter(name: str, fallback_env: Optional[str] = None, default: str = 
     Returns:
         參數值
     """
+    if os.getenv("APP_ENV", "prod") == "staging" and name.startswith("/transcriber/"):
+        name = name.replace("/transcriber/", "/transcriber-staging/", 1)
+
     cache_key = (name, fallback_env, default)
     cached = _param_cache.get(cache_key)
     if cached:
