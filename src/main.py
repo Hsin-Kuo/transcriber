@@ -273,6 +273,10 @@ async def startup_event():
     summary_repo = SummaryRepository(db)
     await _safe_create("summaries", summary_repo.create_indexes())
 
+    from src.database.repositories.summary_log_repo import SummaryLogRepository
+    summary_log_repo = SummaryLogRepository(db)
+    await _safe_create("summary_logs", summary_log_repo.create_indexes())
+
     # RateLimitRepository 用的方法名是 ensure_indexes（不是 create_indexes）
     from src.database.repositories.rate_limit_repo import RateLimitRepository
     rate_limit_repo = RateLimitRepository(db)
