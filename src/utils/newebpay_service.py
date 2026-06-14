@@ -18,8 +18,12 @@ import httpx
 from .config_loader import get_parameter
 
 
+# PeriodTimes = 藍新定期定額的「授權期數」（含 PeriodStartType=2 的首期立即授權）。
+# 月繳：99 期 → 每月自動續扣 ~8 年（標準訂閱，結帳已揭露自動扣款）。
+# 年繳：1 期 → 只扣首期、不自動續訂；一年後 current_period_end 過即降 free，需手動再購。
+#   （刻意設計為一次性：結帳僅揭露月繳自動扣款，年繳不做未揭露的年度自動扣款）
 PERIOD_TIMES_MONTHLY = 99
-PERIOD_TIMES_YEARLY = 10
+PERIOD_TIMES_YEARLY = 1
 
 # 定期定額 PeriodStartType
 PERIOD_START_IMMEDIATE = 2   # 立即執行委託金額授權（新訂閱、升級）
@@ -37,6 +41,12 @@ _BROWSER_USER_AGENT = (
 class NewebpayService:
     """藍新金流服務（Singleton）"""
 
+    # 已知的 sandbox 測試商店 MerchantID（藍新測試環境）。
+    # 測試與正式 MerchantID 都是 MS 開頭、無法用 prefix 區分，故改用「已知 sandbox 值」
+    # 當哨兵：production 環境絕不該出現這些值，出現代表「URL 切正式但金鑰忘了換」。
+    # 新增測試商店時往這裡補值即可。
+    _KNOWN_SANDBOX_MERCHANT_IDS = {"MS359310016"}
+
     def __init__(self):
         self.merchant_id = get_parameter(
             "/transcriber/newebpay-merchant-id",
@@ -51,6 +61,15 @@ class NewebpayService:
             fallback_env="NEWEBPAY_HASH_IV"
         )
         self.env = os.getenv("NEWEBPAY_ENV", "sandbox")
+
+        # env↔金鑰一致性防呆：NEWEBPAY_ENV 只切 gateway URL，金鑰是另外注入的，
+        # 兩者錯配只會在加解密/驗簽階段才爆（使用者付款失敗、難 debug）。
+        # 在 production 下若 MerchantID 仍是已知 sandbox 值，啟動即 fail-fast。
+        if self.env == "production" and self.merchant_id in self._KNOWN_SANDBOX_MERCHANT_IDS:
+            raise RuntimeError(
+                f"NEWEBPAY_ENV=production 但 MerchantID 仍是已知 sandbox 值 "
+                f"({self.merchant_id})；請先把 SSM /transcriber/newebpay-* 換成正式商店金鑰"
+            )
 
     # ── URLs ────────────────────────────────────────────────────
 

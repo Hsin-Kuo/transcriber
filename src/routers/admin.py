@@ -12,6 +12,7 @@ from ..auth.password import hash_password
 from ..database.repositories.user_repo import UserRepository
 from ..database.repositories.task_repo import TaskRepository
 from ..database.repositories.audit_log_repo import AuditLogRepository
+from ..database.repositories.summary_log_repo import SummaryLogRepository
 from ..models.quota import QuotaTier, QUOTA_TIERS
 from ..utils.time_utils import get_utc_timestamp
 from ..utils.audit_logger import log_admin_action
@@ -779,6 +780,10 @@ async def get_task_detail(
     task_user_id = task.get("user", {}).get("user_id") or task.get("user_id")
     task_user_email = task.get("user", {}).get("user_email") or task.get("user_email")
 
+    # AI 摘要生成記錄（每次生成都 append，含時間與 token 消耗）
+    summary_log_repo = SummaryLogRepository(db)
+    summary_logs = await summary_log_repo.list_by_task(task_id)
+
     return {
         "task_id": task.get("_id") or task.get("task_id"),
         "user": {
@@ -808,7 +813,8 @@ async def get_task_detail(
             "started_at": task.get("timestamps", {}).get("started_at") or task.get("started_at"),
             "completed_at": task.get("timestamps", {}).get("completed_at") or task.get("completed_at")
         },
-        "error_message": task.get("error_message") or (task["error"].get("message") if isinstance(task.get("error"), dict) else task.get("error"))
+        "error_message": task.get("error_message") or (task["error"].get("message") if isinstance(task.get("error"), dict) else task.get("error")),
+        "summary_logs": summary_logs
     }
 
 

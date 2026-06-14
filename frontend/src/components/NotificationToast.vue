@@ -8,6 +8,8 @@
           class="notification-toast"
           :class="`notification-${notification.type}`"
           @click="removeNotification(notification.id)"
+          @mouseenter="handleToastMouseEnter(notification)"
+          @mouseleave="handleToastMouseLeave(notification)"
         >
           <div class="notification-icon">
             <svg v-if="notification.type === 'info'" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -50,7 +52,14 @@ import { ref, onMounted, onUnmounted } from 'vue'
 const notifications = ref([])
 let notificationId = 0
 
-function addNotification({ title, message, type = 'info', duration = 5000 }) {
+function addNotification({ title, message, type = 'info', duration }) {
+  // 預設停留時間依類型決定（呼叫端仍可顯式傳 duration 覆寫）：
+  //   error / warning → 永久停留（duration 0），需使用者點擊整則或按關閉鈕才消失，避免重要訊息被錯過
+  //   success / info / processing → 10 秒後自動關閉
+  if (duration === undefined) {
+    duration = (type === 'error' || type === 'warning') ? 0 : 10000
+  }
+
   const id = ++notificationId
   const notification = {
     id,
@@ -61,8 +70,10 @@ function addNotification({ title, message, type = 'info', duration = 5000 }) {
 
   notifications.value.push(notification)
 
+  // error/warning（duration 0）永久停留；其餘存下自動關閉 timer，
+  // 以便 hover-and-leave 提早關時一併清除，避免殘留 setTimeout 空跑
   if (duration > 0) {
-    setTimeout(() => {
+    notification.timer = setTimeout(() => {
       removeNotification(id)
     }, duration)
   }
@@ -73,8 +84,28 @@ function addNotification({ title, message, type = 'info', duration = 5000 }) {
 function removeNotification(id) {
   const index = notifications.value.findIndex(n => n.id === id)
   if (index !== -1) {
-    notifications.value.splice(index, 1)
+    const [removed] = notifications.value.splice(index, 1)
+    if (removed?.timer) clearTimeout(removed.timer)
   }
+  hoverEnterTimes.delete(id)
+}
+
+// hover-and-leave 關閉（所有 toast 皆適用）：記錄進入時間，離開時若停留夠久才關。
+// 對 error/warning 是唯一的自動關閉途徑；對 success 等則是「提早關、忽略剩餘的 10 秒」。
+// dwell 門檻避免滑鼠快速「掠過」誤關。
+const hoverEnterTimes = new Map()
+const HOVER_DWELL_MS = 250
+
+function handleToastMouseEnter(notification) {
+  hoverEnterTimes.set(notification.id, performance.now())
+}
+
+function handleToastMouseLeave(notification) {
+  const enteredAt = hoverEnterTimes.get(notification.id)
+  hoverEnterTimes.delete(notification.id)
+  // 沒有進入紀錄，或停留太短（掠過）→ 不關
+  if (enteredAt === undefined || performance.now() - enteredAt < HOVER_DWELL_MS) return
+  removeNotification(notification.id)
 }
 
 // Expose methods to parent component

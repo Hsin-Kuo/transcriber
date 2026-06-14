@@ -17,9 +17,10 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 # - AWS Web Server / CI 測試：沒裝（requirements-web.txt 不含），WhisperModel = None
 # 用 try/except 比舊版「靠 DEPLOY_ENV 環境變數決定」乾淨：CI 不需特別設環境變數也不會炸
 try:
-    from faster_whisper import WhisperModel
+    from faster_whisper import WhisperModel, BatchedInferencePipeline
 except ImportError:
     WhisperModel = None
+    BatchedInferencePipeline = None
 
 from src.utils.logger import get_logger
 
@@ -179,6 +180,9 @@ class WhisperProcessor:
         """
         self.model = model
         self.model_name = model_name  # 保存模型名稱供 worker 使用
+        self._batched = None  # BatchedInferencePipeline，GPU 路徑首次使用時 lazy 建立
+        # batched 批次大小：每批同時餵 GPU 的 VAD 視窗數。T4 16GB + turbo 可調到 16。
+        self._batch_size = int(os.getenv("WHISPER_BATCH_SIZE", "8"))
 
     def transcribe(
         self,
@@ -207,12 +211,22 @@ class WhisperProcessor:
         return full_text, segments_list, detected_language
 
     def _has_gpu(self) -> bool:
-        """偵測是否有可用 GPU，決定分段轉錄走序列(GPU)或平行(CPU)。"""
+        """偵測是否有可用 GPU，決定走 batched(GPU)或平行多進程(CPU)。"""
         try:
             import torch
             return torch.cuda.is_available()
         except Exception:
             return False
+
+    def _get_batched_model(self):
+        """Lazy 建立並快取 BatchedInferencePipeline（包住同一個 cached model）。
+
+        batched 在 VAD 切出的視窗上做批次推論，GPU 吞吐遠高於逐段序列。
+        只在 GPU 路徑使用——CPU 仍走多進程平行。
+        """
+        if self._batched is None:
+            self._batched = BatchedInferencePipeline(model=self.model)
+        return self._batched
 
     def transcribe_in_chunks(
         self,
@@ -221,16 +235,22 @@ class WhisperProcessor:
         language: Optional[str] = None,
         progress_callback: Optional[callable] = None,
     ) -> Tuple[str, List[Dict], str]:
-        """長音檔分段轉錄。平行(CPU 多核)vs 序列(單 GPU)由 device 自動決定。
+        """長音檔轉錄。GPU 走整檔 batched、CPU 走多進程平行，由 device 自動決定。
 
-        多進程平行只在 CPU 有意義——單張 GPU 上 N 個進程各自載入模型只會搶
-        VRAM、不會更快(GPU 本身已把工作序列化)。對外是單一方法,呼叫端
-        (Orchestrator)不需知道跑在什麼裝置上。
+        GPU：BatchedInferencePipeline 內建 VAD 切分，可直接吞整段長音檔並批次
+        推論，不需手動分段——進度 0→100% 連續、程式更簡單。
+        CPU：單張 GPU 不存在時，多進程平行(各進程獨立模型)才有意義；GPU 上
+        多進程只會搶 VRAM 不會更快。對外是單一方法，呼叫端(Orchestrator)
+        不需知道跑在什麼裝置上。chunk_duration_ms 僅 CPU 平行路徑使用。
         """
         if self._has_gpu():
-            return self._transcribe_in_chunks_serial(
-                audio_path, chunk_duration_ms, language, progress_callback
+            # batched 內建 VAD 切分，整檔單次轉錄即可，毋須手動 25 分鐘分段
+            audio_path = self._ensure_valid_audio(audio_path)
+            segments_list, detected_language = self._transcribe_with_timestamps(
+                audio_path, language, progress_callback=progress_callback,
             )
+            full_text = " ".join(seg["text"] for seg in segments_list)
+            return full_text, segments_list, detected_language
         # 平行版 callback 是 (completed, total[, processing])；統一收斂成 (done, total)
         cb = None
         if progress_callback is not None:
@@ -242,90 +262,6 @@ class WhisperProcessor:
             language=language,
             progress_callback=cb,
         )
-
-    def _transcribe_in_chunks_serial(
-        self,
-        audio_path: Path,
-        chunk_duration_ms: int = 1500000,  # 25 分鐘
-        language: Optional[str] = None,
-        progress_callback: Optional[callable] = None,
-    ) -> Tuple[str, List[Dict], str]:
-        """將音檔分段後轉錄（提高長音檔的準確度）
-
-        Args:
-            audio_path: 音檔路徑
-            chunk_duration_ms: 每段長度（毫秒）
-            language: 語言代碼（None 表示自動偵測）
-            progress_callback: callback(elapsed_seconds, total_seconds)，
-                以整段音檔為單位的時間軸進度。chunked 模式下會自動加上各 chunk 的 time_offset。
-
-        Returns:
-            (完整文字, segments 列表, 偵測到的語言)
-        """
-        audio_path = self._ensure_valid_audio(audio_path)
-        # 獲取音檔總長度
-        total_duration_ms = self._get_audio_duration(audio_path)
-        total_minutes = total_duration_ms / 1000 / 60
-        total_seconds = total_duration_ms / 1000
-        log.debug("transcribe.audio.duration", total_minutes=round(total_minutes, 1))
-
-        # 如果音檔不長，直接轉錄（audio_path 已 normalize，跳過重複 probe）
-        if total_duration_ms <= chunk_duration_ms:
-            log.debug("transcribe.direct.started", chunk_threshold_minutes=chunk_duration_ms / 1000 / 60)
-            segments_list, detected_language = self._transcribe_with_timestamps(
-                audio_path, language, progress_callback=progress_callback,
-            )
-            full_text = " ".join(seg["text"] for seg in segments_list)
-            return full_text, segments_list, detected_language
-
-        # 長音檔：智慧分段處理
-        chunk_entries = self._split_audio_into_chunks(
-            audio_path, total_duration_ms, chunk_duration_ms
-        )
-        num_chunks = len(chunk_entries)
-
-        all_text_parts = []
-        all_segments = []
-        detected_language = None
-
-        for chunk_idx, (chunk_path, time_offset) in enumerate(chunk_entries, start=1):
-            log.debug("transcribe.serial.chunk.started", chunk_idx=chunk_idx, num_chunks=num_chunks)
-
-            # 包裝 callback：chunk 內部 segment 時間（相對 chunk）→ 加 time_offset → 轉成「整段音檔」的時間軸
-            chunk_callback = None
-            if progress_callback:
-                def _wrap(seg_end_in_chunk, _chunk_total, _offset=time_offset, _total=total_seconds):
-                    progress_callback(_offset + seg_end_in_chunk, _total)
-                chunk_callback = _wrap
-
-            chunk_text, chunk_segments, chunk_lang = self.transcribe(
-                chunk_path, language, progress_callback=chunk_callback,
-            )
-
-            all_text_parts.append(chunk_text)
-
-            for seg in chunk_segments:
-                all_segments.append({
-                    "start": seg["start"] + time_offset,
-                    "end": seg["end"] + time_offset,
-                    "text": seg["text"],
-                })
-
-            if detected_language is None:
-                detected_language = chunk_lang
-
-            try:
-                chunk_path.unlink()
-            except Exception as e:
-                log.warning("transcribe.serial.chunk.cleanup_failed", error=str(e))
-
-        full_text = " ".join(all_text_parts)
-        log.info(
-            "transcribe.serial.completed",
-            num_chunks=num_chunks,
-            segment_count=len(all_segments),
-        )
-        return full_text, all_segments, detected_language
 
     def transcribe_in_chunks_parallel(
         self,
@@ -619,8 +555,7 @@ class WhisperProcessor:
 
         segments_list = []
         normalized_lang = _normalize_language(language)
-        segments, info = self.model.transcribe(
-            str(audio_path),
+        transcribe_kwargs = dict(
             language=normalized_lang,
             beam_size=5,
             vad_filter=True,
@@ -632,6 +567,14 @@ class WhisperProcessor:
             hallucination_silence_threshold=2.0,
             initial_prompt="以下是繁體中文的逐字稿。" if normalized_lang == "zh" else None,
         )
+        if self._has_gpu():
+            # GPU：batched 把 VAD 視窗批次餵 GPU，吞吐遠高於逐段序列。
+            # segments 仍是 lazy generator、info.duration 仍有值 → 進度/取消照舊運作。
+            segments, info = self._get_batched_model().transcribe(
+                str(audio_path), batch_size=self._batch_size, **transcribe_kwargs
+            )
+        else:
+            segments, info = self.model.transcribe(str(audio_path), **transcribe_kwargs)
         log.debug("whisper.transcribe.model_returned")
 
         # 獲取 Whisper 偵測到的語言與總時長

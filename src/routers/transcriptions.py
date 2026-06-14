@@ -21,6 +21,7 @@ from ..database.mongodb import get_database
 from ..database.repositories.task_repo import TaskRepository
 from ..dependencies import get_intake_service
 from ..models.intake import IntakeConfig
+from ..models.quota import has_feature
 from ..services.intake_service import TranscriptionIntakeService
 from ..services.task_service import TaskService
 from ..services.utils.audio_validator import (
@@ -1192,6 +1193,18 @@ async def create_batch_transcriptions(
     intake_service: TranscriptionIntakeService = Depends(get_intake_service),
 ):
     """批次建立轉錄任務"""
+    # ── 方案功能檢查：批次上傳僅 Basic 以上方案可用 ──
+    # 強制做在後端，避免 free 使用者繞過前端 UI 直接呼叫此 API。
+    if not has_feature(current_user, "batch_operations"):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "FEATURE_NOT_AVAILABLE",
+                "feature": "batch_operations",
+                "message": "批次上傳為 Basic 以上方案功能，請升級方案後使用",
+            },
+        )
+
     # ── 解析 upload_ids ──
     chunked_uploads_map = {}
     if upload_ids:

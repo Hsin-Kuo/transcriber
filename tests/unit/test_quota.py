@@ -27,6 +27,51 @@ from src.auth.quota import (  # noqa: E402
     build_ai_summary_consumption_pipeline,
     build_transcription_consumption_pipeline,
 )
+from src.models.quota import has_feature, public_tier_plans  # noqa: E402
+
+
+class TestHasFeature:
+    """feature gating 的唯一真實來源——batch_operations 等 flag。"""
+
+    def test_free_lacks_batch_operations(self):
+        assert has_feature({"quota": {"tier": "free", "features": {"batch_operations": False}}}, "batch_operations") is False
+
+    def test_free_has_speaker_diarization(self):
+        # free 方案提供說話者辨識（與方案頁一致），不做 gating
+        assert has_feature({"quota": {"tier": "free"}}, "speaker_diarization") is True
+
+
+class TestPublicTierPlans:
+    """方案頁資料的唯一真實來源——前端 PlanPanel 改抓此 API，不再自行 hardcode。"""
+
+    def test_returns_free_basic_pro_only(self):
+        # enterprise 走業務洽談，不在自助方案頁
+        assert [p["key"] for p in public_tier_plans()] == ["free", "basic", "pro"]
+
+    def test_shape_matches_frontend_fields(self):
+        free = next(p for p in public_tier_plans() if p["key"] == "free")
+        assert set(free) == {"key", "duration", "concurrent", "aiSummaries", "audioRetention", "keepAudio", "features"}
+        assert free["duration"] == 180
+        assert free["features"]["batch_operations"] is False
+        assert free["features"]["speaker_diarization"] is True
+
+    def test_no_price_leaked(self):
+        # 價格綁金流設定，不從此 API 下發
+        assert all("price" not in p and "name" not in p for p in public_tier_plans())
+
+    def test_basic_has_batch_operations(self):
+        assert has_feature({"quota": {"tier": "basic", "features": {"batch_operations": True}}}, "batch_operations") is True
+
+    def test_legacy_doc_missing_features_falls_back_to_tier(self):
+        # 舊 user 文件缺 features → 退回該 tier 在 QUOTA_TIERS 的預設，不可誤判為有權限
+        assert has_feature({"quota": {"tier": "free"}}, "batch_operations") is False
+        assert has_feature({"quota": {"tier": "basic"}}, "batch_operations") is True
+
+    def test_missing_quota_defaults_to_free(self):
+        assert has_feature({}, "batch_operations") is False
+
+    def test_unknown_feature_is_false(self):
+        assert has_feature({"quota": {"tier": "pro"}}, "nonexistent_feature") is False
 
 
 class TestGetTierDefault:
@@ -107,6 +152,133 @@ class TestMonthlyReset:
         user = {"_id": "u1", "subscription": {}, "usage": usage}
         result = await QuotaManager._reset_monthly_quota_if_needed(user, usage, db=None)
         assert result is usage  # 同月 → 不重置
+
+    async def test_reset_reapplies_latest_tier_quota(self):
+        # 換月時依 tier 重新套用最新方案：stale 快照會被刷新成 QUOTA_TIERS 現值
+        from src.models.quota import QUOTA_TIERS, QuotaTier
+        user = {
+            "_id": "u1", "subscription": {},
+            "quota": {"tier": "free", "max_duration_minutes": 9999},  # 舊快照
+            "usage": {"duration_minutes": 50, "last_reset": datetime.utcnow() - timedelta(days=40)},
+        }
+        await QuotaManager._reset_monthly_quota_if_needed(user, user["usage"], db=None)
+        assert user["quota"]["max_duration_minutes"] == QUOTA_TIERS[QuotaTier.FREE]["max_duration_minutes"]
+        assert user["quota"]["tier"] == "free"
+        assert user["quota"]["features"]["speaker_diarization"] is True
+
+    async def test_reset_keeps_unknown_tier_quota_untouched(self):
+        # 無法辨識的 tier → 不覆寫 quota，避免破壞資料
+        user = {
+            "_id": "u1", "subscription": {},
+            "quota": {"tier": "bogus", "max_duration_minutes": 9999},
+            "usage": {"duration_minutes": 50, "last_reset": datetime.utcnow() - timedelta(days=40)},
+        }
+        await QuotaManager._reset_monthly_quota_if_needed(user, user["usage"], db=None)
+        assert user["quota"]["max_duration_minutes"] == 9999
+
+    async def test_expired_paid_user_does_not_revert_to_paid_quota(self):
+        # 回歸：訂閱到期降為 free 後，月配額重套不可讀到 stale 付費 tier 而把 free 覆寫回付費。
+        # 到期降級只在 db 可寫時觸發，故用 fake db 走真實路徑（_id 須為合法 ObjectId）。
+        from src.models.quota import QUOTA_TIERS, QuotaTier
+
+        class _FakeUsers:
+            def __init__(self): self.sets = []
+            async def update_one(self, flt, update): self.sets.append(update.get("$set", {}))
+
+        class _FakeDB:
+            def __init__(self): self.users = _FakeUsers()
+
+        db = _FakeDB()
+        user = {
+            "_id": "507f1f77bcf86cd799439011",
+            "subscription": {
+                "status": "active",
+                "current_period_end": datetime.utcnow() - timedelta(days=2),  # 已到期
+            },
+            "quota": {"tier": "basic", "max_duration_minutes": 600},
+            "usage": {"duration_minutes": 100, "last_reset": datetime.utcnow() - timedelta(days=40)},
+        }
+        await QuotaManager._reset_monthly_quota_if_needed(user, user["usage"], db=db)
+        assert user["quota"]["tier"] == "free"
+        assert user["quota"]["max_duration_minutes"] == QUOTA_TIERS[QuotaTier.FREE]["max_duration_minutes"]
+        # 寫回 DB 的 quota 也必須是 free，而非 basic
+        quota_writes = [s["quota"]["tier"] for s in db.users.sets if "quota" in s]
+        assert quota_writes and all(t == "free" for t in quota_writes)
+
+
+class TestMonthlyRefillHelpers:
+    """週月運算純函數——年繳週期內每月 refill 的判斷基礎。"""
+
+    def test_months_elapsed_anniversary(self):
+        from src.auth.quota import _months_elapsed
+        assert _months_elapsed(datetime(2026, 1, 15), datetime(2026, 1, 20)) == 0
+        assert _months_elapsed(datetime(2026, 1, 15), datetime(2026, 2, 14)) == 0  # 未滿週月
+        assert _months_elapsed(datetime(2026, 1, 15), datetime(2026, 2, 15)) == 1
+        assert _months_elapsed(datetime(2026, 1, 15), datetime(2027, 3, 15)) == 14
+
+    def test_months_elapsed_month_end_overflow(self):
+        from src.auth.quota import _months_elapsed
+        # 1/31 起算、2 月僅 28 天 → 2/28 視為滿一個週月
+        assert _months_elapsed(datetime(2026, 1, 31), datetime(2026, 2, 28)) == 1
+
+    def test_due_monthly_refill(self):
+        from src.auth.quota import _due_monthly_refill
+        ps = datetime(2026, 1, 15)
+        assert _due_monthly_refill(ps, datetime(2026, 1, 20), datetime(2026, 2, 16)) is True   # 跨入第 1 週月
+        assert _due_monthly_refill(ps, datetime(2026, 2, 16), datetime(2026, 2, 28)) is False  # 同一週月格內
+
+
+class TestYearlyIntraPeriodRefill:
+    """D1+D2+D4：年繳訂閱在年度週期內每月 refill，但不重套方案（凍結繳費當下額度）。"""
+
+    def _yearly_user(self, last_reset_dt, quota_minutes=9999):
+        # period_start = 2026-01-10，period_end 一年後（未到期）
+        ps = datetime(2026, 1, 10)
+        return {
+            "_id": "u1",
+            "subscription": {
+                "status": "active", "billing_cycle": "yearly",
+                "current_period_start": ps.timestamp(),
+                "current_period_end": datetime(2027, 1, 10).timestamp(),
+            },
+            "quota": {"tier": "pro", "max_duration_minutes": quota_minutes},
+            "usage": {"duration_minutes": 500, "last_reset": last_reset_dt},
+        }
+
+    async def test_yearly_crosses_month_refills_without_reapply(self):
+        # last_reset 在第 0 週月（1/20），now 進到第 2 週月（3/15）→ 應 refill
+        user = self._yearly_user(datetime(2026, 1, 20), quota_minutes=9999)
+        now = datetime(2026, 3, 15)
+        result = await QuotaManager._reset_monthly_quota_if_needed(user, user["usage"], db=None, now=now)
+        assert result["duration_minutes"] == 0                      # 有 refill（歸零用量）
+        assert user["quota"]["max_duration_minutes"] == 9999        # 年繳週期內：不重套，凍結繳費當下額度
+        assert user["quota"]["tier"] == "pro"
+
+    async def test_yearly_same_month_no_reset(self):
+        # last_reset 已在第 1 週月（2/20），now 仍在第 1 週月（2/28）→ 不重置
+        user = self._yearly_user(datetime(2026, 2, 20))
+        now = datetime(2026, 2, 28)
+        result = await QuotaManager._reset_monthly_quota_if_needed(user, user["usage"], db=None, now=now)
+        assert result is user["usage"]
+
+    async def test_monthly_active_reapplies_latest(self):
+        # 月繳訂閱若走到 lazy refill（跨週期）→ 重套最新方案
+        from src.models.quota import QUOTA_TIERS, QuotaTier
+        ps = datetime(2026, 1, 10)
+        user = {
+            "_id": "u1",
+            "subscription": {
+                "status": "active", "billing_cycle": "monthly",
+                "current_period_start": ps.timestamp(),
+                "current_period_end": datetime(2026, 2, 9).timestamp(),
+            },
+            "quota": {"tier": "basic", "max_duration_minutes": 9999},  # stale
+            "usage": {"duration_minutes": 300, "last_reset": datetime(2026, 1, 5)},
+        }
+        # now 跨過 period_start（1/10 > 1/5 last_reset 即觸發），重套 basic 最新值
+        result = await QuotaManager._reset_monthly_quota_if_needed(user, user["usage"], db=None, now=datetime(2026, 2, 12))
+        assert result["duration_minutes"] == 0
+        assert user["quota"]["max_duration_minutes"] == QUOTA_TIERS[QuotaTier.BASIC]["max_duration_minutes"]
 
 
 class TestConsumptionPipelines:

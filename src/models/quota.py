@@ -50,7 +50,7 @@ QUOTA_TIERS = {
         "audio_retention_days": 3,         # 音檔保留天數（S3 Lifecycle）
         "max_keep_audio": 0,               # 手動保留音檔額度
         "features": {
-            "speaker_diarization": False,
+            "speaker_diarization": True,   # free 亦提供說話者辨識（與方案頁一致）
             "punctuation": True,
             "batch_operations": False,
             "priority_processing": False
@@ -122,3 +122,42 @@ def tier_default(user: dict, field: str):
         tier_enum = QuotaTier.FREE
     free_default = QUOTA_TIERS[QuotaTier.FREE].get(field)
     return QUOTA_TIERS[tier_enum].get(field, free_default)
+
+
+# 方案頁公開顯示的 tier（enterprise 走業務洽談，不在自助方案頁）
+PUBLIC_TIERS = [QuotaTier.FREE, QuotaTier.BASIC, QuotaTier.PRO]
+
+
+def public_tier_plans() -> list:
+    """方案頁所需的 tier 結構（額度 limits + feature flags），對映成前端 PlanPanel 的欄位名。
+
+    這是「方案功能與額度」的唯一真實來源——前端不再自行 hardcode 一份。
+    價格不在此：價格的真實來源綁金流設定（見 frontend/src/constants/pricing.js 註解）。
+    """
+    plans = []
+    for tier in PUBLIC_TIERS:
+        cfg = QUOTA_TIERS[tier]
+        plans.append({
+            "key": tier.value,
+            "duration": cfg["max_duration_minutes"],
+            "concurrent": cfg["max_concurrent_tasks"],
+            "aiSummaries": cfg["max_ai_summaries"],
+            "audioRetention": cfg["audio_retention_days"],
+            "keepAudio": cfg["max_keep_audio"],
+            "features": cfg["features"],
+        })
+    return plans
+
+
+def has_feature(user: dict, feature: str) -> bool:
+    """判斷 user 是否擁有某 feature flag（batch_operations / speaker_diarization …）。
+
+    後端 feature gating 的唯一真實來源：優先讀 user.quota.features，
+    缺該欄位時退回該 tier 在 QUOTA_TIERS 的預設（與 tier_default 相同的 fallback 策略），
+    避免舊 user 文件缺 features 時誤判為有權限。
+    """
+    features = (user.get("quota") or {}).get("features")
+    if isinstance(features, dict) and feature in features:
+        return bool(features[feature])
+    tier_features = tier_default(user, "features") or {}
+    return bool(tier_features.get(feature, False))

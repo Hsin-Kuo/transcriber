@@ -10,6 +10,11 @@
       </router-view>
     </main>
     <NotificationToast ref="notificationToast" />
+    <!-- 全域上傳進度浮層：跳頁也持續顯示大檔上傳進度 -->
+    <GlobalUploadProgress />
+    <!-- 全域方案面板 / 額度不足對話框（任何頁面可觸發）-->
+    <PlanPanel v-model="uiStore.planPanelOpen" :current-tier="currentTier" @plan-changed="handlePlanChanged" />
+    <QuotaExceededModal />
     <!-- 右下角三角形裝飾線 -->
     <!-- <svg class="corner-decoration" viewBox="0 0 130 100" preserveAspectRatio="xMaxYMax meet"> -->
       <!-- 正三角形的兩條上邊（從右下角→頂點→左下角） -->
@@ -25,14 +30,33 @@
 </template>
 
 <script setup>
-import { ref, provide, computed, onMounted, onUnmounted } from 'vue'
+import { ref, provide, computed, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import ElectricBorder from './components/shared/ElectricBorder.vue'
 import Navigation from './components/shared/Navigation.vue'
 import NotificationToast from './components/NotificationToast.vue'
+import GlobalUploadProgress from './components/GlobalUploadProgress.vue'
+// 方案面板與額度對話框只在使用者主動觸發時才需要 → 延後載入，不進主 bundle
+const PlanPanel = defineAsyncComponent(() => import('./components/PlanPanel.vue'))
+const QuotaExceededModal = defineAsyncComponent(() => import('./components/QuotaExceededModal.vue'))
+import { useAuthStore } from './stores/auth'
+import { useUiStore } from './stores/ui'
 
+const { t: $t } = useI18n()
 const route = useRoute()
 const notificationToast = ref(null)
+const authStore = useAuthStore()
+const uiStore = useUiStore()
+const currentTier = computed(() => authStore.quota?.tier || 'free')
+
+function handlePlanChanged(event) {
+  if (event.action === 'upgraded') {
+    notificationToast.value?.addNotification({ title: $t('userSettings.subscription.upgradedSuccess'), type: 'success' })
+  } else if (event.action === 'downgraded') {
+    notificationToast.value?.addNotification({ title: $t('userSettings.subscription.downgradedSuccess'), type: 'success' })
+  }
+}
 
 // 判斷是否顯示導航欄（訪客頁面不顯示）
 const showNavigation = computed(() => {

@@ -104,20 +104,40 @@
           </div>
         </div>
       </div>
+
+      <!-- 加購額度（basic / pro 用戶才顯示；一次性購買、跨月保留）-->
+      <div v-if="currentTier !== 'free' && addons.length" class="addons-section">
+        <h3 class="addons-title">{{ $t('userSettings.planPanel.addonsTitle') }}</h3>
+        <p class="addons-subtitle">{{ $t('userSettings.planPanel.addonsSubtitle') }}</p>
+        <div class="addons-grid">
+          <div v-for="addon in addons" :key="addon._id" class="addon-card">
+            <div class="addon-info">
+              <span class="addon-label">{{ addonLabel(addon) }}</span>
+              <span class="addon-price">NT${{ addon.price_twd }}</span>
+            </div>
+            <button class="addon-buy-btn" @click="buyAddon(addon)">
+              {{ $t('userSettings.planPanel.buyAddon') }}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </Teleport>
 </template>
 
 <script setup>
-import { ref, toRef } from 'vue'
+import { ref, toRef, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
 import { useFocusTrap } from '../composables/useFocusTrap'
+import { useAddonLabel } from '../composables/useAddonLabel'
+import { TIER_PRICES } from '../constants/pricing'
 
 const { t: $t } = useI18n()
 const router = useRouter()
 const authStore = useAuthStore()
+const addonLabel = useAddonLabel()
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -131,6 +151,30 @@ useFocusTrap(panelRef, toRef(props, 'modelValue'))
 
 const changingPlan = ref(false)
 const tierOrder = { free: 0, basic: 1, pro: 2 }
+
+// 加購額度套餐（一次性購買）— basic/pro 用戶開啟面板時才載入
+const addons = ref([])
+
+async function loadAddons() {
+  if (props.currentTier === 'free' || addons.value.length) return
+  try {
+    addons.value = (await authStore.getPackages()) || []
+  } catch (e) {
+    addons.value = []  // 載入失敗不影響方案瀏覽
+  }
+}
+
+watch(() => props.modelValue, (open) => {
+  if (open) {
+    loadPlans()
+    loadAddons()
+  }
+})
+
+function buyAddon(addon) {
+  emit('update:modelValue', false)
+  router.push({ path: '/checkout', query: { addon: addon._id } })
+}
 
 function isUpgrade(planKey) {
   return tierOrder[planKey] > tierOrder[props.currentTier]
@@ -200,59 +244,23 @@ async function selectPlan(planKey) {
 
 const billing = ref('monthly')
 
-const plans = [
-  {
-    key: 'free',
-    duration: 180,
-    concurrent: 1,
-    aiSummaries: 3,
-    audioRetention: 3,
-    keepAudio: 0,
-    features: {
-      speaker_diarization: true,
-      punctuation: true,
-      batch_operations: false,
-      priority_processing: false
-    }
-  },
-  {
-    key: 'basic',
-    duration: 600,
-    concurrent: 2,
-    aiSummaries: 30,
-    audioRetention: 7,
-    keepAudio: 10,
-    features: {
-      speaker_diarization: true,
-      punctuation: true,
-      batch_operations: true,
-      priority_processing: false
-    }
-  },
-  {
-    key: 'pro',
-    duration: 3000,
-    concurrent: 5,
-    aiSummaries: 100,
-    audioRetention: 7,
-    keepAudio: 30,
-    features: {
-      speaker_diarization: true,
-      punctuation: true,
-      batch_operations: true,
-      priority_processing: true
-    }
-  }
-]
+// 方案定義（額度 + features）的唯一真實來源在後端 QUOTA_TIERS，透過 /subscriptions/tiers 下發。
+// 價格仍由前端 pricing.js 提供（綁金流設定，見該檔註解）。
+const plans = ref([])
 
-const twd = {
-  free:  { monthly: 0,   yearly: 0 },
-  basic: { monthly: 299, yearly: 3289 },
-  pro:   { monthly: 899, yearly: 9889 },
+async function loadPlans() {
+  if (plans.value.length) return
+  try {
+    plans.value = (await authStore.getTiers()) || []
+  } catch (e) {
+    plans.value = []  // 載入失敗不影響面板開啟；不 hardcode fallback 以維持單一來源
+  }
 }
 
+onMounted(loadPlans)
+
 function getPrice(plan) {
-  const prices = twd[plan.key] || { monthly: 0, yearly: 0 }
+  const prices = TIER_PRICES[plan.key] || { monthly: 0, yearly: 0 }
   if (billing.value === 'yearly') {
     return prices.yearly > 0
       ? `NT$${Math.round(prices.yearly / 12)}`
@@ -494,10 +502,92 @@ function getPrice(plan) {
   color: var(--main-text-light);
 }
 
+/* 加購額度區 */
+.addons-section {
+  padding: 0 28px 28px;
+  margin-top: 4px;
+  padding-top: 20px;
+}
+
+.addons-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--main-text);
+  margin: 0 0 4px 0;
+}
+
+.addons-subtitle {
+  font-size: 0.8rem;
+  color: var(--main-text-light);
+  margin: 0 0 16px 0;
+  line-height: 1.4;
+}
+
+.addons-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.addon-card {
+  border: 1px solid var(--color-divider, rgba(163, 177, 198, 0.3));
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.addon-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.addon-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--main-text);
+}
+
+.addon-price {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: var(--main-text);
+}
+
+/* 比照 .plan-select-btn（中性框 + 主文字色，hover 填滿主色）*/
+.addon-buy-btn {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--color-divider, rgba(163, 177, 198, 0.3));
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  background: transparent;
+  color: var(--main-text);
+  transition: all 0.2s ease;
+}
+
+.addon-buy-btn:hover {
+  background: var(--main-primary);
+  border-color: var(--main-primary);
+  color: white;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .plan-panel {
     width: 100vw;
+  }
+
+  .addons-section {
+    padding: 20px 16px 16px;
+  }
+
+  .addons-grid {
+    grid-template-columns: 1fr;
   }
 
   .plans-grid {
