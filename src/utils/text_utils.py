@@ -104,6 +104,64 @@ def align_segments_to_punctuated_text(segments: List[Dict], punctuated_text: str
     return result
 
 
+# 句末標點（半形與全形都列，因可能在 convert 全形之前執行）
+_SENTENCE_END_PUNCT = "。！？!?…"
+
+
+def split_segments_at_sentence_punctuation(segments: List[Dict]) -> List[Dict]:
+    """在 Gemini 標點之後，把每個 segment 依句末標點切成「句子級」子 segment。
+
+    中文 whisper 不吐標點 → 早期(word-timestamp)切只能依停頓/長度、會切在句中。
+    句子邊界只有 Gemini 加完標點才有，故在 align 之後做這步。
+
+    計時：在原 segment 的 [start, end] 內，依各句字數比例線性分配（段已不長 →
+    比例插值夠用；不需把 word timestamps 穿過整條 pipeline）。speaker 等欄位沿用母段。
+    無句末標點（標點失敗 / use_punctuation=False）→ 該段原樣保留。
+    """
+    if not segments:
+        return segments
+
+    out: List[Dict] = []
+    for seg in segments:
+        text = seg.get("text") or ""
+        # 依句末標點切，標點留在句尾
+        sentences, cur = [], ""
+        for ch in text:
+            cur += ch
+            if ch in _SENTENCE_END_PUNCT:
+                sentences.append(cur)
+                cur = ""
+        if cur:
+            sentences.append(cur)
+
+        # 0 或 1 句（無句末標點）→ 不動
+        if len([s for s in sentences if s.strip()]) <= 1:
+            out.append(seg)
+            continue
+
+        start = seg.get("start", 0.0)
+        end = seg.get("end", start)
+        dur = max(0.0, end - start)
+        total = sum(len(s) for s in sentences) or 1
+        cum = 0
+        for s in sentences:
+            seg_chars = len(s)
+            if not s.strip():
+                cum += seg_chars
+                continue
+            sub_start = start + dur * (cum / total)
+            cum += seg_chars
+            sub_end = start + dur * (cum / total)
+            out.append({
+                **seg,
+                "start": round(sub_start, 3),
+                "end": round(sub_end, 3),
+                "text": s.strip(),
+            })
+
+    return out
+
+
 def convert_segments_punctuation(segments: List[Dict]) -> List[Dict]:
     """將 segments 中的半形標點符號轉換為全形
 
