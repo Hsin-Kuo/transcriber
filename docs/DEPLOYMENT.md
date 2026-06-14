@@ -84,7 +84,7 @@ gh pr merge --merge                          # → 觸發 deploy-aws.yml
 |------|-----|
 | 網址 | `https://staging.soundlite.app`（Cloudflare Access 鎖 email allowlist；`/subscriptions/notify/*`、`/webhooks/*`、`/health` 為 bypass） |
 | Web EC2 | `i-0e328071b52856681`（t3.micro），EIP `52.196.120.189` |
-| GPU Worker | `i-015808e5cedccd77f`（g4dn.xlarge On-Demand，**手動啟動**，idle 3 分鐘自停） |
+| GPU Worker | `i-01a34a514d56269db`（g4dn.xlarge On-Demand，**手動啟動**，idle 3 分鐘自停） |
 | 資源 | SQS `transcriber-tasks-staging`、S3 `transcriber-files-staging-...`、Atlas **M0**（獨立 project）、SSM `/transcriber-staging/*` |
 | Admin 帳號 | `admin@example.com` / `Admin@123456`（在 Cloudflare Access 後，刻意用弱密碼） |
 
@@ -92,7 +92,7 @@ gh pr merge --merge                          # → 觸發 deploy-aws.yml
 
 **測轉錄**（worker 平常停著）：
 ```bash
-aws ec2 start-instances --region ap-northeast-1 --instance-ids i-015808e5cedccd77f
+aws ec2 start-instances --region ap-northeast-1 --instance-ids i-01a34a514d56269db
 # ~3-5 分鐘 ready → 自動 git reset origin/staging + 載模型 + poll staging SQS
 # 測完 idle 3 分鐘自動關機（要手動關：aws ec2 stop-instances ...）
 ```
