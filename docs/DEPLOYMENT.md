@@ -18,30 +18,31 @@ GitHub (aws branch)
 
 ## 一般功能開發部署
 
-### 開發流程（feature branch → PR → main → ff aws → deploy）
+### 開發流程（三層分支：feature → main → staging → aws）
 
-`main` 跟 `aws` 已設 branch protection（[詳細規則](#branch-protection)）。**不准直接 push** 任一分支。
+`main` / `staging` / `aws` 都有 branch protection（[詳細規則](#branch-protection)）。**不准直接 push**。
+升級鏈靠 **Promotion Guard** workflow 強制來源分支：只有 `main` 能 PR 進 `staging`、只有 `staging` 能 PR 進 `aws`。`main` **不部署**（純整合層）。
 
 ```bash
-# 1. 開新 feature
+# 1. feature → main（整合，不部署）
 git checkout main && git pull
 git checkout -b feature/xxx
-
-# 2. 開發 + commit
-# ... 略 ...
-
-# 3. push branch + open PR（CI 跑 5 個 status check）
+# 開發 + commit
 git push -u origin feature/xxx
-gh pr create --base main
-
-# 4. CI 通過後 merge
+gh pr create --base main                    # CI 跑 5 個 status check
 gh pr merge --squash --delete-branch
 
-# 5. Deploy
-git checkout aws && git pull
-git merge --ff-only origin/main
-git push origin aws                # 觸發 deploy-aws.yml
+# 2. main → staging（部署 + 驗證 staging）
+gh pr create --base staging --head main     # Promotion Guard 檢查 head=main
+gh pr merge --merge                          # ⚠️ 用 merge commit（非 squash）→ 觸發 deploy-staging.yml
+# 在 https://staging.soundlite.app 驗證；要測轉錄先起 GPU worker（見「Staging 環境」）
+
+# 3. staging → aws（部署 prod）
+gh pr create --base aws --head staging       # Promotion Guard 檢查 head=staging
+gh pr merge --merge                          # → 觸發 deploy-aws.yml
 ```
+
+> **環境分支（staging / aws）一律用 merge commit 合併，不要 squash**——squash 會讓環境分支與 main 分歧，之後每次 promotion PR 都重列一堆 commit。
 
 ### GitHub Actions 自動執行的步驟
 
@@ -64,11 +65,45 @@ git push origin aws                # 觸發 deploy-aws.yml
 - ❌ 直接 SSH 改 EC2 上的 unit → 下次 deploy 會被覆蓋掉，且改動沒在 git，造成 drift
 - 在本機沒辦法跑 `systemd-analyze verify`（macOS 沒 systemd），靠 CI deploy 階段驗證 + `is-active --quiet` 兜底
 
-### Branch protection
+### Branch protection（三層）
 
-- `main`: 必須走 PR，5 個 status check（Ruff / Pytest / Nginx conf / Frontend lint × 2）全過才能合
-- `aws`: 禁 force push、禁刪除、強制 linear history（只接受 ff merge from main）
+- `main`: PR + 5 個 status check（Ruff / Pytest / Nginx conf / Frontend lint × 2），來源不限
+- `staging`: 上述 5 個 + **Promotion Guard**（限來源=`main`）；push staging → `deploy-staging.yml`
+- `aws`: 上述 5 個 + **Promotion Guard**（限來源=`staging`）；push aws → `deploy-aws.yml`
+- 三者皆禁 force push / 禁刪除
+- **Promotion Guard**（`.github/workflows/promotion-guard.yml`）：GitHub 原生無法限制 PR 來源分支，故用此 required check 強制三層升級鏈
 - Admin（你）可 bypass，但 bypass 會留在 GitHub 個人 security log
+
+---
+
+## Staging 環境
+
+與 prod **物理隔離**的 pre-prod 環境（完整規劃見 [`STAGING_PLAN.md`](./STAGING_PLAN.md)）。
+
+| 項目 | 值 |
+|------|-----|
+| 網址 | `https://staging.soundlite.app`（Cloudflare Access 鎖 email allowlist；`/subscriptions/notify/*`、`/webhooks/*`、`/health` 為 bypass） |
+| Web EC2 | `i-0e328071b52856681`（t3.micro），EIP `52.196.120.189` |
+| GPU Worker | `i-01a34a514d56269db`（g4dn.xlarge On-Demand，**手動啟動**，idle 3 分鐘自停） |
+| 資源 | SQS `transcriber-tasks-staging`、S3 `transcriber-files-staging-...`、Atlas **M0**（獨立 project）、SSM `/transcriber-staging/*` |
+| Admin 帳號 | `admin@example.com` / `Admin@123456`（在 Cloudflare Access 後，刻意用弱密碼） |
+
+**部署**：PR `main → staging` merge → `deploy-staging.yml` 自動部署 web（只部使用者前端，不含 admin）。
+
+**測轉錄**（worker 平常停著）：
+```bash
+aws ec2 start-instances --region ap-northeast-1 --instance-ids i-01a34a514d56269db
+# ~3-5 分鐘 ready → 自動 git reset origin/staging + 載模型 + poll staging SQS
+# 測完 idle 3 分鐘自動關機（要手動關：aws ec2 stop-instances ...）
+```
+
+**佈建新 worker**（可重現，prod/staging 共用）：
+```bash
+bash deploy/deploy-gpu-worker.sh staging   # 自動裝 ffmpeg / git deploy key / clone / 預裝 deps / unit
+```
+
+> 環境路由靠 `APP_ENV=staging` → `config_loader.get_parameter` 把 `/transcriber/*` 改讀 `/transcriber-staging/*`（與 prod secret 完全隔離）。
+> ⚠️ DLAMI / EC2 base 都**不含 ffmpeg**（intake 量時長、worker 解碼都需要）→ 已收進 `deploy-web.sh` / `deploy-gpu-worker.sh`。ML 依賴（torch / pyannote / huggingface_hub）已在 `requirements.txt` 釘版本，避免新機抓 bleeding-edge 爆掉。
 
 ---
 

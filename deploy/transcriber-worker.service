@@ -22,7 +22,7 @@ EnvironmentFile=/opt/transcriber/.env.worker
 Environment="PYTHONUNBUFFERED=1"
 Environment="PATH=/usr/local/bin:/home/ec2-user/.local/bin:/usr/bin:/bin"
 ExecStartPre=/bin/bash -c 'cd /opt/transcriber && git fetch origin ${DEPLOY_BRANCH} && git reset --hard origin/${DEPLOY_BRANCH}'
-ExecStartPre=/bin/bash -c 'cd /opt/transcriber && pip install -r requirements.txt -q 2>&1 | tail -1'
+ExecStartPre=/bin/bash -c 'cd /opt/transcriber && pip install -r requirements-worker.lock -q 2>&1 | tail -1'
 ExecStart=/usr/bin/python3.12 -m src.worker
 Restart=on-failure
 RestartSec=10
