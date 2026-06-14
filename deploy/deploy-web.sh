@@ -8,6 +8,19 @@ echo "=== 安裝系統依賴 ==="
 sudo dnf update -y
 sudo dnf install -y python3.11 python3.11-pip git nginx
 
+# ffmpeg/ffprobe：intake 用 ffprobe 量音檔時長（audio_service.get_audio_duration），
+# 缺了會回 duration=0 → reservation_repo 擋「duration_minutes 必須為正數」。
+# AL2023 dnf 沒有 ffmpeg → 裝 static binary 到 /usr/local/bin。
+if ! command -v ffprobe >/dev/null; then
+  echo "=== 安裝 ffmpeg static binary ==="
+  cd /tmp
+  curl -fsSL -o ffmpeg.tar.xz https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+  tar xf ffmpeg.tar.xz
+  D=$(ls -d ffmpeg-*-static | head -1)
+  sudo cp "$D/ffmpeg" "$D/ffprobe" /usr/local/bin/
+  rm -rf ffmpeg.tar.xz "$D"
+fi
+
 echo "=== 建立應用目錄 ==="
 sudo mkdir -p /opt/transcriber
 sudo chown ec2-user:ec2-user /opt/transcriber
