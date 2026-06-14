@@ -59,6 +59,12 @@ jobs:
           docker run --rm \
             -v "$PWD/deploy/nginx-ec2.conf:/etc/nginx/conf.d/test.conf:ro" \
             nginx:alpine nginx -t
+      # 分開掛載各自驗證：兩份都定義同名 limit_req_zone，同時載入會 duplicate zone 衝突
+      - name: Validate nginx-staging.conf
+        run: |
+          docker run --rm \
+            -v "$PWD/deploy/nginx-staging.conf:/etc/nginx/conf.d/test.conf:ro" \
+            nginx:alpine nginx -t
 
   frontend-lint:
     name: Frontend ESLint + type-check + test
