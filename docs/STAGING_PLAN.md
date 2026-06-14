@@ -24,14 +24,14 @@
 | 3 | **GPU g4dn.xlarge On-Demand** | 跑跟 prod 完全相同的 batched-GPU 轉錄路徑，pre-prod gate 才有保真度（CPU 會走不同路徑且需改 `model_cache` 的 float16） |
 | 4 | **Cloudflare Access**：email allowlist + webhook/health bypass（金流測試在即，現在就加） | 機器回呼（藍新 notify / Resend webhook）自帶驗證，bypass 不降安全；人類流程走 Access 登入 |
 | 5 | **取碼 = systemd `ExecStartPre` `git reset --hard origin/<branch>`** | 已實證 prod worker 就是這樣（origin/aws）；順手把 worker unit 收成 repo-as-source，補掉 IaC 破口 |
-| 6 | **Atlas staging M2 allowlist = `0.0.0.0/0`** | 鏡像 prod（實證 prod worker 每次開機都是動態 IP、無 EIP 仍能連），靠帳密 + TLS 保護 |
+| 6 | **Atlas staging M0（免費）+ allowlist `0.0.0.0/0`** | staging 資料可丟棄、不需備份；M0 功能（含 transaction，本身是 replica set）與付費 tier 一致 → 當功能 gate 足夠。allowlist 鏡像 prod（worker 動態 IP），靠帳密 + TLS 保護 |
 | 7 | **三層分支** `feature → main(不部署) → staging → aws`，**guard workflow 強制來源分支** | 所有改動必經 staging 驗證才進 prod；GitHub 原生無法限制 PR 來源，靠 required status check 強制 |
 
 ### 沿用舊版仍有效的決策
 
 | 項目 | 決策 |
 |------|------|
-| MongoDB tier | Staging **M2**（每日快照備份；⚠️ **PITR 需 M10+ dedicated**，M2/M5 shared tier 沒有 PITR） |
+| MongoDB tier | Staging **M0（免費）**；**prod 升 Flex 拆成獨立任務**（見下）。⚠️ Atlas 已用 **Flex** 取代 M2/M5 shared tier，新建大概率看不到 M2 |
 | Staging web server | **新開 t3.micro** |
 | SSM 路徑 | `/transcriber-staging/*`（與 prod `/transcriber/*` 完全隔離） |
 | 對外入口 | **單一網域 `staging.soundlite.app`**（不拆 landing/app/admin；先不部 admin） |
@@ -47,7 +47,7 @@
 |---|------|------|------|
 | P1 | **On-Demand G 配額 = 4 vCPU（硬天花板）** | 🟡 申請已送出（2026-06-14，待審批） | 實測 On-Demand G 與 Spot G 配額**都只有 4**，g4dn.xlarge 吃滿 4。staging on-demand worker 與 **prod on-demand 備援 worker 無法同時存在**。已透過 Console 送出 On-Demand G 4→8 申請；批准前若 prod failover，暫停 staging 測試 |
 | P2 | **`transcriber.service` 無 `EnvironmentFile`** | 🔴 必修 | web env 靠 `main.py` 的 `load_dotenv()` 在執行期讀，systemd 不知道 → 無法用 `${WEB_CONCURRENCY}`。需給 unit 加 `EnvironmentFile=-/opt/transcriber/.env` + `Environment=WEB_CONCURRENCY=2`（見 2-D） |
-| P3 | **Atlas M2 無 PITR** | 🟡 前提修正 | M2/M5 shared tier 只有每日快照；PITR 需 M10+。若 staging 只為驗證，每日快照夠用；別把它當 PITR 演練 |
+| P3 | **staging tier 改用 M0（免費）** | ✅ 已決策 | staging 資料可丟棄、不需備份 → 不付 Flex 的 ~$9/月。原「staging 上 M2 當 prod 升級演練」理由已捨棄（M0→Flex 非高風險操作、不值得演練）。prod 升 Flex（取得備份）拆成獨立任務 |
 | P4 | 無 `Makefile` | 🟢 註記 | `staging-worker-up` 改成新增一支 shell script |
 
 **已驗證可行**：`get_parameter` 單點 prefix 路由 ✓；`load_dotenv()` 早於 config_loader import ✓；
@@ -77,7 +77,7 @@ Access bypass 路徑自帶驗證 ✓。
                      └──────────────────────────────┘
                                     │
                      ┌──────────────▼──────────────┐
-                     │  Atlas M2 cluster (staging)  │   allowlist 0.0.0.0/0
+                     │  Atlas M0 cluster (staging)  │   allowlist 0.0.0.0/0
                      └──────────────────────────────┘
 
   prod 環境完全平行（/transcriber/*、prod bucket/queue、origin/aws），互不交集。
@@ -95,12 +95,12 @@ Cloudflare zone。
 |------|------|------|
 | Staging Web EC2 t3.micro (24/7) | ~8 | 依 ap-northeast-1 on-demand 定價 |
 | Web EBS 20GB gp3 | ~1.6 | |
-| Atlas M2 | 9 | 每日快照（非 PITR；PITR 需 M10+） |
+| Atlas M0（免費） | 0 | staging 用免費 tier；資料可丟棄、不需備份 |
 | **GPU Worker EBS（停機也算）** | ~3 | 40GB gp3；models+deps，不需 100GB |
 | GPU Worker 計算（僅測試時） | ~2~3 | on-demand g4dn ~$0.526/hr × 每月幾小時，5 分鐘自停 |
 | S3 + SQS + transfer | <1 | 極小量 |
-| **Staging 小計** | **~$25** | |
-| Prod 升 M2（後續，選做） | +9 | |
+| **Staging 小計** | **~$16** | （省下原 staging Flex 的 ~$9） |
+| Prod 升 Flex（**獨立任務**，取得備份） | +~9 | 由「prod 需備份」驅動，與 staging 脫鉤 |
 
 > **重點**：停機的 GPU worker 仍會收 EBS 儲存費（~$3/月）。把 root volume 開小（40GB）即可壓低；
 > 計算費只在你實際測試時產生。
@@ -117,7 +117,7 @@ Region 一律 `ap-northeast-1`（同 prod）。
 |------|------|
 | SQS | `transcriber-tasks-staging` |
 | S3 | `transcriber-files-staging-696637902131` |
-| Atlas cluster | `transcriber-staging`（M2） |
+| Atlas cluster | `transcriber-staging`（M0 免費；獨立 project） |
 | SSM prefix | `/transcriber-staging/*` |
 | Web EC2 tag | `transcriber-web-staging` |
 | GPU Worker EC2 tag | `transcriber-gpu-staging` |
@@ -146,11 +146,15 @@ aws s3api put-public-access-block --bucket transcriber-files-staging-69663790213
   'BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true'
 ```
 
-### 3. Atlas M2
+### 3. Atlas M0（免費，Console）
 
-Atlas Console / `atlas` CLI 建立 `transcriber-staging`（M2, Tokyo）。
-- **Network allowlist：`0.0.0.0/0`**（鏡像 prod；GPU worker 動態 IP 無法逐一列舉，靠帳密 + TLS）
-- 取連線字串備用（下一步寫進 SSM）
+Atlas Console 建立（CLI 無 API key）：
+- **獨立 project** `transcriber-staging`（Atlas 的 Network Access / DB Users 是 project 層級 → 獨立才能設 `0.0.0.0/0` 不動到 prod）
+- Cluster：Tier **M0（Free）**、Provider AWS、Region **Tokyo (ap-northeast-1)**、Name `transcriber-staging`
+  - ⚠️ Atlas 已用 **Flex** 取代 M2/M5；本案 staging 選 **M0 免費**即可（資料可丟棄、不需備份）
+- DB User（Database Access）：建 user + 自動產生密碼存好
+- **Network Access：`0.0.0.0/0`**（worker 動態 IP 無法逐一列舉，靠帳密 + TLS）
+- Connect → Drivers → 複製 `mongodb+srv://` 連線字串（填入密碼；勿加 `tlsInsecure`）→ 寫進 SSM `mongodb-url`
 
 ### 4. SSM 參數（`/transcriber-staging/*`）— **完整清單**
 
@@ -231,7 +235,7 @@ aws ec2 run-instances \
 | SSM `/transcriber-staging/*` | jwt-secret, worker-secret（fresh）+ google-client-id, google-api-key-1/2, hf-token, resend-api-key（copy from prod） | ✅ 7/10 |
 | Staging Web EC2 id / EIP | `i-0e328071b52856681` / **`52.196.120.189`**（t3.micro, AMI `ami-0f0e8dab98a36cdd7`） | ✅ 建立（未 provision） |
 | Staging GPU Worker EC2 id | （待 provision 時建；AMI `ami-06daba374fafd57e3`） | ⏳ |
-| Atlas M2 + SSM mongodb-url | Console 建立後填 | ⏳ |
+| Atlas M0（獨立 project）+ SSM mongodb-url | Console 建立後填 | ⏳ |
 | SSM newebpay-* / resend-webhook-secret | sandbox 值 / prod 也未設 | ⏳ |
 
 ---
@@ -475,7 +479,7 @@ jobs:
 |---------|---------|------|
 | Staging web 壞了 | `sudo transcriber-rollback --prev` | <2 min |
 | Staging worker 改壞 | 完全不影響 prod（獨立實例 + 獨立 queue/bucket/secret）；改 `.env.worker` 或回退 `staging` 分支即可 | — |
-| Staging Atlas 資料異常 | 不影響 prod（獨立 cluster）；M2 每日快照可回（非 PITR） | — |
+| Staging Atlas 資料異常 | 不影響 prod（獨立 cluster + 獨立 project）；staging 資料可丟棄，直接重建即可 | — |
 | 錯誤分支誤入 prod | 不可能：Promotion Guard 擋非 `staging→aws`；`aws` 還要 Environment approve | — |
 
 > 新設計下 staging 與 prod **物理隔離**，沒有舊版「dual-queue 改壞會波及 prod」的風險，
@@ -505,7 +509,7 @@ jobs:
 6. 手動 start staging worker → Phase 4 驗證 checklist 全過
 7. 金流 sandbox 測通（含 webhook bypass）
 8. 全綠 → 日常以 `staging` 作 pre-prod gate；prod release = PR staging→aws（+ approve）
-9. （選做）prod 升 Atlas M2，staging 已演練過
+9. （獨立任務）prod 從 M0 升 **Flex** 取得備份——與 staging 脫鉤，由「prod 需備份」驅動，想升再升
 
 ---
 
@@ -513,7 +517,7 @@ jobs:
 
 - [ ] prod hotfix 後門：目前 hotfix 也須走 feature→main→staging→aws 全程；如需緊急繞道再設計
 - [ ] CloudWatch alarm：staging worker_heartbeats 異常告警
-- [ ] Atlas 每日快照 restore 演練（M2；PITR 須 M10+ 才有）
+- [ ] **prod 升 Atlas Flex 取得備份**（獨立任務；Flex 已取代 M2/M5。PITR 仍須 M10+）
 - [ ] **（P1）申請 On-Demand G 配額 4→8 vCPU**，讓 staging worker 與 prod 備援可並存
 - [ ] Playwright E2E 4 條黃金路徑（依賴 staging 環境）
 - [ ] `make staging-worker-up` / `down` 包裝腳本
