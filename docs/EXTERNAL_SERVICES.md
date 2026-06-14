@@ -125,7 +125,7 @@
 ---
 
 ## 相關文件
-- 部署架構：`docs/AWS_DEPLOYMENT_PLAN.md`、`docs/DEPLOYMENT.md`
+- 部署架構：`docs/DEPLOYMENT.md`（歷史規劃：`docs/archive/AWS_DEPLOYMENT_PLAN.md`）
 - 監控設定：`docs/MONITORING_SETUP.md`
 - 金流串接：`docs/NEWEBPAY_PERIOD_API.md`
 - 環境變數完整清單：`.env.example`、`deploy/.env.aws`

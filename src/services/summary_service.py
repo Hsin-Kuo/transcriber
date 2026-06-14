@@ -7,11 +7,13 @@ import asyncio
 import os
 import json
 import re
+import time
 from typing import Optional, Dict, Any, Tuple, List
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from ..database.repositories.summary_repo import SummaryRepository
+from ..database.repositories.summary_log_repo import SummaryLogRepository
 from ..database.repositories.task_repo import TaskRepository
 from src.utils.logger import get_logger
 
@@ -47,6 +49,7 @@ class SummaryService:
         """
         self.db = db
         self.summary_repo = SummaryRepository(db)
+        self.summary_log_repo = SummaryLogRepository(db)
         self.task_repo = TaskRepository(db)
         self.default_model = default_model
 
@@ -105,11 +108,21 @@ class SummaryService:
             # 4. 偵測語言
             language = self._detect_language(content)
 
-            # 5. 調用 Gemini API 生成摘要
+            # 5. 調用 Gemini API 生成摘要（量測耗時供後台稽核）
+            source_length = len(content)
+            started = time.monotonic()
             summary_data, model_used, token_usage = await self._generate_with_gemini(content, language)
+            duration_ms = int((time.monotonic() - started) * 1000)
 
             if not summary_data:
                 await self.task_repo.update(task_id, {"summary_status": "failed"})
+                # 記錄這次失敗的生成（保留完整歷史，不覆蓋）
+                await self._record_generation(
+                    task_id=task_id, user_id=user_id, status="failed",
+                    model=model_used or None, language=language, mode=mode,
+                    source_length=source_length, token_usage=None,
+                    duration_ms=duration_ms, error="AI 生成摘要失敗",
+                )
                 return {
                     "task_id": task_id,
                     "status": "failed",
@@ -120,19 +133,29 @@ class SummaryService:
             metadata = {
                 "model": model_used,
                 "language": language,
-                "source_length": len(content)
+                "source_length": source_length
             }
 
             # 如果有 token 使用量，加入 metadata
+            normalized_token_usage = None
             if token_usage:
-                metadata["token_usage"] = {
+                normalized_token_usage = {
                     "total": token_usage.get("total", 0),
                     "prompt": token_usage.get("prompt", 0),
                     "completion": token_usage.get("completion", 0)
                 }
+                metadata["token_usage"] = normalized_token_usage
                 log.debug("summary.token_usage_saved", token_usage=token_usage)
 
             doc = await self.summary_repo.upsert(task_id, summary_data, metadata)
+
+            # 記錄這次成功的生成（每次都 append，供後台查看時間與 token 歷史）
+            await self._record_generation(
+                task_id=task_id, user_id=user_id, status="completed",
+                model=model_used, language=language, mode=mode,
+                source_length=source_length, token_usage=normalized_token_usage,
+                duration_ms=duration_ms, error=None,
+            )
 
             # 7. 更新任務狀態為完成
             await self.task_repo.update(task_id, {
@@ -165,6 +188,36 @@ class SummaryService:
                 "status": "failed",
                 "error": str(e)
             }
+
+    async def _record_generation(
+        self,
+        task_id: str,
+        user_id: Optional[str],
+        status: str,
+        model: Optional[str],
+        language: Optional[str],
+        mode: Optional[str],
+        source_length: Optional[int],
+        token_usage: Optional[Dict[str, int]],
+        duration_ms: Optional[int],
+        error: Optional[str],
+    ) -> None:
+        """寫入一筆摘要生成記錄（best-effort，失敗不影響主流程）"""
+        try:
+            await self.summary_log_repo.add(
+                task_id=task_id,
+                user_id=user_id,
+                status=status,
+                model=model,
+                language=language,
+                mode=mode,
+                source_length=source_length,
+                token_usage=token_usage,
+                duration_ms=duration_ms,
+                error=error,
+            )
+        except Exception as e:
+            log.warning("summary.generation_log_failed", task_id=task_id, error=str(e))
 
     async def get_summary(
         self,
