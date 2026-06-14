@@ -102,10 +102,11 @@ AUTO_SHUTDOWN_IDLE_MINUTES=${IDLE_MIN}
 EOF
 
 # --- 5. 預裝 deps（暖快取）---
-# unit 的 ExecStartPre 也會 pip install，但受 systemd TimeoutStartSec=90s 限制；
-# 冷裝 torch 會 timeout，故首次佈建先在這裡裝好，之後 ExecStartPre 秒過。
-echo "=== 預裝 Python 依賴（含 ML 套件，首次較久）==="
-python3.12 -m pip install -r requirements.txt -q
+# 用 requirements-worker.lock（完整 closure 鎖定）確保重建 deterministic，不受未釘
+# transitive 漂移。unit 的 ExecStartPre 也會 pip install，但受 systemd TimeoutStartSec=90s
+# 限制；冷裝 torch 會 timeout，故首次佈建先在這裡裝好，之後 ExecStartPre 秒過。
+echo "=== 預裝 Python 依賴（從 lock，含 ML 套件，首次較久）==="
+python3.12 -m pip install -r requirements-worker.lock -q
 
 # --- 6. systemd unit（從 repo canonical 檔，禁止直接 SSH 改 EC2 上的 unit）---
 sudo cp /opt/transcriber/deploy/transcriber-worker.service /etc/systemd/system/transcriber-worker.service
