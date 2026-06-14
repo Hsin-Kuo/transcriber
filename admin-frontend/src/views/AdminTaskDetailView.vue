@@ -173,6 +173,43 @@
           </div>
         </div>
 
+        <!-- AI 摘要記錄 -->
+        <div class="detail-card wide">
+          <h2>AI 摘要記錄</h2>
+          <div v-if="task.summary_logs?.length" class="summary-log-table">
+            <div class="summary-log-head">
+              <span>時間</span>
+              <span>狀態</span>
+              <span>模型</span>
+              <span>Token（總 / 輸入 / 輸出）</span>
+              <span>耗時</span>
+            </div>
+            <div
+              v-for="log in task.summary_logs"
+              :key="log._id"
+              class="summary-log-row"
+            >
+              <span class="value">{{ formatTimestamp(log.created_at) || '-' }}</span>
+              <span class="status-badge" :class="`status-${log.status === 'completed' ? 'completed' : 'failed'}`">
+                {{ log.status === 'completed' ? '成功' : '失敗' }}
+              </span>
+              <span class="value">{{ log.model || '-' }}</span>
+              <span class="value">
+                <template v-if="log.token_usage">
+                  {{ log.token_usage.total?.toLocaleString() || 0 }}
+                  <span class="token-breakdown">
+                    （{{ log.token_usage.prompt?.toLocaleString() || 0 }}
+                    / {{ log.token_usage.completion?.toLocaleString() || 0 }}）
+                  </span>
+                </template>
+                <template v-else>-</template>
+              </span>
+              <span class="value">{{ formatMs(log.duration_ms) }}</span>
+            </div>
+          </div>
+          <p v-else class="empty-hint">尚無 AI 摘要生成記錄</p>
+        </div>
+
         <!-- 錯誤訊息 -->
         <div v-if="task.error_message" class="detail-card wide error-card">
           <h2>錯誤訊息</h2>
@@ -278,6 +315,12 @@ function formatDuration(seconds) {
   const hours = Math.floor(mins / 60)
   const remainMins = mins % 60
   return `${hours} 時 ${remainMins} 分`
+}
+
+function formatMs(ms) {
+  if (ms == null) return '-'
+  if (ms < 1000) return `${ms} ms`
+  return `${(ms / 1000).toFixed(1)} 秒`
 }
 
 function formatTimestamp(timestamp) {
@@ -540,6 +583,58 @@ code {
 .timeline-time {
   font-size: 12px;
   color: var(--color-text-light, #a0917c);
+}
+
+.summary-log-table {
+  display: flex;
+  flex-direction: column;
+}
+
+.summary-log-head,
+.summary-log-row {
+  display: grid;
+  grid-template-columns: 1.6fr 0.8fr 1.6fr 2fr 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 0;
+}
+
+.summary-log-head {
+  font-weight: 600;
+  color: var(--color-text-light, #a0917c);
+  border-bottom: 2px solid rgba(163, 177, 198, 0.2);
+}
+
+.summary-log-row {
+  border-bottom: 1px solid rgba(163, 177, 198, 0.2);
+}
+
+.summary-log-row:last-child { border-bottom: none; }
+
+.summary-log-head .status-badge,
+.summary-log-row .value {
+  font-size: 13px;
+}
+
+.token-breakdown {
+  color: var(--color-text-light, #a0917c);
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.empty-hint {
+  color: var(--color-text-light, #a0917c);
+  font-weight: 500;
+}
+
+@media (max-width: 768px) {
+  .summary-log-head { display: none; }
+
+  .summary-log-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+    padding: 14px 0;
+  }
 }
 
 .error-content {
