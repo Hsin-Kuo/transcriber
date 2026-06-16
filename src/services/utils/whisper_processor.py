@@ -706,16 +706,36 @@ class WhisperProcessor:
                     # 進度回報不該打斷轉錄本身
                     log.warning("whisper.progress_callback.failed", error=str(cb_err))
 
+        # ── TEMP DEBUG: 時間戳壓縮定位（診斷後移除）────────────────────
+        def _dbg_ts(segs, stage):
+            ends = [float(s["end"]) for s in segs if s.get("end") is not None]
+            starts = [float(s["start"]) for s in segs if s.get("start") is not None]
+            ws = [w for s in segs for w in (s.get("words") or [])]
+            log.info(
+                "ts.debug", stage=stage, n=len(segs),
+                seg_start_min=round(min(starts), 3) if starts else None,
+                seg_end_max=round(max(ends), 3) if ends else None,
+                n_words=len(ws),
+                word_start_min=round(min((w.start for w in ws), default=0.0), 3),
+                word_end_max=round(max((w.end for w in ws), default=0.0), 3),
+                first_seg=(round(segs[0]["start"], 3), round(segs[0]["end"], 3)) if segs else None,
+                last_seg=(round(segs[-1]["start"], 3), round(segs[-1]["end"], 3)) if segs else None,
+            )
+        _dbg_ts(segments_list, "post_batched")
+        # ──────────────────────────────────────────────────────────────
+
         # Hybrid 覆蓋補轉：batched 單溫度可能整段掉真實語音 → 對空洞用 sequential（溫度 fallback）補回。
         # 在 _collapse/_resegment 之前做，讓補轉段（含 words）一起走後續處理；對下游完全透明。
         if used_batched and _HYBRID_RESCUE and total_duration > 0:
             segments_list = self._hybrid_rescue(
                 audio_path, segments_list, total_duration, transcribe_kwargs
             )
+            _dbg_ts(segments_list, "post_hybrid")  # TEMP DEBUG
 
         # 壓縮重複幻覺 → 依 word timestamps 重切長段（batched 的 VAD 長段 → 碎片）
         segments_list = _collapse_repeated_segments(segments_list)
         segments_list = _resegment_by_words(segments_list)
+        _dbg_ts(segments_list, "post_resegment")  # TEMP DEBUG
         return segments_list, detected_language
 
     def _hybrid_rescue(
