@@ -124,6 +124,22 @@ def _resegment_by_words(segments: List[Dict]) -> List[Dict]:
             out.append({"start": seg["start"], "end": seg["end"], "text": seg["text"]})
             continue
 
+        # 防呆：faster-whisper batched 的 word timestamps 偶爾在長檔某些區段退化——
+        # 字的起點仍對、但 duration 趨近 0，整段字擠在數毫秒內（cross-attention 對齊塌掉）。
+        # 此時 word 涵蓋範圍會遠小於 segment 自身範圍。若直接拿這些壞 word 切，會把好好的
+        # segment 塌縮成數毫秒 → 下游句子切分把整段話塞進極短時間。偵測到就回退用 segment
+        # 級 [start,end]（batched 的 segment 時間是用 timestamp token 算的、可靠），交給後續處理。
+        seg_span = float(seg.get("end", 0.0)) - float(seg.get("start", 0.0))
+        word_span = float(words[-1].end) - float(words[0].start)
+        if seg_span > 0.5 and word_span < seg_span * 0.5:
+            log.warning(
+                "whisper.resegment.degenerate_words",
+                seg_span=round(seg_span, 3), word_span=round(word_span, 3),
+                seg_start=round(float(seg.get("start", 0.0)), 3),
+            )
+            out.append({"start": seg["start"], "end": seg["end"], "text": seg["text"]})
+            continue
+
         cur: list = []
         for i, w in enumerate(words):
             cur.append(w)
@@ -706,36 +722,16 @@ class WhisperProcessor:
                     # 進度回報不該打斷轉錄本身
                     log.warning("whisper.progress_callback.failed", error=str(cb_err))
 
-        # ── TEMP DEBUG: 時間戳壓縮定位（診斷後移除）────────────────────
-        def _dbg_ts(segs, stage):
-            ends = [float(s["end"]) for s in segs if s.get("end") is not None]
-            starts = [float(s["start"]) for s in segs if s.get("start") is not None]
-            ws = [w for s in segs for w in (s.get("words") or [])]
-            log.info(
-                "ts.debug", stage=stage, n=len(segs),
-                seg_start_min=round(min(starts), 3) if starts else None,
-                seg_end_max=round(max(ends), 3) if ends else None,
-                n_words=len(ws),
-                word_start_min=round(min((w.start for w in ws), default=0.0), 3),
-                word_end_max=round(max((w.end for w in ws), default=0.0), 3),
-                first_seg=(round(segs[0]["start"], 3), round(segs[0]["end"], 3)) if segs else None,
-                last_seg=(round(segs[-1]["start"], 3), round(segs[-1]["end"], 3)) if segs else None,
-            )
-        _dbg_ts(segments_list, "post_batched")
-        # ──────────────────────────────────────────────────────────────
-
         # Hybrid 覆蓋補轉：batched 單溫度可能整段掉真實語音 → 對空洞用 sequential（溫度 fallback）補回。
         # 在 _collapse/_resegment 之前做，讓補轉段（含 words）一起走後續處理；對下游完全透明。
         if used_batched and _HYBRID_RESCUE and total_duration > 0:
             segments_list = self._hybrid_rescue(
                 audio_path, segments_list, total_duration, transcribe_kwargs
             )
-            _dbg_ts(segments_list, "post_hybrid")  # TEMP DEBUG
 
         # 壓縮重複幻覺 → 依 word timestamps 重切長段（batched 的 VAD 長段 → 碎片）
         segments_list = _collapse_repeated_segments(segments_list)
         segments_list = _resegment_by_words(segments_list)
-        _dbg_ts(segments_list, "post_resegment")  # TEMP DEBUG
         return segments_list, detected_language
 
     def _hybrid_rescue(

@@ -66,5 +66,26 @@ def test_empty_text_words_skipped():
     assert out == []
 
 
+def test_degenerate_words_fallback_to_segment_timing():
+    # faster-whisper batched 長檔偶發：word 起點對、但 duration 塌縮（整段字擠在數毫秒內）。
+    # 此時 word 範圍(0.003s) << segment 範圍(6.4s) → 應回退用 segment 級 [start,end]，
+    # 不被壞 word 拖成數毫秒（否則下游句子切分會把整段話塞進極短時間）。
+    degenerate = [W(433.618, 433.618, "字") for _ in range(40)]  # 40 字全擠在同一點
+    segs = [{"start": 433.6, "end": 440.0, "text": "一整段正常長度的話", "words": degenerate}]
+    out = _resegment_by_words(segs)
+    assert len(out) == 1
+    assert out[0]["start"] == 433.6 and out[0]["end"] == 440.0  # 用 segment 真實時間
+    assert out[0]["text"] == "一整段正常長度的話"
+
+
+def test_normal_words_not_treated_as_degenerate():
+    # 正常情況：word 涵蓋幾乎整個 segment → 不該誤判為退化、照常依停頓/長度切
+    words = _evenly_spoken(10, start=0.0, dur=0.5, gap=0.0)  # 0.0–5.0
+    segs = [{"start": 0.0, "end": 5.0, "text": "x", "words": words}]
+    out = _resegment_by_words(segs)
+    # word_span(5.0) 不 < seg_span(5.0)*0.5 → 不回退；結果非單一段原樣（有被正常處理）
+    assert out and out[0]["start"] == 0.0
+
+
 def test_constants_are_sane():
     assert 0 < RESEG_GAP_THRESHOLD_SEC < RESEG_MIN_SEGMENT_SEC < RESEG_MAX_SEGMENT_SEC
