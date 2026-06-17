@@ -846,7 +846,7 @@ watch(() => props.initialFiles, (newFiles) => {
   font-size: 14px;
   border: 2px solid rgba(var(--color-primary-rgb), 0.3);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--color-bg-light);
   color: var(--color-text-dark);
 }
 
@@ -861,7 +861,7 @@ watch(() => props.initialFiles, (newFiles) => {
   font-size: 14px;
   border: 2px solid rgba(var(--color-primary-rgb), 0.3);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--color-bg-light);
   color: var(--color-text-dark);
   cursor: pointer;
 }
@@ -887,7 +887,7 @@ watch(() => props.initialFiles, (newFiles) => {
   font-size: 14px;
   border: 2px solid rgba(var(--color-primary-rgb), 0.3);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--color-bg-light);
   color: var(--color-text-dark);
   transition: all 0.3s;
 }

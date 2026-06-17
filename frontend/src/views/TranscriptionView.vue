@@ -249,7 +249,7 @@
             <span v-if="uploading && uploadProgress > 0">{{ $t('transcription.uploading') }} {{ uploadProgress }}%</span>
             <span v-else-if="uploading">{{ $t('transcription.uploading') }}</span>
           </button>
-          <button class="btn btn-secondary btn-cancel" :disabled="uploading" @click="cancelUpload">{{ $t('transcription.cancel') }}</button>
+          <button class="btn btn-secondary btn-cancel" @click="cancelUpload">{{ $t('transcription.cancel') }}</button>
         </div>
       </div>
     </div>
@@ -522,7 +522,7 @@ async function confirmAndUpload() {
     } else {
       console.error($t('transcription.errorUpload') + ':', error)
       const detail = error.response?.data?.detail
-      const errorMsg = typeof detail === 'object' ? detail?.message : (detail || error.message)
+      const errorMsg = uploadErrorMessage(error)
       uploadStore.fail(errorMsg)
       // 額度不足 → 改用引導購買的對話框（而非一般錯誤 toast）
       const quota = quotaErrorFromDetail(detail)
@@ -553,8 +553,22 @@ async function confirmAndUpload() {
   }
 }
 
+// 把上傳錯誤轉成「跟隨 UI 語言」的訊息：
+//  - 已知結構化 code（如 FEATURE_NOT_AVAILABLE）→ 前端 i18n
+//  - 網路 / JS 錯誤（無後端 detail）→ 通用 i18n（取代原本會漏出的英文 library 字串）
+//  - 其餘後端訊息（語言由後端決定）→ 沿用（完整 localize 需後端 i18n）
+function uploadErrorMessage(error) {
+  const detail = error?.response?.data?.detail
+  const code = detail && typeof detail === 'object' ? detail.code : null
+  if (code === 'FEATURE_NOT_AVAILABLE') return $t('uploadErrors.featureNotAvailable')
+  const serverMsg = (detail && typeof detail === 'object') ? detail.message : (typeof detail === 'string' ? detail : '')
+  return serverMsg || $t('uploadErrors.generic')
+}
+
 // 取消上傳
 function cancelUpload() {
+  // 上傳進行中 → 真正中斷請求（與 toast 的 uploadStore.cancel 一致）；非上傳中則僅重置表單
+  if (uploading.value) uploadStore.cancel()
   pendingFile.value = null
   taskType.value = 'paragraph'  // 重置為預設值
   selectedTags.value = []
@@ -594,6 +608,8 @@ function handleShowTranscriptionForm(files) {
 
 // 取消批次上傳
 function cancelBatchUpload() {
+  // 上傳進行中 → 真正中斷請求（與 toast 一致）；非上傳中則僅關面板
+  if (uploading.value) uploadStore.cancel()
   batchMode.isActive = false
   batchMode.files = []
 }
@@ -658,12 +674,17 @@ async function confirmBatchUpload(formData) {
     // 上傳完成後重抓 tag 列表（user 可能在 BatchUploadPanel 內建了新 tag）
     await fetchTagColors()
 
+    // 全部成功且未觸發額度購買 Modal → 跳轉任務列表（與單檔上傳一致）；
+    // 部分失敗或彈了購買引導則留在原頁，避免把引導/失敗結果蓋掉
+    if (result.failed === 0 && !batchQuota && router.currentRoute.value.name === 'transcription') {
+      router.push({ name: 'tasks' })
+    }
+
   } catch (error) {
     // 使用者主動取消：不視為錯誤
     if (!isUploadCancelled(error)) {
       console.error('批次上傳失敗:', error)
-      const detail = error.response?.data?.detail
-      const errorMsg = typeof detail === 'object' ? detail?.message : (detail || error.message)
+      const errorMsg = uploadErrorMessage(error)
       uploadStore.fail(errorMsg)
       if (showNotification) {
         showNotification({

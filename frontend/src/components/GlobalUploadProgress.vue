@@ -76,6 +76,12 @@ const statusText = computed(() => {
 const percentText = computed(() => (store.progress > 0 ? `${store.progress}%` : $t('globalUpload.processing')))
 
 function goToTasks() {
+  // 已在任務列表頁：push 同一路由 Vue Router 會忽略 → 點了沒反應。
+  // 改整頁重新整理，確保使用者看到明確結果（新任務刷新出現）。
+  if (router.currentRoute.value.name === 'tasks') {
+    window.location.reload()
+    return
+  }
   store.dismiss()
   router.push({ name: 'tasks' })
 }

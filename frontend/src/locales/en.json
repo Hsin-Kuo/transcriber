@@ -318,8 +318,8 @@
     "batchHint": "Upgrade to Basic or higher to upload multiple files at once.",
     "upgradeCta": "Upgrade plan",
     "addonCta": "Buy add-on credits",
-    "upgradeHint": "Upgrade for more quota and keep transcribing right away.",
-    "addonHint": "Buy add-on credits to keep going now — credits carry over each month.",
+    "upgradeHint": "Upgrade for more quota.",
+    "addonHint": "Buy add-on credits to keep going — credits carry over each month.",
     "later": "Maybe later"
   },
   "navigation": {
@@ -374,6 +374,10 @@
     "view": "View",
     "cancel": "Cancel",
     "close": "Close"
+  },
+  "uploadErrors": {
+    "featureNotAvailable": "Batch upload is available on Basic plan or above. Please upgrade to use it.",
+    "generic": "Upload failed. Please try again later."
   },
   "uploadZone": {
     "clickToUpload": "Click to upload or drag and drop",

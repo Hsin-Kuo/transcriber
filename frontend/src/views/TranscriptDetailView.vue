@@ -929,9 +929,9 @@ useKeyboardShortcuts(audioControls, { isEditing, isEditingTitle })
 
 
 
-// 返回
+// 返回：固定回到任務列表（而非瀏覽器上一頁，避免從通知/分享連結進來時 back 到非預期頁面）
 function goBack() {
-  router.back()
+  router.push({ name: 'tasks' })
 }
 
 // 刪除任務
