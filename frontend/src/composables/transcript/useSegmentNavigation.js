@@ -90,6 +90,7 @@ export function useSegmentNavigation({
     if (window.CSS && CSS.highlights) {
       const wasSet = CSS.highlights.has('segment-highlight')
       CSS.highlights.delete('segment-highlight')
+      CSS.highlights.delete('segment-highlight-hover')
       if (wasSet) {
         const el = textareaRef.value
         if (el) {
@@ -126,8 +127,15 @@ export function useSegmentNavigation({
 
   // --- Hover chip ---
 
+  function clearSegmentHoverHighlight() {
+    if (window.CSS && CSS.highlights) {
+      CSS.highlights.delete('segment-highlight-hover')
+    }
+  }
+
   function hideHoverChip() {
     hoverChipVisible.value = false
+    clearSegmentHoverHighlight()
   }
 
   function updateHoverChipFromEvent(e) {
@@ -154,6 +162,14 @@ export function useSegmentNavigation({
       top: `${lineRect.top - wrapperRect.top}px`,
     }
     hoverChipVisible.value = true
+
+    // 高亮目前 hover 到的 segment（疊在 segment-highlight 之上，priority 較高），
+    // 讓編輯模式 hover 也有顏色變化，與閱讀模式的 :hover 變色一致
+    if (window.CSS && CSS.highlights) {
+      const hl = new Highlight(segRange)
+      hl.priority = 1
+      CSS.highlights.set('segment-highlight-hover', hl)
+    }
   }
 
   // --- Editor event handlers (bound to contenteditable) ---

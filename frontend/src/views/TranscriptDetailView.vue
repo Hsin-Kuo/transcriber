@@ -1197,6 +1197,11 @@ usePageLifecycle({
   background-color: rgba(196, 140, 226, 0.175);
 }
 
+/* A+ 編輯模式 Alt hover 到的 segment：疊在基礎高亮之上，加深顏色（對應閱讀模式的 :hover 變色）*/
+::highlight(segment-highlight-hover) {
+  background-color: rgba(196, 140, 226, 0.4);
+}
+
 /* A+ Alt + hover 到 segment 時,游標改為 pointer */
 .transcript-display.editing.alt-segment-hover,
 .transcript-display.editing.alt-segment-hover * {
