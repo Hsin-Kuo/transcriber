@@ -318,8 +318,8 @@
     "batchHint": "升級至 Basic 以上方案即可一次上傳多個檔案。",
     "upgradeCta": "升級方案",
     "addonCta": "加購額度",
-    "upgradeHint": "升級方案可獲得更多額度，立即繼續轉錄。",
-    "addonHint": "可單筆加購額度，立即繼續轉錄；額度跨月保留。",
+    "upgradeHint": "升級方案可獲得更多額度。",
+    "addonHint": "可單筆加購額度；額度跨月保留。",
     "later": "稍後再說"
   },
   "navigation": {
@@ -374,6 +374,10 @@
     "view": "查看",
     "cancel": "取消",
     "close": "關閉"
+  },
+  "uploadErrors": {
+    "featureNotAvailable": "批次上傳為 Basic 以上方案功能，請升級方案後使用",
+    "generic": "上傳失敗，請稍後再試"
   },
   "uploadZone": {
     "clickToUpload": "點擊或拖曳檔案",

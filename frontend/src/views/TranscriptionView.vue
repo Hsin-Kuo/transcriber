@@ -522,7 +522,7 @@ async function confirmAndUpload() {
     } else {
       console.error($t('transcription.errorUpload') + ':', error)
       const detail = error.response?.data?.detail
-      const errorMsg = typeof detail === 'object' ? detail?.message : (detail || error.message)
+      const errorMsg = uploadErrorMessage(error)
       uploadStore.fail(errorMsg)
       // 額度不足 → 改用引導購買的對話框（而非一般錯誤 toast）
       const quota = quotaErrorFromDetail(detail)
@@ -551,6 +551,18 @@ async function confirmAndUpload() {
     mergeMode.files = []
     mergeTaskName.value = ''
   }
+}
+
+// 把上傳錯誤轉成「跟隨 UI 語言」的訊息：
+//  - 已知結構化 code（如 FEATURE_NOT_AVAILABLE）→ 前端 i18n
+//  - 網路 / JS 錯誤（無後端 detail）→ 通用 i18n（取代原本會漏出的英文 library 字串）
+//  - 其餘後端訊息（語言由後端決定）→ 沿用（完整 localize 需後端 i18n）
+function uploadErrorMessage(error) {
+  const detail = error?.response?.data?.detail
+  const code = detail && typeof detail === 'object' ? detail.code : null
+  if (code === 'FEATURE_NOT_AVAILABLE') return $t('uploadErrors.featureNotAvailable')
+  const serverMsg = (detail && typeof detail === 'object') ? detail.message : (typeof detail === 'string' ? detail : '')
+  return serverMsg || $t('uploadErrors.generic')
 }
 
 // 取消上傳
@@ -672,8 +684,7 @@ async function confirmBatchUpload(formData) {
     // 使用者主動取消：不視為錯誤
     if (!isUploadCancelled(error)) {
       console.error('批次上傳失敗:', error)
-      const detail = error.response?.data?.detail
-      const errorMsg = typeof detail === 'object' ? detail?.message : (detail || error.message)
+      const errorMsg = uploadErrorMessage(error)
       uploadStore.fail(errorMsg)
       if (showNotification) {
         showNotification({
