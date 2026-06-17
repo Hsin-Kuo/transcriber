@@ -27,9 +27,8 @@
         </h1>
       </div>
 
-      <!-- 元數據 -->
+      <!-- 元數據（建立時間已移除，只保留時長） -->
       <TranscriptMetadata
-        :created-at="createdAt"
         :duration-text="durationText"
         layout="horizontal"
         :show-date-icon="false"
@@ -232,7 +231,6 @@ const props = defineProps({
     type: String,
     default: ''
   },
-  createdAt: [String, Number],
   durationText: String,
   isEditing: {
     type: Boolean,

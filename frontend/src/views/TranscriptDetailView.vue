@@ -4,7 +4,6 @@
     <TranscriptHeader
       ref="headerRef"
       :task-display-name="currentTranscript.custom_name || currentTranscript.filename || $t('transcriptDetail.transcript')"
-      :created-at="currentTranscript.created_at"
       :text-length="currentTranscript.text_length"
       :duration-text="currentTranscript.duration_text"
       :is-editing="isEditing"
