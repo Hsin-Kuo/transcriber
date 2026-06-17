@@ -353,55 +353,31 @@ class="transcript-layout"
               @mousedown="handleEditorClickInEditing"
               @scroll="handleEditorScroll"
             ></div>
-            <!-- 非編輯模式：使用 v-for 渲染高亮和標記 -->
+            <!-- 非編輯模式：純文字單一 text node（與編輯模式共用 CSS Highlight overlay；
+                 segment 高亮 / 搜尋高亮 / Alt+hover+seek 皆走同一套，避免一段一 span 的 DOM 爆量）-->
             <div
               v-else
               class="transcript-display"
-              :class="{ 'alt-pressed': isAltPressed, 'alt-no-seek': isAltPressed && !currentTranscript.hasAudio }"
-              :key="`transcript-${showTimecodeMarkers}-${contentVersion}`"
+              :class="{ 'alt-segment-hover': hoverChipVisible, 'alt-no-seek': !currentTranscript.hasAudio }"
+              :key="`transcript-${contentVersion}`"
               ref="textareaRef"
-            >
-              <template v-for="(part, index) in getContentPartsWithHighlight()" :key="`part-${contentVersion}-${index}`">
-                <span v-if="!part.isMarker && !part.isHighlight" class="text-part">{{ part.text }}</span>
+              @mousemove="handleEditorMouseMove"
+              @mousedown="handleEditorClickInEditing"
+              @scroll="handleEditorScroll"
+            >{{ currentTranscript.content }}<!-- ▼ 時間標記 overlay（skip class → 不計入 char-offset 對應）-->
+              <div v-if="showTimecodeMarkers" class="timecode-marker-overlay" aria-hidden="true">
                 <span
-                  v-else-if="part.isHighlight"
-                  class="search-highlight"
-                  :class="{ 'current': part.isCurrent }"
-                >{{ part.text }}</span>
-                <span v-else class="marker-wrapper"><span
-                    v-if="showTimecodeMarkers"
-                    class="segment-marker"
-                    contenteditable="false"
-                    @click="handleMarkerClick(part.start)"
-                  >
-                    <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor">
-                      <path d="M 4 6 L 1 2 L 7 2 Z" />
-                    </svg>
-                    <span class="timecode-tooltip">
-                      {{ formatTime(part.start) }}
-                    </span>
-                  </span><template v-for="(subPart, subIndex) in splitTextWithHighlight(part.text, part.segmentIndex)" :key="`sub-${subIndex}`">
-                    <span
-                      v-if="subPart.isHighlight"
-                      class="search-highlight"
-                      :class="{ 'current': subPart.isCurrent }"
-                    >{{ subPart.text }}</span>
-                    <span
-                      v-else
-                      class="text-part"
-                      :data-segment-index="part.segmentIndex"
-                      :data-start-time="part.start"
-                      @click="handleTextClick(part.start, $event)"
-                    >{{ subPart.text }}<span v-if="subIndex === 0" class="text-timecode-tooltip">
-                        {{ formatTime(part.start) }}
-                      </span></span>
-                  </template>
-                </span>
-              </template>
-            </div>
-            <!-- Alt hover timecode chip (只在編輯模式 + Alt 按住 + hover 到 segment 時顯示) -->
+                  v-for="m in segmentMarkerOverlay"
+                  :key="m.segmentIndex"
+                  class="timecode-marker"
+                  :class="{ 'no-seek': !currentTranscript.hasAudio }"
+                  :style="{ top: m.top + 'px', left: m.left + 'px' }"
+                  @click="handleMarkerClick(m.start)"
+                ><svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor"><path d="M 4 6 L 1 2 L 7 2 Z" /></svg><span class="timecode-tooltip">{{ formatTime(m.start) }}</span></span>
+              </div></div>
+            <!-- Alt hover timecode chip (Alt 按住 + hover 到 segment 時顯示；編輯/非編輯皆可) -->
             <div
-              v-show="isEditing && hoverChipVisible"
+              v-show="hoverChipVisible"
               ref="hoverChipRef"
               class="segment-hover-chip"
               :style="hoverChipStyle"
@@ -553,6 +529,7 @@ import {
 } from '../composables/transcript/useSegmentEditingOffsets'
 import { useKeyboardShortcuts } from '../composables/transcript/useKeyboardShortcuts'
 import { useSegmentNavigation } from '../composables/transcript/useSegmentNavigation'
+import { useSegmentMarkerOverlay } from '../composables/transcript/useSegmentMarkerOverlay'
 import { useTranscriptDownload } from '../composables/transcript/useTranscriptDownload'
 import { useSearchReplace } from '../composables/transcript/useSearchReplace'
 import { useEditingLifecycle } from '../composables/transcript/useEditingLifecycle'
@@ -767,6 +744,28 @@ const {
   segOffsets,
 })
 
+// 非編輯模式的 segment ranges：直接由 segmentMarkers 對應（靜態，免 diff 追蹤）
+const readSegmentRanges = computed(() =>
+  (segmentMarkers.value || []).map((m) => ({
+    segmentIndex: m.segmentIndex,
+    charStart: m.textStartIndex,
+    charEnd: m.textEndIndex,
+    start: m.start,
+    end: m.end,
+  }))
+)
+
+// 統一 facade：編輯模式用 segOffsets（含 diff 追蹤），非編輯用靜態 ranges。
+// useSegmentNavigation 只讀 editSegmentRanges / snapshot 兩者，故只需對齊這兩個介面。
+const navSegOffsets = {
+  editSegmentRanges: computed(() =>
+    isEditing.value ? segOffsets.editSegmentRanges.value : readSegmentRanges.value
+  ),
+  snapshot: computed(() =>
+    isEditing.value ? segOffsets.snapshot.value : (currentTranscript.value.content || '')
+  ),
+}
+
 // ========== Segment Navigation (Alt+Click seek, hover chip, highlight) ==========
 const {
   isAltPressed,
@@ -780,13 +779,28 @@ const {
   handleTextClick,
 } = useSegmentNavigation({
   textareaRef,
-  segOffsets,
+  segOffsets: navSegOffsets,
   isEditing,
   displayMode,
   hasAudio: computed(() => currentTranscript.value.hasAudio),
   seekToTime,
   headerRef,
   isModifierPressed,
+})
+
+// ========== 非編輯模式 ▼ 時間標記 overlay ==========
+const markerOverlayEnabled = computed(
+  () => showTimecodeMarkers.value && !isEditing.value && displayMode.value === 'paragraph'
+)
+// 任一會改變排版（rewrap）的值變動即重建：字級 / 字重 / 字體 / 內容長度
+const markerOverlayRebuildKey = computed(
+  () => `${contentFontSize.value}|${contentFontWeight.value}|${contentFontFamily.value}|${currentTranscript.value.content?.length || 0}`
+)
+const { markers: segmentMarkerOverlay } = useSegmentMarkerOverlay({
+  textareaRef,
+  segmentRanges: readSegmentRanges,
+  enabled: markerOverlayEnabled,
+  rebuildKey: markerOverlayRebuildKey,
 })
 
 // 計算唯一講者列表（用於字幕模式設定）
@@ -1095,6 +1109,7 @@ usePageLifecycle({
 
 /* 非編輯模式的文字顯示區 */
 .transcript-display {
+  position: relative; /* 作為 ▼ marker overlay abspos 子元素的定位基準 */
   width: 100%;
   height: 100%;
   padding: 20px;
@@ -1135,6 +1150,55 @@ usePageLifecycle({
   font-size: 14px;
 }
 
+/* ▼ 時間標記 overlay：scroller 內的 absolute 層，隨內容原生捲動 + 原生裁切 */
+.timecode-marker-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 0;
+  pointer-events: none;
+}
+
+.timecode-marker {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  /* 對齊到該段首字左上方（如上標），避免蓋住文字 */
+  transform: translate(-12px, 3px);
+  color: var(--main-primary);
+  opacity: 0.4;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  user-select: none;
+}
+
+.timecode-marker:hover {
+  opacity: 1;
+  transform: translate(-12px, 3px) scale(1.3);
+  color: var(--main-primary-dark);
+}
+
+.timecode-marker.no-seek {
+  cursor: default;
+}
+
+.timecode-marker svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* 沿用既有 .timecode-tooltip 樣式（黑底白字氣泡）；hover 時顯示 */
+.timecode-marker .timecode-tooltip {
+  opacity: 0;
+}
+
+.timecode-marker:hover .timecode-tooltip {
+  opacity: 1;
+}
+
 /* 文字片段 */
 .text-part {
   display: inline;
@@ -1165,8 +1229,8 @@ usePageLifecycle({
 .transcript-display.alt-no-seek .marker-wrapper .text-part {
   cursor: default;
 }
-.transcript-display.editing.alt-segment-hover.alt-no-seek,
-.transcript-display.editing.alt-segment-hover.alt-no-seek * {
+.transcript-display.alt-segment-hover.alt-no-seek,
+.transcript-display.alt-segment-hover.alt-no-seek * {
   cursor: default !important;
 }
 
@@ -1202,9 +1266,9 @@ usePageLifecycle({
   background-color: rgba(196, 140, 226, 0.4);
 }
 
-/* A+ Alt + hover 到 segment 時,游標改為 pointer */
-.transcript-display.editing.alt-segment-hover,
-.transcript-display.editing.alt-segment-hover * {
+/* A+ Alt + hover 到 segment 時,游標改為 pointer（編輯/非編輯共用）*/
+.transcript-display.alt-segment-hover,
+.transcript-display.alt-segment-hover * {
   cursor: pointer !important;
 }
 

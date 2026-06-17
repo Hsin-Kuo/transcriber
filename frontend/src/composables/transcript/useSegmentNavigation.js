@@ -39,9 +39,9 @@ export function useSegmentNavigation({
     if (!window.CSS || !CSS.highlights) return
     if (!textareaRef.value) return
 
+    // 編輯與非編輯模式共用同一套 segment 高亮（ranges 來源由 navSegOffsets facade 切換）
     const shouldShow =
       isAltPressed.value &&
-      isEditing.value &&
       displayMode.value === 'paragraph' &&
       segOffsets.editSegmentRanges.value.length > 0
     if (!shouldShow) {
@@ -140,7 +140,7 @@ export function useSegmentNavigation({
 
   function updateHoverChipFromEvent(e) {
     hoverChipRafId = null
-    if (!isAltPressed.value || !isEditing.value) {
+    if (!isAltPressed.value || displayMode.value !== 'paragraph') {
       hideHoverChip()
       return
     }
@@ -193,7 +193,7 @@ export function useSegmentNavigation({
 
   function handleEditorScroll() {
     hideHoverChip()
-    if (!isAltPressed.value || !isEditing.value || displayMode.value !== 'paragraph') return
+    if (!isAltPressed.value || displayMode.value !== 'paragraph') return
     if (scrollHighlightTimer) clearTimeout(scrollHighlightTimer)
     scrollHighlightTimer = setTimeout(() => {
       scrollHighlightTimer = null
@@ -266,7 +266,7 @@ export function useSegmentNavigation({
       () => segOffsets.editSegmentRanges.value,
     ],
     () => {
-      if (isAltPressed.value && isEditing.value && displayMode.value === 'paragraph') {
+      if (isAltPressed.value && displayMode.value === 'paragraph') {
         scheduleSegmentHighlightRebuild()
       } else {
         clearSegmentHighlight()

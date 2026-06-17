@@ -90,7 +90,8 @@ export function useSearchReplace({
     searchMatches.value = matches
     currentMatchIndex.value = matches.length > 0 ? 0 : 0
 
-    if (isEditing.value && displayMode.value === 'paragraph') {
+    // paragraph 模式（編輯/非編輯）皆走 CSS Highlight API
+    if (displayMode.value === 'paragraph') {
       nextTick(() => {
         applySearchHighlightsWithCSS()
       })
@@ -156,7 +157,7 @@ export function useSearchReplace({
   function goToPreviousMatch() {
     if (searchMatches.value.length === 0) return
     currentMatchIndex.value = (currentMatchIndex.value - 1 + searchMatches.value.length) % searchMatches.value.length
-    if (isEditing.value && displayMode.value === 'paragraph') {
+    if (displayMode.value === 'paragraph') {
       applySearchHighlightsWithCSS()
     }
     scrollToMatch(currentMatchIndex.value)
@@ -165,7 +166,7 @@ export function useSearchReplace({
   function goToNextMatch() {
     if (searchMatches.value.length === 0) return
     currentMatchIndex.value = (currentMatchIndex.value + 1) % searchMatches.value.length
-    if (isEditing.value && displayMode.value === 'paragraph') {
+    if (displayMode.value === 'paragraph') {
       applySearchHighlightsWithCSS()
     }
     scrollToMatch(currentMatchIndex.value)
@@ -173,8 +174,9 @@ export function useSearchReplace({
 
   function scrollToMatch(index) {
     if (displayMode.value === 'paragraph') {
+      // paragraph 模式（編輯/非編輯）統一用 range 幾何捲動（無 .search-highlight DOM 可用）
       nextTick(() => {
-        if (isEditing.value && textareaRef.value && searchMatches.value[index]) {
+        if (textareaRef.value && searchMatches.value[index]) {
           const match = searchMatches.value[index]
           const range = findRangeForMatch(match)
           if (range) {
@@ -182,11 +184,6 @@ export function useSearchReplace({
             const containerRect = textareaRef.value.getBoundingClientRect()
             const scrollTop = textareaRef.value.scrollTop + rect.top - containerRect.top - containerRect.height / 2
             textareaRef.value.scrollTo({ top: scrollTop, behavior: 'smooth' })
-          }
-        } else {
-          const highlightedElements = document.querySelectorAll('.search-highlight')
-          if (highlightedElements[index]) {
-            highlightedElements[index].scrollIntoView({ behavior: 'smooth', block: 'center' })
           }
         }
       })
@@ -208,7 +205,7 @@ export function useSearchReplace({
     let lastCharWasNewline = false
 
     function collectTextNodes(node) {
-      if (node.classList && (node.classList.contains('segment-marker') || node.classList.contains('text-timecode-tooltip'))) {
+      if (node.classList && (node.classList.contains('segment-marker') || node.classList.contains('text-timecode-tooltip') || node.classList.contains('timecode-marker-overlay'))) {
         return
       }
       if (node.nodeType === Node.TEXT_NODE) {
