@@ -1222,27 +1222,17 @@ usePageLifecycle({
   background-color: rgba(255, 152, 0, 0.6);
 }
 
-/* 編輯模式 Alt segment 高亮（紫）；hover 疊上加深 */
+/* Alt segment 高亮（橘，primary）；hover 疊上加深同色系。編輯/非編輯一致 */
 ::highlight(segment-highlight) {
-  background-color: rgba(196, 140, 226, 0.175);
-}
-
-::highlight(segment-highlight-hover) {
-  background-color: rgba(196, 140, 226, 0.4);
-}
-
-/* 非編輯（閱讀）模式維持原本的橘色高亮（primary）；hover 加深同色系。
-   用 originating element (:not(.editing)) 限定，與編輯模式共用同一組 highlight 名稱 */
-.transcript-display:not(.editing)::highlight(segment-highlight) {
   background-color: rgba(var(--color-primary-rgb), 0.25);
 }
-.transcript-display:not(.editing)::highlight(segment-highlight-hover) {
+::highlight(segment-highlight-hover) {
   background-color: rgba(var(--color-primary-rgb), 0.45);
 }
-[data-theme="dark"] .transcript-display:not(.editing)::highlight(segment-highlight) {
+[data-theme="dark"] ::highlight(segment-highlight) {
   background-color: rgba(var(--color-primary-rgb), 0.35);
 }
-[data-theme="dark"] .transcript-display:not(.editing)::highlight(segment-highlight-hover) {
+[data-theme="dark"] ::highlight(segment-highlight-hover) {
   background-color: rgba(var(--color-primary-rgb), 0.55);
 }
 
