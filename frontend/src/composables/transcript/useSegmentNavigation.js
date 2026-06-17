@@ -39,9 +39,9 @@ export function useSegmentNavigation({
     if (!window.CSS || !CSS.highlights) return
     if (!textareaRef.value) return
 
+    // 編輯與非編輯模式共用同一套 segment 高亮（ranges 來源由 navSegOffsets facade 切換）
     const shouldShow =
       isAltPressed.value &&
-      isEditing.value &&
       displayMode.value === 'paragraph' &&
       segOffsets.editSegmentRanges.value.length > 0
     if (!shouldShow) {
@@ -90,6 +90,7 @@ export function useSegmentNavigation({
     if (window.CSS && CSS.highlights) {
       const wasSet = CSS.highlights.has('segment-highlight')
       CSS.highlights.delete('segment-highlight')
+      CSS.highlights.delete('segment-highlight-hover')
       if (wasSet) {
         const el = textareaRef.value
         if (el) {
@@ -126,13 +127,20 @@ export function useSegmentNavigation({
 
   // --- Hover chip ---
 
+  function clearSegmentHoverHighlight() {
+    if (window.CSS && CSS.highlights) {
+      CSS.highlights.delete('segment-highlight-hover')
+    }
+  }
+
   function hideHoverChip() {
     hoverChipVisible.value = false
+    clearSegmentHoverHighlight()
   }
 
   function updateHoverChipFromEvent(e) {
     hoverChipRafId = null
-    if (!isAltPressed.value || !isEditing.value) {
+    if (!isAltPressed.value || displayMode.value !== 'paragraph') {
       hideHoverChip()
       return
     }
@@ -154,6 +162,14 @@ export function useSegmentNavigation({
       top: `${lineRect.top - wrapperRect.top}px`,
     }
     hoverChipVisible.value = true
+
+    // 高亮目前 hover 到的 segment（疊在 segment-highlight 之上，priority 較高），
+    // 讓編輯模式 hover 也有顏色變化，與閱讀模式的 :hover 變色一致
+    if (window.CSS && CSS.highlights) {
+      const hl = new Highlight(segRange)
+      hl.priority = 1
+      CSS.highlights.set('segment-highlight-hover', hl)
+    }
   }
 
   // --- Editor event handlers (bound to contenteditable) ---
@@ -177,7 +193,7 @@ export function useSegmentNavigation({
 
   function handleEditorScroll() {
     hideHoverChip()
-    if (!isAltPressed.value || !isEditing.value || displayMode.value !== 'paragraph') return
+    if (!isAltPressed.value || displayMode.value !== 'paragraph') return
     if (scrollHighlightTimer) clearTimeout(scrollHighlightTimer)
     scrollHighlightTimer = setTimeout(() => {
       scrollHighlightTimer = null
@@ -185,7 +201,7 @@ export function useSegmentNavigation({
     }, 80)
   }
 
-  // --- Non-editing click handlers ---
+  // --- ▼ 時間標記點擊（overlay）---
 
   function handleMarkerClick(startTime) {
     if (hasAudio.value) {
@@ -193,13 +209,18 @@ export function useSegmentNavigation({
     }
   }
 
-  function handleTextClick(startTime, event) {
-    if (isAltPressed.value && hasAudio.value) {
-      if (isEditing.value && event) {
-        event.preventDefault()
-      }
-      seekToTime(startTime)
+  // ▼ 標記 hover：複用 Alt hover 的同一顆 chip（在 wrapper 內、不被 scroller 裁切），
+  // 確保與 highlight tooltip 外觀/行為完全一致。傳入 marker 的視窗座標（頂端中心點）。
+  function showHoverChipAt(startTime, clientX, clientY) {
+    const wrapper = textareaRef.value?.parentElement
+    if (!wrapper) return
+    const wrapperRect = wrapper.getBoundingClientRect()
+    hoverChipTime.value = formatTime(startTime)
+    hoverChipStyle.value = {
+      left: `${clientX - wrapperRect.left}px`,
+      top: `${clientY - wrapperRect.top}px`,
     }
+    hoverChipVisible.value = true
   }
 
   // --- Alt key state tracking (window-level) ---
@@ -250,7 +271,7 @@ export function useSegmentNavigation({
       () => segOffsets.editSegmentRanges.value,
     ],
     () => {
-      if (isAltPressed.value && isEditing.value && displayMode.value === 'paragraph') {
+      if (isAltPressed.value && displayMode.value === 'paragraph') {
         scheduleSegmentHighlightRebuild()
       } else {
         clearSegmentHighlight()
@@ -289,6 +310,7 @@ export function useSegmentNavigation({
     handleEditorClickInEditing,
     handleEditorScroll,
     handleMarkerClick,
-    handleTextClick,
+    showHoverChipAt,
+    hideHoverChip,
   }
 }

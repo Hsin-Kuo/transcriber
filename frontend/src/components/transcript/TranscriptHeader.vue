@@ -19,7 +19,7 @@
           :aria-label="$t('transcriptDetail.editTitle')"
           @input="$emit('update:editingTaskName', $event.target.value)"
           @blur="$emit('save-task-name')"
-          @keyup.enter="$emit('save-task-name')"
+          @keydown.enter="handleTitleEnter"
           @keyup.esc="$emit('cancel-title-edit')"
         />
         <h1 v-else @click="$emit('start-title-edit')" class="editable-title">
@@ -27,9 +27,8 @@
         </h1>
       </div>
 
-      <!-- 元數據 -->
+      <!-- 元數據（建立時間已移除，只保留時長） -->
       <TranscriptMetadata
-        :created-at="createdAt"
         :duration-text="durationText"
         layout="horizontal"
         :show-date-icon="false"
@@ -232,7 +231,6 @@ const props = defineProps({
     type: String,
     default: ''
   },
-  createdAt: [String, Number],
   durationText: String,
   isEditing: {
     type: Boolean,
@@ -427,6 +425,12 @@ function handleWheel(event) {
 function updateSpeakerName(speaker, value) {
   const newSpeakerNames = { ...props.speakerNames, [speaker]: value }
   emit('update:speakerNames', newSpeakerNames)
+}
+
+// Enter 儲存標題；忽略中文/IME 組字確認（選字結束）的 Enter，避免誤觸存檔
+function handleTitleEnter(e) {
+  if (e.isComposing || e.keyCode === 229) return
+  emit('save-task-name')
 }
 
 // 監聽編輯標題狀態，自動聚焦輸入框

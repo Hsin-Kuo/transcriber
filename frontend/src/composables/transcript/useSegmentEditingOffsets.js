@@ -16,7 +16,7 @@ import { ref } from 'vue'
  *  - .segment-marker / .text-timecode-tooltip elements: skipped entirely
  */
 
-const SKIP_CLASSES = new Set(['segment-marker', 'text-timecode-tooltip'])
+const SKIP_CLASSES = new Set(['segment-marker', 'text-timecode-tooltip', 'timecode-marker-overlay'])
 
 function shouldSkip(node) {
   return (
