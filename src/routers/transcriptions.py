@@ -19,6 +19,7 @@ import aiofiles
 from ..auth.dependencies import get_current_user
 from ..database.mongodb import get_database
 from ..database.repositories.task_repo import TaskRepository
+from ..database.repositories.user_repo import UserRepository
 from ..dependencies import get_intake_service
 from ..models.intake import IntakeConfig
 from ..models.quota import has_feature
@@ -1195,7 +1196,11 @@ async def create_batch_transcriptions(
     """批次建立轉錄任務"""
     # ── 方案功能檢查：批次上傳僅 Basic 以上方案可用 ──
     # 強制做在後端，避免 free 使用者繞過前端 UI 直接呼叫此 API。
-    if not has_feature(current_user, "batch_operations"):
+    # current_user 來自 JWT、為效能不含 quota（dependencies.py）；feature gating 必須
+    # 用 DB 的完整 user（含 quota.features），否則 has_feature 永遠 fallback 成 free → 連
+    # Basic 以上也被誤擋 403。load 不到（理論上不會）視為無權限，fail-closed。
+    full_user = await UserRepository(db).get_by_id(str(current_user["_id"]))
+    if not has_feature(full_user or {}, "batch_operations"):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             detail={
