@@ -658,6 +658,12 @@ async function confirmBatchUpload(formData) {
     // 上傳完成後重抓 tag 列表（user 可能在 BatchUploadPanel 內建了新 tag）
     await fetchTagColors()
 
+    // 全部成功且未觸發額度購買 Modal → 跳轉任務列表（與單檔上傳一致）；
+    // 部分失敗或彈了購買引導則留在原頁，避免把引導/失敗結果蓋掉
+    if (result.failed === 0 && !batchQuota && router.currentRoute.value.name === 'transcription') {
+      router.push({ name: 'tasks' })
+    }
+
   } catch (error) {
     // 使用者主動取消：不視為錯誤
     if (!isUploadCancelled(error)) {
