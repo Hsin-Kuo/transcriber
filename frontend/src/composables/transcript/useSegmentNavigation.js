@@ -201,19 +201,10 @@ export function useSegmentNavigation({
     }, 80)
   }
 
-  // --- Non-editing click handlers ---
+  // --- ▼ 時間標記點擊（overlay）---
 
   function handleMarkerClick(startTime) {
     if (hasAudio.value) {
-      seekToTime(startTime)
-    }
-  }
-
-  function handleTextClick(startTime, event) {
-    if (isAltPressed.value && hasAudio.value) {
-      if (isEditing.value && event) {
-        event.preventDefault()
-      }
       seekToTime(startTime)
     }
   }
@@ -305,6 +296,5 @@ export function useSegmentNavigation({
     handleEditorClickInEditing,
     handleEditorScroll,
     handleMarkerClick,
-    handleTextClick,
   }
 }

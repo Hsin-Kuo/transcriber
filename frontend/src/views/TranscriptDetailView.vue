@@ -726,12 +726,9 @@ const {
   goToNextMatch,
   handleReplaceCurrent,
   handleReplaceAllNew,
-  getContentPartsWithHighlight,
-  splitTextWithHighlight,
   clearHighlights,
   reSearch,
   reapplyHighlightsIfNeeded,
-  applySearchHighlightsWithCSS,
 } = useSearchReplace({
   textareaRef,
   currentTranscript,
@@ -768,7 +765,6 @@ const navSegOffsets = {
 
 // ========== Segment Navigation (Alt+Click seek, hover chip, highlight) ==========
 const {
-  isAltPressed,
   hoverChipVisible,
   hoverChipTime,
   hoverChipStyle,
@@ -776,7 +772,6 @@ const {
   handleEditorClickInEditing,
   handleEditorScroll,
   handleMarkerClick,
-  handleTextClick,
 } = useSegmentNavigation({
   textareaRef,
   segOffsets: navSegOffsets,
@@ -1199,36 +1194,7 @@ usePageLifecycle({
   opacity: 1;
 }
 
-/* 文字片段 */
-.text-part {
-  display: inline;
-  position: relative;
-  padding: 1px 0px; /* 預先保留空間，避免 Alt 切換時文字重排 */
-  border-radius: 3px;
-}
-
-/* Alt 鍵按下時的可點擊文字樣式（透過 parent .alt-pressed 切換，
-   避免一次 patch 數百個 span 的 class —— Safari 上會明顯卡頓）
-   只套用到 .marker-wrapper 內的 .text-part：原本只有這些 span 有 click handler */
-.transcript-display.alt-pressed .marker-wrapper .text-part {
-  background-color: rgba(var(--color-primary-rgb), 0.25);
-  cursor: pointer;
-}
-
-/* 深色模式：primary 橘疊在深底上偏暗，alpha 拉高以維持可辨識度 */
-[data-theme="dark"] .transcript-display.alt-pressed .marker-wrapper .text-part {
-  background-color: rgba(var(--color-primary-rgb), 0.35);
-}
-
-.transcript-display.alt-pressed .marker-wrapper .text-part:hover {
-  background-color: rgba(var(--color-divider-rgb), 0.4);
-}
-
-/* 音檔已刪除：Alt 仍亮 segment 色塊與 timecode 供檢視，但停用 seek，
-   游標不顯示為可點擊（避免看起來可點卻無反應） */
-.transcript-display.alt-no-seek .marker-wrapper .text-part {
-  cursor: default;
-}
+/* 音檔已刪除：Alt+hover 仍亮 segment 但停用 seek，游標不顯示為可點擊 */
 .transcript-display.alt-segment-hover.alt-no-seek,
 .transcript-display.alt-segment-hover.alt-no-seek * {
   cursor: default !important;
@@ -1298,98 +1264,7 @@ usePageLifecycle({
   border-top-color: rgba(0, 0, 0, 0.85);
 }
 
-/* 文字部分的 Timecode Tooltip */
-.text-timecode-tooltip {
-  position: absolute;
-  bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%) translateY(-4px);
-  padding: 4px 8px;
-  background: rgba(0, 0, 0, 0.85);
-  color: white;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 500;
-  white-space: nowrap;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-  z-index: 1000;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-  display: none;
-}
-
-.transcript-display.alt-pressed .text-timecode-tooltip {
-  display: inline-block;
-}
-
-.transcript-display.alt-pressed .text-part:hover .text-timecode-tooltip {
-  opacity: 1;
-}
-
-/* Tooltip 箭頭 */
-.text-timecode-tooltip::after {
-  content: '';
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  border: 4px solid transparent;
-  border-top-color: rgba(0, 0, 0, 0.85);
-}
-
-/* 標記包裝器 */
-.marker-wrapper {
-  position: relative;
-  display: inline;
-}
-
-/* Segment 標記 */
-.segment-marker {
-  position: relative;
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  margin-right: 2px;
-  vertical-align: super;
-  cursor: pointer;
-  color: var(--main-primary);
-  opacity: 0.4;
-  transition: all 0.2s ease;
-  font-size: 8px;
-  line-height: 1;
-  user-select: none !important;
-  -webkit-user-select: none !important;
-  -moz-user-select: none !important;
-  -ms-user-select: none !important;
-}
-
-/* 標記內所有元素都不可選中 */
-.segment-marker * {
-  user-select: none !important;
-  -webkit-user-select: none !important;
-  -moz-user-select: none !important;
-  -ms-user-select: none !important;
-}
-
-/* 編輯模式下標記仍可點擊 */
-.editing .segment-marker {
-  cursor: pointer;
-}
-
-.segment-marker:hover {
-  opacity: 1;
-  transform: scale(1.3);
-  color: var(--main-primary-dark);
-}
-
-.segment-marker svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-/* Timecode Tooltip */
+/* Timecode Tooltip（▼ marker overlay 共用）*/
 .timecode-tooltip {
   position: absolute;
   bottom: 100%;
@@ -1407,10 +1282,6 @@ usePageLifecycle({
   transition: opacity 0.2s ease;
   z-index: 1000;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-}
-
-.segment-marker:hover .timecode-tooltip {
-  opacity: 1;
 }
 
 /* Tooltip 箭頭 */
