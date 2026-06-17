@@ -1188,6 +1188,17 @@ usePageLifecycle({
   cursor: default;
 }
 
+/* 深色模式：改用橘色（與 Alt highlight 一致）並提高可見度，
+   原本 --main-primary(=藍灰) @0.4 在深底上過暗看不清 */
+[data-theme="dark"] .timecode-marker {
+  color: var(--color-primary);
+  opacity: 0.7;
+}
+
+[data-theme="dark"] .timecode-marker:hover {
+  color: var(--color-primary);
+}
+
 .timecode-marker svg {
   display: block;
   width: 100%;
