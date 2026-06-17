@@ -249,7 +249,7 @@
             <span v-if="uploading && uploadProgress > 0">{{ $t('transcription.uploading') }} {{ uploadProgress }}%</span>
             <span v-else-if="uploading">{{ $t('transcription.uploading') }}</span>
           </button>
-          <button class="btn btn-secondary btn-cancel" :disabled="uploading" @click="cancelUpload">{{ $t('transcription.cancel') }}</button>
+          <button class="btn btn-secondary btn-cancel" @click="cancelUpload">{{ $t('transcription.cancel') }}</button>
         </div>
       </div>
     </div>
@@ -555,6 +555,8 @@ async function confirmAndUpload() {
 
 // 取消上傳
 function cancelUpload() {
+  // 上傳進行中 → 真正中斷請求（與 toast 的 uploadStore.cancel 一致）；非上傳中則僅重置表單
+  if (uploading.value) uploadStore.cancel()
   pendingFile.value = null
   taskType.value = 'paragraph'  // 重置為預設值
   selectedTags.value = []
@@ -594,6 +596,8 @@ function handleShowTranscriptionForm(files) {
 
 // 取消批次上傳
 function cancelBatchUpload() {
+  // 上傳進行中 → 真正中斷請求（與 toast 一致）；非上傳中則僅關面板
+  if (uploading.value) uploadStore.cancel()
   batchMode.isActive = false
   batchMode.files = []
 }
