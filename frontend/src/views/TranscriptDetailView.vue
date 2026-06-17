@@ -1159,8 +1159,8 @@ usePageLifecycle({
   position: absolute;
   width: 8px;
   height: 8px;
-  /* 對齊到該段首字左上方（如上標），避免蓋住文字 */
-  transform: translate(-12px, 3px);
+  /* 抬到該段首字正上方的行距空間（如上標），避免壓到左方/同段文字 */
+  transform: translate(-3px, -5px);
   color: var(--main-primary);
   opacity: 0.4;
   cursor: pointer;
@@ -1171,7 +1171,7 @@ usePageLifecycle({
 
 .timecode-marker:hover {
   opacity: 1;
-  transform: translate(-12px, 3px) scale(1.3);
+  transform: translate(-3px, -5px) scale(1.3);
   color: var(--main-primary-dark);
 }
 
