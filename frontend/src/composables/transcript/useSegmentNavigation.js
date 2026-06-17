@@ -209,6 +209,20 @@ export function useSegmentNavigation({
     }
   }
 
+  // ▼ 標記 hover：複用 Alt hover 的同一顆 chip（在 wrapper 內、不被 scroller 裁切），
+  // 確保與 highlight tooltip 外觀/行為完全一致。傳入 marker 的視窗座標（頂端中心點）。
+  function showHoverChipAt(startTime, clientX, clientY) {
+    const wrapper = textareaRef.value?.parentElement
+    if (!wrapper) return
+    const wrapperRect = wrapper.getBoundingClientRect()
+    hoverChipTime.value = formatTime(startTime)
+    hoverChipStyle.value = {
+      left: `${clientX - wrapperRect.left}px`,
+      top: `${clientY - wrapperRect.top}px`,
+    }
+    hoverChipVisible.value = true
+  }
+
   // --- Alt key state tracking (window-level) ---
 
   function handleKeyDown(e) {
@@ -296,5 +310,7 @@ export function useSegmentNavigation({
     handleEditorClickInEditing,
     handleEditorScroll,
     handleMarkerClick,
+    showHoverChipAt,
+    hideHoverChip,
   }
 }

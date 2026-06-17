@@ -373,7 +373,9 @@ class="transcript-layout"
                   :class="{ 'no-seek': !currentTranscript.hasAudio }"
                   :style="{ top: m.top + 'px', left: m.left + 'px' }"
                   @click="handleMarkerClick(m.start)"
-                ><svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor"><path d="M 4 6 L 1 2 L 7 2 Z" /></svg><span class="timecode-tooltip">{{ formatTime(m.start) }}</span></span>
+                  @mouseenter="onMarkerEnter(m, $event)"
+                  @mouseleave="hideHoverChip()"
+                ><svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor"><path d="M 4 6 L 1 2 L 7 2 Z" /></svg></span>
               </div></div>
             <!-- Alt hover timecode chip (Alt 按住 + hover 到 segment 時顯示；編輯/非編輯皆可) -->
             <div
@@ -519,7 +521,6 @@ import { NEW_ENDPOINTS } from '../api/endpoints'
 import { useDisplayPreferences } from '../composables/transcript/useDisplayPreferences'
 import { useTranscriptData } from '../composables/transcript/useTranscriptData'
 import { useAudioPlayer } from '../composables/transcript/useAudioPlayer'
-import { formatTime } from '../utils/formatTime'
 import { useSubtitleMode } from '../composables/transcript/useSubtitleMode'
 import { useTranscriptEditor } from '../composables/transcript/useTranscriptEditor'
 import { useSegmentMarkers } from '../composables/transcript/useSegmentMarkers'
@@ -772,6 +773,8 @@ const {
   handleEditorClickInEditing,
   handleEditorScroll,
   handleMarkerClick,
+  showHoverChipAt,
+  hideHoverChip,
 } = useSegmentNavigation({
   textareaRef,
   segOffsets: navSegOffsets,
@@ -797,6 +800,12 @@ const { markers: segmentMarkerOverlay } = useSegmentMarkerOverlay({
   enabled: markerOverlayEnabled,
   rebuildKey: markerOverlayRebuildKey,
 })
+
+// hover ▼ → 顯示與 Alt hover 同一顆 chip（定位在 marker 頂端中心，置於其上方）
+function onMarkerEnter(m, e) {
+  const rect = e.currentTarget.getBoundingClientRect()
+  showHoverChipAt(m.start, rect.left + rect.width / 2, rect.top)
+}
 
 // 計算唯一講者列表（用於字幕模式設定）
 const uniqueSpeakers = computed(() => {
@@ -1185,15 +1194,6 @@ usePageLifecycle({
   height: 100%;
 }
 
-/* 沿用既有 .timecode-tooltip 樣式（黑底白字氣泡）；hover 時顯示 */
-.timecode-marker .timecode-tooltip {
-  opacity: 0;
-}
-
-.timecode-marker:hover .timecode-tooltip {
-  opacity: 1;
-}
-
 /* 音檔已刪除：Alt+hover 仍亮 segment 但停用 seek，游標不顯示為可點擊 */
 .transcript-display.alt-segment-hover.alt-no-seek,
 .transcript-display.alt-segment-hover.alt-no-seek * {
@@ -1259,37 +1259,6 @@ usePageLifecycle({
 }
 
 .segment-hover-chip::after {
-  content: '';
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  border: 4px solid transparent;
-  border-top-color: rgba(0, 0, 0, 0.85);
-}
-
-/* Timecode Tooltip（▼ marker overlay 共用）*/
-.timecode-tooltip {
-  position: absolute;
-  bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%) translateY(-4px);
-  padding: 4px 8px;
-  background: rgba(0, 0, 0, 0.85);
-  color: white;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 500;
-  white-space: nowrap;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-  z-index: 1000;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-}
-
-/* Tooltip 箭頭 */
-.timecode-tooltip::after {
   content: '';
   position: absolute;
   top: 100%;
