@@ -10,6 +10,7 @@ from ..database.mongodb import get_database
 from ..database.repositories.task_repo import TaskRepository
 from ..utils.storage_service import is_aws
 from ..utils.time_utils import get_utc_timestamp
+from ..services.task_query_helpers import is_audio_expired
 
 router = APIRouter(prefix="/shared", tags=["Shared"])
 
@@ -191,7 +192,6 @@ async def get_shared_task(
     # 判斷音檔是否可用（與 tasks.py 詳情頁邏輯一致：套用擁有者 tier 的保留天數，過期則視為無音檔）
     has_audio = bool(result_info.get("audio_file"))
     if has_audio:
-        from .tasks import _is_audio_expired
         from ..database.repositories.user_repo import UserRepository
         from ..models.quota import QUOTA_TIERS, QuotaTier
         owner_id = task.get("user", {}).get("user_id")
@@ -202,7 +202,7 @@ async def get_shared_task(
             owner_tier = owner.get("quota", {}).get("tier", "free") if owner else "free"
             tier_config = QUOTA_TIERS.get(QuotaTier(owner_tier), QUOTA_TIERS[QuotaTier.FREE])
             retention_days = tier_config.get("audio_retention_days", 7)
-        if _is_audio_expired(task, retention_days):
+        if is_audio_expired(task, retention_days):
             has_audio = False
 
     # 序列化日期（timestamps 儲存為 Unix epoch 秒數）
