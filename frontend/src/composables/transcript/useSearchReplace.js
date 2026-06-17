@@ -90,7 +90,8 @@ export function useSearchReplace({
     searchMatches.value = matches
     currentMatchIndex.value = matches.length > 0 ? 0 : 0
 
-    if (isEditing.value && displayMode.value === 'paragraph') {
+    // paragraph 模式（編輯/非編輯）皆走 CSS Highlight API
+    if (displayMode.value === 'paragraph') {
       nextTick(() => {
         applySearchHighlightsWithCSS()
       })
@@ -156,7 +157,7 @@ export function useSearchReplace({
   function goToPreviousMatch() {
     if (searchMatches.value.length === 0) return
     currentMatchIndex.value = (currentMatchIndex.value - 1 + searchMatches.value.length) % searchMatches.value.length
-    if (isEditing.value && displayMode.value === 'paragraph') {
+    if (displayMode.value === 'paragraph') {
       applySearchHighlightsWithCSS()
     }
     scrollToMatch(currentMatchIndex.value)
@@ -165,7 +166,7 @@ export function useSearchReplace({
   function goToNextMatch() {
     if (searchMatches.value.length === 0) return
     currentMatchIndex.value = (currentMatchIndex.value + 1) % searchMatches.value.length
-    if (isEditing.value && displayMode.value === 'paragraph') {
+    if (displayMode.value === 'paragraph') {
       applySearchHighlightsWithCSS()
     }
     scrollToMatch(currentMatchIndex.value)
@@ -173,8 +174,9 @@ export function useSearchReplace({
 
   function scrollToMatch(index) {
     if (displayMode.value === 'paragraph') {
+      // paragraph 模式（編輯/非編輯）統一用 range 幾何捲動（無 .search-highlight DOM 可用）
       nextTick(() => {
-        if (isEditing.value && textareaRef.value && searchMatches.value[index]) {
+        if (textareaRef.value && searchMatches.value[index]) {
           const match = searchMatches.value[index]
           const range = findRangeForMatch(match)
           if (range) {
@@ -182,11 +184,6 @@ export function useSearchReplace({
             const containerRect = textareaRef.value.getBoundingClientRect()
             const scrollTop = textareaRef.value.scrollTop + rect.top - containerRect.top - containerRect.height / 2
             textareaRef.value.scrollTo({ top: scrollTop, behavior: 'smooth' })
-          }
-        } else {
-          const highlightedElements = document.querySelectorAll('.search-highlight')
-          if (highlightedElements[index]) {
-            highlightedElements[index].scrollIntoView({ behavior: 'smooth', block: 'center' })
           }
         }
       })
@@ -208,7 +205,7 @@ export function useSearchReplace({
     let lastCharWasNewline = false
 
     function collectTextNodes(node) {
-      if (node.classList && (node.classList.contains('segment-marker') || node.classList.contains('text-timecode-tooltip'))) {
+      if (node.classList && (node.classList.contains('segment-marker') || node.classList.contains('text-timecode-tooltip') || node.classList.contains('timecode-marker-overlay'))) {
         return
       }
       if (node.nodeType === Node.TEXT_NODE) {
@@ -439,186 +436,6 @@ export function useSearchReplace({
     scrollRestoreTimers.push(timerId)
   }
 
-  // ========== 渲染 Helper（非編輯模式 highlight） ==========
-
-  function getContentParts() {
-    const content = currentTranscript.value.content || ''
-
-    if (!segmentMarkers.value || segmentMarkers.value.length === 0) {
-      return [{ text: content, isMarker: false }]
-    }
-
-    const parts = []
-    let lastIndex = 0
-
-    const sortedMarkers = [...segmentMarkers.value].sort((a, b) => a.textStartIndex - b.textStartIndex)
-
-    sortedMarkers.forEach(marker => {
-      if (marker.textStartIndex > lastIndex) {
-        parts.push({
-          text: content.substring(lastIndex, marker.textStartIndex),
-          isMarker: false
-        })
-      }
-
-      parts.push({
-        text: marker.text,
-        isMarker: true,
-        start: marker.start,
-        end: marker.end,
-        segmentIndex: marker.segmentIndex
-      })
-
-      lastIndex = marker.textEndIndex
-    })
-
-    if (lastIndex < content.length) {
-      parts.push({
-        text: content.substring(lastIndex),
-        isMarker: false
-      })
-    }
-
-    return parts
-  }
-
-  function getContentPartsWithHighlight() {
-    const parts = getContentParts()
-
-    if (isEditing.value || !searchText.value || searchMatches.value.length === 0) {
-      return parts
-    }
-
-    const result = []
-    let globalCharIndex = 0
-
-    for (const part of parts) {
-      if (!part.isMarker) {
-        const subParts = splitTextWithHighlightByPosition(part.text, globalCharIndex)
-        result.push(...subParts)
-        globalCharIndex += part.text.length
-      } else {
-        result.push(part)
-        globalCharIndex += part.text.length
-      }
-    }
-
-    return result
-  }
-
-  function splitTextWithHighlightByPosition(text, startPosition) {
-    if (!searchText.value || searchMatches.value.length === 0) {
-      return [{ text, isMarker: false, isHighlight: false }]
-    }
-
-    const endPosition = startPosition + text.length
-    const parts = []
-    let lastIndex = 0
-
-    const relevantMatches = searchMatches.value
-      .map((match, idx) => ({ ...match, matchIndex: idx }))
-      .filter(match => match.start < endPosition && match.end > startPosition)
-
-    for (const match of relevantMatches) {
-      const localStart = Math.max(0, match.start - startPosition)
-      const localEnd = Math.min(text.length, match.end - startPosition)
-
-      if (localStart > lastIndex) {
-        parts.push({
-          text: text.substring(lastIndex, localStart),
-          isMarker: false,
-          isHighlight: false
-        })
-      }
-
-      parts.push({
-        text: text.substring(localStart, localEnd),
-        isMarker: false,
-        isHighlight: true,
-        isCurrent: match.matchIndex === currentMatchIndex.value
-      })
-
-      lastIndex = localEnd
-    }
-
-    if (lastIndex < text.length) {
-      parts.push({
-        text: text.substring(lastIndex),
-        isMarker: false,
-        isHighlight: false
-      })
-    }
-
-    if (parts.length === 0) {
-      return [{ text, isMarker: false, isHighlight: false }]
-    }
-
-    return parts
-  }
-
-  function splitTextWithHighlight(text, segmentIndex) {
-    if (!searchText.value || !text) {
-      return [{ text, isHighlight: false }]
-    }
-
-    const parts = []
-    let lastIndex = 0
-
-    const regex = buildSearchRegex(searchText.value, {
-      matchCase: matchCase.value,
-      matchWholeWord: matchWholeWord.value,
-    })
-    if (!regex) return [{ text, isHighlight: false }]
-
-    try {
-      let match
-
-      let globalOffset = 0
-      const sortedMarkers = [...segmentMarkers.value].sort((a, b) => a.textStartIndex - b.textStartIndex)
-      const marker = sortedMarkers.find(m => m.segmentIndex === segmentIndex)
-      if (marker) {
-        globalOffset = marker.textStartIndex
-      }
-
-      while ((match = regex.exec(text)) !== null) {
-        if (match.index > lastIndex) {
-          parts.push({
-            text: text.substring(lastIndex, match.index),
-            isHighlight: false
-          })
-        }
-
-        const globalMatchStart = globalOffset + match.index
-        const isCurrent = searchMatches.value.some((m, idx) =>
-          m.start === globalMatchStart && idx === currentMatchIndex.value
-        )
-
-        parts.push({
-          text: match[0],
-          isHighlight: true,
-          isCurrent
-        })
-
-        lastIndex = match.index + match[0].length
-      }
-    } catch (e) {
-      return [{ text, isHighlight: false }]
-    }
-
-    if (lastIndex < text.length) {
-      parts.push({
-        text: text.substring(lastIndex),
-        isHighlight: false
-      })
-    }
-
-    if (parts.length === 0) {
-      return [{ text, isHighlight: false }]
-    }
-
-    return parts
-  }
-
   // ========== 外部整合 helper ==========
 
   function clearHighlights() {
@@ -667,10 +484,6 @@ export function useSearchReplace({
     // Replace
     handleReplaceCurrent,
     handleReplaceAllNew,
-
-    // Rendering
-    getContentPartsWithHighlight,
-    splitTextWithHighlight,
 
     // Integration helpers
     clearHighlights,

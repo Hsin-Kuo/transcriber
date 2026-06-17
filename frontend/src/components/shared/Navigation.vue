@@ -589,6 +589,15 @@ watch(() => route.path, (newPath, oldPath) => {
   border-radius: 2px;
 }
 
+.recent-task-empty {
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  text-align: center;
+  /* 明確指定主題色，避免 fallback 到瀏覽器預設黑色（深色模式下黑字配深底會看不清） */
+  color: var(--nav-text);
+  opacity: 0.7;
+}
+
 .recent-task-item {
   display: flex;
   flex-direction: column;
