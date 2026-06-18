@@ -76,6 +76,33 @@ def font_for_script(script: Script, primary_lang: str = "zh-TW") -> str:
     return _LANG_TO_HAN_FONT.get(primary_lang, FONT_TC)
 
 
+# ── 字型涵蓋 fallback ──────────────────────────────────────────
+# 各 Noto 字型實際涵蓋的 codepoints，由 pdf_generator.preload_fonts 在 ReportLab 註冊字型後
+# 填入（取自 font.face.charToGlyph）。用途：NotoSansTC 缺部分簡體字（这/简…），單純依
+# primary_lang 把所有漢字都導到 TC 會讓那些字變豆腐 → 逐字檢查涵蓋、缺則 fallback。
+_FONT_COVERAGE: dict[str, frozenset] = {}
+
+# fallback 順序：NotoSansSC 是 CJK superset（TC+SC 全包）擺第一，補得最齊；其餘依序。
+_FALLBACK_ORDER = (FONT_SC, FONT_TC, FONT_JP, FONT_KR)
+
+
+def register_font_coverage(name: str, codepoints) -> None:
+    """登記某字型涵蓋的 codepoints（供 resolve_font fallback）。pdf_generator 註冊字型後呼叫。"""
+    _FONT_COVERAGE[name] = frozenset(codepoints)
+
+
+def resolve_font(preferred: str, codepoint: int) -> str:
+    """首選字型涵蓋此字 → 用首選；否則 fallback 到第一個涵蓋它的字型；都沒有/未建表 → 回首選。"""
+    if not _FONT_COVERAGE:
+        return preferred  # 涵蓋表未建立（理論上 preload 後才用）→ 保持原行為，不退化
+    if codepoint in _FONT_COVERAGE.get(preferred, frozenset()):
+        return preferred
+    for name in _FALLBACK_ORDER:
+        if codepoint in _FONT_COVERAGE.get(name, frozenset()):
+            return name
+    return preferred
+
+
 def wrap_text_with_font_tags(text: str, primary_lang: str = "zh-TW") -> str:
     """把字串切成同 script 連續 chunk，每段包 <font name=...> tag。
 
@@ -97,7 +124,8 @@ def wrap_text_with_font_tags(text: str, primary_lang: str = "zh-TW") -> str:
 
     for ch in text:
         script = detect_char_script(ch)
-        font = font_for_script(script, primary_lang)
+        # 先依 script/primary_lang 選字型，再逐字確認該字型真的有這個字、缺則 fallback
+        font = resolve_font(font_for_script(script, primary_lang), ord(ch))
         if font != current_font:
             flush()
             current_font = font
