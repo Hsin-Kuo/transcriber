@@ -211,7 +211,8 @@ def transcribe_chunk_worker(
         no_repeat_ngram_size=3,
         word_timestamps=True,
         hallucination_silence_threshold=2.0,
-        initial_prompt="以下是繁體中文的逐字稿。" if normalized_lang == "zh" else None,
+        # [驗證] 暫時移除 zh initial_prompt，確認 Amara.org 幻覺是否由它觸發
+        initial_prompt=None,
     )
 
     # 收集結果（保留 words 供重切段用；字型轉換由呼叫端的清洗步驟統一處理）
@@ -642,7 +643,8 @@ class WhisperProcessor:
             no_repeat_ngram_size=3,
             word_timestamps=True,
             hallucination_silence_threshold=2.0,
-            initial_prompt="以下是繁體中文的逐字稿。" if normalized_lang == "zh" else None,
+            # [驗證] 暫時移除 zh initial_prompt，確認 Amara.org 幻覺是否由它觸發
+            initial_prompt=None,
         )
         if self._has_gpu() and _USE_BATCHED:
             # GPU + batched：把 VAD 視窗批次餵 GPU，吞吐高；但只轉 VAD 區段、單一溫度無
