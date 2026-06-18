@@ -393,7 +393,10 @@
     "confirmDeleteTask": "確定要刪除這個任務嗎？",
     "deleteFailed": "刪除失敗，請稍後再試",
     "transcriptionComplete": "轉錄完成",
-    "transcriptionFailed": "轉錄失敗"
+    "transcriptionCompleteMessage": "「{name}」已完成",
+    "transcriptionFailed": "轉錄失敗",
+    "transcriptionFailedMessage": "「{name}」轉錄失敗",
+    "cancelFailed": "取消失敗，請稍後再試"
   },
   "taskList": {
     "all": "全部",
@@ -797,6 +800,14 @@
     "AUDIO_MISSING": "音檔已不存在，可能已過期被系統清除。",
     "SERVER_RESTART": "伺服器重啟導致任務中斷，請重新上傳。",
     "SYSTEM_ERROR": "系統發生未知錯誤，請稍後重試或聯絡客服。"
+  },
+  "apiError": {
+    "rateLimitedTitle": "請求太頻繁",
+    "rateLimitedMessage": "操作過於頻繁，請稍後再試",
+    "serverErrorTitle": "伺服器錯誤",
+    "serverErrorMessage": "伺服器暫時無法處理請求，請稍後再試",
+    "networkErrorTitle": "網路連線異常",
+    "networkErrorMessage": "無法連接伺服器，請檢查網路連線"
   },
   "common": {
     "close": "關閉"

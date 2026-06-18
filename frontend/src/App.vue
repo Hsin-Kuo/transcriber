@@ -73,8 +73,8 @@ provide('showNotification', (options) => {
 function handleRateLimit() {
   if (notificationToast.value) {
     notificationToast.value.addNotification({
-      title: '請求太頻繁',
-      message: '操作過於頻繁，請稍後再試',
+      title: $t('apiError.rateLimitedTitle'),
+      message: $t('apiError.rateLimitedMessage'),
       type: 'warning',
     })
   }
@@ -83,8 +83,8 @@ function handleRateLimit() {
 function handleServerError() {
   if (notificationToast.value) {
     notificationToast.value.addNotification({
-      title: '伺服器錯誤',
-      message: '伺服器暫時無法處理請求，請稍後再試',
+      title: $t('apiError.serverErrorTitle'),
+      message: $t('apiError.serverErrorMessage'),
       type: 'error',
     })
   }
@@ -93,8 +93,8 @@ function handleServerError() {
 function handleNetworkError() {
   if (notificationToast.value) {
     notificationToast.value.addNotification({
-      title: '網路連線異常',
-      message: '無法連接伺服器，請檢查網路連線',
+      title: $t('apiError.networkErrorTitle'),
+      message: $t('apiError.networkErrorMessage'),
       type: 'error',
     })
   }
