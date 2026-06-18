@@ -96,7 +96,7 @@
                     type="checkbox"
                     :checked="task.keep_audio"
                     @change="handleToggleKeepAudio"
-                    :disabled="!task.keep_audio && keepAudioCount >= 3"
+                    :disabled="!task.keep_audio && keepAudioCount >= maxKeepAudio"
                     class="toggle-input"
                   />
                   <!-- 圖釘（線條風格） -->
@@ -228,14 +228,21 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTaskHelpers } from '../../composables/task/useTaskHelpers'
 import { useDateFormatter } from '../../composables/useDateFormatter'
+import { useAuthStore } from '../../stores/auth'
 import TaskTagsSection from './TaskTagsSection.vue'
 import BottomSheet from '../common/BottomSheet.vue'
 
 const { t: $t } = useI18n()
+const authStore = useAuthStore()
+
+// 手動保留音檔上限（依方案）；999999 視為無限
+const UNLIMITED_KEEP_AUDIO = 999999
+const maxKeepAudio = computed(() => authStore.maxKeepAudio)
+const isUnlimitedKeepAudio = computed(() => maxKeepAudio.value >= UNLIMITED_KEEP_AUDIO)
 const { formatDateTime: formatTimestamp } = useDateFormatter()
 const {
   getStatusText,
@@ -369,13 +376,23 @@ function handleTagsUpdated(data) {
 }
 
 function getKeepAudioTooltip() {
+  // 最新任務音檔自動保留，不受手動額度影響（不帶數字，避免 free=0 / 無限方案顯示怪異）
   if (props.isNewest) {
     return $t('taskList.keepAudioTooltipNewest')
   }
-  if (!props.task.keep_audio && props.keepAudioCount >= 3) {
-    return $t('taskList.keepAudioTooltipFull')
+  // 方案不支援手動保留（free，max_keep_audio=0）
+  if (maxKeepAudio.value <= 0) {
+    return $t('taskList.keepAudioTooltipUnavailable')
   }
-  return $t('taskList.keepAudioTooltipNormal')
+  // 已達上限
+  if (!props.task.keep_audio && props.keepAudioCount >= maxKeepAudio.value) {
+    return $t('taskList.keepAudioTooltipFull', { n: maxKeepAudio.value })
+  }
+  // 無限方案不秀數字
+  if (isUnlimitedKeepAudio.value) {
+    return $t('taskList.keepAudioTooltipNormalUnlimited')
+  }
+  return $t('taskList.keepAudioTooltipNormal', { n: maxKeepAudio.value })
 }
 </script>
 
