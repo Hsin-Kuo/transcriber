@@ -13,7 +13,7 @@ torchaudio==2.5.1
 pyannote.audio==3.4.0
 # huggingface_hub 0.26+ 移除了 hf_hub_download 的 use_auth_token 參數，pyannote.audio 3.4.0
 # 仍在用它 → 不釘會抓到新版、diarization 載入即 TypeError。釘在最後支援該參數的 0.25.x。
-huggingface_hub==0.25.2
+huggingface_hub==1.19.0
 
 # 音檔處理
 pydub
