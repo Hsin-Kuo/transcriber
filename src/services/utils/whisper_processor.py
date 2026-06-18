@@ -93,6 +93,52 @@ def _collapse_repeated_segments(segments: List[Dict], max_repeat: int = 2) -> Li
     return result
 
 
+# ── 幻覺 deny_list ──────────────────────────────────────────────
+# Whisper 訓練語料含大量網路字幕，靜音/雜訊段沒有聲學證據時會「背出」這些字幕台詞
+# boilerplate（移除 initial_prompt 後大幅減少，但低音量雜訊仍偶發）。這些片語在真實
+# 語音逐字稿中幾乎不可能出現，整段命中即丟。
+# 保守原則：只列「絕不會是真實語音」的字幕/頻道宣傳台詞，避免誤刪正常句子；命中皆 log。
+# 比對前先去除空白（Whisper 可能在 CJK 間插空格），故 pattern 不含空白。
+_HALLUCINATION_PATTERNS = [
+    re.compile(p) for p in [
+        r"Amara\.?org",                                  # (中文)字幕由Amara.org社群/社区提供
+        r"字幕.{0,4}社[群區区團团].{0,2}提供",            # 字幕由…社群提供 變體
+        r"(中文)?字幕.{0,6}志[願愿]者",                   # 中文字幕志願者 / 字幕由志願者提供
+        r"請不吝.{0,8}(點贊|點讚|訂閱|订阅|轉發|转发|打賞|打赏|分享)",  # 頻道宣傳
+        r"明[鏡镜].{0,10}(需要您的支持|點點欄目|频道|新闻)",
+        r"^(由)?.{0,4}(本字幕|本影片|本视频).{0,8}(提供|製作|制作)$",
+        r"詞曲李宗盛",                                    # 具體歌曲 credit 幻覺（字面比對，不擴及泛詞曲）
+    ]
+]
+
+
+def _filter_hallucination_segments(segments: List[Dict]) -> List[Dict]:
+    """丟掉整段為 Whisper 字幕/頻道 boilerplate 幻覺的 segment。
+
+    比對前去除空白正規化；命中 deny_list 即整段丟棄並 log（可審計，方便日後調 pattern）。
+    只比對整段文字，不切割保留——避免誤傷夾雜真實語音的長段。
+    """
+    if not segments:
+        return segments
+
+    kept: List[Dict] = []
+    for seg in segments:
+        raw = seg.get("text", "")
+        norm = re.sub(r"\s+", "", raw.strip())
+        hit = next((p.pattern for p in _HALLUCINATION_PATTERNS if p.search(norm)), None)
+        if hit:
+            log.warning(
+                "whisper.hallucination.denylist_dropped",
+                text=raw.strip(),
+                pattern=hit,
+                start=seg.get("start"),
+                end=seg.get("end"),
+            )
+            continue
+        kept.append(seg)
+    return kept
+
+
 def _resegment_by_words(segments: List[Dict]) -> List[Dict]:
     """把(可能很長的) whisper segments 依字間停頓 / 長度切成較短碎片。
 
@@ -211,8 +257,6 @@ def transcribe_chunk_worker(
         no_repeat_ngram_size=3,
         word_timestamps=True,
         hallucination_silence_threshold=2.0,
-        # [驗證] 暫時移除 zh initial_prompt，確認 Amara.org 幻覺是否由它觸發
-        initial_prompt=None,
     )
 
     # 收集結果（保留 words 供重切段用；字型轉換由呼叫端的清洗步驟統一處理）
@@ -225,8 +269,9 @@ def transcribe_chunk_worker(
             "words": segment.words,
         })
 
-    # 壓縮重複幻覺 → 依 word timestamps 重切長段 → 重建 full_text
+    # 壓縮重複幻覺 → 丟字幕 boilerplate 幻覺 → 依 word timestamps 重切長段 → 重建 full_text
     segments = _collapse_repeated_segments(segments)
+    segments = _filter_hallucination_segments(segments)
     segments = _resegment_by_words(segments)
     full_text = " ".join(seg["text"] for seg in segments)
     detected_language = info.language
@@ -643,8 +688,6 @@ class WhisperProcessor:
             no_repeat_ngram_size=3,
             word_timestamps=True,
             hallucination_silence_threshold=2.0,
-            # [驗證] 暫時移除 zh initial_prompt，確認 Amara.org 幻覺是否由它觸發
-            initial_prompt=None,
         )
         if self._has_gpu() and _USE_BATCHED:
             # GPU + batched：把 VAD 視窗批次餵 GPU，吞吐高；但只轉 VAD 區段、單一溫度無
@@ -676,8 +719,9 @@ class WhisperProcessor:
                     # 進度回報不該打斷轉錄本身
                     log.warning("whisper.progress_callback.failed", error=str(cb_err))
 
-        # 壓縮重複幻覺 → 依 word timestamps 重切長段（batched 的 VAD 長段 → 碎片）
+        # 壓縮重複幻覺 → 丟字幕 boilerplate 幻覺 → 依 word timestamps 重切長段
         segments_list = _collapse_repeated_segments(segments_list)
+        segments_list = _filter_hallucination_segments(segments_list)
         segments_list = _resegment_by_words(segments_list)
         return segments_list, detected_language
 
