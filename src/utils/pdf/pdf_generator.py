@@ -33,6 +33,7 @@ from .script_detect import (
     FONT_SC,
     FONT_TC,
     primary_font_for_lang,
+    register_font_coverage,
     wrap_text_with_font_tags,
 )
 
@@ -62,6 +63,9 @@ def preload_fonts() -> None:
                     "Run tools/build-fonts.sh to regenerate."
                 )
             pdfmetrics.registerFont(TTFont(name, path))
+            # 登記該字型實際涵蓋的 codepoints，供 script_detect.resolve_font 逐字 fallback
+            # （修 NotoSansTC 缺簡體字時的豆腐）。ReportLab 註冊後 face.charToGlyph 即可取得。
+            register_font_coverage(name, pdfmetrics.getFont(name).face.charToGlyph.keys())
         _REGISTERED = True
 
 
