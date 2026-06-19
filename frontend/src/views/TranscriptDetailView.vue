@@ -883,6 +883,9 @@ const {
   updateSubtitleSettings,
   isMounted: () => isMounted,
   isInitializing: () => isInitializing,
+  isEditing,
+  originalSegments,
+  originalContent,
 })
 
 // ========== 下載功能 ==========
