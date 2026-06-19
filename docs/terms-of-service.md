@@ -227,6 +227,6 @@
 
 ## 聯絡方式
 
-如有疑問，請聯繫：support@soundlite.ai
+如有疑問，請聯繫：support@soundlite.app
 
 v.1.0 公佈日期： 2026年8月1日
