@@ -1859,3 +1859,16 @@ usePageLifecycle({
 }
 
 </style>
+
+<!-- 全域（非 scoped）：CSS Custom Highlight API 的 ::highlight() 在 scoped 下會被加上
+     data-v 屬性，只對本元件（段落模式）的文字生效。字幕模式的 .segment-span 位於子元件
+     SubtitleTable（不同 scope id），需用全域規則才能套到搜尋高亮。 -->
+<style>
+::highlight(search-highlight) {
+  background-color: rgba(255, 235, 59, 0.4);
+}
+
+::highlight(search-highlight-current) {
+  background-color: rgba(255, 152, 0, 0.6);
+}
+</style>
