@@ -945,7 +945,7 @@ async function deleteTask() {
 
   try {
     await taskService.delete(currentTranscript.value.task_id)
-    router.push('/')
+    router.push({ name: 'tasks' })
   } catch (error) {
     console.error('Delete failed:', error)
     alert($t('tasksView.deleteFailed'))
