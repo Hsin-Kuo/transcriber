@@ -9,6 +9,22 @@ import './assets/theme-light.css' // 淺色主題 (預設)
 import './assets/theme-dark.css'  // 深色主題
 import './style.css'
 
+// Staging 用灰色 favicon，方便一眼和 prod 區分。
+// 以 build-time 的 VITE_SENTRY_ENVIRONMENT 為主、hostname 為 fallback。
+const isStaging =
+  import.meta.env.VITE_SENTRY_ENVIRONMENT === 'staging' ||
+  window.location.hostname.startsWith('staging.')
+if (isStaging) {
+  document
+    .querySelectorAll('link[rel~="icon"], link[rel="apple-touch-icon"]')
+    .forEach((el) => el.remove())
+  const link = document.createElement('link')
+  link.rel = 'icon'
+  link.type = 'image/svg+xml'
+  link.href = '/favicon-staging.svg'
+  document.head.appendChild(link)
+}
+
 const app = createApp(App)
 const pinia = createPinia()
 
