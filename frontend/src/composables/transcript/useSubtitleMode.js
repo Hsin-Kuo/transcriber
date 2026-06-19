@@ -33,7 +33,6 @@ export function useSubtitleMode(segments) {
     const sortedSegments = [...segmentList].sort((a, b) => a.start - b.start)
     const groups = []
     let currentGroup = null
-    const gaps = []
 
     for (let i = 0; i < sortedSegments.length; i++) {
       const segment = sortedSegments[i]
@@ -53,7 +52,6 @@ export function useSubtitleMode(segments) {
 
         // 計算如果加入這個 segment，group 的總時長
         const groupDuration = segment.end - currentGroup.startTime
-        gaps.push(groupDuration)
 
         // 疏密度邏輯
         const shouldSplit = !speakerMatch || (thresholdSeconds === 0) || (groupDuration >= thresholdSeconds)
@@ -77,22 +75,6 @@ export function useSubtitleMode(segments) {
       }
     }
 
-    // 統計間隔（僅在有間隔時）
-    if (gaps.length > 0) {
-      const avgGap = (gaps.reduce((a, b) => a + b, 0) / gaps.length).toFixed(2)
-      const minGap = Math.min(...gaps).toFixed(2)
-      const maxGap = Math.max(...gaps).toFixed(2)
-
-      const gap0 = gaps.filter(g => g === 0).length
-      const gapLess01 = gaps.filter(g => g > 0 && g < 0.1).length
-      const gapLess1 = gaps.filter(g => g >= 0.1 && g < 1).length
-      const gapLess5 = gaps.filter(g => g >= 1 && g < 5).length
-      const gap5Plus = gaps.filter(g => g >= 5).length
-
-      console.log(`  📊 間隔統計: 平均 ${avgGap}s, 最小 ${minGap}s, 最大 ${maxGap}s | 閾值: ${thresholdSeconds}s`)
-      console.log(`  📊 間隔分布: =0 (${gap0}) | 0-0.1s (${gapLess01}) | 0.1-1s (${gapLess1}) | 1-5s (${gapLess5}) | ≥5s (${gap5Plus})`)
-    }
-
     if (currentGroup) groups.push(currentGroup)
     return groups
   }
@@ -101,14 +83,11 @@ export function useSubtitleMode(segments) {
    * 合併後的 segments（自動響應疏密度變化）
    */
   const groupedSegments = computed(() => {
-    console.log(`🎯 [groupedSegments] 觸發計算 - densityThreshold: ${densityThreshold.value}`)
-    const groups = mergeSegmentsByDensity(
+    return mergeSegmentsByDensity(
       segments.value,
       densityThreshold.value,
       hasSpeakerInfo.value
     )
-    console.log(`🔧 疏密度: ${densityThreshold.value}s | Segments: ${segments.value?.length || 0} → Groups: ${groups.length}`)
-    return groups
   })
 
   /**
