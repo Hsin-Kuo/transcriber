@@ -8,6 +8,7 @@
 兩進程之間唯一的變化點(「音檔從哪來」)由注入的 AudioSource 抽掉。processor
 與 db 也是注入——orchestrator 不知道自己跑在 server 還是 worker。
 """
+import gc
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -23,6 +24,7 @@ from src.utils.text_utils import (
     align_segments_to_punctuated_text,
     split_segments_at_sentence_punctuation,
     convert_segments_punctuation,
+    strip_subtitle_punctuation,
 )
 from src.utils.storage_service import save_audio
 from src.utils.time_utils import get_utc_timestamp
@@ -109,7 +111,17 @@ class TranscriptionOrchestrator:
             self.check_cancelled(task_id)
 
             # ── 成功收尾 ─────────────────────────────
-            converted_segments = convert_segments_punctuation(segments)
+            task = self._get_task(task_id)
+            if task and task.get("task_type") == "subtitle":
+                # 字幕任務一律去標點（含 Whisper 原生標點）；不可再做半形→全形轉換，
+                # 否則會把保護的 3.14 / 1,000 / 12:30 變成 3。14 / 1，000 / 12：30
+                final_text = strip_subtitle_punctuation(final_text)
+                converted_segments = [
+                    {**s, "text": strip_subtitle_punctuation(s.get("text", ""))}
+                    for s in segments
+                ]
+            else:
+                converted_segments = convert_segments_punctuation(segments)
             self._save_transcription_results(task_id, final_text, converted_segments)
             self._save_compact_audio(task_id, mp3_path)
             self._mark_completed(
@@ -141,7 +153,31 @@ class TranscriptionOrchestrator:
                 log.warning("audio_source.cleanup_failed", error=str(e))
             self._cleanup_temp_dir(temp_dir)
             self.progress_store.clear(task_id)
+            self._release_run_memory()
             clear_contextvars()
+
+    def _release_run_memory(self) -> None:
+        """每次 run 收尾時主動回收記憶體。
+
+        模型是常駐單例(load 一次),這裡釋放的是「單次 run 累積」的暫態:
+        whisper/ctranslate2 與 pyannote 留下的中間張量、segments 中間態等。
+        常駐進程(local 模式 / GPU worker)若不主動回收,記憶體會隨運行時間單調成長。
+
+        - gc.collect():強制回收 Python 層大物件(segments / full_text 等)。
+        - torch.cuda.empty_cache():把 CUDA caching allocator 的空閒區塊還給 driver,
+          避免長時間多任務後 VRAM 碎片化 OOM。CPU(int8)環境下 torch 不一定存在,
+          故 import 失敗或無 GPU 時皆安全略過(no-op)。
+        """
+        try:
+            gc.collect()
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except ImportError:
+                pass
+        except Exception as e:
+            log.warning("transcription.run.release_memory_failed", error=str(e))
 
     # ── public:Phase 機器(測試 surface)───────────────
 

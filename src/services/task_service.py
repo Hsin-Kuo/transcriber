@@ -59,7 +59,6 @@ class TaskService:
         # orchestration 用資源（不是 progress；保留在 _store）
         self._cancelled_tasks = self._store.cancelled
         self._temp_dirs = self._store.temp_dirs
-        self._diarization_processes = self._store.diarization_processes
         self._lock = self._store.lock
 
     async def create_task(self, task_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,7 +230,7 @@ class TaskService:
         return deleted_files
 
     def cleanup_task_memory(self, task_id: str) -> None:
-        """清理任務的執行期資源（progress snapshot、取消標記、臨時目錄、diarization 進程）"""
+        """清理任務的執行期資源（progress snapshot、取消標記、臨時目錄）"""
         self.progress_store.clear(task_id)
 
         with self._lock:
@@ -239,7 +238,6 @@ class TaskService:
             temp_dir = self._temp_dirs.pop(task_id, None)
             if temp_dir is not None:
                 self._cleanup_temp_dir(temp_dir)
-            self._diarization_processes.pop(task_id, None)
 
     def set_temp_dir(self, task_id: str, temp_dir: Path) -> None:
         """設置任務的臨時目錄
@@ -262,28 +260,6 @@ class TaskService:
         """
         with self._lock:
             return self._temp_dirs.get(task_id)
-
-    def set_diarization_process(self, task_id: str, process: Any) -> None:
-        """設置任務的 diarization 進程
-
-        Args:
-            task_id: 任務 ID
-            process: Diarization 進程
-        """
-        with self._lock:
-            self._diarization_processes[task_id] = process
-
-    def get_diarization_process(self, task_id: str) -> Any:
-        """獲取任務的 diarization 進程
-
-        Args:
-            task_id: 任務 ID
-
-        Returns:
-            Diarization 進程，如果不存在則返回 None
-        """
-        with self._lock:
-            return self._diarization_processes.get(task_id)
 
     # ========== 業務邏輯方法 ==========
 
@@ -479,10 +455,6 @@ class TaskService:
                     for tid in list(self._cancelled_tasks.keys()):
                         if tid not in active_task_ids:
                             self._cancelled_tasks.pop(tid, None)
-
-                    for tid in list(self._diarization_processes.keys()):
-                        if tid not in active_task_ids:
-                            self._diarization_processes.pop(tid, None)
 
                 # 強制垃圾回收
                 gc.collect()

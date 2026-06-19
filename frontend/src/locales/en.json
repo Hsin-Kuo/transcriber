@@ -393,7 +393,10 @@
     "confirmDeleteTask": "Are you sure you want to delete this task?",
     "deleteFailed": "Delete failed, please try again later",
     "transcriptionComplete": "Transcription Complete",
-    "transcriptionFailed": "Transcription Failed"
+    "transcriptionCompleteMessage": "\"{name}\" is complete",
+    "transcriptionFailed": "Transcription Failed",
+    "transcriptionFailedMessage": "\"{name}\" failed to transcribe",
+    "cancelFailed": "Failed to cancel, please try again later"
   },
   "taskList": {
     "all": "All",
@@ -421,9 +424,13 @@
     "deleteButtonText": "Delete",
     "batchEdit": "",
     "exitBatchEdit": "Exit Edit",
+    "exit": "Exit",
     "selectAll": "Select All",
     "deselectAll": "Deselect All",
     "selectedTasks": "Selected {count} tasks",
+    "batchSelectedCount": "{count} selected",
+    "applyTagsToTasks": "Apply tags to {count} tasks",
+    "selectTagToApply": "Select a tag to apply",
     "batchDelete": "Batch Delete ({count})",
     "batchDeleteTitle": "Delete {count} selected tasks",
     "batchDeleteConfirm": "Are you sure you want to delete {count} tasks?",
@@ -461,10 +468,14 @@
     "clearFilter": "Clear filter",
     "noAvailableTags": "No tags available",
     "quickSelect": "Quick select:",
+    "quickSelectTitle": "Quick Select",
     "selectColor": "Select Color",
-    "keepAudioTooltipNewest": "Audio from newest task is kept automatically (not counted in 3-file limit)",
-    "keepAudioTooltipFull": "Maximum 3 audio files can be kept",
-    "keepAudioTooltipNormal": "Check to keep this audio file (max 3)",
+    "fineTuneColorHint": "Click to fine-tune color",
+    "keepAudioTooltipNewest": "Audio from newest task is kept automatically (not counted toward the limit)",
+    "keepAudioTooltipFull": "You can keep at most {n} audio files",
+    "keepAudioTooltipNormal": "Check to keep this audio file (max {n})",
+    "keepAudioTooltipNormalUnlimited": "Check to keep this audio file",
+    "keepAudioTooltipUnavailable": "Your plan doesn't support keeping audio files. Please upgrade.",
     "confirmUnpinAudio": "Are you sure you want to unpin this audio?\n\nThe audio file will be automatically deleted if it has exceeded the retention period based on its original upload time.",
     "errorFetchTagColors": "Failed to fetch tag colors",
     "errorFetchTagOrder": "Failed to fetch tag order",
@@ -619,8 +630,8 @@
     "taskNotFound": "Task not found",
     "loadTranscriptFailed": "Failed to load transcript",
     "saveSuccess": "Save Successful",
-    "transcriptAndSubtitleUpdated": "Transcript and subtitles updated",
     "transcriptUpdated": "Transcript updated",
+    "changesSaved": "Changes saved",
     "saveFailed": "Save Failed",
     "unknownError": "An unknown error occurred",
     "updateFailed": "Update Failed",
@@ -792,5 +803,13 @@
     "AUDIO_MISSING": "Audio file no longer exists. It may have expired and been removed.",
     "SERVER_RESTART": "Task was interrupted by a server restart. Please re-upload your file.",
     "SYSTEM_ERROR": "An unexpected error occurred. Please try again later or contact support."
+  },
+  "apiError": {
+    "rateLimitedTitle": "Too many requests",
+    "rateLimitedMessage": "You're doing that too often. Please try again later.",
+    "serverErrorTitle": "Server error",
+    "serverErrorMessage": "The server is temporarily unable to handle the request. Please try again later.",
+    "networkErrorTitle": "Network error",
+    "networkErrorMessage": "Unable to reach the server. Please check your network connection."
   }
 }

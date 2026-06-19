@@ -393,7 +393,10 @@
     "confirmDeleteTask": "確定要刪除這個任務嗎？",
     "deleteFailed": "刪除失敗，請稍後再試",
     "transcriptionComplete": "轉錄完成",
-    "transcriptionFailed": "轉錄失敗"
+    "transcriptionCompleteMessage": "「{name}」已完成",
+    "transcriptionFailed": "轉錄失敗",
+    "transcriptionFailedMessage": "「{name}」轉錄失敗",
+    "cancelFailed": "取消失敗，請稍後再試"
   },
   "taskList": {
     "all": "全部",
@@ -421,9 +424,13 @@
     "deleteButtonText": "刪除",
     "batchEdit": "",
     "exitBatchEdit": "退出編輯",
+    "exit": "退出",
     "selectAll": "全選",
     "deselectAll": "取消全選",
     "selectedTasks": "已選擇 {count} 個任務",
+    "batchSelectedCount": "已選 {count} 項",
+    "applyTagsToTasks": "套用標籤至 {count} 個任務",
+    "selectTagToApply": "選擇要套用的標籤",
     "batchDelete": "批次刪除 ({count})",
     "batchDeleteTitle": "刪除選中的 {count} 個任務",
     "batchDeleteConfirm": "確定要刪除 {count} 個任務嗎？",
@@ -463,10 +470,14 @@
     "clearFilter": "清除篩選",
     "noAvailableTags": "尚無可用標籤",
     "quickSelect": "快速選擇：",
+    "quickSelectTitle": "快速選擇",
     "selectColor": "選擇顏色",
-    "keepAudioTooltipNewest": "最新音檔會自動保留（不計入3個勾選限制）",
-    "keepAudioTooltipFull": "最多只能勾選3個音檔",
-    "keepAudioTooltipNormal": "勾選以保留此音檔（最多3個）",
+    "fineTuneColorHint": "點擊微調顏色",
+    "keepAudioTooltipNewest": "最新音檔會自動保留（不計入勾選上限）",
+    "keepAudioTooltipFull": "最多只能勾選 {n} 個音檔",
+    "keepAudioTooltipNormal": "勾選以保留此音檔（最多 {n} 個）",
+    "keepAudioTooltipNormalUnlimited": "勾選以保留此音檔",
+    "keepAudioTooltipUnavailable": "目前方案不支援手動保留音檔，請升級方案",
     "confirmUnpinAudio": "確定要取消保留音檔嗎？\n\n該音檔將根據原始上傳時間判斷，若已超過保留期限將會被自動刪除。",
     "errorFetchTagColors": "獲取標籤顏色失敗",
     "errorFetchTagOrder": "獲取標籤順序失敗",
@@ -623,8 +634,8 @@
     "taskNotFound": "找不到該任務",
     "loadTranscriptFailed": "載入逐字稿失敗",
     "saveSuccess": "儲存成功",
-    "transcriptAndSubtitleUpdated": "逐字稿和字幕已更新",
     "transcriptUpdated": "逐字稿已更新",
+    "changesSaved": "變更已儲存",
     "saveFailed": "儲存失敗",
     "unknownError": "發生未知錯誤",
     "updateFailed": "更新失敗",
@@ -797,6 +808,14 @@
     "AUDIO_MISSING": "音檔已不存在，可能已過期被系統清除。",
     "SERVER_RESTART": "伺服器重啟導致任務中斷，請重新上傳。",
     "SYSTEM_ERROR": "系統發生未知錯誤，請稍後重試或聯絡客服。"
+  },
+  "apiError": {
+    "rateLimitedTitle": "請求太頻繁",
+    "rateLimitedMessage": "操作過於頻繁，請稍後再試",
+    "serverErrorTitle": "伺服器錯誤",
+    "serverErrorMessage": "伺服器暫時無法處理請求，請稍後再試",
+    "networkErrorTitle": "網路連線異常",
+    "networkErrorMessage": "無法連接伺服器，請檢查網路連線"
   },
   "common": {
     "close": "關閉"

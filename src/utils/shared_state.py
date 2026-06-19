@@ -2,12 +2,12 @@
 執行時任務資源容器（記憶體，不持久化）。
 
 進度狀態已搬到 src.services.progress_store.ProgressStore。
-這裡剩下的是 orchestration 用的資源：取消標記、臨時目錄、diarization 子進程。
+這裡剩下的是 orchestration 用的資源：取消標記、臨時目錄。
 """
 
 from threading import Lock
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 
 class TaskStateStore:
@@ -24,9 +24,6 @@ class TaskStateStore:
 
         # 任務取消標記
         self.cancelled: Dict[str, bool] = {}
-
-        # 任務的 Diarization 子進程
-        self.diarization_processes: Dict[str, Any] = {}
 
     # ---- cancelled ----
 
@@ -53,19 +50,6 @@ class TaskStateStore:
     def clear_temp_dir(self, task_id: str) -> None:
         with self.lock:
             self.temp_dirs.pop(task_id, None)
-
-    # ---- diarization_processes ----
-
-    def get_diarization_process(self, task_id: str) -> Optional[Any]:
-        return self.diarization_processes.get(task_id)
-
-    def set_diarization_process(self, task_id: str, proc: Any) -> None:
-        with self.lock:
-            self.diarization_processes[task_id] = proc
-
-    def clear_diarization_process(self, task_id: str) -> None:
-        with self.lock:
-            self.diarization_processes.pop(task_id, None)
 
 
 # ==================== 模組級單例 ====================

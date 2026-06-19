@@ -437,16 +437,11 @@ async def cancel_task(
     # 2. 標記任務為已取消（運行時狀態）
     task_service.cancel_task(task_id)
 
-    # 3. 立即終止 diarization 進程（如果正在運行）
-    diarization_process = task_service.get_diarization_process(task_id)
-    if diarization_process:
-        try:
-            diarization_process.shutdown(wait=False, cancel_futures=True)
-            log.debug("task.cancel.diarization_terminated", task_id=task_id)
-        except Exception as e:
-            log.warning("task.cancel.diarization_terminate_failed", task_id=task_id, error=str(e))
+    # 注意:本地 diarization 在 orchestrator 的 ThreadPoolExecutor thread 內跑 pyannote
+    # 推論,無 cooperative cancel hook —— 無法中途中斷,只能在下個 phase boundary 由
+    # check_cancelled() 接住。取消標記已於步驟 2 設下,run temp_dir 由下方清理。
 
-    # 4. 清理臨時目錄
+    # 3. 清理臨時目錄
     temp_dir = task_service.get_temp_dir(task_id)
     if temp_dir:
         try:
@@ -457,7 +452,7 @@ async def cancel_task(
         except Exception as e:
             log.warning("task.cancel.temp_dir_cleanup_failed", task_id=task_id, error=str(e))
 
-    # 5. 更新資料庫中的任務狀態為「已取消」
+    # 4. 更新資料庫中的任務狀態為「已取消」
     await task_service.update_task_status(task_id, {
         "status": "cancelled",
         "error": {"code": "USER_CANCELLED", "message": "用戶取消"}
@@ -465,7 +460,7 @@ async def cancel_task(
 
     log.info("task.cancelled", task_id=task_id)
 
-    # 6. 釋放預扣配額（idempotent）
+    # 5. 釋放預扣配額（idempotent）
     try:
         from ..database.repositories.reservation_repo import ReservationRepository
         db = task_service.task_repo.db

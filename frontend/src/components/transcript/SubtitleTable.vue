@@ -32,15 +32,15 @@
           </td>
 
           <td v-if="hasSpeakerInfo" class="col-speaker">
+            <!-- 講者可在編輯/非編輯模式皆可變更（即時 autosave，與文字編輯解耦） -->
             <span
-              class="speaker-badge"
-              :class="{ 'clickable': !isEditing }"
-              :role="!isEditing ? 'button' : undefined"
-              :tabindex="!isEditing ? 0 : undefined"
-              @click="!isEditing && openSpeakerPicker(group, $event)"
-              @keydown.enter="!isEditing && openSpeakerPicker(group, $event)"
-              :title="!isEditing ? $t('subtitleTable.clickToChangeSpeaker') : ''"
-              :aria-label="!isEditing ? $t('subtitleTable.clickToChangeSpeaker') : undefined"
+              class="speaker-badge clickable"
+              role="button"
+              tabindex="0"
+              @click="openSpeakerPicker(group, $event)"
+              @keydown.enter="openSpeakerPicker(group, $event)"
+              :title="$t('subtitleTable.clickToChangeSpeaker')"
+              :aria-label="$t('subtitleTable.clickToChangeSpeaker')"
             >
               {{ getSpeakerDisplayName(group.speaker) }}
             </span>

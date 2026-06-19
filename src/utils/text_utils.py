@@ -47,6 +47,60 @@ def convert_punctuation_to_fullwidth(text: str) -> str:
     return result
 
 
+def strip_subtitle_punctuation(text: str) -> str:
+    """移除字幕用文字的句讀標點，但保留數字/英文中有語意的符號。
+
+    用 Unicode 標點類別（P*）判斷整體移除，僅對歧義的 ASCII 字元 `. , : ' -`
+    以前後字元 lookaround 保護，避免破壞：
+    - 小數點 / 千分位：3.14、1,000
+    - 時間冒號：12:30
+    - 英文縮寫：U.S.、e.g
+    - 字內單引號：don't、John's
+    - 連字號：well-known、2-3
+
+    全形句讀（，。！？、；：「」…—等）一律移除。
+    """
+    if not text:
+        return text
+
+    chars = list(text)
+    n = len(chars)
+    out = []
+
+    for i, ch in enumerate(chars):
+        if not unicodedata.category(ch).startswith("P"):
+            out.append(ch)
+            continue
+
+        prev_ch = chars[i - 1] if i > 0 else ""
+        next_ch = chars[i + 1] if i + 1 < n else ""
+
+        # 受保護的字內 ASCII 標點：前後皆為對應類別時保留
+        if ch == "." and ((prev_ch.isdigit() and next_ch.isdigit())
+                          or (prev_ch.isalpha() and next_ch.isalpha())):
+            out.append(ch)            # 3.14 / U.S
+            continue
+        if ch == "," and prev_ch.isdigit() and next_ch.isdigit():
+            out.append(ch)            # 1,000
+            continue
+        if ch == ":" and prev_ch.isdigit() and next_ch.isdigit():
+            out.append(ch)            # 12:30
+            continue
+        if ch in ("'", "’") and prev_ch.isalnum() and next_ch.isalnum():
+            out.append(ch)            # don't / John's
+            continue
+        if ch == "-" and prev_ch.isalnum() and next_ch.isalnum():
+            out.append(ch)            # well-known / 2-3
+            continue
+
+        # 其餘標點：移除（不補字）
+
+    result = "".join(out)
+    # 收斂移除後可能產生的多餘空白
+    result = re.sub(r"[ \t]{2,}", " ", result)
+    return result.strip()
+
+
 def align_segments_to_punctuated_text(segments: List[Dict], punctuated_text: str) -> List[Dict]:
     """標點處理後，將 punctuated_text 的內容對齊回各 segment（把標點/句子分回各段）。
 

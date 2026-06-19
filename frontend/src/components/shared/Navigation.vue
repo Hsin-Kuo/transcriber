@@ -1,20 +1,35 @@
 <template>
   <nav class="navigation" :class="{ collapsed: isCollapsed }">
-    <!-- 收合/展開按鈕 -->
-    <button class="toggle-btn" @click="toggleCollapse" :title="isCollapsed ? $t('navigation.expandSidebar') : $t('navigation.collapseSidebar')" :aria-label="isCollapsed ? $t('navigation.expandSidebar') : $t('navigation.collapseSidebar')">
-      <!-- 展開時顯示《（向左，表示收合） -->
-      <svg v-if="!isCollapsed" width="16" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="15 18 9 12 15 6"></polyline>
-      </svg>
-      <!-- 收合時顯示》（向右，表示展開） -->
-      <svg v-else width="16" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="9 18 15 12 9 6"></polyline>
-      </svg>
-    </button>
-
     <div class="nav-brand">
-      <img class="brand-icon" src="/favicon.svg" alt="SoundLite" width="28" height="28" />
-      <h2 v-if="!isCollapsed">Sound Lite</h2>
+      <!-- 收合時：品牌 logo 兼任展開觸發器，hover 後 logo 淡出、展開 icon 淡入 -->
+      <button
+        v-if="isCollapsed"
+        class="brand-toggle"
+        @click="toggleCollapse"
+        :title="$t('navigation.expandSidebar')"
+        :aria-label="$t('navigation.expandSidebar')"
+      >
+        <img class="brand-icon brand-logo" src="/favicon.svg" alt="SoundLite" width="28" height="28" />
+        <!-- 側欄面板 + 向右箭頭（表示展開）；略小於 logo(28) -->
+        <svg class="brand-expand-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect width="18" height="18" x="3" y="3" rx="2"></rect>
+          <path d="M9 3v18"></path>
+          <path d="m14 9 3 3-3 3"></path>
+        </svg>
+      </button>
+      <!-- 展開時：logo + 名稱靠左，收合按鈕靠右，三者同一水平列 -->
+      <template v-else>
+        <img class="brand-icon" src="/favicon.svg" alt="SoundLite" width="28" height="28" />
+        <h2>SoundLite</h2>
+        <button class="toggle-btn" @click="toggleCollapse" :title="$t('navigation.collapseSidebar')" :aria-label="$t('navigation.collapseSidebar')">
+          <!-- 側欄面板外框；箭頭平常隱藏，hover 才淡入（向左＝收合） -->
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect width="18" height="18" x="3" y="3" rx="2"></rect>
+            <path d="M9 3v18"></path>
+            <path class="toggle-arrow" d="m16 15-3-3 3-3"></path>
+          </svg>
+        </button>
+      </template>
     </div>
 
     <div class="nav-links">
@@ -264,11 +279,11 @@ watch(() => route.path, (newPath, oldPath) => {
 
 /* 切換按鈕 */
 .toggle-btn {
-  position: absolute;
-  top: 4px;
-  right: 2px;
+  margin-left: auto;
+  margin-right: -10px;
+  flex-shrink: 0;
   width: 28px;
-  height: 36px;
+  height: 28px;
   border: none;
   background: transparent;
   border-radius: 6px;
@@ -277,7 +292,6 @@ watch(() => route.path, (newPath, oldPath) => {
   align-items: center;
   justify-content: center;
   transition: all 0.3s ease;
-  z-index: 10;
 }
 
 .toggle-btn:hover {
@@ -293,11 +307,21 @@ watch(() => route.path, (newPath, oldPath) => {
   transition: all 0.2s ease;
 }
 
+/* 展開時：箭頭平常隱藏（只露面板外框），hover 才淡入 */
+.toggle-btn .toggle-arrow {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.toggle-btn:hover .toggle-arrow {
+  opacity: 1;
+}
+
 .nav-brand {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 10px;
+  justify-content: flex-start;
+  gap: 12px;
   padding-bottom: 14px;
   position: relative;
 }
@@ -323,12 +347,48 @@ watch(() => route.path, (newPath, oldPath) => {
 }
 
 .navigation.collapsed .nav-brand {
+  justify-content: center;
   padding-bottom: 16px;
 }
 
 .brand-icon {
   color: var(--nav-active-bg);
   flex-shrink: 0;
+}
+
+/* 收合時的品牌按鈕：平常顯示 logo，hover 後 logo 淡出、展開 icon 淡入 */
+.brand-toggle {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.brand-toggle .brand-logo {
+  transition: opacity 0.2s ease;
+}
+
+.brand-toggle .brand-expand-icon {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  stroke: var(--main-primary);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.brand-toggle:hover .brand-logo {
+  opacity: 0;
+}
+
+.brand-toggle:hover .brand-expand-icon {
+  opacity: 1;
 }
 
 .nav-links {
