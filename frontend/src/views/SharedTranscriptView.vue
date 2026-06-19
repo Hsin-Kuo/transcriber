@@ -128,19 +128,19 @@
           {{ taskData.content }}
         </div>
 
-        <!-- 字幕模式 -->
+        <!-- 字幕模式：依任務設定的疏密度合併（與詳情頁同一套分組邏輯） -->
         <div v-else class="subtitle-list">
           <div
-            v-for="(segment, index) in taskData.segments"
+            v-for="(group, index) in groupedSegments"
             :key="index"
             class="subtitle-row"
-            @click="seekTo(segment.start)"
+            @click="seekTo(group.startTime)"
           >
-            <span class="subtitle-time">{{ formatTime(segment.start) }}</span>
-            <span v-if="segment.speaker" class="subtitle-speaker">
-              {{ taskData.speaker_names?.[segment.speaker] || segment.speaker }}
+            <span class="subtitle-time">{{ formatTime(group.startTime) }}</span>
+            <span v-if="group.speaker" class="subtitle-speaker">
+              {{ taskData.speaker_names?.[group.speaker] || group.speaker }}
             </span>
-            <span class="subtitle-text">{{ segment.text }}</span>
+            <span class="subtitle-text">{{ group.combinedText }}</span>
           </div>
         </div>
       </div>
@@ -161,6 +161,7 @@ import axios from 'axios'
 import { API_BASE } from '../utils/api'
 import { NEW_ENDPOINTS } from '../api/endpoints'
 import { useDateFormatter } from '../composables/useDateFormatter'
+import { useSubtitleMode } from '../composables/transcript/useSubtitleMode'
 
 const { t } = useI18n()
 const { formatDateTime } = useDateFormatter()
@@ -173,6 +174,10 @@ const audioError = ref(null)
 const audioEl = ref(null)
 const summaryExpanded = ref(false)
 
+// 字幕分組：重用詳情頁同一套 mergeSegmentsByDensity，並以任務設定的疏密度驅動
+const sharedSegments = computed(() => taskData.value.segments || [])
+const { groupedSegments, densityThreshold } = useSubtitleMode(sharedSegments)
+
 
 const audioUrl = computed(() => {
   if (!taskData.value.has_audio) return ''
@@ -183,6 +188,11 @@ onMounted(async () => {
   try {
     const response = await axios.get(`${API_BASE}${NEW_ENDPOINTS.shared.get(route.params.token)}`)
     taskData.value = response.data
+    // 套用任務儲存的疏密度（無則維持預設 3.0，與詳情頁一致）
+    const density = response.data?.subtitle_settings?.density_threshold
+    if (typeof density === 'number') {
+      densityThreshold.value = density
+    }
     if (response.data.summary) {
       summaryExpanded.value = true
     }

@@ -24,6 +24,7 @@ from src.utils.text_utils import (
     align_segments_to_punctuated_text,
     split_segments_at_sentence_punctuation,
     convert_segments_punctuation,
+    strip_subtitle_punctuation,
 )
 from src.utils.storage_service import save_audio
 from src.utils.time_utils import get_utc_timestamp
@@ -110,7 +111,17 @@ class TranscriptionOrchestrator:
             self.check_cancelled(task_id)
 
             # ── 成功收尾 ─────────────────────────────
-            converted_segments = convert_segments_punctuation(segments)
+            task = self._get_task(task_id)
+            if task and task.get("task_type") == "subtitle":
+                # 字幕任務一律去標點（含 Whisper 原生標點）；不可再做半形→全形轉換，
+                # 否則會把保護的 3.14 / 1,000 / 12:30 變成 3。14 / 1，000 / 12：30
+                final_text = strip_subtitle_punctuation(final_text)
+                converted_segments = [
+                    {**s, "text": strip_subtitle_punctuation(s.get("text", ""))}
+                    for s in segments
+                ]
+            else:
+                converted_segments = convert_segments_punctuation(segments)
             self._save_transcription_results(task_id, final_text, converted_segments)
             self._save_compact_audio(task_id, mp3_path)
             self._mark_completed(

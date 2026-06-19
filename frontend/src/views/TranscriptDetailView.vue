@@ -190,7 +190,7 @@ class="transcript-layout"
                 type="range"
                 class="collapsed-vertical-slider"
                 min="0"
-                max="120"
+                max="180"
                 step="1"
                 :value="densityThreshold"
                 @input="densityThreshold = Number($event.target.value)"
@@ -883,6 +883,9 @@ const {
   updateSubtitleSettings,
   isMounted: () => isMounted,
   isInitializing: () => isInitializing,
+  isEditing,
+  originalSegments,
+  originalContent,
 })
 
 // ========== 下載功能 ==========
@@ -942,7 +945,7 @@ async function deleteTask() {
 
   try {
     await taskService.delete(currentTranscript.value.task_id)
-    router.push('/')
+    router.push({ name: 'tasks' })
   } catch (error) {
     console.error('Delete failed:', error)
     alert($t('tasksView.deleteFailed'))
@@ -1858,4 +1861,17 @@ usePageLifecycle({
   }
 }
 
+</style>
+
+<!-- 全域（非 scoped）：CSS Custom Highlight API 的 ::highlight() 在 scoped 下會被加上
+     data-v 屬性，只對本元件（段落模式）的文字生效。字幕模式的 .segment-span 位於子元件
+     SubtitleTable（不同 scope id），需用全域規則才能套到搜尋高亮。 -->
+<style>
+::highlight(search-highlight) {
+  background-color: rgba(255, 235, 59, 0.4);
+}
+
+::highlight(search-highlight-current) {
+  background-color: rgba(255, 152, 0, 0.6);
+}
 </style>

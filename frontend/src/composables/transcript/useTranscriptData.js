@@ -174,7 +174,7 @@ export function useTranscriptData() {
    * @param {string} mode - 顯示模式 ('paragraph' | 'subtitle')
    * @returns {Promise<boolean>} 儲存是否成功
    */
-  async function saveTranscript(content, segments = null, mode = 'paragraph') {
+  async function saveTranscript(content, segments = null, mode = 'paragraph', successMessage = null) {
     // 檢查是否有變更
     if (content === originalContent.value && !segments) {
       return true
@@ -207,7 +207,7 @@ export function useTranscriptData() {
       if (showNotification) {
         showNotification({
           title: t('transcriptData.saveSuccess'),
-          message: segments ? t('transcriptData.transcriptAndSubtitleUpdated') : t('transcriptData.transcriptUpdated'),
+          message: successMessage || t('transcriptData.transcriptUpdated'),
           type: 'success'
         })
       }

@@ -126,7 +126,7 @@
           :value="densityThreshold"
           @input="$emit('update:densityThreshold', Number($event.target.value))"
           min="0"
-          max="120"
+          max="180"
           step="1"
           class="slider density-slider"
         />

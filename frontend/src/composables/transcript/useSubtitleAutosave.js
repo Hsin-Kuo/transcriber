@@ -23,6 +23,9 @@ export function useSubtitleAutosave({
   updateSubtitleSettings,
   isMounted,
   isInitializing,
+  isEditing,
+  originalSegments,
+  originalContent,
 }) {
   const { t: $t } = useI18n()
 
@@ -88,7 +91,20 @@ export function useSubtitleAutosave({
       return seg
     })
 
-    saveSegmentsToBackend()
+    // 編輯模式：講者與文字解耦。
+    // 講者即時存後端，但只帶「編輯開始時的文字 baseline」（originalSegments），
+    // 不挾帶尚未儲存的文字編輯；同時把講者變更同步進 originalSegments 快照，
+    // 讓「取消」只還原文字、保留已存的講者（編輯中 segments 與快照同序同長度）。
+    if (isEditing?.value && originalSegments?.value?.length === segments.value.length) {
+      const baseline = originalSegments.value.map((seg, i) => ({
+        ...seg,
+        speaker: segments.value[i].speaker,
+      }))
+      originalSegments.value = baseline
+      saveSegmentsToBackend(baseline, originalContent?.value)
+    } else {
+      saveSegmentsToBackend()
+    }
   }
 
   function handleOpenSpeakerSettings(speakerCode) {
@@ -97,12 +113,15 @@ export function useSubtitleAutosave({
     }
   }
 
-  async function saveSegmentsToBackend() {
+  // segmentsOverride / contentOverride：編輯模式下傳 baseline，只存講者不挾帶未存文字
+  async function saveSegmentsToBackend(segmentsOverride = null, contentOverride = null) {
     try {
       await saveTranscript(
-        currentTranscript.value.content,
-        segments.value,
-        'subtitle'
+        contentOverride != null ? contentOverride : currentTranscript.value.content,
+        segmentsOverride || segments.value,
+        'subtitle',
+        // 講者變更走通用訊息，避免顯示「逐字稿和字幕已更新」誤導
+        $t('transcriptData.changesSaved')
       )
       console.log('✅ ' + $t('transcriptDetail.segmentsAutoSaved'))
     } catch (error) {

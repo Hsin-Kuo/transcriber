@@ -1156,10 +1156,10 @@ async def update_subtitle_settings(
     if "density_threshold" in settings:
         density = settings["density_threshold"]
         # 驗證範圍
-        if not isinstance(density, (int, float)) or density < 0 or density > 120:
+        if not isinstance(density, (int, float)) or density < 0 or density > 180:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="density_threshold 必須是 0-120 之間的數字"
+                detail="density_threshold 必須是 0-180 之間的數字"
             )
         subtitle_settings["density_threshold"] = float(density)
 

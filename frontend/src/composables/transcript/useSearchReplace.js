@@ -95,6 +95,10 @@ export function useSearchReplace({
       nextTick(() => {
         applySearchHighlightsWithCSS()
       })
+    } else if (displayMode.value === 'subtitle') {
+      nextTick(() => {
+        applySubtitleHighlightsWithCSS()
+      })
     }
 
     if (matches.length > 0) {
@@ -152,6 +156,72 @@ export function useSearchReplace({
     }
   }
 
+  // ========== CSS Highlight API（字幕模式） ==========
+
+  // 蒐集字幕表格各 segment 的 text node，並標出其在 getSearchableContent()
+  // 串接字串中的 char 區間。getSearchableContent 對每個 segment 串 `text + '\n'`，
+  // 故每個 segment 佔 [start, start+len]，下一個 segment 起點再 +1（換行 joiner）。
+  // querySelectorAll 回傳 document order = row 順序 → 每列 span 順序，與串接順序一致。
+  function buildSubtitleTextNodes() {
+    const spans = document.querySelectorAll('.subtitle-table .col-content .segment-span')
+    const nodes = []
+    let charIndex = 0
+    spans.forEach((span) => {
+      const text = span.textContent || ''
+      // 空 segment 無 text node；仍要推進 charIndex 對齊 +1 換行
+      nodes.push({ node: span.firstChild, element: span, start: charIndex, end: charIndex + text.length })
+      charIndex += text.length + 1
+    })
+    return nodes
+  }
+
+  // search 不含換行，故每個 match 必落在單一 segment text node 內
+  function subtitleMatchToRange(nodes, match) {
+    for (const n of nodes) {
+      if (n.node && match.start >= n.start && match.start < n.end) {
+        try {
+          const range = new Range()
+          range.setStart(n.node, match.start - n.start)
+          range.setEnd(n.node, Math.min(n.node.textContent.length, match.end - n.start))
+          return range
+        } catch (e) {
+          return null
+        }
+      }
+    }
+    return null
+  }
+
+  function applySubtitleHighlightsWithCSS() {
+    if (!CSS.highlights) return
+
+    CSS.highlights.delete('search-highlight')
+    CSS.highlights.delete('search-highlight-current')
+
+    if (searchMatches.value.length === 0) return
+
+    const nodes = buildSubtitleTextNodes()
+    const ranges = []
+    const currentRanges = []
+
+    searchMatches.value.forEach((match, matchIndex) => {
+      const range = subtitleMatchToRange(nodes, match)
+      if (!range) return
+      if (matchIndex === currentMatchIndex.value) {
+        currentRanges.push(range)
+      } else {
+        ranges.push(range)
+      }
+    })
+
+    if (ranges.length > 0) {
+      CSS.highlights.set('search-highlight', new Highlight(...ranges))
+    }
+    if (currentRanges.length > 0) {
+      CSS.highlights.set('search-highlight-current', new Highlight(...currentRanges))
+    }
+  }
+
   // ========== 導航 ==========
 
   function goToPreviousMatch() {
@@ -159,6 +229,8 @@ export function useSearchReplace({
     currentMatchIndex.value = (currentMatchIndex.value - 1 + searchMatches.value.length) % searchMatches.value.length
     if (displayMode.value === 'paragraph') {
       applySearchHighlightsWithCSS()
+    } else if (displayMode.value === 'subtitle') {
+      applySubtitleHighlightsWithCSS()
     }
     scrollToMatch(currentMatchIndex.value)
   }
@@ -168,6 +240,8 @@ export function useSearchReplace({
     currentMatchIndex.value = (currentMatchIndex.value + 1) % searchMatches.value.length
     if (displayMode.value === 'paragraph') {
       applySearchHighlightsWithCSS()
+    } else if (displayMode.value === 'subtitle') {
+      applySubtitleHighlightsWithCSS()
     }
     scrollToMatch(currentMatchIndex.value)
   }
@@ -188,10 +262,15 @@ export function useSearchReplace({
         }
       })
     } else if (displayMode.value === 'subtitle') {
+      // 字幕模式無 .search-highlight DOM（走 CSS Highlight API）；
+      // 捲到含當前 match 的 segment-span 元素
       nextTick(() => {
-        const highlightedElements = document.querySelectorAll('.search-highlight')
-        if (highlightedElements[index]) {
-          highlightedElements[index].scrollIntoView({ behavior: 'smooth', block: 'center' })
+        const match = searchMatches.value[index]
+        if (!match) return
+        const nodes = buildSubtitleTextNodes()
+        const target = nodes.find((n) => match.start >= n.start && match.start < n.end)
+        if (target?.element) {
+          target.element.scrollIntoView({ behavior: 'smooth', block: 'center' })
         }
       })
     }
@@ -454,9 +533,14 @@ export function useSearchReplace({
   }
 
   function reapplyHighlightsIfNeeded() {
-    if (displayMode.value === 'paragraph' && searchMatches.value.length > 0) {
+    if (searchMatches.value.length === 0) return
+    if (displayMode.value === 'paragraph') {
       nextTick(() => {
         applySearchHighlightsWithCSS()
+      })
+    } else if (displayMode.value === 'subtitle') {
+      nextTick(() => {
+        applySubtitleHighlightsWithCSS()
       })
     }
   }
@@ -490,5 +574,6 @@ export function useSearchReplace({
     reSearch,
     reapplyHighlightsIfNeeded,
     applySearchHighlightsWithCSS,
+    applySubtitleHighlightsWithCSS,
   }
 }
