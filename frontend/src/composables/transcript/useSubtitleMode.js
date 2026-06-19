@@ -9,10 +9,14 @@ import { ref, computed } from 'vue'
  * - 處理字幕編輯和更新
  * - 格式化時間戳
  */
+// 疏密度拉桿最大值（秒），需與各 slider 的 max 一致。
+// 拉到此值（最右）時語意切換為「同講者連續 segment 全部併成一列」（忽略時間間隔）。
+export const MAX_DENSITY_SECONDS = 180
+
 export function useSubtitleMode(segments) {
   // 字幕控制狀態
   const timeFormat = ref('start')       // 'start' | 'range'
-  const densityThreshold = ref(3.0)     // 強制分開的間隔（秒），範圍 0.0-120.0
+  const densityThreshold = ref(3.0)     // 強制分開的間隔（秒），範圍 0.0-180.0（180=同講者全併）
 
   // 檢測是否有說話者資訊
   const hasSpeakerInfo = computed(() => {
@@ -54,7 +58,14 @@ export function useSubtitleMode(segments) {
         const groupDuration = segment.end - currentGroup.startTime
 
         // 疏密度邏輯
-        const shouldSplit = !speakerMatch || (thresholdSeconds === 0) || (groupDuration >= thresholdSeconds)
+        // - thresholdSeconds === 0（最左）：每句各自一列
+        // - thresholdSeconds >= MAX（最右）：同講者全併，忽略時間間隔
+        // - 其間：線性，group 時長達閾值才拆
+        const mergeAllSameSpeaker = thresholdSeconds >= MAX_DENSITY_SECONDS
+        const shouldSplit =
+          !speakerMatch ||
+          (thresholdSeconds === 0) ||
+          (!mergeAllSameSpeaker && groupDuration >= thresholdSeconds)
 
         if (shouldSplit) {
           groups.push(currentGroup)
