@@ -18,6 +18,9 @@ class AuditLogRepository:
         self.db = db
         self.collection = db.audit_logs
 
+    # 稽核紀錄保留期限：365 天（含 IP 等個資，避免無限期保留）
+    RETENTION_SECONDS = 365 * 24 * 60 * 60
+
     async def create_indexes(self):
         """建立索引"""
         await self.collection.create_index("user_id")
@@ -25,6 +28,11 @@ class AuditLogRepository:
         await self.collection.create_index("timestamp")
         await self.collection.create_index([("user_id", 1), ("timestamp", -1)])
         await self.collection.create_index("resource_id")
+        # TTL：365 天後自動清除。注意 TTL 只對 BSON Date 生效，
+        # 既有的 `timestamp` 欄位是整數 epoch（秒）無法用，故另建 `created_at` datetime 欄位。
+        await self.collection.create_index(
+            "created_at", expireAfterSeconds=self.RETENTION_SECONDS
+        )
         log.info("audit_log.indexes.created")
 
     async def log(
@@ -71,7 +79,9 @@ class AuditLogRepository:
             "path": path,
             "method": method,
             "status_code": status_code,
-            "timestamp": timestamp
+            "timestamp": timestamp,
+            # BSON Date 欄位，供 TTL index 用（timestamp 為整數 epoch，TTL 不吃）
+            "created_at": datetime.now(timezone.utc),
         }
 
         # 可選欄位
