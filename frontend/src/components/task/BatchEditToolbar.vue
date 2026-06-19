@@ -1,135 +1,115 @@
 <template>
-  <div class="batch-toolbar">
-    <!-- 標題列 -->
-    <div class="batch-toolbar-header">
-      <div class="batch-header-left">
-        <button class="btn-batch-select-all" @click="handleToggleSelectAll">
+  <Teleport to="body">
+    <div class="batch-float-toolbar">
+      <!-- 標籤編輯展開區（位於工具列上方） -->
+      <transition name="batch-panel">
+        <div v-if="showTagEditor && selectedCount > 0" class="batch-tag-editor">
+          <div class="editor-title">
+            {{ $t('taskList.applyTagsToTasks', { count: selectedCount }) }}
+          </div>
+
+          <div class="editor-dropdown" ref="dropdownRef">
+            <button
+              class="dropdown-trigger"
+              :class="{ open: dropdownOpen }"
+              @click="dropdownOpen = !dropdownOpen"
+            >
+              <span>{{ $t('taskList.selectTagToApply') }}</span>
+              <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+
+            <div v-if="dropdownOpen" class="dropdown-menu">
+              <button
+                v-for="item in tagOptions"
+                :key="item.tag"
+                class="dropdown-item"
+                :class="{ 'is-common': item.isCommon }"
+                @click="handleTagClick(item)"
+              >
+                <span class="tag-dot" :style="{ background: getTagColor(item.tag) }"></span>
+                <span class="tag-name">{{ item.tag }}</span>
+                <!-- common（全部任務都有）→ 移除（−）；否則 → 套用（＋） -->
+                <svg v-if="item.isCommon" class="action-icon remove-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                <svg v-else class="action-icon add-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+              </button>
+              <div v-if="tagOptions.length === 0" class="dropdown-empty">
+                {{ $t('taskList.noAvailableTags') }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </transition>
+
+      <!-- 主工具列 -->
+      <div class="batch-bar">
+        <button
+          class="batch-select-all"
+          :title="allSelected ? $t('taskList.deselectAll') : $t('taskList.selectAll')"
+          :aria-label="allSelected ? $t('taskList.deselectAll') : $t('taskList.selectAll')"
+          @click="handleToggleSelectAll"
+        >
           <input
             type="checkbox"
-            :checked="selectedTaskIds.size === tasks.length && tasks.length > 0"
-            :indeterminate="selectedTaskIds.size > 0 && selectedTaskIds.size < tasks.length"
+            :checked="allSelected"
+            :indeterminate="someSelected"
             readonly
           />
-          <span>
-            {{ selectedTaskIds.size === tasks.length && tasks.length > 0
-              ? $t('taskList.deselectAll')
-              : $t('taskList.selectAll') }}
-          </span>
+          <span>{{ allSelected ? $t('taskList.deselectAll') : $t('taskList.selectAll') }}</span>
         </button>
-        <span class="batch-selection-count">
-          {{ $t('taskList.selectedTasks', { count: selectedTaskIds.size, total: tasks.length }) }}
+
+        <span class="batch-count">
+          {{ $t('taskList.batchSelectedCount', { count: selectedCount }) }}
         </span>
-      </div>
 
-      <div class="batch-header-right">
-        <button
-          v-if="selectedTaskIds.size > 0"
-          class="btn-batch-action btn-batch-delete"
-          @click="handleBatchDelete"
-          :title="$t('taskList.batchDeleteTitle', { count: selectedTaskIds.size })"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="3 6 5 6 21 6"></polyline>
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-            <line x1="10" y1="11" x2="10" y2="17"></line>
-            <line x1="14" y1="11" x2="14" y2="17"></line>
-          </svg>
-          {{ $t('taskList.batchDelete', { count: selectedTaskIds.size }) }}
-        </button>
-      </div>
-    </div>
-
-    <!-- 批次操作區域（僅在有選中任務時顯示） -->
-    <div v-if="selectedTaskIds.size > 0" class="batch-actions">
-      <!-- 緊湊型標籤管理區域 -->
-      <div class="batch-tags-section-compact" :class="{ 'collapsed': isCollapsed }">
-        <!-- 標籤區域標題和摺疊按鈕 -->
-        <div class="batch-tags-header">
-          <div class="batch-tags-info">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <div class="batch-actions">
+          <button
+            class="batch-btn"
+            :class="{ active: showTagEditor }"
+            :disabled="selectedCount === 0"
+            @click="toggleTagEditor"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
               <line x1="7" y1="7" x2="7.01" y2="7"></line>
             </svg>
-            <span class="tags-title">{{ $t('taskList.batchTagEdit') }}</span>
-            <span class="tags-stats">
-              {{ $t('taskList.tagsStats', {
-                common: selectedTasksTagsComputed.commonTags.length,
-                candidate: selectedTasksTagsComputed.candidateTags.length
-              }) }}
-            </span>
-          </div>
-          <button
-            class="btn-collapse"
-            @click="isCollapsed = !isCollapsed"
-            :title="isCollapsed ? $t('taskList.expand') : $t('taskList.collapse')"
-          >
-            {{ isCollapsed ? '▼' : '▲' }}
+            {{ $t('taskList.editTags') }}
           </button>
-        </div>
 
-        <!-- 標籤列表（可摺疊） -->
-        <div v-show="!isCollapsed" class="batch-tags-content">
-          <!-- 統一的標籤列表 -->
-          <div v-if="unifiedTagsListComputed.length > 0" class="tags-pills-container">
-            <div class="tags-pills-list">
-              <button
-                v-for="item in unifiedTagsListComputed"
-                :key="item.tag"
-                class="tag-pill"
-                :class="{ 'tag-added': item.isAdded, 'tag-available': !item.isAdded }"
-                :style="{ color: getTagColor(item.tag) }"
-                @click="item.isAdded ? handleQuickRemoveTag(item.tag) : handleQuickAddTag(item.tag)"
-                :title="item.isAdded
-                  ? $t('taskList.clickToRemoveTag', { tag: item.tag })
-                  : $t('taskList.clickToAddTag', { tag: item.tag })"
-              >
-                <svg class="pill-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <template v-if="item.isAdded">
-                    <polyline points="20 6 9 17 4 12"></polyline>
-                  </template>
-                  <template v-else>
-                    <line x1="12" y1="5" x2="12" y2="19"></line>
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                  </template>
-                </svg>
-                <span>{{ item.tag }}</span>
-              </button>
-            </div>
-          </div>
+          <button
+            class="batch-btn batch-btn-danger"
+            :disabled="selectedCount === 0"
+            @click="handleBatchDelete"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              <line x1="10" y1="11" x2="10" y2="17"></line>
+              <line x1="14" y1="11" x2="14" y2="17"></line>
+            </svg>
+            {{ $t('taskList.delete') }}
+          </button>
 
-          <!-- 無標籤提示 -->
-          <div v-else class="batch-tags-empty">
-            {{ $t('taskList.noAvailableTags') }}
-          </div>
-
-          <!-- 手動輸入 -->
-          <div class="batch-manual-input-compact">
-            <input
-              type="text"
-              v-model="manualTagInput"
-              :placeholder="$t('taskList.manualTagInputPlaceholder')"
-              class="manual-input-field"
-              @keydown.enter="handleManualAddTags"
-            />
-            <button
-              class="btn-manual-add"
-              @click="handleManualAddTags"
-              :disabled="!manualTagInput.trim()"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 5v14M5 12h14"></path>
-              </svg>
-              {{ $t('taskList.addButton') }}
-            </button>
-          </div>
+          <button class="batch-btn batch-btn-ghost batch-btn-icon" @click="handleExit" :title="$t('taskList.exit')" :aria-label="$t('taskList.exit')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
         </div>
       </div>
     </div>
-  </div>
+  </Teleport>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTaskTags } from '../../composables/task/useTaskTags'
 
@@ -154,87 +134,62 @@ const props = defineProps({
 
 // Emits
 const emit = defineEmits([
-  'update:selectedTaskIds',
   'select-all',
   'deselect-all',
   'batch-delete',
   'batch-tags-add',
-  'batch-tags-remove'
+  'batch-tags-remove',
+  'exit'
 ])
 
 // State
-const isCollapsed = ref(true)
-const manualTagInput = ref('')
+const showTagEditor = ref(false)
+const dropdownOpen = ref(false)
+const dropdownRef = ref(null)
 
 // Computed
-const selectedTasksTagsComputed = computed(() => {
-  if (props.selectedTaskIds.size === 0) {
-    return {
-      commonTags: [],
-      candidateTags: []
-    }
-  }
+const selectedCount = computed(() => props.selectedTaskIds.size)
+const allSelected = computed(() => props.tasks.length > 0 && selectedCount.value === props.tasks.length)
+const someSelected = computed(() => selectedCount.value > 0 && selectedCount.value < props.tasks.length)
 
-  // 獲取所有選中的任務
+// 標籤選項：標記 isCommon（= 所有選取任務都已擁有 → 點擊改為移除）
+// 已套用（common）排在前面，其餘依字母排序
+const tagOptions = computed(() => {
   const selectedTasks = props.tasks.filter(t => props.selectedTaskIds.has(t.task_id))
+  if (selectedTasks.length === 0) return []
 
-  if (selectedTasks.length === 0) {
-    return { commonTags: [], candidateTags: [] }
-  }
-
-  // 收集所有選中任務的標籤
-  const allTagsMap = new Map() // tag -> count
-
+  const tagCount = new Map()
   selectedTasks.forEach(task => {
-    const tags = task.tags || []
-    tags.forEach(tag => {
-      allTagsMap.set(tag, (allTagsMap.get(tag) || 0) + 1)
+    (task.tags || []).forEach(tag => {
+      tagCount.set(tag, (tagCount.get(tag) || 0) + 1)
     })
   })
 
-  // 所有任務都有的標籤
-  const commonTags = Array.from(allTagsMap.entries())
-    .filter(([tag, count]) => count === selectedTasks.length)
-    .map(([tag]) => tag)
-
-  // 候選標籤 = 部分任務有的標籤 + 系統中的其他標籤（但不包括 commonTags）
-  const partialTags = Array.from(allTagsMap.entries())
-    .filter(([tag, count]) => count < selectedTasks.length)
-    .map(([tag]) => tag)
-
-  const otherTags = props.allTags.filter(tag =>
-    !commonTags.includes(tag) && !partialTags.includes(tag)
-  )
-
-  const candidateTags = [...partialTags, ...otherTags]
-
-  return { commonTags, candidateTags }
-})
-
-const unifiedTagsListComputed = computed(() => {
-  const { commonTags, candidateTags } = selectedTasksTagsComputed.value
-
-  // 合併標籤並標記狀態
-  const tagsList = [
-    ...commonTags.map(tag => ({ tag, isAdded: true })),
-    ...candidateTags.map(tag => ({ tag, isAdded: false }))
-  ]
-
-  // 排序：已加入的在前，然後按標籤名稱排序
-  return tagsList.sort((a, b) => {
-    if (a.isAdded !== b.isAdded) {
-      return a.isAdded ? -1 : 1
-    }
-    return a.tag.localeCompare(b.tag)
-  })
+  return props.allTags
+    .map(tag => ({ tag, isCommon: tagCount.get(tag) === selectedTasks.length }))
+    .sort((a, b) => {
+      if (a.isCommon !== b.isCommon) return a.isCommon ? -1 : 1
+      return a.tag.localeCompare(b.tag)
+    })
 })
 
 // Methods
 function handleToggleSelectAll() {
-  if (props.selectedTaskIds.size === props.tasks.length) {
-    emit('deselect-all')
+  emit(allSelected.value ? 'deselect-all' : 'select-all')
+}
+
+function toggleTagEditor() {
+  showTagEditor.value = !showTagEditor.value
+  if (!showTagEditor.value) dropdownOpen.value = false
+}
+
+function handleTagClick(item) {
+  // 所有選取任務都已擁有 → 移除；否則 → 套用（新增）
+  // 保持下拉開啟，方便連續操作；刷新後該標籤的 common 狀態會自動更新
+  if (item.isCommon) {
+    emit('batch-tags-remove', [item.tag])
   } else {
-    emit('select-all')
+    emit('batch-tags-add', [item.tag])
   }
 }
 
@@ -242,272 +197,331 @@ function handleBatchDelete() {
   emit('batch-delete')
 }
 
-function handleQuickAddTag(tag) {
-  emit('batch-tags-add', [tag])
+function handleExit() {
+  emit('exit')
 }
 
-function handleQuickRemoveTag(tag) {
-  emit('batch-tags-remove', [tag])
-}
-
-function handleManualAddTags() {
-  if (!manualTagInput.value.trim()) {
-    return
-  }
-
-  const tags = manualTagInput.value.split(',').map(t => t.trim()).filter(t => t)
-  if (tags.length > 0) {
-    emit('batch-tags-add', tags)
-    manualTagInput.value = ''
+// 點擊下拉外部時關閉
+function handleClickOutside(event) {
+  if (dropdownOpen.value && dropdownRef.value && !dropdownRef.value.contains(event.target)) {
+    dropdownOpen.value = false
   }
 }
+
+onMounted(() => document.addEventListener('mousedown', handleClickOutside))
+onBeforeUnmount(() => document.removeEventListener('mousedown', handleClickOutside))
 </script>
 
 <style scoped>
-/* 從 TaskList.vue 複製批次工具列的 CSS */
-.batch-toolbar {
-  padding: 0;
+.batch-float-toolbar {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 1100; /* 高於 mobile 底部導覽列 (1000) */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
 }
 
-.batch-toolbar-header {
+/* 主工具列 */
+.batch-bar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
+  gap: 20px;
+  padding: 10px 16px;
+  background: var(--color-bg-light, #fff);
+  border: 1px solid rgba(var(--color-text-dark-rgb), 0.12);
+  border-radius: 14px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
 }
 
-.batch-header-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.btn-batch-select-all {
-  display: flex;
+.batch-select-all {
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px;
-  background: var(--color-bg, white);
-  border: 1px solid rgba(var(--color-primary-rgb), 0.3);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s;
-  font-size: 13px;
-  font-weight: 500;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
   color: var(--main-text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s;
 }
 
-.btn-batch-select-all:hover {
-  background: rgba(var(--color-primary-rgb), 0.05);
-  border-color: rgba(var(--color-primary-rgb), 0.5);
+.batch-select-all:hover {
+  background: rgba(var(--color-text-dark-rgb), 0.06);
 }
 
-.btn-batch-select-all input[type="checkbox"] {
+.batch-select-all input[type="checkbox"] {
   width: 16px;
   height: 16px;
   cursor: pointer;
 }
 
-.batch-selection-count {
-  font-size: 13px;
-  color: rgba(var(--color-text-dark-rgb), 0.7);
-  font-weight: 500;
+.batch-count {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--main-text);
+  white-space: nowrap;
+  padding-left: 2px;
 }
 
-.batch-header-right {
+.batch-actions {
   display: flex;
-  gap: 12px;
-}
-
-.btn-batch-action {
-  display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 16px;
-  border: none;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
 }
 
-.btn-batch-delete {
-  background: rgba(var(--color-danger-rgb), 0.15);
+.batch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.batch-btn:hover:not(:disabled) {
+  background: rgba(var(--color-primary-rgb), 0.1);
+}
+
+.batch-btn.active {
+  background: rgba(var(--color-primary-rgb), 0.16);
+}
+
+.batch-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.batch-btn-danger {
   color: var(--color-danger);
 }
 
-.btn-batch-delete:hover {
-  background: rgba(var(--color-danger-rgb), 0.25);
-  transform: translateY(-1px);
+.batch-btn-danger:hover:not(:disabled) {
+  background: rgba(var(--color-danger-rgb), 0.12);
 }
 
-/* 批次操作區域 */
-.batch-actions {
-  margin-top: 16px;
+.batch-btn-ghost {
+  border: none;
+  background: transparent;
+  color: rgba(var(--color-text-dark-rgb), 0.7);
 }
 
-/* 標籤管理區域 */
-.batch-tags-section-compact {
-  background: var(--color-bg, white);
-  border: 1px solid rgba(var(--color-primary-rgb), 0.2);
-  border-radius: 8px;
-  overflow: hidden;
-  transition: all 0.3s;
+.batch-btn-ghost:hover:not(:disabled) {
+  background: rgba(var(--color-text-dark-rgb), 0.06);
+  color: var(--main-text);
 }
 
-.batch-tags-section-compact.collapsed {
-  /* 摺疊狀態的樣式 */
+/* 純圖示按鈕：方形、無多餘左右留白 */
+.batch-btn-icon {
+  padding: 8px;
+  gap: 0;
 }
 
-.batch-tags-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 6px 16px;
-  background: rgba(var(--color-teal-rgb), 0.05);
-  border-bottom: 1px solid rgba(var(--color-primary-rgb), 0.1);
-  cursor: pointer;
+/* 標籤編輯展開區 */
+.batch-tag-editor {
+  padding: 14px 16px;
+  background: var(--color-bg-light, #fff);
+  border: 1px solid rgba(var(--color-text-dark-rgb), 0.12);
+  border-radius: 14px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
 }
 
-.batch-tags-info {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.batch-tags-info svg {
-  color: var(--color-teal);
-}
-
-.tags-title {
+.editor-title {
   font-size: 13px;
   font-weight: 600;
-  color: rgba(var(--color-text-dark-rgb), 0.8);
-}
-
-.tags-stats {
-  font-size: 12px;
-  color: rgba(var(--color-text-dark-rgb), 0.5);
-  padding: 2px 8px;
-  background: rgba(var(--color-teal-rgb), 0.1);
-  border-radius: 4px;
-}
-
-.btn-collapse {
-  padding: 4px 8px;
-  background: none;
-  border: none;
-  color: rgba(var(--color-text-dark-rgb), 0.6);
-  cursor: pointer;
-  font-size: 12px;
-  transition: all 0.2s;
-}
-
-.btn-collapse:hover {
-  color: rgba(var(--color-text-dark-rgb), 0.9);
-}
-
-/* 標籤內容 */
-.batch-tags-content {
-  padding: 16px;
-}
-
-.tags-pills-container {
-  margin-bottom: 16px;
-}
-
-.tags-pills-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.tag-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border: 1.5px solid currentColor;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-  background: var(--color-bg, white);
-}
-
-.tag-pill:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-}
-
-.tag-pill.tag-added {
-  background: currentColor;
-  color: white !important;
-}
-
-.tag-pill.tag-available {
-  background: var(--color-bg, rgba(255, 255, 255, 0.9));
-}
-
-.pill-icon {
-  width: 14px;
-  height: 14px;
-}
-
-.batch-tags-empty {
-  padding: 20px;
-  text-align: center;
-  color: rgba(var(--color-text-dark-rgb), 0.5);
-  font-size: 13px;
-}
-
-/* 手動輸入 */
-.batch-manual-input-compact {
-  display: flex;
-  gap: 8px;
-}
-
-.manual-input-field {
-  flex: 1;
-  padding: 8px 12px;
-  font-size: 13px;
-  border: 1px solid rgba(var(--color-primary-rgb), 0.3);
-  border-radius: 6px;
-  background: var(--color-bg, white);
   color: var(--main-text);
+  margin-bottom: 10px;
+}
+
+/* 下拉選單 */
+.editor-dropdown {
+  position: relative;
+}
+
+.dropdown-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-width: 240px;
+  padding: 9px 12px;
+  border: 1px solid rgba(var(--color-primary-rgb), 0.3);
+  border-radius: 10px;
+  background: var(--color-bg, #fff);
+  color: var(--main-text);
+  font-size: 13px;
+  cursor: pointer;
   transition: all 0.2s;
 }
 
-.manual-input-field:focus {
-  outline: none;
+.dropdown-trigger:hover,
+.dropdown-trigger.open {
   border-color: rgba(var(--color-primary-rgb), 0.5);
 }
 
-.btn-manual-add {
-  display: inline-flex;
+.chevron {
+  flex-shrink: 0;
+  color: rgba(var(--color-text-dark-rgb), 0.55);
+  transition: transform 0.2s;
+}
+
+.dropdown-trigger.open .chevron {
+  transform: rotate(180deg);
+}
+
+.dropdown-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px); /* 往上展開，因為工具列在底部 */
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--color-bg, #fff);
+  border: 1px solid rgba(var(--color-text-dark-rgb), 0.12);
+  border-radius: 10px;
+  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.16);
+}
+
+.dropdown-item {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  background: rgba(var(--color-primary-rgb), 0.15);
-  border: 1px solid rgba(var(--color-primary-rgb), 0.3);
-  border-radius: 6px;
-  color: var(--color-primary);
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--main-text);
   font-size: 13px;
-  font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background 0.15s;
+  text-align: left;
 }
 
-.btn-manual-add:hover:not(:disabled) {
-  background: rgba(var(--color-primary-rgb), 0.25);
-  transform: translateY(-1px);
+.dropdown-item:hover {
+  background: rgba(var(--color-primary-rgb), 0.1);
 }
 
-.btn-manual-add:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+/* 共用標籤（全部任務都有）非 hover 時以灰底標示「已套用」 */
+.dropdown-item.is-common {
+  background: rgba(var(--color-text-dark-rgb), 0.06);
+}
+
+.dropdown-item.is-common:hover {
+  background: rgba(var(--color-danger-rgb), 0.1);
+}
+
+.dropdown-item .tag-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dropdown-item .action-icon {
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.dropdown-item:hover .action-icon {
+  opacity: 1;
+}
+
+.dropdown-item .add-icon {
+  color: var(--color-primary);
+}
+
+.dropdown-item .remove-icon {
+  color: var(--color-danger);
+}
+
+.tag-dot {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.dropdown-empty {
+  padding: 16px;
+  text-align: center;
+  font-size: 13px;
+  color: rgba(var(--color-text-dark-rgb), 0.5);
+}
+
+/* 展開動畫 */
+.batch-panel-enter-active,
+.batch-panel-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.batch-panel-enter-from,
+.batch-panel-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+/* === 響應式 === */
+@media (max-width: 768px) {
+  .batch-float-toolbar {
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px)); /* 避開底部導覽列 */
+    left: 16px;
+    right: 16px;
+    transform: none;
+    width: auto;
+    max-width: none;
+  }
+
+  .batch-bar {
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .batch-btn {
+    padding: 8px 10px;
+  }
+
+  .dropdown-trigger {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .batch-bar {
+    gap: 6px;
+  }
+
+  .batch-btn,
+  .batch-count {
+    font-size: 12px;
+  }
+
+  /* 螢幕太窄：隱藏全選文字，只留 checkbox（title/aria-label 仍保留） */
+  .batch-select-all span {
+    display: none;
+  }
+
+  .batch-select-all {
+    padding: 6px;
+  }
 }
 </style>
