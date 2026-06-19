@@ -16,6 +16,8 @@ export const useAuthStore = defineStore('auth', () => {
   const isAuthenticated = computed(() => !!user.value)
   const isAdmin = computed(() => user.value?.role === 'admin')
   const quota = computed(() => user.value?.quota || {})
+  // 手動保留音檔額度（方案決定）；缺欄位時退回 0，與後端 tier_config.get("max_keep_audio", 0) 一致
+  const maxKeepAudio = computed(() => quota.value.max_keep_audio ?? 0)
   const usage = computed(() => user.value?.usage || {})
   const authProviders = computed(() => user.value?.auth_providers || [])
   const hasPassword = computed(() => authProviders.value.includes('password'))
@@ -413,6 +415,7 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated,
     isAdmin,
     quota,
+    maxKeepAudio,
     usage,
     quotaPercentage,
     remainingQuota,

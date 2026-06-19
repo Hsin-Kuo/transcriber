@@ -22,7 +22,6 @@ const routes = [
     name: 'transcription',
     component: TranscriptionView,
     meta: {
-      title: '上傳音檔',
       requiresAuth: true
     }
   },
@@ -31,7 +30,6 @@ const routes = [
     name: 'tasks',
     component: TasksView,
     meta: {
-      title: '所有任務',
       requiresAuth: true
     }
   },
@@ -40,7 +38,6 @@ const routes = [
     name: 'settings',
     component: UserSettingsView,
     meta: {
-      title: '使用者設定',
       requiresAuth: true
     }
   },
@@ -49,7 +46,6 @@ const routes = [
     name: 'checkout',
     component: CheckoutView,
     meta: {
-      title: '結帳',
       requiresAuth: true,
       hideNav: true
     }
@@ -59,7 +55,6 @@ const routes = [
     name: 'paymentReturn',
     component: PaymentReturnView,
     meta: {
-      title: '付款結果',
       requiresAuth: true,
       hideNav: true
     }
@@ -69,7 +64,6 @@ const routes = [
     name: 'transcript',
     component: TranscriptDetailView,
     meta: {
-      title: '逐字稿詳情',
       requiresAuth: true
     }
   },
@@ -78,7 +72,6 @@ const routes = [
     name: 'login',
     component: LoginView,
     meta: {
-      title: '登入',
       guest: true
     }
   },
@@ -87,7 +80,6 @@ const routes = [
     name: 'register',
     component: RegisterView,
     meta: {
-      title: '註冊',
       guest: true
     }
   },
@@ -98,7 +90,6 @@ const routes = [
     meta: {
       // 不設 guest：驗證連結為 token-based，須能在「瀏覽器已有另一帳號登入」時
       // 照常驗證；hideNav 維持獨立頁外觀。
-      title: 'Email 驗證',
       hideNav: true
     }
   },
@@ -109,7 +100,6 @@ const routes = [
     meta: {
       // 不設 guest：與驗證流程一致，不因已登入其他帳號被導走；
       // 元件本身有「沒帶 email 就回 /register」的狀態守衛。hideNav 維持獨立頁外觀。
-      title: '請查看您的信箱',
       hideNav: true
     }
   },
@@ -120,7 +110,6 @@ const routes = [
     meta: {
       // 不設 guest：忘記/重設密碼以 email token 為憑證，須能在「瀏覽器已有
       // 另一帳號登入」時照常使用；hideNav 維持獨立頁外觀（隱藏導覽列）。
-      title: '忘記密碼',
       hideNav: true
     }
   },
@@ -131,7 +120,6 @@ const routes = [
     meta: {
       // 不設 guest：見 forgot-password 說明。重設連結為 token-based，
       // 不應因瀏覽器已登入其他帳號而被 guard 導走。
-      title: '重設密碼',
       hideNav: true
     }
   },
@@ -140,7 +128,6 @@ const routes = [
     name: 'sharedTranscript',
     component: SharedTranscriptView,
     meta: {
-      title: '分享的逐字稿',
       public: true,
       hideNav: true
     }

@@ -347,7 +347,7 @@ async function cancelTask(taskId) {
       task.cancelling = false
     }
 
-    showNotification?.('取消失敗，請稍後再試', 'error')
+    showNotification?.({ title: t('tasksView.cancelFailed'), type: 'error' })
   }
 }
 
@@ -414,7 +414,7 @@ function connectTaskSSE(taskId) {
           if (showNotification) {
             showNotification({
               title: t('tasksView.transcriptionComplete'),
-              message: `「${task.custom_name || task.filename || task.file?.filename}」已完成`,
+              message: t('tasksView.transcriptionCompleteMessage', { name: task.custom_name || task.filename || task.file?.filename }),
               type: 'success'
             })
           }
@@ -425,7 +425,7 @@ function connectTaskSSE(taskId) {
           if (showNotification) {
             showNotification({
               title: t('tasksView.transcriptionFailed'),
-              message: `「${task.custom_name || task.filename || task.file?.filename}」轉錄失敗`,
+              message: t('tasksView.transcriptionFailedMessage', { name: task.custom_name || task.filename || task.file?.filename }),
               type: 'error'
             })
           }

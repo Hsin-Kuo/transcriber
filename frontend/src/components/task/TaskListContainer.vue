@@ -19,6 +19,7 @@
       <button
         class="tab-btn tab-all"
         :class="{ active: selectedTaskType === 'all' }"
+        :disabled="isBatchEditMode"
         @click="selectedTaskType = 'all'"
       >
         <span>{{ $t('taskList.all') }}</span>
@@ -26,6 +27,7 @@
       <button
         class="tab-btn tab-paragraph"
         :class="{ active: selectedTaskType === 'paragraph' }"
+        :disabled="isBatchEditMode"
         @click="selectedTaskType = 'paragraph'"
       >
         <span>{{ $t('taskList.paragraph') }}</span>
@@ -33,6 +35,7 @@
       <button
         class="tab-btn tab-subtitle"
         :class="{ active: selectedTaskType === 'subtitle' }"
+        :disabled="isBatchEditMode"
         @click="selectedTaskType = 'subtitle'"
       >
         <span>{{ $t('taskList.subtitle') }}</span>
@@ -40,22 +43,24 @@
       <button
         class="tab-btn tab-has-audio"
         :class="{ active: selectedTaskType === 'has_audio' }"
+        :disabled="isBatchEditMode"
         @click="selectedTaskType = 'has_audio'"
       >
         <span>{{ $t('taskList.hasAudio') }}</span>
       </button>
 
+      <!-- 進入批次編輯（編輯狀態下隱藏，退出改由底部工具列的 X） -->
       <button
+        v-if="!isBatchEditMode"
         class="tab-btn tab-batch-edit"
-        :class="{ active: isBatchEditMode }"
         @click="toggleBatchEditMode"
-        :title="isBatchEditMode ? $t('taskList.exitBatchEdit') : $t('taskList.batchEdit')"
+        :title="$t('taskList.batchEdit')"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
           <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
         </svg>
-        <span>{{ isBatchEditMode ? $t('taskList.exitBatchEdit') : $t('taskList.batchEdit') }}</span>
+        <span>{{ $t('taskList.batchEdit') }}</span>
       </button>
 
       <!-- 分頁控制 -->
@@ -84,21 +89,21 @@
       @toggle-selection="handleToggleSelection"
       @toggle-keep-audio="handleToggleKeepAudio"
       @tags-updated="handleTaskTagsUpdated"
-    >
-      <template #before-cards>
-        <BatchEditToolbar
-          v-if="isBatchEditMode"
-          v-model:selectedTaskIds="selectedTaskIds"
-          :tasks="sortedTasks"
-          :all-tags="allTags"
-          @select-all="handleSelectAll"
-          @deselect-all="handleDeselectAll"
-          @batch-delete="handleBatchDelete"
-          @batch-tags-add="handleBatchTagsAdd"
-          @batch-tags-remove="handleBatchTagsRemove"
-        />
-      </template>
-    </TaskGrid>
+    />
+
+    <!-- 批次編輯：底部浮動工具列 -->
+    <BatchEditToolbar
+      v-if="isBatchEditMode"
+      :selected-task-ids="selectedTaskIds"
+      :tasks="sortedTasks"
+      :all-tags="allTags"
+      @select-all="handleSelectAll"
+      @deselect-all="handleDeselectAll"
+      @batch-delete="handleBatchDelete"
+      @batch-tags-add="handleBatchTagsAdd"
+      @batch-tags-remove="handleBatchTagsRemove"
+      @exit="exitBatchEditMode"
+    />
   </div>
 </template>
 
@@ -137,6 +142,8 @@ const emit = defineEmits(['download', 'refresh', 'delete', 'cancel', 'view', 'pa
 
 // 處理分頁變更
 function handlePageChange(newPage) {
+  // 批次編輯時鎖定換頁，避免改變列表內容
+  if (isBatchEditMode.value) return
   emit('page-change', newPage)
 }
 
@@ -241,11 +248,16 @@ const sortedTasks = computed(() => {
 
 // Methods - Batch Mode
 function toggleBatchEditMode() {
-  isBatchEditMode.value = !isBatchEditMode.value
-  if (!isBatchEditMode.value) {
-    selectedTaskIds.value.clear()
-    selectedTaskIds.value = new Set()
+  if (isBatchEditMode.value) {
+    exitBatchEditMode()
+  } else {
+    isBatchEditMode.value = true
   }
+}
+
+function exitBatchEditMode() {
+  isBatchEditMode.value = false
+  selectedTaskIds.value = new Set()
 }
 
 function handleToggleSelection(taskId) {
@@ -262,7 +274,6 @@ function handleSelectAll() {
 }
 
 function handleDeselectAll() {
-  selectedTaskIds.value.clear()
   selectedTaskIds.value = new Set()
 }
 
@@ -478,6 +489,26 @@ onMounted(() => {
   background-color: var(--nav-bg) !important;
 }
 
+/* 批次編輯時為底部浮動工具列預留空間，避免遮住最後一筆任務 */
+.task-list.batch-edit-active {
+  padding-bottom: 120px;
+}
+
+/* 批次編輯時鎖定篩選與換頁：灰化 + 禁止互動，避免改變列表內容 */
+.task-list.batch-edit-active :deep(.filter-section),
+.task-list.batch-edit-active .pagination-wrapper {
+  pointer-events: none;
+  filter: grayscale(1);
+  opacity: 0.5;
+}
+
+/* 非批次的類型頁籤一併灰化鎖定（批次頁籤保留可點以退出） */
+.task-list.batch-edit-active .tab-btn:disabled {
+  pointer-events: none;
+  filter: grayscale(1);
+  cursor: not-allowed;
+}
+
 /* 任務類型篩選區 - 資料夾頁籤樣式 */
 .task-type-tabs {
   display: flex;
@@ -617,6 +648,17 @@ onMounted(() => {
   /* 為浮動的分頁列預留底部空間，避免遮住最後一筆任務 */
   .task-list.has-pagination {
     padding-bottom: 80px;
+  }
+
+  /* 批次工具列在 mobile 浮於底部導覽列之上，需更多底部空間 */
+  .task-list.batch-edit-active {
+    padding-bottom: 200px;
+  }
+
+  /* 手機版切頁是 position:fixed 浮窗；批次編輯時直接隱藏，
+     避免與底部工具列重疊、或被祖層 filter 影響定位而跑到上方 */
+  .task-list.batch-edit-active :deep(.pagination) {
+    display: none;
   }
 
   /* 任務類型頁籤換行排列 */
