@@ -23,7 +23,7 @@ from ..services.audio_service import AudioService
 from ..services.tag_service import TagService
 from ..services.task_dispatch import get_task_dispatch
 from ..utils.logger import get_logger
-from ..utils.storage_service import is_aws
+from ..utils.storage.backend import is_aws
 from ..utils.time_utils import get_utc_timestamp
 
 log = get_logger(__name__)

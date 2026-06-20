@@ -8,7 +8,7 @@ import secrets
 from ..auth.dependencies import get_current_user
 from ..database.mongodb import get_database
 from ..database.repositories.task_repo import TaskRepository
-from ..utils.storage_service import is_aws
+from ..utils.storage.backend import is_aws
 from ..utils.time_utils import get_utc_timestamp
 from ..services.task_query_helpers import is_audio_expired
 
@@ -270,7 +270,7 @@ async def get_shared_audio(
         )
 
     if is_aws():
-        from ..utils.storage_service import audio_exists_by_path, get_presigned_url_by_path
+        from ..utils.storage.compact import audio_exists_by_path, get_presigned_url_by_path
         from urllib.parse import urlparse
 
         audio_file_path = task.get("result", {}).get("audio_file")
