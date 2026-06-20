@@ -394,7 +394,7 @@ class TaskService:
     # ========== 私有輔助方法 ==========
 
     def _get_task_user_id(self, task: Dict[str, Any]) -> str:
-        """安全獲取任務的 user_id（支援巢狀與扁平格式）
+        """安全獲取任務的 user_id（tasks 一律巢狀 user.user_id）
 
         Args:
             task: 任務資料
@@ -402,12 +402,10 @@ class TaskService:
         Returns:
             用戶 ID
         """
-        # 嘗試巢狀格式
-        if "user" in task and isinstance(task["user"], dict):
-            return str(task["user"].get("user_id", ""))
-
-        # 嘗試扁平格式
-        return str(task.get("user_id", ""))
+        user = task.get("user")
+        if isinstance(user, dict):
+            return str(user.get("user_id", ""))
+        return ""
 
     def _cleanup_temp_dir(self, temp_dir: Path) -> None:
         """清理臨時目錄
