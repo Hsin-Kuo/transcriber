@@ -102,6 +102,40 @@ class ChunkUploadRepository:
         """強制刪除（驗證失敗等清理情境用）"""
         await self.collection.delete_one({"_id": upload_id})
 
+    async def take_incomplete_for_retry(
+        self, user_id: str, filename: str, total_size: int
+    ) -> List[dict]:
+        """取走（找出並刪除）同 user、同檔名同大小、尚未完成的舊上傳工作階段。
+
+        用於 init 時的「重試覆蓋」：本專案不做續傳，前端失敗重試會 init 新的
+        upload_id 把整個檔重傳一遍，舊 session 不會被續用，留著只是佔本機 EBS
+        到 sweep。這裡在 init 當下就把同簽名的未完成舊 session 取走，讓 caller
+        立即清掉其 temp_dir，不必等 grace period。
+
+        只清 status=uploading（未完成）；completed-but-not-consumed 不碰——那是
+        組裝好、可能正要被 consume 的成品，交給 consume / sweep 流程處理。
+
+        以 find_one_and_delete 逐筆確認（filter 帶 status=uploading），避免 find
+        與 delete 之間 session 剛好 complete 而被誤砍。回傳被刪 docs，caller 負責
+        rmtree temp_dir。
+        """
+        matched = await self.collection.find({
+            "user_id": user_id,
+            "filename": filename,
+            "total_size": total_size,
+            "status": "uploading",
+        }).to_list(length=None)
+
+        deleted: List[dict] = []
+        for doc in matched:
+            confirmed = await self.collection.find_one_and_delete({
+                "_id": doc["_id"],
+                "status": "uploading",
+            })
+            if confirmed is not None:
+                deleted.append(confirmed)
+        return deleted
+
     async def sweep_expired(self, grace_seconds: int) -> List[dict]:
         """找出 last_activity_at 早於 grace_seconds 前的 doc，刪 doc 並回傳被刪 docs。
 

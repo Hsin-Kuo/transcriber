@@ -206,6 +206,54 @@ async def test_sweep_expired_returns_only_actually_deleted(repo):
     assert await repo.get(uids[2]) is None
 
 
+# ── take_incomplete_for_retry（init 重試覆蓋）─────────────
+
+
+async def test_take_incomplete_evicts_same_signature(repo):
+    """同 user、同檔名同大小、status=uploading 的舊 session 被取走並回傳。"""
+    uid = await _init(repo, user_id="u1", total_chunks=3, filename="a.mp3")
+    total_size = 3 * 1024  # 對齊 _init 的 total_size 算法
+
+    deleted = await repo.take_incomplete_for_retry("u1", "a.mp3", total_size)
+
+    assert [d["_id"] for d in deleted] == [uid]
+    assert "temp_dir" in deleted[0], "回傳須含 temp_dir 供 caller rmtree"
+    assert await repo.get(uid) is None, "舊 session 應已被刪"
+
+
+async def test_take_incomplete_ignores_different_filename(repo):
+    """不同檔名不視為同一次重試 → 不清。"""
+    uid = await _init(repo, user_id="u1", total_chunks=3, filename="other.mp3")
+    deleted = await repo.take_incomplete_for_retry("u1", "a.mp3", 3 * 1024)
+    assert deleted == []
+    assert await repo.get(uid) is not None
+
+
+async def test_take_incomplete_ignores_different_total_size(repo):
+    """同檔名但大小不同（內容已換）→ 不清。"""
+    uid = await _init(repo, user_id="u1", total_chunks=3, filename="a.mp3")  # size=3072
+    deleted = await repo.take_incomplete_for_retry("u1", "a.mp3", 9999)
+    assert deleted == []
+    assert await repo.get(uid) is not None
+
+
+async def test_take_incomplete_ignores_other_user(repo):
+    """別的 user 的同名上傳不可被清（隔離）。"""
+    uid = await _init(repo, user_id="u2", total_chunks=3, filename="a.mp3")
+    deleted = await repo.take_incomplete_for_retry("u1", "a.mp3", 3 * 1024)
+    assert deleted == []
+    assert await repo.get(uid) is not None
+
+
+async def test_take_incomplete_skips_completed(repo):
+    """completed-but-not-consumed 的成品不該被清（交給 consume / sweep）。"""
+    uid = await _init(repo, user_id="u1", total_chunks=3, filename="a.mp3")
+    await repo.mark_completed(uid, Path("/tmp/test/a.mp3"))
+    deleted = await repo.take_incomplete_for_retry("u1", "a.mp3", 3 * 1024)
+    assert deleted == []
+    assert await repo.get(uid) is not None
+
+
 async def test_sweep_expired_protects_against_find_then_delete_race(repo, monkeypatch):
     """關鍵 race：find() 回傳 doc 後、find_one_and_delete 前，add_chunk 跑進來
     更新 last_activity_at。原始實作（delete_many 不二次驗證）會誤刪此 doc；

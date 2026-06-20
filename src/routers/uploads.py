@@ -34,7 +34,10 @@ CHUNK_SIZE = 16 * 1024 * 1024  # 16 MB
 # 單檔上限：以環境變數 MAX_UPLOAD_SIZE_MB 設定（預設 3072 MB = 3 GB）
 MAX_UPLOAD_SIZE_MB = int(os.environ.get("MAX_UPLOAD_SIZE_MB", "3072"))
 MAX_UPLOAD_SIZE = MAX_UPLOAD_SIZE_MB * 1024 * 1024
-UPLOAD_EXPIRY_SECONDS = 10800  # 3 小時無活動即清理（大檔上傳較慢）
+# 60 分鐘無活動即清理。chunk 每傳一片就刷新 last_activity_at，所以「正在進行」
+# 的上傳永遠不會被掃到；只有完全沒動靜的死 session 才清。本專案不做續傳，留著
+# 死 session 沒有任何續傳價值，只是佔本機 EBS，因此取較短 grace 加速回收。
+UPLOAD_EXPIRY_SECONDS = 3600
 CLEANUP_INTERVAL_SECONDS = 300  # 每 5 分鐘掃一次
 
 # 同一 user 最多同時 N 條 chunk 在後端寫磁碟。
@@ -86,13 +89,27 @@ async def init_upload(
 
     validate_filename_extension(filename)
 
+    repo = _repo()
+    user_id = str(current_user["_id"])
+
+    # 重試覆蓋：本專案不做續傳，前端失敗重試會 init 新 upload_id 重傳整個檔。
+    # 在此把同 user、同檔名同大小的未完成舊 session 取走並即時清掉其 temp_dir，
+    # 避免重試的半成品累積佔本機 EBS 到 grace period 才被 sweep。
+    stale = await repo.take_incomplete_for_retry(user_id, filename, total_size)
+    for doc in stale:
+        td = Path(doc.get("temp_dir", ""))
+        if td.exists():
+            await asyncio.to_thread(shutil.rmtree, td, ignore_errors=True)
+    if stale:
+        log.info("chunk_upload.init.evicted_stale", user_id=user_id, count=len(stale))
+
     total_chunks = (total_size + CHUNK_SIZE - 1) // CHUNK_SIZE
     upload_id = str(uuid.uuid4())
     temp_dir = get_temp_dir(prefix="chunk_")
 
-    await _repo().init_upload(
+    await repo.init_upload(
         upload_id=upload_id,
-        user_id=str(current_user["_id"]),
+        user_id=user_id,
         filename=filename,
         total_size=total_size,
         total_chunks=total_chunks,
@@ -265,7 +282,7 @@ async def periodic_chunk_upload_cleanup(
 
     與舊版差異：
     - 舊版只清未完成的 → completed-but-never-consumed 會永遠留 temp_dir
-    - 新版以 last_activity_at 為準，3 小時無活動就清，不論是否 completed
+    - 新版以 last_activity_at 為準，grace_seconds 無活動就清，不論是否 completed
     - rmtree 跑 threadpool（避免阻塞 event loop）
     """
     repo = ChunkUploadRepository(db)
