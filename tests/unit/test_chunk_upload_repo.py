@@ -254,6 +254,41 @@ async def test_take_incomplete_skips_completed(repo):
     assert await repo.get(uid) is not None
 
 
+# ── abort（使用者主動中止）─────────────────────────────
+
+
+async def test_abort_deletes_own_uploading_session(repo):
+    """本人中止未完成 session → 回傳 doc（含 temp_dir）且 doc 被刪。"""
+    uid = await _init(repo, user_id="u1")
+    doc = await repo.abort(uid, "u1")
+    assert doc is not None and doc["_id"] == uid
+    assert "temp_dir" in doc
+    assert await repo.get(uid) is None
+
+
+async def test_abort_deletes_completed_not_consumed(repo):
+    """completed-but-not-consumed 也能被本人中止（取消已組裝但未送轉錄的上傳）。"""
+    uid = await _init(repo, user_id="u1")
+    await repo.mark_completed(uid, Path("/tmp/test/a.mp3"))
+    doc = await repo.abort(uid, "u1")
+    assert doc is not None
+    assert await repo.get(uid) is None
+
+
+async def test_abort_rejects_other_user(repo):
+    """不能中止別人的上傳 → 回 None、doc 仍在。"""
+    uid = await _init(repo, user_id="u1")
+    doc = await repo.abort(uid, "attacker")
+    assert doc is None
+    assert await repo.get(uid) is not None
+
+
+async def test_abort_missing_is_idempotent(repo):
+    """中止不存在的 upload → 回 None，不報錯（前端可 fire-and-forget）。"""
+    doc = await repo.abort("nonexistent-id", "u1")
+    assert doc is None
+
+
 async def test_sweep_expired_protects_against_find_then_delete_race(repo, monkeypatch):
     """關鍵 race：find() 回傳 doc 後、find_one_and_delete 前，add_chunk 跑進來
     更新 last_activity_at。原始實作（delete_many 不二次驗證）會誤刪此 doc；

@@ -136,6 +136,22 @@ class ChunkUploadRepository:
                 deleted.append(confirmed)
         return deleted
 
+    async def abort(self, upload_id: str, user_id: str) -> Optional[dict]:
+        """使用者主動中止：atomic 取走並刪除自己的 upload session，回傳被刪 doc。
+
+        給前端「上傳失敗 / 使用者取消」時呼叫的 DELETE endpoint 用，讓半成品的
+        temp_dir 當下就能被清掉，不必等 grace period 的 sweep。
+
+        - 限本人（filter 帶 user_id），不能中止別人的上傳
+        - 不限 status：uploading（半成品）或 completed-but-not-consumed 都可中止；
+          已被 consume 的 doc 早已不存在 → 回 None（idempotent，重複呼叫安全）
+        Caller 拿到非 None 後負責 rmtree temp_dir。
+        """
+        return await self.collection.find_one_and_delete({
+            "_id": upload_id,
+            "user_id": user_id,
+        })
+
     async def sweep_expired(self, grace_seconds: int) -> List[dict]:
         """找出 last_activity_at 早於 grace_seconds 前的 doc，刪 doc 並回傳被刪 docs。
 

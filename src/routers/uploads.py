@@ -236,6 +236,28 @@ async def complete_upload(
     }
 
 
+@router.delete("/{upload_id}")
+async def abort_upload(
+    upload_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """主動中止上傳工作階段，即時清掉半成品的 temp_dir。
+
+    前端在「上傳失敗 / 使用者取消」時呼叫，讓本機 EBS 的 chunk 檔當下回收，
+    不必等 periodic_chunk_upload_cleanup 的 grace period。
+
+    Idempotent：找不到（已被 consume / 已中止 / 不存在）也回 200，讓前端能
+    fire-and-forget 不必處理 404。只能中止自己的上傳。
+    """
+    doc = await _repo().abort(upload_id, str(current_user["_id"]))
+    if doc:
+        td = Path(doc.get("temp_dir", ""))
+        if td.exists():
+            await asyncio.to_thread(shutil.rmtree, td, ignore_errors=True)
+        log.info("chunk_upload.aborted", upload_id=upload_id)
+    return {"status": "aborted", "found": doc is not None}
+
+
 def _assemble_chunks(temp_dir: Path, assembled_path: Path, total_chunks: int) -> None:
     """把 N 個 chunk 串接成完整檔。Sync I/O，由 to_thread 包覆。"""
     with assembled_path.open("wb") as out:
