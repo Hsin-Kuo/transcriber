@@ -132,13 +132,7 @@ async def list_users(
 
         # 計算任務統計
         task_count = await task_repo.count_by_user(user_id)
-        active_task_count = await task_repo.collection.count_documents({
-            "$or": [
-                {"user.user_id": user_id},
-                {"user_id": user_id}
-            ],
-            "status": {"$in": ["pending", "processing"]}
-        })
+        active_task_count = await task_repo.count_active_by_user(user_id)
 
         result.append({
             "id": user_id,
@@ -192,9 +186,9 @@ async def get_user_detail(
     for task in recent_tasks:
         recent_tasks_summary.append({
             "task_id": task.get("_id") or task.get("task_id"),
-            "filename": task.get("file", {}).get("filename") or task.get("filename"),
+            "filename": task.get("file", {}).get("filename"),
             "status": task.get("status"),
-            "created_at": task.get("timestamps", {}).get("created_at") or task.get("created_at")
+            "created_at": task.get("timestamps", {}).get("created_at")
         })
 
     return {
@@ -694,19 +688,13 @@ async def list_all_tasks(
         user = await user_repo.get_by_email(user_email)
         if user:
             uid = str(user["_id"])
-            filters["$or"] = [
-                {"user.user_id": uid},
-                {"user_id": uid}
-            ]
+            filters.update(TaskRepository.owned_by(uid))
         else:
             # 沒找到用戶，返回空結果
             return {"tasks": [], "total": 0, "skip": skip, "limit": limit}
 
     if user_id:
-        filters["$or"] = [
-            {"user.user_id": user_id},
-            {"user_id": user_id}
-        ]
+        filters.update(TaskRepository.owned_by(user_id))
 
     if status:
         if status == "active":
@@ -733,22 +721,22 @@ async def list_all_tasks(
     result = []
     for task in tasks:
         # 取得用戶資訊
-        task_user_id = task.get("user", {}).get("user_id") or task.get("user_id")
-        task_user_email = task.get("user", {}).get("user_email") or task.get("user_email")
+        task_user_id = task.get("user", {}).get("user_id")
+        task_user_email = task.get("user", {}).get("user_email")
 
         result.append({
             "task_id": task.get("_id") or task.get("task_id"),
             "user_id": task_user_id,
             "user_email": task_user_email,
-            "filename": task.get("file", {}).get("filename") or task.get("filename"),
-            "file_size_mb": task.get("file", {}).get("size_mb") or task.get("file_size_mb"),
+            "filename": task.get("file", {}).get("filename"),
+            "file_size_mb": task.get("file", {}).get("size_mb"),
             "status": task.get("status"),
             "progress": task.get("progress"),
             "progress_percentage": task.get("progress_percentage"),
-            "audio_duration_seconds": task.get("stats", {}).get("audio_duration_seconds") or task.get("audio_duration"),
+            "audio_duration_seconds": task.get("stats", {}).get("audio_duration_seconds"),
             "duration_seconds": task.get("stats", {}).get("duration_seconds"),
-            "created_at": task.get("timestamps", {}).get("created_at") or task.get("created_at"),
-            "completed_at": task.get("timestamps", {}).get("completed_at") or task.get("completed_at"),
+            "created_at": task.get("timestamps", {}).get("created_at"),
+            "completed_at": task.get("timestamps", {}).get("completed_at"),
             "config": task.get("config", {})
         })
 
@@ -777,8 +765,8 @@ async def get_task_detail(
         )
 
     # 取得用戶資訊
-    task_user_id = task.get("user", {}).get("user_id") or task.get("user_id")
-    task_user_email = task.get("user", {}).get("user_email") or task.get("user_email")
+    task_user_id = task.get("user", {}).get("user_id")
+    task_user_email = task.get("user", {}).get("user_email")
 
     # AI 摘要生成記錄（每次生成都 append，含時間與 token 消耗）
     summary_log_repo = SummaryLogRepository(db)
@@ -791,27 +779,27 @@ async def get_task_detail(
             "user_email": task_user_email
         },
         "file": {
-            "filename": task.get("file", {}).get("filename") or task.get("filename"),
-            "size_mb": task.get("file", {}).get("size_mb") or task.get("file_size_mb")
+            "filename": task.get("file", {}).get("filename"),
+            "size_mb": task.get("file", {}).get("size_mb")
         },
         "config": task.get("config", {}),
         "status": task.get("status"),
         "progress": task.get("progress"),
         "progress_percentage": task.get("progress_percentage"),
         "result": {
-            "audio_file": task.get("result", {}).get("audio_file") or task.get("audio_file"),
-            "transcription_file": task.get("result", {}).get("transcription_file") or task.get("transcription_file"),
-            "text_length": task.get("result", {}).get("text_length") or task.get("text_length")
+            "audio_file": task.get("result", {}).get("audio_file"),
+            "transcription_file": task.get("result", {}).get("transcription_file"),
+            "text_length": task.get("result", {}).get("text_length")
         },
         "stats": task.get("stats", {}),
         "models": task.get("models", {}),
         "tags": task.get("tags", []),
         "custom_name": task.get("custom_name"),
         "timestamps": {
-            "created_at": task.get("timestamps", {}).get("created_at") or task.get("created_at"),
-            "updated_at": task.get("timestamps", {}).get("updated_at") or task.get("updated_at"),
-            "started_at": task.get("timestamps", {}).get("started_at") or task.get("started_at"),
-            "completed_at": task.get("timestamps", {}).get("completed_at") or task.get("completed_at")
+            "created_at": task.get("timestamps", {}).get("created_at"),
+            "updated_at": task.get("timestamps", {}).get("updated_at"),
+            "started_at": task.get("timestamps", {}).get("started_at"),
+            "completed_at": task.get("timestamps", {}).get("completed_at")
         },
         "error_message": task.get("error_message") or (task["error"].get("message") if isinstance(task.get("error"), dict) else task.get("error")),
         "summary_logs": summary_logs

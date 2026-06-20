@@ -1,7 +1,6 @@
 """任務資料存取層"""
 from datetime import datetime
 from typing import Optional, Dict, Any, List
-from bson import ObjectId
 
 from ...utils.time_utils import get_utc_timestamp
 from src.utils.logger import get_logger
@@ -39,6 +38,17 @@ class TaskRepository:
         self.db = db
         self.collection = db.tasks
 
+    @staticmethod
+    def owned_by(user_id: str) -> Dict[str, Any]:
+        """一筆 Task 屬於某 user 的查詢條件（單一真實來源）。
+
+        tasks collection 一律巢狀 `user.user_id`；create path（intake_service）
+        只寫巢狀，2026-06 probe 確認 prod 136 筆全巢狀、0 筆扁平，故舊扁平
+        `user_id` 相容分支已移除。所有 ownership 查詢都應拼接此條件，不要在
+        呼叫端手寫 `user.user_id`。
+        """
+        return {"user.user_id": user_id}
+
     async def create(self, task_data: Dict[str, Any]) -> Dict[str, Any]:
         """建立新任務"""
         result = await self.collection.insert_one(task_data)
@@ -61,16 +71,10 @@ class TaskRepository:
         )
 
     async def get_by_id_and_user(self, task_id: str, user_id: str) -> Optional[Dict[str, Any]]:
-        """根據 ID 和 user_id 獲取任務（權限檢查）
-
-        支援巢狀結構 (user.user_id) 和扁平結構 (user_id)
-        """
+        """根據 ID 和 user_id 獲取任務（權限檢查）"""
         return await self.collection.find_one({
             "_id": task_id,
-            "$or": [
-                {"user.user_id": user_id},  # 巢狀格式
-                {"user_id": user_id}  # 扁平格式（向後兼容）
-            ]
+            **self.owned_by(user_id),
         })
 
     async def update(self, task_id: str, updates: Dict[str, Any]) -> bool:
@@ -88,10 +92,7 @@ class TaskRepository:
         """刪除任務（權限檢查）- 真正刪除記錄"""
         result = await self.collection.delete_one({
             "_id": task_id,
-            "$or": [
-                {"user.user_id": user_id},  # 巢狀格式
-                {"user_id": user_id}  # 扁平格式（向後兼容）
-            ]
+            **self.owned_by(user_id),
         })
         return result.deleted_count > 0
 
@@ -101,10 +102,7 @@ class TaskRepository:
         result = await self.collection.update_one(
             {
                 "_id": task_id,
-                "$or": [
-                    {"user.user_id": user_id},  # 巢狀格式
-                    {"user_id": user_id}  # 扁平格式（向後兼容）
-                ]
+                **self.owned_by(user_id),
             },
             {
                 "$set": {
@@ -132,8 +130,6 @@ class TaskRepository:
     ) -> List[Dict[str, Any]]:
         """查詢用戶的任務列表
 
-        支援巢狀結構 (user.user_id) 和扁平結構 (user_id)
-
         Args:
             status_nin: 排除指定 status 列表（白名單驗證；status 已指定時忽略）
             include_deleted: 是否包含已刪除的任務（默認 False，過濾已刪除）
@@ -145,12 +141,7 @@ class TaskRepository:
             # 巢狀格式的排序欄位
             sort = [("timestamps.created_at", -1)]
 
-        filters = {
-            "$or": [
-                {"user.user_id": user_id},  # 巢狀格式
-                {"user_id": user_id}  # 扁平格式（向後兼容）
-            ]
-        }
+        filters = dict(self.owned_by(user_id))
 
         # 驗證並應用 status 篩選（白名單）；status 與 status_nin 互斥，status 優先
         validated_status = _validate_status(status)
@@ -172,13 +163,7 @@ class TaskRepository:
 
         # 音檔篩選
         if has_audio is True:
-            filters["$and"] = filters.get("$and", [])
-            filters["$and"].append({
-                "$or": [
-                    {"result.audio_file": {"$exists": True, "$ne": None}},
-                    {"audio_file": {"$exists": True, "$ne": None}}
-                ]
-            })
+            filters["result.audio_file"] = {"$exists": True, "$ne": None}
 
         # 默認過濾已刪除的任務
         if not include_deleted:
@@ -196,12 +181,7 @@ class TaskRepository:
             tags: 過濾標籤列表（AND 邏輯，任務必須包含所有指定的標籤）
             has_audio: 過濾是否有音檔（可選：True 只顯示有音檔的任務）
         """
-        filters = {
-            "$or": [
-                {"user.user_id": user_id},  # 巢狀格式
-                {"user_id": user_id}  # 扁平格式（向後兼容）
-            ]
-        }
+        filters = dict(self.owned_by(user_id))
 
         # 驗證並應用 status 篩選（白名單）
         validated_status = _validate_status(status)
@@ -219,13 +199,7 @@ class TaskRepository:
 
         # 音檔篩選
         if has_audio is True:
-            filters["$and"] = filters.get("$and", [])
-            filters["$and"].append({
-                "$or": [
-                    {"result.audio_file": {"$exists": True, "$ne": None}},
-                    {"audio_file": {"$exists": True, "$ne": None}}
-                ]
-            })
+            filters["result.audio_file"] = {"$exists": True, "$ne": None}
 
         # 默認過濾已刪除的任務
         if not include_deleted:
@@ -236,74 +210,39 @@ class TaskRepository:
     async def find_active_by_user(self, user_id: str) -> List[Dict[str, Any]]:
         """查詢用戶進行中的任務（記憶體優化：限制最多 20 個）"""
         cursor = self.collection.find({
-            "$or": [
-                {"user.user_id": user_id},  # 巢狀格式
-                {"user_id": user_id}  # 扁平格式（向後兼容）
-            ],
+            **self.owned_by(user_id),
             "status": {"$in": ["pending", "processing"]},
             "deleted": {"$ne": True}  # 過濾已刪除的任務
         }).sort("timestamps.created_at", -1).limit(20)
         return await cursor.to_list(length=20)
 
-    async def get_user_total_duration(self, user_id: str, from_date: datetime = None) -> float:
-        """計算用戶的總轉錄時長（秒）"""
-        filters = {
-            "$or": [
-                {"user.user_id": user_id},  # 巢狀格式
-                {"user_id": user_id}  # 扁平格式
-            ],
-            "status": "completed",
-            "audio_duration": {"$exists": True}
-        }
-        if from_date:
-            filters["$or"] = [
-                {
-                    "user.user_id": user_id,
-                    "timestamps.created_at": {"$gte": from_date.strftime("%Y-%m-%d %H:%M:%S")}
-                },
-                {
-                    "user_id": user_id,
-                    "created_at": {"$gte": from_date.strftime("%Y-%m-%d %H:%M:%S")}
-                }
-            ]
-
-        pipeline = [
-            {"$match": filters},
-            {
-                "$group": {
-                    "_id": None,
-                    "total_duration": {"$sum": "$audio_duration"}
-                }
-            }
-        ]
-
-        result = await self.collection.aggregate(pipeline).to_list(1)
-        if result:
-            return result[0].get("total_duration", 0)
-        return 0
+    async def count_active_by_user(self, user_id: str) -> int:
+        """計算用戶進行中（pending / processing）的任務數量。"""
+        return await self.collection.count_documents({
+            **self.owned_by(user_id),
+            "status": {"$in": ["pending", "processing"]},
+            "deleted": {"$ne": True},
+        })
 
     async def count_by_user_since(self, user_id: str, from_date: datetime) -> int:
         """計算用戶從某日期起的任務數量"""
         from_date_str = from_date.strftime("%Y-%m-%d %H:%M:%S")
         return await self.collection.count_documents({
-            "$or": [
-                {
-                    "user.user_id": user_id,
-                    "timestamps.created_at": {"$gte": from_date_str}
-                },
-                {
-                    "user_id": user_id,
-                    "created_at": {"$gte": from_date_str}
-                }
-            ]
+            **self.owned_by(user_id),
+            "timestamps.created_at": {"$gte": from_date_str},
         })
 
     async def create_indexes(self):
-        """建立索引以提升查詢效能"""
+        """建立索引以提升查詢效能
+
+        索引欄位對齊實際查詢路徑（巢狀）：ownership 用 `user.user_id`、
+        排序用 `timestamps.created_at`。舊的扁平 `user_id` / `created_at`
+        索引已無查詢命中，可由 ops 手動 dropIndex 清掉（本層不自動刪）。
+        """
         # task_id 作為 _id，自動有唯一索引
-        await self.collection.create_index("user_id")
-        await self.collection.create_index([("user_id", 1), ("created_at", -1)])
-        await self.collection.create_index([("user_id", 1), ("status", 1)])
+        await self.collection.create_index("user.user_id")
+        await self.collection.create_index([("user.user_id", 1), ("timestamps.created_at", -1)])
+        await self.collection.create_index([("user.user_id", 1), ("status", 1)])
         await self.collection.create_index("status")
         await self.collection.create_index("share_token", sparse=True)
         log.info("task.indexes.created")
@@ -314,10 +253,7 @@ class TaskRepository:
         result = await self.collection.update_many(
             {
                 "_id": {"$in": task_ids},
-                "$or": [
-                    {"user.user_id": user_id},  # 巢狀格式
-                    {"user_id": user_id}  # 扁平格式（向後兼容）
-                ]
+                **self.owned_by(user_id),
             },
             {
                 "$addToSet": {"tags": {"$each": tags_to_add}},
@@ -335,10 +271,7 @@ class TaskRepository:
         result = await self.collection.update_many(
             {
                 "_id": {"$in": task_ids},
-                "$or": [
-                    {"user.user_id": user_id},  # 巢狀格式
-                    {"user_id": user_id}  # 扁平格式（向後兼容）
-                ]
+                **self.owned_by(user_id),
             },
             {
                 "$pullAll": {"tags": tags_to_remove},
@@ -355,10 +288,7 @@ class TaskRepository:
         # 先檢查哪些任務可以刪除
         deletable = await self.collection.find({
             "_id": {"$in": task_ids},
-            "$or": [
-                {"user.user_id": user_id},  # 巢狀格式
-                {"user_id": user_id}  # 扁平格式（向後兼容）
-            ],
+            **self.owned_by(user_id),
             "status": {"$nin": ["pending", "processing"]}
         }).to_list(length=None)
 
@@ -376,10 +306,7 @@ class TaskRepository:
         # 先檢查哪些任務可以刪除
         deletable = await self.collection.find({
             "_id": {"$in": task_ids},
-            "$or": [
-                {"user.user_id": user_id},  # 巢狀格式
-                {"user_id": user_id}  # 扁平格式（向後兼容）
-            ],
+            **self.owned_by(user_id),
             "status": {"$nin": ["pending", "processing"]},
             "deleted": {"$ne": True}  # 排除已刪除的任務
         }).to_list(length=None)
@@ -404,7 +331,7 @@ class TaskRepository:
 
     async def get_all_tasks(self, limit: int = 1000) -> List[Dict[str, Any]]:
         """獲取所有任務（管理員用）"""
-        cursor = self.collection.find({}).sort("created_at", -1).limit(limit)
+        cursor = self.collection.find({}).sort("timestamps.created_at", -1).limit(limit)
         return await cursor.to_list(length=limit)
 
     async def insert_many(self, tasks: List[Dict[str, Any]]) -> int:
@@ -424,127 +351,31 @@ class TaskRepository:
     #
     # Repository 層現在只負責純資料存取操作，不包含業務邏輯（如驗證、計算、轉換）
 
-    async def count_by_status(self, user_id: str, status: str) -> int:
-        """計算特定狀態的任務數量"""
-        return await self.collection.count_documents({
-            "user_id": user_id,
-            "status": status
-        })
+    async def get_audio_refs_for_user(self, user_id: str) -> List[Dict[str, Any]]:
+        """取得用戶所有任務的音檔引用（帳號刪除清理音檔用）。
 
-    async def count_keep_audio_tasks(self, user_id: str) -> int:
-        """計算用戶勾選保留音檔的任務數量"""
-        return await self.collection.count_documents({
-            "user_id": user_id,
-            "keep_audio": True,
-            "status": "completed",
-            "audio_file": {"$exists": True}
-        })
+        只投影 _id 與音檔路徑，不載入轉錄/segments 等大型欄位。
+        """
+        return await self.collection.find(
+            self.owned_by(user_id),
+            {"_id": 1, "result.audio_file": 1},
+        ).to_list(length=None)
+
+    async def delete_all_for_user(self, user_id: str) -> int:
+        """硬刪除某 user 的所有任務（帳號刪除用）。回傳刪除筆數。"""
+        result = await self.collection.delete_many(self.owned_by(user_id))
+        return result.deleted_count
 
     async def get_all_user_tags(self, user_id: str) -> List[str]:
-        """獲取用戶所有使用過的標籤（支援巢狀和扁平結構）"""
+        """獲取用戶所有使用過的標籤"""
         pipeline = [
-            {"$match": {
-                "$or": [
-                    {"user.user_id": user_id},  # 巢狀格式
-                    {"user_id": user_id}  # 扁平格式（向後兼容）
-                ]
-            }},
+            {"$match": self.owned_by(user_id)},
             {"$unwind": "$tags"},
             {"$group": {"_id": "$tags"}},
             {"$sort": {"_id": 1}}
         ]
         result = await self.collection.aggregate(pipeline).to_list(length=None)
         return [doc["_id"] for doc in result if doc["_id"]]
-
-    async def find_tasks_with_audio(self, limit: int = 100, user_id: str = None) -> List[Dict[str, Any]]:
-        """查詢有音檔的任務（僅返回必要欄位，用於清理音檔）
-
-        記憶體優化：只查詢需要的欄位，不載入 segments、transcript 等大型數據
-
-        Args:
-            limit: 查詢數量限制（預設 100）
-            user_id: 用戶 ID（如果提供，只查詢該用戶的任務）
-
-        Returns:
-            任務列表，每個任務只包含：task_id, audio_file, completed_at, keep_audio, status
-        """
-        query = {
-            "status": "completed",
-            "$or": [
-                {"result.audio_file": {"$exists": True, "$ne": None}},  # 巢狀格式
-                {"audio_file": {"$exists": True, "$ne": None}}  # 扁平格式（向後兼容）
-            ]
-        }
-
-        # 如果提供了 user_id，添加用戶過濾
-        if user_id:
-            # 同時匹配字符串和 ObjectId 格式（因為舊資料可能格式不一致）
-            from bson import ObjectId
-            user_id_conditions = [user_id]
-
-            # 如果 user_id 看起來像 ObjectId，也嘗試 ObjectId 格式
-            try:
-                if len(user_id) == 24:  # ObjectId 長度
-                    user_id_conditions.append(ObjectId(user_id))
-            except Exception:
-                pass
-
-            user_filter = {
-                "$or": [
-                    {"user.user_id": {"$in": user_id_conditions}},  # 巢狀格式
-                    {"user_id": {"$in": user_id_conditions}}  # 扁平格式（向後兼容）
-                ]
-            }
-            # 合併查詢條件
-            query = {
-                "$and": [
-                    {"status": "completed"},
-                    {
-                        "$or": [
-                            {"result.audio_file": {"$exists": True, "$ne": None}},
-                            {"audio_file": {"$exists": True, "$ne": None}}
-                        ]
-                    },
-                    user_filter
-                ]
-            }
-
-        cursor = self.collection.find(
-            query,
-            {
-                # 只查詢需要的欄位（projection）
-                "_id": 1,
-                "task_id": 1,
-                "audio_file": 1,  # 扁平格式
-                "result.audio_file": 1,  # 巢狀格式
-                "keep_audio": 1,
-                "completed_at": 1,  # 扁平格式
-                "timestamps.completed_at": 1,  # 巢狀格式
-                "status": 1,
-                "user_id": 1,  # 扁平格式
-                "user.user_id": 1  # 巢狀格式（用於調試）
-            }
-        ).sort("timestamps.completed_at", -1).limit(limit)
-
-        tasks = await cursor.to_list(length=limit)
-
-        # 調試日誌
-        if user_id:
-            sample = [
-                {
-                    "task_id": task.get("task_id", "unknown")[:8],
-                    "user_id": task.get("user", {}).get("user_id") or task.get("user_id", "unknown"),
-                }
-                for task in tasks[:3]
-            ]
-            log.debug(
-                "task.find_tasks_with_audio",
-                user_id=user_id,
-                count=len(tasks),
-                sample=sample,
-            )
-
-        return tasks
 
     async def remove_tag_from_all_user_tasks(self, user_id: str, tag_name: str) -> int:
         """從用戶所有任務中移除指定標籤（單次原子操作）
@@ -563,10 +394,7 @@ class TaskRepository:
         result = await self.collection.update_many(
             {
                 "tags": tag_name,
-                "$or": [
-                    {"user.user_id": user_id},  # 巢狀格式
-                    {"user_id": user_id}  # 扁平格式（向後兼容）
-                ]
+                **self.owned_by(user_id),
             },
             {
                 "$pull": {"tags": tag_name},
@@ -602,10 +430,7 @@ class TaskRepository:
         result = await self.collection.update_many(
             {
                 "tags": old_name,
-                "$or": [
-                    {"user.user_id": user_id},
-                    {"user_id": user_id}
-                ]
+                **self.owned_by(user_id),
             },
             [
                 {
@@ -626,28 +451,5 @@ class TaskRepository:
                     }
                 }
             ]
-        )
-        return result.modified_count
-
-    async def clear_audio_files_except_kept(self, user_id: str) -> int:
-        """清除未勾選保留的音檔記錄"""
-        now = get_utc_timestamp()
-        result = await self.collection.update_many(
-            {
-                "user_id": user_id,
-                "keep_audio": {"$ne": True},
-                "audio_file": {"$exists": True}
-            },
-            {
-                "$unset": {
-                    "audio_file": "",
-                    "audio_filename": ""
-                },
-                "$set": {
-                    "keep_audio": False,
-                    "updated_at": now,
-                    "timestamps.updated_at": now  # 同步更新巢狀結構
-                }
-            }
         )
         return result.modified_count

@@ -33,6 +33,12 @@ Gemini / OpenAI 加標點。權重 13%。
 使用者一次上傳音檔產生一筆 Task。在 MongoDB 持久化，含 user / config / 結果 metadata 等。
 _Avoid_: Job、Request。
 
+**Task ownership**:
+「一筆 Task 屬於某 user」的查詢條件，單一真實來源是 `TaskRepository.owned_by(user_id)`（回 `{"user.user_id": user_id}`）。所有 ownership 查詢（repo 內部、admin composed filter）都拼接它，呼叫端不手寫欄位路徑。
+_Avoid_: 在呼叫端直接寫 `{"user.user_id": ...}` 或打 `task_repo.collection`、重新引入扁平 `user_id` 相容分支。
+
+> **tasks collection schema 一律巢狀**：create path（`intake_service`）只寫巢狀 `user.user_id` / `file.*` / `config.*` / `result.*` / `timestamps.*`。2026-06 probe 確認 prod 136 筆全巢狀、**0 筆扁平**，故舊「nested + flat `$or`」相容分支與 `get_task_field` 的 flat fallback 已全數移除。移除是 **fail-safe**（萬一還原超舊扁平備份，ownership 查詢回空 → 使用者見 404，不洩漏）。**不要再為 tasks 加扁平相容**。注意 `orders` / `tags` / `audit_logs` 等其他 collection 仍是扁平 `user_id`，那是各自設計，與此無關。
+
 **Transcription**:
 Task 完成後產出的轉錄結果（含 full_text、segments、語言、speakers 等），存在 `transcriptions` collection。
 _Avoid_: Result、Output。
