@@ -26,7 +26,7 @@ from src.utils.text_utils import (
     convert_segments_punctuation,
     strip_subtitle_punctuation,
 )
-from src.utils.storage_service import save_audio
+from src.utils.storage.compact import save_audio
 from src.utils.time_utils import get_utc_timestamp
 
 log = get_logger(__name__)

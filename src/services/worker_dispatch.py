@@ -46,7 +46,7 @@ class WorkerDispatch:
             worker_secret: HMAC 簽名密鑰；空字串時略過簽章（dev/未配置）
             handoff_uploader: callable(task_id, local_path, ext) -> str
                               把音檔上傳到 S3 `handoff/{task_id}.{ext}`，回傳 s3:// URI
-                              （包 blocking I/O；典型實作見 storage_service.upload_to_handoff）
+                              （包 blocking I/O；典型實作見 storage.handoff.upload_to_handoff）
         """
         self._sqs_client = sqs_client
         self._sqs_queue_url = sqs_queue_url

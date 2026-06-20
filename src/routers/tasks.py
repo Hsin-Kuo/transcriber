@@ -21,7 +21,8 @@ from ..services.task_query_helpers import (
 )
 from ..dependencies import get_task_service, get_tag_service
 from ..services.utils.async_utils import get_current_time
-from ..utils.storage_service import is_aws, delete_audio_by_path as storage_delete_audio_by_path, move_audio, extract_tier_from_path
+from ..utils.storage.backend import is_aws
+from ..utils.storage.compact import delete_audio_by_path as storage_delete_audio_by_path, move_audio, extract_tier_from_path
 from ..utils.logger import get_logger
 
 try:

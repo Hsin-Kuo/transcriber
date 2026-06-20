@@ -211,7 +211,7 @@ async def startup_event():
 
     # AWS 模式：驗證必要的環境變數
     if DEPLOY_ENV == "aws":
-        from src.utils.storage_service import validate_aws_config
+        from src.utils.storage.backend import validate_aws_config
         validate_aws_config()
         logger.info("app.startup.aws_config_validated")
 
@@ -456,7 +456,7 @@ async def startup_event():
         # AWS 模式：WorkerDispatch（boto3 client + S3 uploader 注入）
         import boto3
         from src.services.worker_dispatch import WorkerDispatch
-        from src.utils.storage_service import upload_to_handoff
+        from src.utils.storage.handoff import upload_to_handoff
         from src.utils.config_loader import get_parameter as _gp
 
         sqs_region = os.getenv("S3_REGION", "ap-northeast-1")

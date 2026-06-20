@@ -1077,7 +1077,8 @@ async def cleanup_handoff_orphans(
     對應 CONTEXT.md「Handoff audio」。手動觸發，未自動排程——
     建議搭 crontab 每日跑一次。
     """
-    from ..utils.storage_service import is_aws, sweep_handoff_orphans
+    from ..utils.storage.backend import is_aws
+    from ..utils.storage.handoff import sweep_handoff_orphans
 
     if not is_aws():
         return {"deleted": 0, "message": "local 模式無 handoff/ 結構"}

@@ -1129,7 +1129,7 @@ async def delete_account(
     task_ids = [task["_id"] for task in user_tasks]
 
     # 2. 刪除 S3/本地音檔
-    from ..utils.storage_service import delete_audio_by_path
+    from ..utils.storage.compact import delete_audio_by_path
     for task in user_tasks:
         audio_path = task.get("result", {}).get("audio_file")
         if audio_path:

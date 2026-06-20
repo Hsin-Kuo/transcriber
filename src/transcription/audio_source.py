@@ -7,16 +7,13 @@
 - S3Source: AWS Worker,從 handoff/{task_id}.{ext} 下載;成功時刪除 handoff 物件。
 
 只負責 acquire() + cleanup()——格式轉換歸 audio_converter、永久儲存歸
-storage_service,都不在此。
+storage.compact,都不在此。
 """
 from pathlib import Path
 from typing import Optional, Protocol
 
-from src.utils.storage_service import (
-    delete_handoff,
-    download_audio,
-    download_from_handoff,
-)
+from src.utils.storage.compact import download_audio
+from src.utils.storage.handoff import delete_handoff, download_from_handoff
 from src.utils.logger import get_logger
 
 log = get_logger(__name__)

@@ -32,7 +32,7 @@ from ..services.utils.audio_validator import (
 from ..services.utils.whisper_processor import WhisperProcessor
 from ..services.utils.punctuation_processor import PunctuationProcessor
 from ..services.utils.diarization_processor import DiarizationProcessor
-from ..utils.storage_service import is_aws
+from ..utils.storage.backend import is_aws
 from ..utils.config_loader import get_parameter, get_temp_dir
 from ..utils.logger import get_logger
 from ..services.task_dispatch import (
@@ -720,7 +720,8 @@ async def download_audio(
 
     if is_aws():
         # AWS 模式：回傳 S3 presigned URL redirect
-        from ..utils.storage_service import audio_exists_by_path, get_presigned_url_by_path, S3_REGION
+        from ..utils.storage.backend import S3_REGION
+        from ..utils.storage.compact import audio_exists_by_path, get_presigned_url_by_path
         from fastapi.responses import RedirectResponse
         from urllib.parse import urlparse
 
