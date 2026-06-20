@@ -102,7 +102,10 @@ export async function uploadChunked(file, { onProgress, signal } = {}) {
     const completeRes = await api.post(NEW_ENDPOINTS.uploads.complete(upload_id), null, { signal })
     return completeRes.data.upload_id
   } catch (err) {
-    await abortUploadSession(upload_id)
+    // fire-and-forget：不 await，讓取消/失敗即時往上拋，不被後端 rmtree（刪多 GB
+    // 半成品可能要一兩秒）卡住回饋。abort 內部自吞錯誤，floating promise 安全；
+    // 清不掉也有後端 grace sweep 兜底。
+    abortUploadSession(upload_id)
     throw err
   }
 }
