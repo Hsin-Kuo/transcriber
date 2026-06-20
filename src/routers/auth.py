@@ -1,7 +1,6 @@
 """認證路由"""
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from datetime import datetime, timedelta
-import secrets
 from ..utils.time_utils import get_utc_timestamp
 from ..auth.cookies import (
     REFRESH_COOKIE_NAME,
@@ -60,7 +59,7 @@ from ..models.auth import (
     UpdatePreferencesRequest,
     DeleteAccountRequest
 )
-from ..auth.password import hash_password, hash_token, verify_password
+from ..auth.password import hash_password, verify_password
 from ..auth.jwt_handler import create_access_token, create_refresh_token, verify_token
 from ..auth.dependencies import get_current_user
 from ..database.mongodb import get_database
@@ -68,6 +67,18 @@ from ..database.repositories.user_repo import UserRepository
 from ..database.repositories.rate_limit_repo import RateLimitRepository
 from ..utils.audit_logger import get_audit_logger
 from ..utils.email_service import get_email_service
+from ..services.credential_flow import (
+    build_credential_flow,
+    CredentialIntent,
+    CredentialPurpose,
+    CredentialCooldown,
+    CredentialTokenInvalid,
+    CredentialTokenExpired,
+    WeakPassword,
+    SendVerification,
+    SendAccountExists,
+    SendPasswordReset,
+)
 from ..utils.privacy import mask_email
 from ..models.quota import QUOTA_TIERS, QuotaTier
 
@@ -75,6 +86,41 @@ from ..utils.logger import get_logger
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 log = get_logger(__name__)
+
+
+# ============================================
+# CredentialFlow edge adapters
+# ============================================
+# CredentialFlow 決定「寄哪封信 / 不寄」，edge 負責真的呼叫 email_service。
+# 詳見 CONTEXT.md「認證與憑證」。
+
+async def _dispatch_credential_email(email_service, instruction) -> bool:
+    """執行 CredentialFlow 回傳的 EmailInstruction（None 視為成功，不寄）。"""
+    if instruction is None:
+        return True
+    if isinstance(instruction, SendVerification):
+        return await email_service.send_verification_email(
+            to_email=instruction.to, verification_token=instruction.token
+        )
+    if isinstance(instruction, SendAccountExists):
+        return await email_service.send_account_exists_email(to_email=instruction.to)
+    if isinstance(instruction, SendPasswordReset):
+        return await email_service.send_password_reset_email(
+            to_email=instruction.to, reset_token=instruction.token
+        )
+    return True
+
+
+async def _log_credential_audit(audit_logger, request, audit) -> None:
+    if audit is None:
+        return
+    await audit_logger.log_auth(
+        request=request,
+        action=audit.action,
+        user_id=audit.user_id,
+        status_code=audit.status_code,
+        message=audit.message,
+    )
 
 
 @router.post("/register")
@@ -95,7 +141,6 @@ async def register(
     Raises:
         HTTPException: Email 已被註冊或發送驗證郵件失敗
     """
-    user_repo = UserRepository(db)
     rate_limit_repo = RateLimitRepository(db)
     email_service = get_email_service()
     audit_logger = get_audit_logger()
@@ -138,91 +183,22 @@ async def register(
         limit_type="register_email", key=normalized_email, ttl_seconds=REGISTER_RATE_LIMIT_WINDOW
     )
 
-    # 檢查 Email 是否已存在
-    existing_user = await user_repo.get_by_email(user_data.email)
-    if existing_user:
-        # 防 email 枚舉：HTTP response 與新註冊完全一致，不洩漏帳號是否存在。
-        # 但「寄給信箱真正擁有者」的信不會洩漏給攻擊者，故依帳號狀態寄不同信：
-        #   - 已驗證 → 「帳號已存在」通知（引導登入 / 忘記密碼）
-        #   - 註冊過但未驗證 → 重寄驗證信（換新 token + 24h），協助完成註冊
-        if existing_user.get("email_verified"):
-            await email_service.send_account_exists_email(to_email=user_data.email)
-            dup_action = "register_duplicate_verified"
-        else:
-            new_token = secrets.token_urlsafe(32)
-            await user_repo.update(str(existing_user["_id"]), {
-                "verification_token": None,  # 清 legacy plaintext
-                "verification_token_hash": hash_token(new_token),
-                "verification_expires": get_utc_timestamp() + (24 * 60 * 60),
-            })
-            await email_service.send_verification_email(
-                to_email=user_data.email,
-                verification_token=new_token,
-            )
-            dup_action = "register_duplicate_unverified_resent"
-        await audit_logger.log_auth(
-            request=request,
-            action=dup_action,
-            user_id=str(existing_user["_id"]),
-            status_code=200,
-            message=f"重複註冊嘗試: {user_data.email}"
-        )
-        return {
-            "message": "註冊成功！請檢查您的信箱以完成驗證",
-            "email": user_data.email,
-            "email_sent": True,  # 對外保持一致，不洩漏 email 是否已註冊
-        }
-
-    # 生成驗證 token (使用 secrets 生成安全的隨機字符串)
-    verification_token = secrets.token_urlsafe(32)
-    now = get_utc_timestamp()
-    verification_expires = now + (24 * 60 * 60)  # 24 小時後過期
-
-    # 建立新用戶 (未激活狀態)
-    user = await user_repo.create({
-        "email": user_data.email,
-        "password_hash": hash_password(user_data.password),
-        "auth_providers": ["password"],
-        "role": "user",
-        "is_active": False,  # 需要驗證 email 後才激活
-        "email_verified": False,
-        "verification_token_hash": hash_token(verification_token),
-        "verification_expires": verification_expires,
-        "quota": {
-            "tier": QuotaTier.FREE,
-            **{k: v for k, v in QUOTA_TIERS[QuotaTier.FREE].items() if k not in ("name", "price")}
-        },
-        "usage": {
-            "transcriptions": 0,
-            "duration_minutes": 0,
-            "ai_summaries": 0,
-            "last_reset": now,
-            "total_transcriptions": 0,
-            "total_duration_minutes": 0,
-            "total_ai_summaries": 0
-        },
-        "refresh_tokens": [],
-        "created_at": now,
-        "updated_at": now
-    })
-
-    # 發送驗證郵件
-    email_sent = await email_service.send_verification_email(
-        to_email=user_data.email,
-        verification_token=verification_token
+    # 委派 CredentialFlow：決定建帳號 / 重簽 / account-exists + 寄哪封信。
+    # 對外回應由 outcome 統一給出（unknown 與 duplicate 不可區分，防 enumeration）。
+    flow = build_credential_flow(db)
+    outcome = await flow.issue(
+        CredentialIntent.REGISTER, user_data.email, password=user_data.password
     )
+    email_sent = await _dispatch_credential_email(email_service, outcome.email)
 
-    if not email_sent:
-        # 不刪除 user（保留 inactive 狀態）：
-        # - 寄信失敗通常是 transient（Resend 5xx、SMTP timeout）
-        # - 砍掉 user 會讓用戶以為註冊失敗、嘗試重新註冊時又撞到「已存在」邏輯
-        # - 用戶可直接走 /auth/resend-verification 觸發重發
+    # 新用戶驗證信寄送失敗 → 降級訊息（保留 inactive user，引導重發）。
+    # 寄信失敗通常 transient（Resend 5xx / SMTP timeout）；不砍 user，使用者可走
+    # /auth/resend-verification。duplicate 路徑沿用舊行為，不因寄信失敗改變對外回應。
+    if not email_sent and outcome.audit and outcome.audit.action == "register":
         await audit_logger.log_auth(
-            request=request,
-            action="register_email_failed",
-            user_id=str(user["_id"]),
-            status_code=200,
-            message=f"註冊但驗證信寄送失敗: {user_data.email}"
+            request=request, action="register_email_failed",
+            user_id=outcome.audit.user_id, status_code=200,
+            message=f"註冊但驗證信寄送失敗: {user_data.email}",
         )
         return {
             "message": "帳號已建立，但驗證信寄送發生問題。請稍後使用「重新發送驗證信」。",
@@ -230,19 +206,8 @@ async def register(
             "email_sent": False,
         }
 
-    await audit_logger.log_auth(
-        request=request,
-        action="register",
-        user_id=str(user["_id"]),
-        status_code=200,
-        message=f"新用戶註冊: {user_data.email}"
-    )
-
-    return {
-        "message": "註冊成功！請查看您的郵箱完成驗證",
-        "email": user_data.email,
-        "email_sent": True,
-    }
+    await _log_credential_audit(audit_logger, request, outcome.audit)
+    return outcome.response
 
 
 @router.get("/verify-email")
@@ -266,34 +231,17 @@ async def verify_email_preflight(
     Raises:
         HTTPException: 400 token 無效 / 已驗證；410 token 已過期
     """
-    user_repo = UserRepository(db)
-    user = await user_repo.get_by_verification_token(token)
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="驗證連結無效"
-        )
-
-    if user.get("email_verified"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="此 Email 已完成驗證"
-        )
-
-    verification_expires = user.get("verification_expires")
-    if verification_expires:
-        if hasattr(verification_expires, 'timestamp'):
-            verification_expires = int(verification_expires.timestamp())
-        if verification_expires < get_utc_timestamp():
-            raise HTTPException(
-                status_code=status.HTTP_410_GONE,
-                detail="驗證連結已過期，請重新申請驗證郵件"
-            )
+    flow = build_credential_flow(db)
+    try:
+        result = await flow.preflight(CredentialPurpose.VERIFY_EMAIL, token)
+    except CredentialTokenInvalid as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except CredentialTokenExpired as e:
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail=str(e))
 
     return {
-        "email": user["email"],
-        "expires_at": verification_expires,
+        "email": result.email,
+        "expires_at": result.expires_at,
     }
 
 
@@ -309,65 +257,25 @@ async def verify_email(
     驗證成功後不發 token、不寫 refresh cookie，避免覆蓋瀏覽器內其他已登入的
     session（refresh cookie 為 domain 共用一份）；改由使用者自行登入。
     """
-    user_repo = UserRepository(db)
     audit_logger = get_audit_logger()
-
-    user = await user_repo.get_by_verification_token(payload.token)
-
-    if not user:
+    flow = build_credential_flow(db)
+    try:
+        outcome = await flow.consume(CredentialPurpose.VERIFY_EMAIL, payload.token)
+    except CredentialTokenInvalid as e:
         await audit_logger.log_auth(
-            request=request,
-            action="verify_email_invalid",
-            user_id=None,
-            status_code=400,
-            message="無效的驗證 token"
+            request=request, action="verify_email_invalid", user_id=None,
+            status_code=400, message=str(e),
         )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="驗證連結無效"
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except CredentialTokenExpired as e:
+        await audit_logger.log_auth(
+            request=request, action="verify_email_expired", user_id=e.user_id,
+            status_code=410, message=str(e),
         )
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail=str(e))
 
-    if user.get("email_verified"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="此 Email 已完成驗證"
-        )
-
-    verification_expires = user.get("verification_expires")
-    if verification_expires:
-        if hasattr(verification_expires, 'timestamp'):
-            verification_expires = int(verification_expires.timestamp())
-        if verification_expires < get_utc_timestamp():
-            await audit_logger.log_auth(
-                request=request,
-                action="verify_email_expired",
-                user_id=str(user["_id"]),
-                status_code=410,
-                message=f"驗證連結已過期: {user['email']}"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_410_GONE,
-                detail="驗證連結已過期，請重新申請驗證郵件"
-            )
-
-    # 啟用帳號 + 清 token（連帶清掉可能殘留的 legacy plaintext 欄位）
-    await user_repo.update(str(user["_id"]), {
-        "is_active": True,
-        "email_verified": True,
-        "verification_token": None,        # legacy plaintext
-        "verification_token_hash": None,
-        "verification_expires": None,
-    })
-
-    await audit_logger.log_auth(
-        request=request,
-        action="verify_email",
-        user_id=str(user["_id"]),
-        status_code=200,
-        message=f"Email 驗證成功: {user['email']}"
-    )
-
-    return {"verified": True, "email": user["email"]}
+    await _log_credential_audit(audit_logger, request, outcome.audit)
+    return outcome.response
 
 
 @router.post("/resend-verification")
@@ -389,7 +297,6 @@ async def resend_verification_email(
     Raises:
         HTTPException: Email 不存在、已驗證、超過速率限制或發送失敗
     """
-    user_repo = UserRepository(db)
     rate_limit_repo = RateLimitRepository(db)
     email_service = get_email_service()
 
@@ -454,55 +361,16 @@ async def resend_verification_email(
         ttl_seconds=REGISTER_RATE_LIMIT_WINDOW,
     )
 
-    user = await user_repo.get_by_email(request.email)
-
-    # 統一 200 回應防 enumeration：unknown / verified / bounced 都回相同訊息，
-    # 僅在「真的有未驗證 user 且未 bounce」時實際寄信。對應 UX 細節：
-    # - 不存在的 email：用戶會發現自己沒在自家信箱看到信，自然會去 register
-    # - 已驗證 email：用戶會嘗試登入，發現可直接 login
-    # - bounced email：verify-pending 頁的 registration-status polling 會回
-    #   bounced 並切換到「換 email」UI，使用者不需透過此 endpoint 知道狀態
-    silent_success = {
-        "message": "驗證郵件已重新發送，請查看您的郵箱",
-        "email": request.email
-    }
-
-    if not user:
-        return silent_success
-
-    if user.get("email_verified"):
-        return silent_success
-
-    if user.get("email_bounced"):
-        log.info("auth.resend_verification.skip_bounced", email=mask_email(request.email))
-        return silent_success
-
-    # 生成新的驗證 token
-    verification_token = secrets.token_urlsafe(32)
-    verification_expires = get_utc_timestamp() + (24 * 60 * 60)  # 24 小時後過期
-
-    # 更新用戶的驗證 token（DB 僅存 hash；同時清掉 legacy plaintext 欄位）
-    await user_repo.update(str(user["_id"]), {
-        "verification_token": None,
-        "verification_token_hash": hash_token(verification_token),
-        "verification_expires": verification_expires
-        # updated_at 由 user_repo.update() 自動設置
-    })
-
-    # 發送驗證郵件
-    email_sent = await email_service.send_verification_email(
-        to_email=request.email,
-        verification_token=verification_token
-    )
-
-    if not email_sent:
-        # 寄信失敗（Resend transient 5xx 等）仍回 silent success — 不能洩漏
-        # 「user 存在」這個資訊。用戶可透過 verify-pending 頁的 polling 看狀態，
-        # 或再次按重發按鈕（受 60s cooldown 限制）。
-        log.warning("auth.resend_verification.send_failed", email=mask_email(request.email))
-        return silent_success
-
-    return silent_success
+    # 委派 CredentialFlow：unknown / verified / bounced 一律 silent（email=None），
+    # 僅未驗證且未 bounce 才回 SendVerification。對外訊息統一防 enumeration。
+    flow = build_credential_flow(db)
+    outcome = await flow.issue(CredentialIntent.RESEND, request.email)
+    if outcome.email is not None:
+        email_sent = await _dispatch_credential_email(email_service, outcome.email)
+        if not email_sent:
+            # 寄信失敗（Resend transient 5xx 等）仍回 silent success — 不洩漏 user 存在。
+            log.warning("auth.resend_verification.send_failed", email=mask_email(request.email))
+    return outcome.response
 
 
 @router.get("/registration-status")
@@ -1084,7 +952,6 @@ async def forgot_password(
     if not client_ip:
         client_ip = http_request.client.host if http_request.client else "unknown"
 
-    user_repo = UserRepository(db)
     rate_limit_repo = RateLimitRepository(db)
     email_service = get_email_service()
 
@@ -1101,14 +968,6 @@ async def forgot_password(
             detail="請求過於頻繁，請稍後再試"
         )
 
-    user = await user_repo.get_by_email(request.email)
-
-    # 無論 email 是否存在，都返回相同訊息（防止 email 枚舉攻擊）
-    success_message = {
-        "message": "如果該 Email 已註冊，您將會收到密碼重設郵件",
-        "email": request.email
-    }
-
     # 記錄此 IP 的請求（無論 email 是否存在都記錄，防止探測）
     await rate_limit_repo.record_request(
         limit_type="forgot_password_ip",
@@ -1116,69 +975,22 @@ async def forgot_password(
         ttl_seconds=3600
     )
 
-    if not user:
-        return success_message
-
-    # 檢查帳號是否已激活
-    if not user.get("email_verified"):
-        return success_message
-
-    # 注意：此處故意 **不** 對 user.email_bounced 做 pre-flight skip。
-    # 已驗證 user 的 email 標 bounced 可能是暫時失敗（信箱滿、轉址抖動），
-    # 若這時 silent skip 密碼重設 → 真實用戶被永久鎖死無法自救。
-    # 寄信動作仍會走 Resend，若仍失敗交由 Resend 的 suppression 與 webhook
-    # 處理；用戶若仍收不到信可走 support。
-    # 對未驗證 user 的 bounce 阻擋仍由 resend-verification + register flow 處理。
-    if user.get("email_bounced"):
-        log.info(
-            "auth.forgot_password.attempt_for_bounced_user",
-            user_id=str(user["_id"]),
-            email=mask_email(request.email),
-        )
-
-    # 檢查 Email 冷卻時間
-    last_request = user.get("password_reset_requested_at")
-    cooldown_allowed, cooldown_remaining = await rate_limit_repo.check_cooldown(
-        last_request_timestamp=last_request,
-        cooldown_seconds=FORGOT_PASSWORD_COOLDOWN_SECONDS
-    )
-    if not cooldown_allowed:
-        remaining_minutes = (cooldown_remaining + 59) // 60  # 向上取整
+    # 委派 CredentialFlow：unknown / 未驗證 → silent；已驗證（含 bounced，刻意不 skip
+    # 以免真實用戶被永久鎖死）→ 簽 reset token + 寄信。cooldown 由 module 依
+    # password_reset_requested_at 判定，超過則拋 CredentialCooldown（edge → 429）。
+    flow = build_credential_flow(db)
+    try:
+        outcome = await flow.issue(CredentialIntent.FORGOT, request.email)
+    except CredentialCooldown as e:
+        remaining_minutes = (e.remaining_seconds + 59) // 60  # 向上取整
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=f"請等待 {remaining_minutes} 分鐘後再試"
         )
 
-    # 生成密碼重設 token
-    reset_token = secrets.token_urlsafe(32)
-    now = get_utc_timestamp()
-    reset_expires = now + (60 * 60)  # 1 小時後過期
-
-    # 更新用戶的重設 token（DB 僅存 hash；同時清掉 legacy plaintext）
-    await user_repo.update(str(user["_id"]), {
-        "password_reset_token": None,
-        "password_reset_token_hash": hash_token(reset_token),
-        "password_reset_expires": reset_expires,
-        "password_reset_requested_at": now
-    })
-
-    # 發送密碼重設郵件
-    await email_service.send_password_reset_email(
-        to_email=request.email,
-        reset_token=reset_token
-    )
-
-    # 記錄忘記密碼請求
-    audit_logger = get_audit_logger()
-    await audit_logger.log_auth(
-        request=http_request,
-        action="forgot_password",
-        user_id=str(user["_id"]),
-        status_code=200,
-        message=f"發送密碼重設郵件：{request.email}"
-    )
-
-    return success_message
+    await _dispatch_credential_email(email_service, outcome.email)
+    await _log_credential_audit(get_audit_logger(), http_request, outcome.audit)
+    return outcome.response
 
 
 @router.get("/reset-password")
@@ -1202,26 +1014,14 @@ async def reset_password_preflight(
     Raises:
         HTTPException: 400 token 無效或已過期
     """
-    user_repo = UserRepository(db)
-    user = await user_repo.get_by_password_reset_token(token)
+    flow = build_credential_flow(db)
+    try:
+        result = await flow.preflight(CredentialPurpose.RESET_PASSWORD, token)
+    except (CredentialTokenInvalid, CredentialTokenExpired) as e:
+        # reset 流程一律以 400 表達無效 / 過期（沿用舊行為）
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="重設連結無效或已過期"
-        )
-
-    reset_expires = user.get("password_reset_expires")
-    if reset_expires:
-        if hasattr(reset_expires, 'timestamp'):
-            reset_expires = int(reset_expires.timestamp())
-        if reset_expires < get_utc_timestamp():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="重設連結已過期，請重新申請"
-            )
-
-    return {"valid": True, "expires_at": reset_expires}
+    return {"valid": True, "expires_at": result.expires_at}
 
 
 @router.post("/reset-password")
@@ -1243,68 +1043,17 @@ async def reset_password(
     Raises:
         HTTPException: Token 無效、已過期或密碼不符合要求
     """
-    import re
-    user_repo = UserRepository(db)
-
-    # 查找具有此重設 token 的用戶
-    user = await user_repo.get_by_password_reset_token(request.token)
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="重設連結無效或已過期"
+    flow = build_credential_flow(db)
+    try:
+        outcome = await flow.consume(
+            CredentialPurpose.RESET_PASSWORD, request.token, new_password=request.new_password
         )
+    except (CredentialTokenInvalid, CredentialTokenExpired, WeakPassword) as e:
+        # reset 流程一律以 400 表達無效 / 過期 / 弱密碼（沿用舊行為）
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-    # 檢查 token 是否過期
-    reset_expires = user.get("password_reset_expires")
-    if reset_expires:
-        if hasattr(reset_expires, 'timestamp'):
-            reset_expires = int(reset_expires.timestamp())
-        if reset_expires < get_utc_timestamp():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="重設連結已過期，請重新申請"
-            )
-
-    # 驗證密碼複雜度
-    new_pwd = request.new_password
-    if not re.search(r'[A-Z]', new_pwd):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="新密碼必須包含至少一個大寫字母"
-        )
-    if not re.search(r'[a-z]', new_pwd):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="新密碼必須包含至少一個小寫字母"
-        )
-    if not re.search(r'[0-9]', new_pwd):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="新密碼必須包含至少一個數字"
-        )
-
-    # 更新密碼並清除重設 token 和冷卻記錄（含 legacy plaintext 欄位）
-    new_password_hash = hash_password(request.new_password)
-    await user_repo.update(str(user["_id"]), {
-        "password_hash": new_password_hash,
-        "password_reset_token": None,
-        "password_reset_token_hash": None,
-        "password_reset_expires": None,
-        "password_reset_requested_at": None
-    })
-
-    # 記錄密碼重設成功
-    audit_logger = get_audit_logger()
-    await audit_logger.log_auth(
-        request=http_request,
-        action="reset_password",
-        user_id=str(user["_id"]),
-        status_code=200,
-        message=f"密碼重設成功：{user.get('email')}"
-    )
-
-    return {"message": "密碼已重設成功，請使用新密碼登入"}
+    await _log_credential_audit(get_audit_logger(), http_request, outcome.audit)
+    return outcome.response
 
 
 @router.delete("/account")
@@ -1380,7 +1129,7 @@ async def delete_account(
     task_ids = [task["_id"] for task in user_tasks]
 
     # 2. 刪除 S3/本地音檔
-    from ..utils.storage_service import delete_audio_by_path
+    from ..utils.storage.compact import delete_audio_by_path
     for task in user_tasks:
         audio_path = task.get("result", {}).get("audio_file")
         if audio_path:

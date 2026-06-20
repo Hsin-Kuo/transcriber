@@ -162,7 +162,8 @@ class TaskService:
         """
         from src.database.repositories.transcription_repo import TranscriptionRepository
         from src.database.repositories.segment_repo import SegmentRepository
-        from src.utils.storage_service import is_aws, delete_audio_by_path as storage_delete_audio_by_path
+        from src.utils.storage.backend import is_aws
+        from src.utils.storage.compact import delete_audio_by_path as storage_delete_audio_by_path
         from .task_query_helpers import get_task_field
 
         deleted_files = []

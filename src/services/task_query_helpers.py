@@ -106,7 +106,7 @@ def is_audio_expired(task: Dict[str, Any], retention_days: int) -> bool:
 
     audio_file = task.get("result", {}).get("audio_file")
     if audio_file:
-        from ..utils.storage_service import extract_tier_from_path
+        from ..utils.storage.compact import extract_tier_from_path
         from ..models.quota import QUOTA_TIERS, QuotaTier
         path_tier = extract_tier_from_path(audio_file)
         if path_tier and path_tier != "kept":
