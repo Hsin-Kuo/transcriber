@@ -131,12 +131,40 @@ _Avoid_: webhook payload（藍新 raw 加密 form 是 adapter 解密前的另一
 **Settlement effect**:
 `settle()` 對單一 [[PaymentNotification]] 算出的帳號狀態變更，共五種：**啟用訂閱**（首期成功；升級時附帶把舊方案剩餘額度結轉進 `extra_quota` + 終止舊藍新委託）、**續訂展期**（renewal 成功，只滾 `current_period_end` + 歸零 monthly usage）、**降為 free**（renewal 失敗 → `expired`）、**加值**（extra_quota MPG 成功與升級結轉共用）、**拒絕重複完成**（sibling 已先啟動 → 標 `needs_refund` + 終止多出來的委託，不重複啟用/加值）。**孤兒委託對帳收斂**（終止該 user 名下非當前 active 的已 paid 委託，防雙重扣款）是「啟用訂閱」effect 的尾段，best-effort + Sentry 警示，絕不可拋例外拖垮已成功的啟用。
 
+### 認證與憑證
+
+> 已落地：`src/services/credential_flow.py` + `tests/services/test_credential_flow.py`，且 `auth.py`
+> 的 register / verify×2 / resend / forgot / reset×2 共 7 個 endpoint 已接線委派（edge 只留
+> rate-limit + 寄信 + audit + exception→HTTP）。`registration-status` / `abandon-registration`
+> 是 bounce-driven 讀取/刪除、非 token 生命週期，**不**經 CredentialFlow。
+
+**Email credential challenge**:
+一個「證明你控制某 email」的一次性憑證：高熵 token（`secrets.token_urlsafe(32)`），DB **只存 hash**（`hash_token`，清掉 legacy plaintext 欄位），帶 expiry。兩種用途共用同一形態——**帳號啟用**（verification，24h）與**密碼重設**（reset，1h）。生命週期三動作：issue（簽發 + 寄信）→ consume（驗證 + 套效果）→ preflight（唯讀預檢）。**preflight 絕不寫 DB、絕不 consume**——防 mail gateway / 連結預掃 bot 的自動 GET 把 token 燒掉（見 `auth.py` verify-email preflight 註解）。
+_Avoid_: verification token（過窄，漏掉 reset）、magic link（暗示免密碼登入，非本意）、OTP（非數字碼、非短時效）。
+
+**CredentialFlow**:
+擁有 [[Email credential challenge]] 完整生命週期的 deep module，是 auth router 第一群（register / verify×2 / resend / registration-status / abandon / forgot / reset×2）深化後的形態。三入口：`issue(intent, email, password?)`（intent ∈ `{register, resend, forgot}`）、`consume(purpose, token, new_password?)`（purpose ∈ `{verify_email, reset_password}`）、`preflight(purpose, token)`。`issue` 是單一入口跑 **(intent × account_state)** 矩陣（對應 [[Settlement effect]] 的 matrix 手法）：`register` 撞 unknown→建帳號+寄驗證、verified→寄 account-exists、unverified→重簽；`resend`/`forgot` 各自的 silent 分支與 bounce 規則（含 `forgot` **故意不** skip `email_bounced`，避免真實用戶被永久鎖死）全收斂進矩陣。**自己做 `user_repo` 寫入**（建帳號 / 寫 token hash / 啟用 / 設密碼）——這是核心領域行為，不外推成指令。**只有非自己領域的副作用外推**：寄哪封信 / 不寄、要清哪些 rate-limit key、audit 描述，全由 [[CredentialOutcome]] 帶回，edge 執行。**enumeration 防護的單一守點**——「是否找到 user」與「對外回什麼 + 寄哪封信」的耦合收斂在此，不再散在 router。預計封裝在 `src/services/credential_flow.py`。
+_Avoid_: AuthService（過廣——login / refresh / logout 的 session 簽發、me / preferences / delete-account 的 self-service 都**不**在此）、把 enumeration 分支寫回 router、在 module 內直接寄信（寄送是 edge adapter）。
+
+**CredentialOutcome**:
+跨 CredentialFlow → router seam 的 typed payload，也是 `CredentialFlow` 的**整個 test surface**——注入 fake `user_repo`、餵 plain `(intent, email)`，斷言寫進 repo 的 token hash / 狀態 + outcome 內容，跑遍 unknown / unverified / verified / bounced 矩陣，**不起 FastAPI、不碰 SMTP、不碰真 rate_limit_repo**。四欄：`response`（enumeration-safe 對外訊息，edge 直接回）、`email`（[[EmailInstruction]] | None）、`rate_limit_clears`（`list[(limit_type, key)]`，clear-on-success 的領域效果）、`audit`（`AuditDescriptor`：action / user_id / status_code / message，由 edge 配 `request` 落 log）。
+_Avoid_: 把 HTTP status code / `Response` 物件塞進 outcome（HTTP 形態屬 edge）、把 `request` / IP 放進來（那是 edge 取的）。
+
+**EmailInstruction**:
+[[CredentialOutcome]] 內「該寄哪封信」的決策本身（不是寄送動作）。typed variants：`SendVerification(to, token)` / `SendAccountExists(to)` / `SendPasswordReset(to, token)` / `None`（不寄）。**module 決定、edge 用 `email_service` 真的寄**——這個分離讓 enumeration 不變式（unknown 與 unverified-bounced 對外不可區分）可在 module 層直接斷言。
+_Avoid_: 在 module 內呼叫 `email_service.send_*`、把 email 模板內容放進來（模板屬 [[email_service]] adapter）。
+
+**CredentialTokenInvalid / CredentialTokenExpired**:
+`consume()` / `preflight()` 撞到無效 / 過期 token 時拋出的 typed domain exception（**單一處定義、兩入口共用 import**，跟 [[TranscriptionCancelled]] 同規格）。這些**非 enumeration 敏感**（token 本身即 secret），edge catch 後 map 成 400 / 410。token-invalid 不走 [[CredentialOutcome]]（沒有 enumeration-safe response 要回，直接是錯誤）。
+_Avoid_: 在 module 內 `raise HTTPException`（HTTP 語意屬 edge）、用回傳 None 表達失敗（失去型別、呼叫端易漏判）。
+
 ## Relationships
 
 - 一個 **Task** 經過三個 **Phase**（PREPARATION → TRANSCRIPTION → PUNCTUATION），完成後產出一份 **Transcription**。
 - **Worker** 在執行 Task 期間持續更新 **transient progress state**；**Web Server** 透過 SSE 把 transient state 推送給前端。
 - **Transient progress state** 存在獨立的 `task_progress` collection（由 ProgressStore 封裝），跟 `tasks` collection 的 **persistent task state** 完全分離。
 - **OrderSettlement** 的 `open_pending` 建出一張 pending **Order**；藍新回 [[PaymentNotification]] 後 `settle` 把它推進終態並套用 **Settlement effect**（改寫 user 的 subscription / quota / usage）。Router 只負責 checkout 組裝、webhook 解密與 idempotency。
+- **CredentialFlow** 的 `issue` / `consume` 對單一 [[Email credential challenge]] 算出 [[CredentialOutcome]]（含 [[EmailInstruction]] 決策 + rate-limit clear 指令 + audit 描述）；router 只負責 rate-limit check+record（pre-lookup）+ 429、用 `email_service` 真的寄信、配 `request` 落 audit、把 [[CredentialTokenInvalid]] / Expired map 成 400 / 410。session（login/refresh/logout）與 self-service（me/preferences/delete-account）不經此 module。
 
 ## Example dialogue
 
