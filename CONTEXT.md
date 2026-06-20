@@ -158,6 +158,12 @@ _Avoid_: 在 module 內呼叫 `email_service.send_*`、把 email 模板內容放
 `consume()` / `preflight()` 撞到無效 / 過期 token 時拋出的 typed domain exception（**單一處定義、兩入口共用 import**，跟 [[TranscriptionCancelled]] 同規格）。這些**非 enumeration 敏感**（token 本身即 secret），edge catch 後 map 成 400 / 410。token-invalid 不走 [[CredentialOutcome]]（沒有 enumeration-safe response 要回，直接是錯誤）。
 _Avoid_: 在 module 內 `raise HTTPException`（HTTP 語意屬 edge）、用回傳 None 表達失敗（失去型別、呼叫端易漏判）。
 
+### 後台統計
+
+**AdminAnalytics**:
+後台 `/statistics` 的統計運算 deep module，把原本埋在 admin router endpoint（~330 行）的 3-collection（`tasks` / `summaries` / `users`）aggregation 與 Python 端合併/衍生邏輯收斂於此。**分兩層**：(1) **純函式**（`derive_overview` / `combine_token_usage` / `merge_daily` / `merge_top_users` / `format_named_counts` / `format_performance`）吃 aggregation 結果 dict、回 response 區塊——無 Mongo，是除零保護 / top-N 截斷 / date-map 合併 / token 合計這些 **bug 溫床的快速 unit test 表面**；(2) `AdminAnalytics(db).full_report()` 跑 pipeline 的 orchestration，用純函式組成回應。pipeline 正確性（`$group` / `$lookup` / `$dateToString` 30 天窗）由 Mongo-backed 整合測試覆蓋。**兩個入口**：`full_report()`（`/statistics`）與 `revenue()`（`/revenue`：MRR / 訂閱分佈 / 月收入 / 近期訂單 join email / 流失指標；MRR 的純函式 `summarize_subscriptions` 以注入 `price_of` 解耦 NewebpayService）。Router endpoint 只剩 audit log（statistics）+ `return await build_admin_analytics(db).<entry>()`。封裝在 `src/services/admin_analytics.py`。
+_Avoid_: StatisticsService（過泛——它專指後台 admin 統計）、把 aggregation pipeline 寫回 router、把純 merge/derive 邏輯跟 Mongo orchestration 混在同一函式（兩層分離正是可測性的關鍵）。
+
 ## Relationships
 
 - 一個 **Task** 經過三個 **Phase**（PREPARATION → TRANSCRIPTION → PUNCTUATION），完成後產出一份 **Transcription**。
