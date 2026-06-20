@@ -104,7 +104,7 @@ def is_audio_expired(task: Dict[str, Any], retention_days: int) -> bool:
     if completed_at.tzinfo is None:
         completed_at = completed_at.replace(tzinfo=timezone.utc)
 
-    audio_file = task.get("result", {}).get("audio_file") or task.get("audio_file")
+    audio_file = task.get("result", {}).get("audio_file")
     if audio_file:
         from ..utils.storage_service import extract_tier_from_path
         from ..models.quota import QUOTA_TIERS, QuotaTier

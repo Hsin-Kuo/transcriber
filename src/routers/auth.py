@@ -1375,17 +1375,14 @@ async def delete_account(
     # 1. 取得用戶所有任務（用於刪除關聯資料）
     from ..database.repositories.task_repo import TaskRepository
     task_repo = TaskRepository(db)
-    user_tasks = await task_repo.collection.find(
-        {"$or": [{"user.user_id": user_id}, {"user_id": user_id}]},
-        {"_id": 1, "result.audio_file": 1, "audio_file": 1}
-    ).to_list(length=None)
+    user_tasks = await task_repo.get_audio_refs_for_user(user_id)
 
     task_ids = [task["_id"] for task in user_tasks]
 
     # 2. 刪除 S3/本地音檔
     from ..utils.storage_service import delete_audio_by_path
     for task in user_tasks:
-        audio_path = task.get("result", {}).get("audio_file") or task.get("audio_file")
+        audio_path = task.get("result", {}).get("audio_file")
         if audio_path:
             try:
                 delete_audio_by_path(audio_path)
@@ -1399,9 +1396,7 @@ async def delete_account(
         await db.summaries.delete_many({"_id": {"$in": task_ids}})
 
     # 4. 刪除任務
-    await task_repo.collection.delete_many(
-        {"$or": [{"user.user_id": user_id}, {"user_id": user_id}]}
-    )
+    await task_repo.delete_all_for_user(user_id)
 
     # 5. 刪除標籤
     await db.tags.delete_many({"user_id": user_id})

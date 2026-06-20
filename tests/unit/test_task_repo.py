@@ -81,6 +81,17 @@ def _doc(*, user_id="u1", status="completed", task_type="paragraph",
     return doc
 
 
+class TestOwnedBy:
+    """owned_by 是 ownership 條件的單一真實來源（純函式，不碰 DB）。"""
+
+    def test_returns_nested_path_only(self):
+        assert TaskRepository.owned_by("u1") == {"user.user_id": "u1"}
+
+    def test_is_static(self):
+        # 不需要實例即可呼叫（呼叫端可拼進 composed filter）
+        assert TaskRepository.owned_by("x")["user.user_id"] == "x"
+
+
 class TestCrud:
     async def test_create_and_get_by_id(self, repo):
         doc = _doc(status="completed")
@@ -94,10 +105,12 @@ class TestCrud:
         assert await repo.get_by_id_and_user(doc["_id"], "alice") is not None
         assert await repo.get_by_id_and_user(doc["_id"], "bob") is None
 
-    async def test_get_by_id_and_user_flat_format(self, repo):
+    async def test_get_by_id_and_user_flat_not_matched(self, repo):
+        """舊扁平 user_id 相容分支已移除：扁平 doc 不再被 ownership 查詢命中
+        （fail-safe — 拒絕存取而非洩漏）。prod 已無扁平資料（2026-06 probe）。"""
         doc = _doc(user_id="alice", flat_user=True)
         await repo.create(doc)
-        assert await repo.get_by_id_and_user(doc["_id"], "alice") is not None
+        assert await repo.get_by_id_and_user(doc["_id"], "alice") is None
 
     async def test_update_returns_true_and_persists(self, repo):
         doc = _doc(status="pending")
@@ -149,6 +162,37 @@ class TestFindByUser:
         await repo.create(_doc(status="completed"))
         await repo.create(_doc(deleted=True))
         assert await repo.count_by_user("u1") == 2
+
+
+class TestUserScopedQueries:
+    """ownership 集中後新增/沿用的 user-scoped 方法。"""
+
+    async def test_count_active_by_user(self, repo):
+        await repo.create(_doc(status="pending"))
+        await repo.create(_doc(status="processing"))
+        await repo.create(_doc(status="completed"))
+        await repo.create(_doc(status="pending", deleted=True))
+        await repo.create(_doc(status="processing", user_id="other"))
+        assert await repo.count_active_by_user("u1") == 2
+
+    async def test_delete_all_for_user_scoped(self, repo):
+        await repo.create(_doc(user_id="alice"))
+        await repo.create(_doc(user_id="alice", status="pending"))
+        await repo.create(_doc(user_id="bob"))
+        deleted = await repo.delete_all_for_user("alice")
+        assert deleted == 2
+        assert await repo.count_by_user("bob") == 1
+
+    async def test_get_audio_refs_projects_minimal(self, repo):
+        d1 = _doc(user_id="alice")
+        d1["result"] = {"audio_file": "uploads/pro/x.mp3"}
+        d1["config"] = {"language": "zh"}  # 不該被投影出來
+        await repo.create(d1)
+        await repo.create(_doc(user_id="bob"))
+        refs = await repo.get_audio_refs_for_user("alice")
+        assert len(refs) == 1
+        assert refs[0]["result"]["audio_file"] == "uploads/pro/x.mp3"
+        assert "config" not in refs[0]
 
 
 class TestDispatchQueries:
