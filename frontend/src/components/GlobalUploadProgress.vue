@@ -51,7 +51,7 @@
 </template>
 
 <script setup>
-import { computed, watch, onUnmounted } from 'vue'
+import { computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useUploadStore } from '../stores/upload'
@@ -103,8 +103,21 @@ watch(
   },
 )
 
+// 關分頁 / 重整時若仍有上傳飛行中，跳瀏覽器原生確認，避免無聲中斷上傳。
+// （現代瀏覽器不採用自訂文案，preventDefault + returnValue 即觸發原生對話框）
+function handleBeforeUnload(e) {
+  if (!store.busy) return
+  e.preventDefault()
+  e.returnValue = ''
+}
+
+onMounted(() => {
+  window.addEventListener('beforeunload', handleBeforeUnload)
+})
+
 onUnmounted(() => {
   if (dismissTimer) clearTimeout(dismissTimer)
+  window.removeEventListener('beforeunload', handleBeforeUnload)
 })
 </script>
 
