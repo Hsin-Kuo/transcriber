@@ -21,7 +21,7 @@ from ..services.utils.audio_validator import (
     validate_filename_extension,
     validate_magic_bytes,
 )
-from ..utils.config_loader import get_temp_dir
+from ..utils.config_loader import get_temp_dir, temp_free_bytes
 from ..utils.logger import get_logger
 
 router = APIRouter(prefix="/uploads", tags=["Uploads"])
@@ -40,6 +40,13 @@ MAX_UPLOAD_SIZE = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 UPLOAD_EXPIRY_SECONDS = 3600
 CLEANUP_INTERVAL_SECONDS = 300  # 每 5 分鐘掃一次
 
+# 磁碟容量守門：分片暫存與轉錄 working copy 都落在本機 EBS（t3.small 磁碟不大）。
+# init 時若「放得下這個檔後、剩餘空間」會低於這條保留底線就拒絕，避免多人/大檔
+# 上傳把磁碟塞爆拖垮整機。底線要留給：complete 組裝時 chunks 與 assembled 短暫
+# 並存、其他併發上傳、轉錄 working copy、系統本身。預設 2GB，可用環境變數調整。
+DISK_RESERVE_MB = int(os.environ.get("UPLOAD_DISK_RESERVE_MB", "2048"))
+DISK_RESERVE_BYTES = DISK_RESERVE_MB * 1024 * 1024
+
 # 同一 user 最多同時 N 條 chunk 在後端寫磁碟。
 # 對齊前端建議的並行度（Phase 2.1：3 條），避免 disk I/O / RAM 被單一 user 吃滿。
 # 多 worker 模式下每 worker 各有獨立字典 → 實際總並行 = N × workers（可接受）。
@@ -53,6 +60,11 @@ _user_chunk_semaphores: dict[str, asyncio.Semaphore] = {}
 # 真要嚴格全域協調得上 Redis distributed semaphore，目前流量不值得。
 GLOBAL_CHUNK_CONCURRENCY = 5
 _global_chunk_semaphore = asyncio.Semaphore(GLOBAL_CHUNK_CONCURRENCY)
+
+
+def _has_room_for(total_size: int, free_bytes: int) -> bool:
+    """放得下 total_size 後，剩餘空間是否仍 >= 保留底線。純函式方便測試。"""
+    return free_bytes - total_size >= DISK_RESERVE_BYTES
 
 
 def _get_user_chunk_semaphore(user_id: str) -> asyncio.Semaphore:
@@ -102,6 +114,21 @@ async def init_upload(
             await asyncio.to_thread(shutil.rmtree, td, ignore_errors=True)
     if stale:
         log.info("chunk_upload.init.evicted_stale", user_id=user_id, count=len(stale))
+
+    # 磁碟容量守門（在 evict 之後檢查：重試同一檔時先釋放自己上一輪的半成品，
+    # 才不會被自己佔的空間擋下）。disk_usage 反映實際已用 bytes，盡力而為——
+    # 已 init 但還沒寫的併發 session 不算在內，因此底線取較寬鬆的 2GB 緩衝。
+    free = await asyncio.to_thread(temp_free_bytes)
+    if not _has_room_for(total_size, free):
+        log.warning(
+            "chunk_upload.init.rejected_low_disk",
+            user_id=user_id, free_mb=free // (1024 * 1024),
+            need_mb=total_size // (1024 * 1024),
+        )
+        raise HTTPException(
+            status.HTTP_507_INSUFFICIENT_STORAGE,
+            "伺服器暫存空間不足，請稍後再試",
+        )
 
     total_chunks = (total_size + CHUNK_SIZE - 1) // CHUNK_SIZE
     upload_id = str(uuid.uuid4())
