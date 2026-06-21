@@ -318,7 +318,7 @@ export function useTranscriptData() {
       if (showNotification) {
         showNotification({
           title: t('transcriptData.updateFailed'),
-          message: t('transcriptData.cannotUpdateSubtitleSettings') || '無法更新字幕設定',
+          message: t('transcriptData.cannotUpdateSubtitleSettings'),
           type: 'error'
         })
       }
@@ -349,7 +349,7 @@ export function useTranscriptData() {
       if (showNotification) {
         showNotification({
           title: t('transcriptData.updateFailed'),
-          message: t('transcriptData.cannotUpdateTags') || '無法更新標籤',
+          message: t('transcriptData.cannotUpdateTags'),
           type: 'error'
         })
       }

@@ -273,7 +273,7 @@ export function useTaskTags($t) {
       }
 
       if (!tagObj) {
-        throw new Error(`找不到標籤「${oldTag}」`)
+        throw new Error($t ? $t('taskList.tagNotFound', { tag: oldTag }) : `Tag "${oldTag}" not found`)
       }
 
       const tagId = tagObj.tag_id || tagObj._id

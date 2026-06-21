@@ -7,23 +7,23 @@
           <div class="pending-icon" aria-hidden="true">❌</div>
 
           <h1 class="auth-title">
-            {{ status === 'complained' ? '此 Email 已標記為拒收' : 'Email 似乎無法送達' }}
+            {{ status === 'complained' ? $t('auth.complainedTitle') : $t('auth.emailUndeliverableTitle') }}
           </h1>
 
           <p class="auth-subtitle">
             <template v-if="status === 'complained'">
-              我們收到了 <strong>{{ email }}</strong> 的收件方標示「不想再收信」，將不再嘗試寄送。
+              {{ $t('auth.complainedMessage', { email }) }}
             </template>
             <template v-else>
-              <strong>{{ email }}</strong> 收信失敗 — 信箱可能不存在或拼字有誤。
+              {{ $t('auth.bouncedMessage', { email }) }}
             </template>
           </p>
 
           <div class="hint-box hint-box-warning">
-            <p class="hint-title">您可以：</p>
+            <p class="hint-title">{{ $t('auth.youCan') }}</p>
             <ul class="hint-list">
-              <li>確認 email 拼字（漏字母 / 多字母 / 域名打錯）</li>
-              <li>使用其他 email 重新註冊</li>
+              <li>{{ $t('auth.checkEmailSpelling') }}</li>
+              <li>{{ $t('auth.useAnotherEmail') }}</li>
             </ul>
           </div>
 
@@ -33,13 +33,13 @@
             :disabled="abandoning"
             @click="handleAbandon"
           >
-            <span v-if="abandoning">處理中...</span>
-            <span v-else>改用其他 email 重新註冊</span>
+            <span v-if="abandoning">{{ $t('auth.processing') }}</span>
+            <span v-else>{{ $t('auth.reRegisterWithOtherEmail') }}</span>
           </button>
 
           <div class="auth-footer">
             <p class="muted">
-              如果您確定 email 沒打錯，請聯絡支援團隊
+              {{ $t('auth.contactSupportHint') }}
             </p>
           </div>
         </template>
@@ -49,24 +49,24 @@
           <div class="pending-icon" aria-hidden="true">{{ initialSent ? '✉️' : '⚠️' }}</div>
 
           <h1 class="auth-title">
-            {{ initialSent ? '請查看您的信箱' : '帳號已建立，請重發驗證信' }}
+            {{ initialSent ? $t('auth.checkInboxTitle') : $t('auth.accountCreatedResendTitle') }}
           </h1>
 
           <p class="auth-subtitle">
             <template v-if="initialSent">
-              我們已將驗證連結寄到 <strong>{{ email }}</strong>，點開連結即可完成註冊。
+              {{ $t('auth.verifyLinkSentMessage', { email }) }}
             </template>
             <template v-else>
-              帳號 <strong>{{ email }}</strong> 已建立，但驗證信寄送暫時失敗。請按下方按鈕重新寄送。
+              {{ $t('auth.accountCreatedSendFailedMessage', { email }) }}
             </template>
           </p>
 
           <div class="hint-box">
-            <p class="hint-title">沒收到信？</p>
+            <p class="hint-title">{{ $t('auth.noEmailReceived') }}</p>
             <ul class="hint-list">
-              <li>確認是否進到「垃圾郵件」或「促銷活動」資料夾</li>
-              <li>確認 email 地址沒打錯（目前是 <code>{{ email }}</code>）</li>
-              <li>等候一兩分鐘後再重新寄送</li>
+              <li>{{ $t('auth.checkSpamHint') }}</li>
+              <li>{{ $t('auth.checkEmailCorrectBefore') }}<code>{{ email }}</code>{{ $t('auth.checkEmailCorrectAfter') }}</li>
+              <li>{{ $t('auth.waitAndResend') }}</li>
             </ul>
           </div>
 
@@ -77,9 +77,9 @@
             :disabled="cooldownRemaining > 0 || resending"
             @click="handleResend"
           >
-            <span v-if="resending">寄送中...</span>
-            <span v-else-if="cooldownRemaining > 0">{{ cooldownRemaining }} 秒後可重新寄送</span>
-            <span v-else>重新寄送驗證信</span>
+            <span v-if="resending">{{ $t('auth.resending') }}</span>
+            <span v-else-if="cooldownRemaining > 0">{{ $t('auth.resendCooldown', { seconds: cooldownRemaining }) }}</span>
+            <span v-else>{{ $t('auth.resendVerificationEmail') }}</span>
           </button>
 
           <!-- 重發結果訊息 -->
@@ -94,16 +94,16 @@
 
           <!-- Polling 5 分鐘超時提示 -->
           <div v-if="pollTimedOut" class="notice notice-info" role="status" aria-live="polite">
-            已停止自動偵測。若您已完成驗證，請手動<router-link to="/login">前往登入</router-link>。
+            {{ $t('auth.pollTimeoutBefore') }}<router-link to="/login">{{ $t('auth.pollTimeoutLink') }}</router-link>{{ $t('auth.pollTimeoutAfter') }}
           </div>
 
           <div class="auth-footer">
             <p>
-              收到信並完成驗證後，
-              <router-link to="/login">前往登入</router-link>
+              {{ $t('auth.afterVerifyLogin') }}
+              <router-link to="/login">{{ $t('auth.goToLoginLink') }}</router-link>
             </p>
             <p class="muted">
-              打錯 email？<router-link to="/register">回到註冊頁</router-link>
+              {{ $t('auth.wrongEmailQuestion') }}<router-link to="/register">{{ $t('auth.backToRegister') }}</router-link>
             </p>
           </div>
         </template>
@@ -115,10 +115,12 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import api from '../../utils/api'
 
 const route = useRoute()
 const router = useRouter()
+const { t: $t } = useI18n()
 
 // 後端 cooldown = 60s（src/routers/auth.py: RESEND_VERIFICATION_COOLDOWN_SECONDS）
 const COOLDOWN_SECONDS = 60
@@ -264,7 +266,7 @@ async function handleResend() {
 
   try {
     await api.post('/auth/resend-verification', { email: email.value })
-    resendNotice.value = '驗證信已重新寄出，請查看您的信箱'
+    resendNotice.value = $t('auth.resendSuccess')
     resendError.value = false
     startCooldown()
     // 重新計算 poll 視窗，給新一輪寄信完整 5 分鐘的監測時間
@@ -274,7 +276,7 @@ async function handleResend() {
     const status = err.response?.status
     const detail = err.response?.data?.detail
     resendError.value = true
-    resendNotice.value = detail || '寄送失敗，請稍後再試'
+    resendNotice.value = detail || $t('auth.resendFailed')
     // 429: 後端告訴我們再等多久；解析訊息中的秒數啟動 cooldown
     if (status === 429) {
       const match = String(detail || '').match(/(\d+)\s*秒/)

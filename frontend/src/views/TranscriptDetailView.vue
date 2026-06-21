@@ -80,7 +80,7 @@ class="transcript-layout"
         <!-- A) 展開狀態：完整面板 -->
         <template v-if="!isEffectivelyCollapsed">
           <!-- 收合按鈕 -->
-          <button class="panel-collapse-btn" @click="isLeftPanelCollapsed = true" title="收合面板">
+          <button class="panel-collapse-btn" @click="isLeftPanelCollapsed = true" :title="$t('transcriptDetail.collapsePanel')">
             <span>−</span>
           </button>
 
@@ -110,7 +110,7 @@ class="transcript-layout"
         <!-- B) 收合狀態：精簡側邊欄 -->
         <div v-else class="collapsed-sidebar">
           <!-- 展開按鈕 -->
-          <button class="panel-expand-btn" @click="isLeftPanelCollapsed = false" title="展開面板">
+          <button class="panel-expand-btn" @click="isLeftPanelCollapsed = false" :title="$t('transcriptDetail.expandPanel')">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
               <!-- 左上直角 -->
               <polyline points="5,1 1,1 1,5" />
@@ -141,11 +141,11 @@ class="transcript-layout"
 
           <!-- 時間碼/時間格式旋鈕 -->
           <div class="collapsed-knob-wrapper">
-            <label v-if="displayMode === 'paragraph'" class="knob" :class="{ active: showTimecodeMarkers }" title="時間標記">
+            <label v-if="displayMode === 'paragraph'" class="knob" :class="{ active: showTimecodeMarkers }" :title="$t('transcriptDetail.timeMarkers')">
               <input type="checkbox" :checked="showTimecodeMarkers" @change="showTimecodeMarkers = $event.target.checked" />
               <span class="knob-indicator"></span>
             </label>
-            <label v-else class="knob" :class="{ active: timeFormat === 'range' }" title="時間格式">
+            <label v-else class="knob" :class="{ active: timeFormat === 'range' }" :title="$t('subtitleTable.timeFormat')">
               <input type="checkbox" :checked="timeFormat === 'range'" @change="timeFormat = $event.target.checked ? 'range' : 'start'" />
               <span class="knob-indicator"></span>
             </label>
@@ -153,7 +153,7 @@ class="transcript-layout"
 
           <!-- 深色/淺色模式旋鈕 -->
           <div class="collapsed-knob-wrapper">
-            <label class="knob" :class="{ active: isDarkMode }" title="深色模式">
+            <label class="knob" :class="{ active: isDarkMode }" :title="$t('displaySettings.darkMode')">
               <input type="checkbox" :checked="isDarkMode" @change="isDarkMode = $event.target.checked" />
               <span class="knob-indicator"></span>
             </label>
@@ -170,7 +170,7 @@ class="transcript-layout"
                 step="1"
                 :value="contentFontSize"
                 @input="contentFontSize = Number($event.target.value)"
-                title="字體大小"
+                :title="$t('displaySettings.fontSize')"
               />
             </div>
             <div class="collapsed-slider-wrapper">
@@ -182,7 +182,7 @@ class="transcript-layout"
                 step="100"
                 :value="contentFontWeight"
                 @input="contentFontWeight = Number($event.target.value)"
-                title="字體粗細"
+                :title="$t('displaySettings.fontWeight')"
               />
             </div>
             <div v-if="displayMode === 'subtitle'" class="collapsed-slider-wrapper">
@@ -194,7 +194,7 @@ class="transcript-layout"
                 step="1"
                 :value="densityThreshold"
                 @input="densityThreshold = Number($event.target.value)"
-                title="疏密度"
+                :title="$t('transcriptDetail.density')"
               />
             </div>
           </div>
@@ -321,7 +321,7 @@ class="transcript-layout"
         <div class="transcript-content-wrapper">
           <div v-if="loadingTranscript" class="loading-state">
             <div class="spinner"></div>
-            <p>載入逐字稿中...</p>
+            <p>{{ $t('transcriptDetail.loadingTranscript') }}</p>
           </div>
           <div v-else-if="transcriptError" class="error-state">
             <p>{{ transcriptError }}</p>
@@ -333,7 +333,7 @@ class="transcript-layout"
           >
             <!-- 替換中的過渡狀態（用於完全卸載 contenteditable 避免 Vue DOM 同步問題） -->
             <div v-if="isReplacing" class="transcript-display replacing-state">
-              <span class="replacing-indicator">{{ $t('transcriptDetail.replacing') || '正在替換...' }}</span>
+              <span class="replacing-indicator">{{ $t('transcriptDetail.replacing') }}</span>
             </div>
             <!-- 編輯模式：純文字 contenteditable;segment 視覺層由 CSS Highlight 與 overlay 提供 -->
             <div

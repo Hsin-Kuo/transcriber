@@ -211,7 +211,13 @@
       "downgrade": "Downgrade",
       "cancelSubscription": "Cancel Subscription",
       "processing": "Processing...",
-      "changeFailed": "Failed to change plan, please try again"
+      "changeFailed": "Failed to change plan, please try again",
+      "perMonthYearly": "/mo (billed yearly)",
+      "extraMinutes": "+{n} min",
+      "extraAiSummaries": "+{n} AI summaries",
+      "upgradeKeepQuota": "After upgrading, your remaining quota ({parts}) will be kept as extra quota and won't be affected by the monthly reset.",
+      "downgradeScheduled": "You can keep your current plan until {date}, then it will switch to {plan} automatically.\n\nPlease complete the payment authorization (you won't be charged immediately).",
+      "downgradeImmediate": "Your plan will switch immediately and you will be charged."
     },
     "subscription": {
       "currentPlan": "Current Plan",
@@ -360,7 +366,13 @@
     "uploading": "Uploading...",
     "uploadFailed": "Upload Failed",
     "uploadFailedMessage": "Upload failed: {message}",
-    "errorUpload": "Upload failed"
+    "errorUpload": "Upload failed",
+    "language": "Language",
+    "langChineseGeneric": "Chinese (generic)",
+    "mergeMode": "Merge Mode",
+    "fileCount": "{count} file(s)",
+    "taskName": "Task Name",
+    "mergeTaskNameHint": "This name identifies the merged transcription task"
   },
   "globalUpload": {
     "statusUploading": "Uploading",
@@ -391,7 +403,9 @@
     "fileTooLarge": "File Too Large",
     "fileTooLargeMessage": "\"{name}\" is {size}, exceeding the {max}MB limit",
     "filesTooLargeMessage": "{count} file(s) exceed the {max}MB limit and were skipped",
-    "busyHint": "An upload is already in progress. You can start a new one once it finishes or is cancelled."
+    "busyHint": "An upload is already in progress. You can start a new one once it finishes or is cancelled.",
+    "mergeMultiple": "Merge multiple audio files",
+    "mergeAudio": "Merge Audio"
   },
   "tasksView": {
     "downloadFailed": "Download failed, please try again later",
@@ -519,7 +533,14 @@
     "logLoadedTagOrder": "Loaded tag order from server:",
     "logTagCount": "tags",
     "logTagMapping": "Tag \"{name}\" -> ID: {id}",
-    "logSendingTagIds": "Sending tag ID list:"
+    "logSendingTagIds": "Sending tag ID list:",
+    "tagNotFound": "Tag \"{tag}\" not found",
+    "selectTask": "Select Task",
+    "taskProgress": "Task Progress",
+    "tagStepCreate": "Create tags",
+    "tagStepOrder": "Save order",
+    "tagStepColor": "Save colors",
+    "tagEditPartialFailed": "Some tag edits failed ({steps}): {message}"
   },
   "downloadDialog": {
     "title": "Download Settings",
@@ -560,7 +581,13 @@
     "errorSavingSegments": "Failed to save segments",
     "confirmLeave": "You have unsaved changes. Are you sure you want to leave?",
     "moreOptions": "More Options",
-    "replacing": "Replacing..."
+    "replacing": "Replacing...",
+    "editTitle": "Edit Title",
+    "collapsePanel": "Collapse panel",
+    "expandPanel": "Expand panel",
+    "timeMarkers": "Time markers",
+    "density": "Density",
+    "loadingTranscript": "Loading transcript..."
   },
   "audioPlayer": {
     "browserNotSupported": "Your browser does not support audio playback.",
@@ -605,7 +632,8 @@
     "audioLoadFailed": "Audio loading failed. Please try again later or refresh the page.",
     "playbackFailed": "Playback failed",
     "audioExpiredTitle": "Audio file has been deleted",
-    "audioExpiredTooltip": "This task's audio file has been automatically deleted (retention period: {days} days). To keep audio files, use the pin feature on the task list page."
+    "audioExpiredTooltip": "This task's audio file has been automatically deleted (retention period: {days} days). To keep audio files, use the pin feature on the task list page.",
+    "volume": "Volume"
   },
   "replaceToolbar": {
     "find": "Find",
@@ -643,7 +671,8 @@
     "updateFailed": "Update Failed",
     "cannotUpdateTaskName": "Cannot update task name",
     "cannotUpdateSpeakerNames": "Cannot update speaker names",
-    "cannotUpdateTags": "Cannot update tags"
+    "cannotUpdateTags": "Cannot update tags",
+    "cannotUpdateSubtitleSettings": "Failed to update subtitle settings"
   },
   "taskInfo": {
     "lastEdited": "Last Updated",
@@ -743,7 +772,79 @@
     "register": "Register",
     "sendVerificationFailed": "Failed to send verification email",
     "networkError": "Network error, please try again later",
-    "googleLoginFailed": "Google login failed: "
+    "googleLoginFailed": "Google login failed: ",
+    "registerTitle": "Create Account",
+    "confirmPassword": "Confirm Password",
+    "confirmPasswordPlaceholderRegister": "Re-enter password",
+    "registering": "Registering...",
+    "registerButton": "Register",
+    "haveAccount": "Already have an account?",
+    "loginNow": "Log in",
+    "registerFreeQuotaTitle": "Free quota on sign-up",
+    "registerQuotaLabel": "Monthly transcription minutes",
+    "registerQuotaValue": "180 minutes",
+    "googleSignupFailed": "Google sign-up failed: ",
+    "forgotPasswordSubtitle": "Sound Lite Transcription",
+    "forgotPasswordEmailHint": "If {email} is registered, you will receive a password reset email.",
+    "backToLoginPage": "Back to login page",
+    "registerFailed": "Registration failed",
+    "wrongCredentials": "Incorrect email or password",
+    "sendResetEmailFailed": "Failed to send reset email",
+    "resetPasswordFailed": "Failed to reset password",
+    "googleLoginError": "Google login failed",
+    "updatePreferencesFailed": "Failed to update preferences",
+    "deleteAccountFailed": "Failed to delete account",
+    "setPasswordFailed": "Failed to set password",
+    "resetPasswordEnterNew": "Please enter your new password.",
+    "checkingLink": "Checking link...",
+    "verifyCheckingTitle": "Checking verification link...",
+    "verifyPleaseWait": "Please wait",
+    "verifyConfirmTitle": "Confirm Email Verification",
+    "verifyConfirmMessage": "You're about to complete verification for {email}.",
+    "verifyConfirmHint": "Click the button below to activate your account and log in automatically.",
+    "verifying": "Verifying...",
+    "completeVerification": "Complete Verification",
+    "verifySuccessTitle": "Email Verified Successfully!",
+    "verifySuccessMessage": "Redirecting to the login page, please log in with your account...",
+    "verifyExpiredTitle": "Verification Link Expired",
+    "enterYourEmail": "Enter your email",
+    "resending": "Sending...",
+    "resendVerificationEmail": "Resend Verification Email",
+    "verifyFailedTitle": "Verification Failed",
+    "reRegister": "Register Again",
+    "missingToken": "Missing verification token",
+    "verifyLinkExpired": "Verification link has expired",
+    "verifyLinkInvalid": "Verification link is invalid",
+    "verifyFailedRetry": "Verification failed, please try again",
+    "resendSuccess": "Verification email resent, please check your inbox",
+    "resendFailed": "Failed to send, please try again later",
+    "complainedTitle": "This Email Is Marked as Do-Not-Send",
+    "emailUndeliverableTitle": "Email Appears Undeliverable",
+    "complainedMessage": "We received a do-not-send signal from the recipient of {email} and will no longer attempt delivery.",
+    "bouncedMessage": "{email} bounced — the mailbox may not exist or the address may be misspelled.",
+    "youCan": "You can:",
+    "checkEmailSpelling": "Check the email spelling (missing/extra letters, wrong domain)",
+    "useAnotherEmail": "Register again with a different email",
+    "processing": "Processing...",
+    "reRegisterWithOtherEmail": "Register again with a different email",
+    "contactSupportHint": "If you're sure the email is correct, please contact support",
+    "checkInboxTitle": "Check Your Inbox",
+    "accountCreatedResendTitle": "Account Created — Please Resend Verification",
+    "verifyLinkSentMessage": "We've sent a verification link to {email}. Open the link to complete registration.",
+    "accountCreatedSendFailedMessage": "Account {email} was created, but sending the verification email temporarily failed. Please click the button below to resend.",
+    "noEmailReceived": "Didn't receive the email?",
+    "checkSpamHint": "Check your \"Spam\" or \"Promotions\" folder",
+    "checkEmailCorrectBefore": "Make sure the email address is correct (currently ",
+    "checkEmailCorrectAfter": ")",
+    "waitAndResend": "Wait a minute or two, then resend",
+    "resendCooldown": "Resend in {seconds}s",
+    "pollTimeoutBefore": "Automatic detection has stopped. If you've completed verification, please manually ",
+    "pollTimeoutLink": "go to login",
+    "pollTimeoutAfter": ".",
+    "afterVerifyLogin": "After receiving the email and completing verification, ",
+    "goToLoginLink": "go to login",
+    "wrongEmailQuestion": "Wrong email?",
+    "backToRegister": "Back to register"
   },
   "aiSummary": {
     "title": "AI Summary",
@@ -802,7 +903,8 @@
     "summaryTitle": "Summary",
     "keyPoints": "Key Points",
     "contentSegments": "Content Segments",
-    "actionItems": "Action Items"
+    "actionItems": "Action Items",
+    "shareLink": "Share Link"
   },
   "taskErrors": {
     "INVALID_AUDIO": "Unable to process audio file. The file may be corrupted or DRM-protected.",
@@ -819,5 +921,38 @@
     "serverErrorMessage": "The server is temporarily unable to handle the request. Please try again later.",
     "networkErrorTitle": "Network error",
     "networkErrorMessage": "Unable to reach the server. Please check your network connection."
+  },
+  "common": {
+    "cancel": "Cancel",
+    "remove": "Remove",
+    "close": "Close",
+    "back": "Back",
+    "listSeparator": ", "
+  },
+  "mergeModal": {
+    "title": "Merge Audio",
+    "uploadSection": "Upload Audio",
+    "uploadZoneAria": "Select or drop audio files",
+    "dragDrop": "Drop audio files here",
+    "clickSelect": "or click to select files",
+    "supportedFormats": "Supports mp3, wav, m4a, mp4 and more",
+    "selectedFiles": "Selected files",
+    "noFiles": "No files selected",
+    "uploadFromLeft": "Upload audio from the left",
+    "dragToReorder": "Drag to reorder",
+    "totalSize": "Total size: {size}",
+    "minTwoFiles": "Select at least 2 files to merge",
+    "nextStep": "Next: Transcription settings"
+  },
+  "paymentReturn": {
+    "processing": "Processing payment",
+    "processingHint": "Please wait while we confirm your payment...",
+    "success": "Payment successful!",
+    "backToSettings": "Back to Settings",
+    "failed": "Payment failed",
+    "failedHint": "Please check your card details and try again, or contact support.",
+    "subscriptionActivated": "Your subscription is now active.",
+    "extraQuotaReady": "Your extra quota has been credited and is ready to use.",
+    "planActivated": "The {plan} plan is now active."
   }
 }
