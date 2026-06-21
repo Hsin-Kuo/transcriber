@@ -564,7 +564,12 @@ async function confirmAndUpload() {
 //  - 網路 / JS 錯誤（無後端 detail）→ 通用 i18n（取代原本會漏出的英文 library 字串）
 //  - 其餘後端訊息（語言由後端決定）→ 沿用（完整 localize 需後端 i18n）
 function uploadErrorMessage(error) {
-  const detail = error?.response?.data?.detail
+  return detailToMessage(error?.response?.data?.detail)
+}
+
+// 把後端 detail 本體（字串 或 {code,message} 物件）轉成跟隨 UI 語言的可讀訊息。
+// 抽出來讓「axios error」與「批次回傳 tasks[].error 的裸 detail」共用同一套轉換。
+function detailToMessage(detail) {
   const code = detail && typeof detail === 'object' ? detail.code : null
   if (code === 'FEATURE_NOT_AVAILABLE') return $t('uploadErrors.featureNotAvailable')
   const serverMsg = (detail && typeof detail === 'object') ? detail.message : (typeof detail === 'string' ? detail : '')
@@ -660,12 +665,25 @@ async function confirmBatchUpload(formData) {
     // 顯示結果通知
     if (showNotification) {
       if (result.failed > 0) {
+        // 列出哪些檔失敗、各自原因（後端在 tasks[].error 帶了 detail，先前只用來
+        // 判斷配額 Modal，沒告知使用者明細）。上限 5 筆避免 toast 過長。
+        const FAILED_LIST_MAX = 5
+        const failedLines = (result.tasks || [])
+          .filter(t => t.error)
+          .map(t => $t('batchUpload.failedItem', {
+            filename: t.filename,
+            reason: detailToMessage(t.error),
+          }))
+        const shown = failedLines.slice(0, FAILED_LIST_MAX)
+        if (failedLines.length > FAILED_LIST_MAX) {
+          shown.push($t('batchUpload.moreFailures', { count: failedLines.length - FAILED_LIST_MAX }))
+        }
         showNotification({
           title: $t('batchUpload.partialSuccess'),
-          message: $t('batchUpload.partialSuccessMessage', {
-            created: result.created,
-            failed: result.failed
-          }),
+          message: [
+            $t('batchUpload.partialSuccessMessage', { created: result.created, failed: result.failed }),
+            ...shown,
+          ].join('\n'),
           type: 'warning'
         })
       } else {

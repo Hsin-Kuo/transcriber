@@ -211,6 +211,8 @@ onUnmounted(() => {
   font-size: 0.85rem;
   color: var(--main-text-light);
   line-height: 1.4;
+  /* 保留訊息中的換行（批次部分失敗會用 \n 列出各檔原因）；單行訊息不受影響 */
+  white-space: pre-line;
 }
 
 .notification-close {
