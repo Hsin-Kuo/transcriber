@@ -3,10 +3,12 @@ import os
 from datetime import datetime, date, timedelta
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from typing import Optional
+
+from ..utils.api_errors import api_error
 
 from ..auth.dependencies import get_current_user
 from ..database.mongodb import get_database
@@ -109,21 +111,22 @@ async def create_checkout(
 ):
     """建立新訂閱（定期定額表單）"""
     if request.tier not in ("basic", "pro"):
-        raise HTTPException(status_code=400, detail="無效的方案")
+        raise api_error("SUBSCRIPTION_INVALID_TIER", "Invalid subscription plan", 400)
     if request.billing not in ("monthly", "yearly"):
-        raise HTTPException(status_code=400, detail="無效的計費週期")
+        raise api_error("SUBSCRIPTION_INVALID_BILLING_CYCLE", "Invalid billing cycle", 400)
 
     user_repo = UserRepository(db)
     full_user = await user_repo.get_by_id(str(current_user["_id"]))
     sub = full_user.get("subscription", {}) if full_user else {}
 
     if sub.get("status") in ("active", "trialing"):
-        raise HTTPException(status_code=400, detail="已有有效訂閱，請使用變更方案功能")
+        raise api_error("SUBSCRIPTION_ALREADY_ACTIVE",
+                        "You already have an active subscription, please use the change plan feature", 400)
 
     svc = get_newebpay_service()
     amount = svc.get_subscription_price(request.tier, request.billing)
     if not amount:
-        raise HTTPException(status_code=500, detail="價格尚未設定")
+        raise api_error("SUBSCRIPTION_PRICE_NOT_CONFIGURED", "Price is not configured", 500)
 
     user_id = str(current_user["_id"])
 
@@ -197,9 +200,9 @@ async def cancel_subscription(
     sub = full_user.get("subscription", {}) if full_user else {}
 
     if sub.get("status") != "active":
-        raise HTTPException(status_code=400, detail="沒有有效的訂閱")
+        raise api_error("SUBSCRIPTION_NOT_ACTIVE", "No active subscription", 400)
     if sub.get("cancel_at_period_end"):
-        raise HTTPException(status_code=400, detail="訂閱已排定取消")
+        raise api_error("SUBSCRIPTION_ALREADY_SCHEDULED_CANCEL", "Subscription is already scheduled for cancellation", 400)
 
     period_no = sub.get("period_no")
     active_order_no = sub.get("active_order_no")
@@ -228,9 +231,9 @@ async def reactivate_subscription(
     sub = full_user.get("subscription", {}) if full_user else {}
 
     if sub.get("status") != "active":
-        raise HTTPException(status_code=400, detail="沒有有效的訂閱")
+        raise api_error("SUBSCRIPTION_NOT_ACTIVE", "No active subscription", 400)
     if not sub.get("cancel_at_period_end"):
-        raise HTTPException(status_code=400, detail="訂閱未排定取消")
+        raise api_error("SUBSCRIPTION_NOT_SCHEDULED_CANCEL", "Subscription is not scheduled for cancellation", 400)
 
     # 由於藍新定期定額已終止，重新啟用需要用戶重新付款
     # 回傳 checkout 資料讓前端帶用戶重新訂閱
@@ -239,7 +242,7 @@ async def reactivate_subscription(
     svc = get_newebpay_service()
     amount = svc.get_subscription_price(tier, billing)
     if not amount:
-        raise HTTPException(status_code=500, detail="價格尚未設定")
+        raise api_error("SUBSCRIPTION_PRICE_NOT_CONFIGURED", "Price is not configured", 500)
 
     user_id = str(current_user["_id"])
 
@@ -284,16 +287,16 @@ async def change_plan(
     降級：期末生效，建立 PeriodStartType=2 的 Basic 定期定額（首扣日=Pro到期日）。
     """
     if request.tier not in ("basic", "pro"):
-        raise HTTPException(status_code=400, detail="無效的方案")
+        raise api_error("SUBSCRIPTION_INVALID_TIER", "Invalid subscription plan", 400)
     if request.billing not in ("monthly", "yearly"):
-        raise HTTPException(status_code=400, detail="無效的計費週期")
+        raise api_error("SUBSCRIPTION_INVALID_BILLING_CYCLE", "Invalid billing cycle", 400)
 
     user_repo = UserRepository(db)
     full_user = await user_repo.get_by_id(str(current_user["_id"]))
     sub = full_user.get("subscription", {}) if full_user else {}
 
     if sub.get("status") != "active":
-        raise HTTPException(status_code=400, detail="沒有有效的訂閱")
+        raise api_error("SUBSCRIPTION_NOT_ACTIVE", "No active subscription", 400)
 
     current_tier = sub.get("tier", "free")
     upgrading = is_upgrade(current_tier, request.tier)
@@ -301,7 +304,7 @@ async def change_plan(
     svc = get_newebpay_service()
     amount = svc.get_subscription_price(request.tier, request.billing)
     if not amount:
-        raise HTTPException(status_code=500, detail="價格尚未設定")
+        raise api_error("SUBSCRIPTION_PRICE_NOT_CONFIGURED", "Price is not configured", 500)
 
     user_id = str(current_user["_id"])
     await _handle_invoice_save(request, user_id, user_repo)
@@ -470,12 +473,13 @@ async def purchase_extra_quota(
     sub = full_user.get("subscription", {}) if full_user else {}
 
     if sub.get("status") != "active":
-        raise HTTPException(status_code=403, detail="需要有效的付費訂閱才能購買額外額度")
+        raise api_error("SUBSCRIPTION_REQUIRED_FOR_EXTRA",
+                        "An active paid subscription is required to purchase extra quota", 403)
 
     # 從 packages collection 取得套餐資訊
     package = await db.packages.find_one({"_id": ObjectId(request.package_id), "active": True})
     if not package:
-        raise HTTPException(status_code=404, detail="套餐不存在")
+        raise api_error("SUBSCRIPTION_PACKAGE_NOT_FOUND", "Package not found", 404)
 
     user_id = str(current_user["_id"])
     await _handle_invoice_save(request, user_id, user_repo)

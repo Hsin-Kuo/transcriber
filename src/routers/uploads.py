@@ -21,7 +21,7 @@ from ..services.utils.audio_validator import (
     validate_filename_extension,
     validate_magic_bytes,
 )
-from ..utils.api_errors import api_error, ErrorCode
+from ..utils.api_errors import api_error
 from ..utils.config_loader import get_temp_dir, temp_free_bytes
 from ..utils.logger import get_logger
 
@@ -93,11 +93,11 @@ async def init_upload(
 ):
     """初始化分片上傳，回傳 upload_id 和 total_chunks"""
     if total_size <= 0:
-        raise api_error(ErrorCode.INVALID_FILE_SIZE, "檔案大小無效",
+        raise api_error("INVALID_FILE_SIZE", "Invalid file size",
                         status.HTTP_400_BAD_REQUEST)
     if total_size > MAX_UPLOAD_SIZE:
-        raise api_error(ErrorCode.FILE_TOO_LARGE,
-                        f"檔案超過 {MAX_UPLOAD_SIZE_MB}MB 上限",
+        raise api_error("FILE_TOO_LARGE",
+                        f"File exceeds the {MAX_UPLOAD_SIZE_MB}MB limit",
                         status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                         max=MAX_UPLOAD_SIZE_MB)
 
@@ -127,8 +127,8 @@ async def init_upload(
             user_id=user_id, free_mb=free // (1024 * 1024),
             need_mb=total_size // (1024 * 1024),
         )
-        raise api_error(ErrorCode.UPLOAD_DISK_FULL,
-                        "伺服器暫存空間不足，請稍後再試",
+        raise api_error("UPLOAD_DISK_FULL",
+                        "Server storage is temporarily full, please try again later",
                         status.HTTP_507_INSUFFICIENT_STORAGE)
 
     total_chunks = (total_size + CHUNK_SIZE - 1) // CHUNK_SIZE
@@ -163,18 +163,22 @@ async def upload_chunk(
     user_id = str(current_user["_id"])
     meta = await repo.get(upload_id)
     if not meta:
-        raise HTTPException(
+        raise api_error(
+            "UPLOAD_SESSION_NOT_FOUND",
+            "Upload session expired or not found, please re-select the file",
             status.HTTP_404_NOT_FOUND,
-            "上傳工作階段已過期或不存在，請重新選擇檔案上傳",
         )
 
     if meta["user_id"] != user_id:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "無權操作此上傳")
+        raise api_error("UPLOAD_FORBIDDEN",
+                        "You do not have permission for this upload",
+                        status.HTTP_403_FORBIDDEN)
 
     if chunk_index < 0 or chunk_index >= meta["total_chunks"]:
-        raise HTTPException(
+        raise api_error(
+            "UPLOAD_CHUNK_INDEX_OUT_OF_RANGE",
+            f"chunk_index out of range (0-{meta['total_chunks'] - 1})",
             status.HTTP_400_BAD_REQUEST,
-            f"chunk_index 超出範圍 (0-{meta['total_chunks'] - 1})",
         )
 
     # 驗證通過才搶 semaphore：4xx 不消耗配額，能快速回客戶端。
@@ -199,9 +203,10 @@ async def upload_chunk(
                 # 驗證與寫入之間 doc 被刪除（極罕見：例如 concurrent complete 驗證
                 # 失敗或 cleanup sweep 邊界 race）。chunk 檔還在但已無 metadata 對應，
                 # 回 409 讓 client 重新 init 而不是回 200 假裝成功。
-                raise HTTPException(
+                raise api_error(
+                    "UPLOAD_SESSION_INVALIDATED",
+                    "Upload session invalidated, please re-select the file",
                     status.HTTP_409_CONFLICT,
-                    "上傳工作階段已失效，請重新選擇檔案上傳",
                 )
             received_count = len(updated["received"])
 
@@ -221,20 +226,24 @@ async def complete_upload(
     repo = _repo()
     meta = await repo.get(upload_id)
     if not meta:
-        raise HTTPException(
+        raise api_error(
+            "UPLOAD_SESSION_NOT_FOUND",
+            "Upload session expired or not found, please re-select the file",
             status.HTTP_404_NOT_FOUND,
-            "上傳工作階段已過期或不存在，請重新選擇檔案上傳",
         )
 
     if meta["user_id"] != str(current_user["_id"]):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "無權操作此上傳")
+        raise api_error("UPLOAD_FORBIDDEN",
+                        "You do not have permission for this upload",
+                        status.HTTP_403_FORBIDDEN)
 
     received = set(meta.get("received") or [])
     missing = set(range(meta["total_chunks"])) - received
     if missing:
-        raise HTTPException(
+        raise api_error(
+            "UPLOAD_CHUNKS_MISSING",
+            f"Missing {len(missing)} chunk(s): {sorted(missing)[:10]}",
             status.HTTP_400_BAD_REQUEST,
-            f"缺少 {len(missing)} 個 chunk: {sorted(missing)[:10]}",
         )
 
     temp_dir = Path(meta["temp_dir"])

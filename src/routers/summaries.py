@@ -1,5 +1,5 @@
 """AI 摘要管理路由"""
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 
 from ..auth.dependencies import get_current_user
 from ..auth.quota import QuotaManager
@@ -8,6 +8,7 @@ from ..database.repositories.user_repo import UserRepository
 from ..services.summary_service import SummaryService
 from ..models.summary import SummaryResponse, GenerateSummaryResponse
 from ..utils.audit_logger import get_audit_logger
+from ..utils.api_errors import api_error
 from ..dependencies import get_summary_service
 
 
@@ -96,9 +97,10 @@ async def get_summary(
     summary = await summary_service.get_summary(task_id, user_id)
 
     if not summary:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="摘要不存在或無權存取"
+        raise api_error(
+            "SUMMARY_NOT_FOUND",
+            "Summary not found or access denied",
+            status.HTTP_404_NOT_FOUND,
         )
 
     return summary
@@ -127,9 +129,10 @@ async def delete_summary(
     success = await summary_service.delete_summary(task_id, user_id)
 
     if not success:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="摘要不存在或無權存取"
+        raise api_error(
+            "SUMMARY_NOT_FOUND",
+            "Summary not found or access denied",
+            status.HTTP_404_NOT_FOUND,
         )
 
     audit_logger = get_audit_logger()

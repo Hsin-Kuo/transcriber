@@ -6,6 +6,7 @@ from ..auth.dependencies import get_current_user
 from ..dependencies import get_tag_service
 from ..services.tag_service import TagService
 from ..models.tag import TagCreate, TagUpdate, TagOrderUpdate, TagResponse
+from ..utils.api_errors import api_error
 from ..utils.audit_logger import get_audit_logger
 from ..utils.logger import get_logger
 
@@ -125,9 +126,10 @@ async def get_tag(
     tag = await tag_service.get_tag(str(current_user["_id"]), tag_id)
 
     if not tag:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="標籤不存在或無權訪問"
+        raise api_error(
+            "TAG_NOT_FOUND",
+            "Tag not found or access denied",
+            status.HTTP_404_NOT_FOUND,
         )
 
     return tag
@@ -195,9 +197,11 @@ async def update_tag_order(
         )
     except Exception as e:
         log.error("tag.reorder.error", error=str(e), exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"更新標籤順序失敗: {str(e)}"
+        raise api_error(
+            "TAG_REORDER_FAILED",
+            "Failed to update tag order: {error}",
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error=str(e),
         )
 
 
@@ -234,9 +238,10 @@ async def update_tag(
         )
 
         if not tag:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="標籤不存在或無權訪問"
+            raise api_error(
+                "TAG_NOT_FOUND",
+                "Tag not found or access denied",
+                status.HTTP_404_NOT_FOUND,
             )
 
         # 記錄 audit log
