@@ -211,7 +211,13 @@
       "downgrade": "Downgrade",
       "cancelSubscription": "Cancel Subscription",
       "processing": "Processing...",
-      "changeFailed": "Failed to change plan, please try again"
+      "changeFailed": "Failed to change plan, please try again",
+      "perMonthYearly": "/mo (billed yearly)",
+      "extraMinutes": "+{n} min",
+      "extraAiSummaries": "+{n} AI summaries",
+      "upgradeKeepQuota": "After upgrading, your remaining quota ({parts}) will be kept as extra quota and won't be affected by the monthly reset.",
+      "downgradeScheduled": "You can keep your current plan until {date}, then it will switch to {plan} automatically.\n\nPlease complete the payment authorization (you won't be charged immediately).",
+      "downgradeImmediate": "Your plan will switch immediately and you will be charged."
     },
     "subscription": {
       "currentPlan": "Current Plan",
@@ -571,7 +577,8 @@
     "errorSavingSegments": "Failed to save segments",
     "confirmLeave": "You have unsaved changes. Are you sure you want to leave?",
     "moreOptions": "More Options",
-    "replacing": "Replacing..."
+    "replacing": "Replacing...",
+    "editTitle": "Edit Title"
   },
   "audioPlayer": {
     "browserNotSupported": "Your browser does not support audio playback.",
@@ -616,7 +623,8 @@
     "audioLoadFailed": "Audio loading failed. Please try again later or refresh the page.",
     "playbackFailed": "Playback failed",
     "audioExpiredTitle": "Audio file has been deleted",
-    "audioExpiredTooltip": "This task's audio file has been automatically deleted (retention period: {days} days). To keep audio files, use the pin feature on the task list page."
+    "audioExpiredTooltip": "This task's audio file has been automatically deleted (retention period: {days} days). To keep audio files, use the pin feature on the task list page.",
+    "volume": "Volume"
   },
   "replaceToolbar": {
     "find": "Find",
@@ -886,7 +894,8 @@
     "summaryTitle": "Summary",
     "keyPoints": "Key Points",
     "contentSegments": "Content Segments",
-    "actionItems": "Action Items"
+    "actionItems": "Action Items",
+    "shareLink": "Share Link"
   },
   "taskErrors": {
     "INVALID_AUDIO": "Unable to process audio file. The file may be corrupted or DRM-protected.",
@@ -907,7 +916,9 @@
   "common": {
     "cancel": "Cancel",
     "remove": "Remove",
-    "close": "Close"
+    "close": "Close",
+    "back": "Back",
+    "listSeparator": ", "
   },
   "mergeModal": {
     "title": "Merge Audio",
@@ -923,5 +934,16 @@
     "totalSize": "Total size: {size}",
     "minTwoFiles": "Select at least 2 files to merge",
     "nextStep": "Next: Transcription settings"
+  },
+  "paymentReturn": {
+    "processing": "Processing payment",
+    "processingHint": "Please wait while we confirm your payment...",
+    "success": "Payment successful!",
+    "backToSettings": "Back to Settings",
+    "failed": "Payment failed",
+    "failedHint": "Please check your card details and try again, or contact support.",
+    "subscriptionActivated": "Your subscription is now active.",
+    "extraQuotaReady": "Your extra quota has been credited and is ready to use.",
+    "planActivated": "The {plan} plan is now active."
   }
 }

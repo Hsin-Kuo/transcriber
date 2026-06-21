@@ -4,8 +4,8 @@
       <!-- 處理中 -->
       <template v-if="status === 'processing'">
         <div class="spinner"></div>
-        <h2>付款處理中</h2>
-        <p>請稍候，正在確認付款狀態...</p>
+        <h2>{{ $t('paymentReturn.processing') }}</h2>
+        <p>{{ $t('paymentReturn.processingHint') }}</p>
       </template>
 
       <!-- 成功 -->
@@ -15,9 +15,9 @@
             <polyline points="20 6 9 17 4 12"></polyline>
           </svg>
         </div>
-        <h2>付款成功！</h2>
+        <h2>{{ $t('paymentReturn.success') }}</h2>
         <p>{{ successMessage }}</p>
-        <button class="action-btn" @click="$router.push('/settings')">返回設定頁</button>
+        <button class="action-btn" @click="$router.push('/settings')">{{ $t('paymentReturn.backToSettings') }}</button>
       </template>
 
       <!-- 失敗 -->
@@ -28,9 +28,9 @@
             <line x1="6" y1="6" x2="18" y2="18"></line>
           </svg>
         </div>
-        <h2>付款失敗</h2>
-        <p>請確認信用卡資訊後重試，或聯繫客服。</p>
-        <button class="action-btn secondary" @click="$router.push('/settings')">返回</button>
+        <h2>{{ $t('paymentReturn.failed') }}</h2>
+        <p>{{ $t('paymentReturn.failedHint') }}</p>
+        <button class="action-btn secondary" @click="$router.push('/settings')">{{ $t('common.back') }}</button>
       </template>
     </div>
   </div>
@@ -38,16 +38,17 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
 import api from '../utils/api'
 
 const route = useRoute()
-const router = useRouter()
+const { t } = useI18n()
 const authStore = useAuthStore()
 
 const status = ref('processing')
-const successMessage = ref('您的訂閱已成功啟用。')
+const successMessage = ref(t('paymentReturn.subscriptionActivated'))
 
 const MAX_POLLS = 10
 const POLL_INTERVAL = 1500
@@ -82,7 +83,7 @@ onMounted(async () => {
         const hasExtra = (sub.extra_quota?.duration_minutes > 0) || (sub.extra_quota?.ai_summaries > 0)
         if (hasExtra || i >= 4) {
           await authStore.fetchCurrentUser()
-          successMessage.value = '額外額度已入帳，可立即使用。'
+          successMessage.value = t('paymentReturn.extraQuotaReady')
           status.value = 'success'
           return
         }
@@ -90,7 +91,7 @@ onMounted(async () => {
         // 訂閱類：等 status 變為 active
         if (sub.status === 'active') {
           await authStore.fetchCurrentUser()
-          successMessage.value = `${sub.tier === 'pro' ? 'Pro' : 'Basic'} 方案已啟用。`
+          successMessage.value = t('paymentReturn.planActivated', { plan: sub.tier === 'pro' ? 'Pro' : 'Basic' })
           status.value = 'success'
           return
         }

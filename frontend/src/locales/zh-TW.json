@@ -211,7 +211,13 @@
       "downgrade": "降級方案",
       "cancelSubscription": "取消訂閱",
       "processing": "處理中...",
-      "changeFailed": "方案變更失敗，請稍後再試"
+      "changeFailed": "方案變更失敗，請稍後再試",
+      "perMonthYearly": "/月（年繳）",
+      "extraMinutes": "+{n} 分鐘",
+      "extraAiSummaries": "+{n} 次 AI 摘要",
+      "upgradeKeepQuota": "升級後，剩餘額度（{parts}）將保留為額外額度，不受每月重置影響。",
+      "downgradeScheduled": "降級後仍可使用目前方案直到 {date}，屆時自動切換為 {plan} 方案。\n\n請完成付款授權（不會立即扣款）。",
+      "downgradeImmediate": "將立即切換為新方案並扣款。"
     },
     "subscription": {
       "currentPlan": "目前方案",
@@ -910,7 +916,9 @@
   "common": {
     "close": "關閉",
     "cancel": "取消",
-    "remove": "移除"
+    "remove": "移除",
+    "back": "返回",
+    "listSeparator": "、"
   },
   "mergeModal": {
     "title": "音檔合併服務",
@@ -926,5 +934,16 @@
     "totalSize": "合計大小：{size}",
     "minTwoFiles": "請至少選擇 2 個檔案進行合併",
     "nextStep": "下一步：轉錄設定"
+  },
+  "paymentReturn": {
+    "processing": "付款處理中",
+    "processingHint": "請稍候，正在確認付款狀態...",
+    "success": "付款成功！",
+    "backToSettings": "返回設定頁",
+    "failed": "付款失敗",
+    "failedHint": "請確認信用卡資訊後重試，或聯繫客服。",
+    "subscriptionActivated": "您的訂閱已成功啟用。",
+    "extraQuotaReady": "額外額度已入帳，可立即使用。",
+    "planActivated": "{plan} 方案已啟用。"
   }
 }

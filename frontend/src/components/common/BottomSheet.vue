@@ -6,7 +6,7 @@
           <div class="bottom-sheet-handle"></div>
           <div v-if="title" class="bottom-sheet-header">
             <span>{{ title }}</span>
-            <button class="bottom-sheet-close" @click="close" aria-label="關閉">✕</button>
+            <button class="bottom-sheet-close" @click="close" :aria-label="$t('common.close')">✕</button>
           </div>
           <div class="bottom-sheet-content">
             <slot />
