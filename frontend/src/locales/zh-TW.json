@@ -385,7 +385,8 @@
     "uploadingFile": "上傳檔案中...",
     "fileTooLarge": "檔案過大",
     "fileTooLargeMessage": "「{name}」大小為 {size}，超過 {max}MB 上限",
-    "filesTooLargeMessage": "有 {count} 個檔案超過 {max}MB 上限，已自動略過"
+    "filesTooLargeMessage": "有 {count} 個檔案超過 {max}MB 上限，已自動略過",
+    "busyHint": "目前已有一個上傳正在進行，完成或取消後才能開始新的上傳。"
   },
   "tasksView": {
     "downloadFailed": "下載失敗，請稍後再試",

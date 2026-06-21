@@ -385,7 +385,8 @@
     "uploadingFile": "Uploading file...",
     "fileTooLarge": "File Too Large",
     "fileTooLargeMessage": "\"{name}\" is {size}, exceeding the {max}MB limit",
-    "filesTooLargeMessage": "{count} file(s) exceed the {max}MB limit and were skipped"
+    "filesTooLargeMessage": "{count} file(s) exceed the {max}MB limit and were skipped",
+    "busyHint": "An upload is already in progress. You can start a new one once it finishes or is cancelled."
   },
   "tasksView": {
     "downloadFailed": "Download failed, please try again later",

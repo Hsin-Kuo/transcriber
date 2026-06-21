@@ -6,7 +6,7 @@
     <!-- 上傳進行中提示：另一批上傳（可能在別頁啟動）尚未完成，暫時鎖住新上傳，
          避免單槽位的 uploadStore 被新 start() 覆蓋掉進度 / 孤兒化前一批的 AbortController -->
     <div v-if="uploadStore.busy && !uploading" class="upload-busy-hint">
-      目前已有一個上傳正在進行，完成或取消後才能開始新的上傳。
+      {{ $t('uploadZone.busyHint') }}
     </div>
 
     <!-- 上傳區域（含三角形合併按鈕） -->
