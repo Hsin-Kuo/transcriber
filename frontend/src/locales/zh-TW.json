@@ -394,7 +394,9 @@
   "errors": {
     "invalidFileSize": "檔案大小無效",
     "fileTooLarge": "檔案超過 {max}MB 上限",
-    "uploadDiskFull": "伺服器暫存空間不足，請稍後再試"
+    "uploadDiskFull": "伺服器暫存空間不足，請稍後再試",
+    "uploadSessionNotFound": "上傳工作階段已過期或不存在，請重新選擇檔案上傳",
+    "uploadSessionInvalidated": "上傳工作階段已失效，請重新選擇檔案上傳"
   },
   "uploadZone": {
     "clickToUpload": "點擊或拖曳檔案",

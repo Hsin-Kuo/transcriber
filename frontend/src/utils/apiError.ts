@@ -15,6 +15,8 @@ export const ERROR_I18N: Record<string, string> = {
   INVALID_FILE_SIZE: 'errors.invalidFileSize',
   FILE_TOO_LARGE: 'errors.fileTooLarge',
   UPLOAD_DISK_FULL: 'errors.uploadDiskFull',
+  UPLOAD_SESSION_NOT_FOUND: 'errors.uploadSessionNotFound',
+  UPLOAD_SESSION_INVALIDATED: 'errors.uploadSessionInvalidated',
   FEATURE_NOT_AVAILABLE: 'uploadErrors.featureNotAvailable',
 }
 
