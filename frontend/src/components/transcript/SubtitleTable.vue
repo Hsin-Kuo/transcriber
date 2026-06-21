@@ -356,6 +356,8 @@ onUnmounted(() => {
   background: var(--main-bg);
   padding: 12px;
   text-align: left;
+  /* 統一表頭字體：避免「時間」欄繼承 .col-time 的 Courier New monospace */
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 11px;
   font-weight: 700;
   color: var(--main-text-light);
