@@ -536,7 +536,11 @@
     "logTagCount": "個標籤",
     "logTagMapping": "標籤 \"{name}\" -> ID: {id}",
     "logSendingTagIds": "發送的標籤 ID 列表：",
-    "tagNotFound": "找不到標籤「{tag}」"
+    "tagNotFound": "找不到標籤「{tag}」",
+    "tagStepCreate": "建立標籤",
+    "tagStepOrder": "保存順序",
+    "tagStepColor": "保存顏色",
+    "tagEditPartialFailed": "部分標籤編輯操作失敗（{steps}）：{message}"
   },
   "downloadDialog": {
     "title": "下載設定",
@@ -578,7 +582,12 @@
     "errorSavingSegments": "儲存 segments 失敗",
     "confirmLeave": "你有未儲存的編輯內容，確定要離開嗎？",
     "moreOptions": "更多選項",
-    "replacing": "正在取代..."
+    "replacing": "正在取代...",
+    "collapsePanel": "收合面板",
+    "expandPanel": "展開面板",
+    "timeMarkers": "時間標記",
+    "density": "疏密度",
+    "loadingTranscript": "載入逐字稿中..."
   },
   "audioPlayer": {
     "browserNotSupported": "您的瀏覽器不支援音訊播放。",

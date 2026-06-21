@@ -536,7 +536,11 @@
     "logSendingTagIds": "Sending tag ID list:",
     "tagNotFound": "Tag \"{tag}\" not found",
     "selectTask": "Select Task",
-    "taskProgress": "Task Progress"
+    "taskProgress": "Task Progress",
+    "tagStepCreate": "Create tags",
+    "tagStepOrder": "Save order",
+    "tagStepColor": "Save colors",
+    "tagEditPartialFailed": "Some tag edits failed ({steps}): {message}"
   },
   "downloadDialog": {
     "title": "Download Settings",
@@ -578,7 +582,12 @@
     "confirmLeave": "You have unsaved changes. Are you sure you want to leave?",
     "moreOptions": "More Options",
     "replacing": "Replacing...",
-    "editTitle": "Edit Title"
+    "editTitle": "Edit Title",
+    "collapsePanel": "Collapse panel",
+    "expandPanel": "Expand panel",
+    "timeMarkers": "Time markers",
+    "density": "Density",
+    "loadingTranscript": "Loading transcript..."
   },
   "audioPlayer": {
     "browserNotSupported": "Your browser does not support audio playback.",
