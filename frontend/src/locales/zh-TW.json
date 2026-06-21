@@ -379,6 +379,11 @@
     "featureNotAvailable": "批次上傳為 Basic 以上方案功能，請升級方案後使用",
     "generic": "上傳失敗，請稍後再試"
   },
+  "errors": {
+    "invalidFileSize": "檔案大小無效",
+    "fileTooLarge": "檔案超過 {max}MB 上限",
+    "uploadDiskFull": "伺服器暫存空間不足，請稍後再試"
+  },
   "uploadZone": {
     "clickToUpload": "點擊或拖曳檔案",
     "supportedFormats": "支援音訊（M4A、MP3、WAV）及影片（MP4、MOV、AVI）格式",

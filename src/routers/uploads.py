@@ -21,6 +21,7 @@ from ..services.utils.audio_validator import (
     validate_filename_extension,
     validate_magic_bytes,
 )
+from ..utils.api_errors import api_error, ErrorCode
 from ..utils.config_loader import get_temp_dir, temp_free_bytes
 from ..utils.logger import get_logger
 
@@ -92,12 +93,13 @@ async def init_upload(
 ):
     """初始化分片上傳，回傳 upload_id 和 total_chunks"""
     if total_size <= 0:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "檔案大小無效")
+        raise api_error(ErrorCode.INVALID_FILE_SIZE, "檔案大小無效",
+                        status.HTTP_400_BAD_REQUEST)
     if total_size > MAX_UPLOAD_SIZE:
-        raise HTTPException(
-            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            f"檔案超過 {MAX_UPLOAD_SIZE_MB}MB 上限",
-        )
+        raise api_error(ErrorCode.FILE_TOO_LARGE,
+                        f"檔案超過 {MAX_UPLOAD_SIZE_MB}MB 上限",
+                        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        max=MAX_UPLOAD_SIZE_MB)
 
     validate_filename_extension(filename)
 
@@ -125,10 +127,9 @@ async def init_upload(
             user_id=user_id, free_mb=free // (1024 * 1024),
             need_mb=total_size // (1024 * 1024),
         )
-        raise HTTPException(
-            status.HTTP_507_INSUFFICIENT_STORAGE,
-            "伺服器暫存空間不足，請稍後再試",
-        )
+        raise api_error(ErrorCode.UPLOAD_DISK_FULL,
+                        "伺服器暫存空間不足，請稍後再試",
+                        status.HTTP_507_INSUFFICIENT_STORAGE)
 
     total_chunks = (total_size + CHUNK_SIZE - 1) // CHUNK_SIZE
     upload_id = str(uuid.uuid4())

@@ -282,6 +282,7 @@ import { useAuthStore } from '../stores/auth'
 import { useUiStore } from '../stores/ui'
 import { useUploadStore } from '../stores/upload'
 import { quotaErrorFromDetail } from '../utils/quotaError'
+import { errorI18n } from '../utils/apiError'
 
 const { t: $t, locale } = useI18n()
 const router = useRouter()
@@ -567,13 +568,14 @@ function uploadErrorMessage(error) {
   return detailToMessage(error?.response?.data?.detail)
 }
 
-// 把後端 detail 本體（字串 或 {code,message} 物件）轉成跟隨 UI 語言的可讀訊息。
-// 抽出來讓「axios error」與「批次回傳 tasks[].error 的裸 detail」共用同一套轉換。
+// 把後端 detail 本體（字串 或 {code,message,params} 物件）轉成跟隨 UI 語言的訊息。
+// 經集中對照（apiError.ts）：有 code 對應 i18n key → 前端翻譯（多語系）；
+// 否則 fallback 到後端 message（中文）；再不然通用錯誤。
+// 共用給「axios error」與「批次回傳 tasks[].error 的裸 detail」。
 function detailToMessage(detail) {
-  const code = detail && typeof detail === 'object' ? detail.code : null
-  if (code === 'FEATURE_NOT_AVAILABLE') return $t('uploadErrors.featureNotAvailable')
-  const serverMsg = (detail && typeof detail === 'object') ? detail.message : (typeof detail === 'string' ? detail : '')
-  return serverMsg || $t('uploadErrors.generic')
+  const { key, params, fallback } = errorI18n(detail)
+  if (key) return $t(key, params)
+  return fallback || $t('uploadErrors.generic')
 }
 
 // 取消上傳

@@ -375,6 +375,11 @@
     "cancel": "Cancel",
     "close": "Close"
   },
+  "errors": {
+    "invalidFileSize": "Invalid file size",
+    "fileTooLarge": "File exceeds the {max}MB limit",
+    "uploadDiskFull": "Server storage is temporarily full. Please try again later."
+  },
   "uploadErrors": {
     "featureNotAvailable": "Batch upload is available on Basic plan or above. Please upgrade to use it.",
     "generic": "Upload failed. Please try again later."
