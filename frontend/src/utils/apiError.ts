@@ -12,12 +12,70 @@
 
 /** 已就位 i18n 的錯誤碼 → i18n key。新增後端 code 時在此補一行即可。 */
 export const ERROR_I18N: Record<string, string> = {
+  // Uploads
   INVALID_FILE_SIZE: 'errors.invalidFileSize',
   FILE_TOO_LARGE: 'errors.fileTooLarge',
   UPLOAD_DISK_FULL: 'errors.uploadDiskFull',
   UPLOAD_SESSION_NOT_FOUND: 'errors.uploadSessionNotFound',
   UPLOAD_SESSION_INVALIDATED: 'errors.uploadSessionInvalidated',
   FEATURE_NOT_AVAILABLE: 'uploadErrors.featureNotAvailable',
+  // Auth
+  AUTH_RATE_LIMITED: 'errors.authRateLimited',
+  AUTH_RESEND_COOLDOWN: 'errors.authResendCooldown',
+  AUTH_INVALID_CREDENTIALS: 'errors.authInvalidCredentials',
+  AUTH_EMAIL_NOT_VERIFIED: 'errors.authEmailNotVerified',
+  AUTH_ACCOUNT_DISABLED: 'errors.authAccountDisabled',
+  AUTH_CURRENT_PASSWORD_INCORRECT: 'errors.authCurrentPasswordIncorrect',
+  AUTH_NEW_PASSWORD_SAME_AS_OLD: 'errors.authNewPasswordSameAsOld',
+  AUTH_PASSWORD_RESET_COOLDOWN: 'errors.authPasswordResetCooldown',
+  AUTH_EMAIL_CONFIRMATION_MISMATCH: 'errors.authEmailConfirmationMismatch',
+  AUTH_PASSWORD_REQUIRED: 'errors.authPasswordRequired',
+  AUTH_PASSWORD_INCORRECT: 'errors.authPasswordIncorrect',
+  // Tasks
+  TASK_NOT_FOUND: 'errors.taskNotFound',
+  TASK_NOT_CANCELABLE: 'errors.taskNotCancelable',
+  TASK_NOT_DELETABLE: 'errors.taskNotDeletable',
+  // Transcriptions
+  TRANSCRIPTION_INVALID_UPLOAD_ID: 'errors.transcriptionInvalidUploadId',
+  TRANSCRIPTION_NO_FILE_PROVIDED: 'errors.transcriptionNoFileProvided',
+  TRANSCRIPTION_FILES_TOO_LARGE: 'errors.transcriptionFilesTooLarge',
+  TRANSCRIPTION_TASK_NOT_FOUND: 'errors.transcriptionTaskNotFound',
+  TRANSCRIPTION_TASK_NOT_COMPLETED: 'errors.transcriptionTaskNotCompleted',
+  TRANSCRIPTION_CONTENT_NOT_FOUND: 'errors.transcriptionContentNotFound',
+  TRANSCRIPTION_AUDIO_EXPIRED: 'errors.transcriptionAudioExpired',
+  TRANSCRIPTION_AUDIO_NOT_FOUND: 'errors.transcriptionAudioNotFound',
+  TRANSCRIPTION_BATCH_TOO_MANY_FILES: 'errors.transcriptionBatchTooManyFiles',
+  TRANSCRIPTION_BATCH_NO_FILES: 'errors.transcriptionBatchNoFiles',
+  // Subscriptions
+  SUBSCRIPTION_ALREADY_ACTIVE: 'errors.subscriptionAlreadyActive',
+  SUBSCRIPTION_NOT_ACTIVE: 'errors.subscriptionNotActive',
+  SUBSCRIPTION_ALREADY_SCHEDULED_CANCEL: 'errors.subscriptionAlreadyScheduledCancel',
+  SUBSCRIPTION_NOT_SCHEDULED_CANCEL: 'errors.subscriptionNotScheduledCancel',
+  SUBSCRIPTION_REQUIRED_FOR_EXTRA: 'errors.subscriptionRequiredForExtra',
+  // Shared
+  SHARED_PAID_TIER_ONLY: 'errors.sharedPaidTierOnly',
+  SHARED_TASK_NOT_FOUND: 'errors.sharedTaskNotFound',
+  SHARED_TASK_NOT_COMPLETED: 'errors.sharedTaskNotCompleted',
+  SHARED_LINK_INVALID: 'errors.sharedLinkInvalid',
+  SHARED_LINK_EXPIRED: 'errors.sharedLinkExpired',
+  SHARED_AUDIO_EXPIRED: 'errors.sharedAudioExpired',
+  SHARED_AUDIO_NOT_FOUND: 'errors.sharedAudioNotFound',
+  // Tags / Summaries
+  TAG_NOT_FOUND: 'errors.tagNotFoundOrDenied',
+  SUMMARY_NOT_FOUND: 'errors.summaryNotFound',
+  // OAuth
+  OAUTH_TOKEN_INVALID: 'errors.oauthTokenInvalid',
+  OAUTH_TOKEN_VERIFY_FAILED: 'errors.oauthTokenVerifyFailed',
+  OAUTH_EMAIL_EXISTS_UNLINKED: 'errors.oauthEmailExistsUnlinked',
+  OAUTH_ALREADY_LINKED_SELF: 'errors.oauthAlreadyLinkedSelf',
+  OAUTH_ALREADY_LINKED_OTHER: 'errors.oauthAlreadyLinkedOther',
+  OAUTH_NOT_LINKED: 'errors.oauthNotLinked',
+  OAUTH_UNLINK_REQUIRES_PASSWORD: 'errors.oauthUnlinkRequiresPassword',
+  OAUTH_PASSWORD_ALREADY_SET: 'errors.oauthPasswordAlreadySet',
+  // Audio
+  AUDIO_MERGE_TOO_FEW_FILES: 'errors.audioMergeTooFewFiles',
+  AUDIO_MERGE_TOTAL_TOO_LARGE: 'errors.audioMergeTotalTooLarge',
+  AUDIO_FILE_NOT_FOUND: 'errors.audioFileNotFound',
 }
 
 type ErrorDetail = {

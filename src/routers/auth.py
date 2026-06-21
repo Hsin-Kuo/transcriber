@@ -80,6 +80,7 @@ from ..services.credential_flow import (
     SendPasswordReset,
 )
 from ..utils.privacy import mask_email
+from ..utils.api_errors import api_error
 from ..models.quota import QUOTA_TIERS, QuotaTier
 
 from ..utils.logger import get_logger
@@ -158,9 +159,10 @@ async def register(
         window_seconds=REGISTER_RATE_LIMIT_WINDOW,
     )
     if not ip_allowed:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="註冊請求過於頻繁，請稍後再試",
+        raise api_error(
+            "AUTH_RATE_LIMITED",
+            "Too many registration requests, please try again later",
+            status.HTTP_429_TOO_MANY_REQUESTS,
         )
 
     email_allowed, _ = await rate_limit_repo.check_rate_limit(
@@ -170,9 +172,10 @@ async def register(
         window_seconds=REGISTER_RATE_LIMIT_WINDOW,
     )
     if not email_allowed:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="註冊請求過於頻繁，請稍後再試",
+        raise api_error(
+            "AUTH_RATE_LIMITED",
+            "Too many registration requests, please try again later",
+            status.HTTP_429_TOO_MANY_REQUESTS,
         )
 
     # 不論 email 是否存在都記錄 → 避免「rate-limit 觸發行為」洩漏帳號是否存在
@@ -313,9 +316,10 @@ async def resend_verification_email(
         window_seconds=REGISTER_RATE_LIMIT_WINDOW,
     )
     if not ip_allowed:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="請求過於頻繁，請稍後再試",
+        raise api_error(
+            "AUTH_RATE_LIMITED",
+            "Too many requests, please try again later",
+            status.HTTP_429_TOO_MANY_REQUESTS,
         )
 
     # 同 email 60s 內只能重發 1 次
@@ -326,9 +330,11 @@ async def resend_verification_email(
         window_seconds=RESEND_VERIFICATION_COOLDOWN_SECONDS,
     )
     if not cooldown_allowed:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"請等待 {RESEND_VERIFICATION_COOLDOWN_SECONDS} 秒後再重新發送",
+        raise api_error(
+            "AUTH_RESEND_COOLDOWN",
+            "Please wait {seconds} seconds before resending",
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            seconds=RESEND_VERIFICATION_COOLDOWN_SECONDS,
         )
 
     # 同 email 每小時上限
@@ -339,9 +345,10 @@ async def resend_verification_email(
         window_seconds=REGISTER_RATE_LIMIT_WINDOW,
     )
     if not email_allowed:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="重發次數過多，請稍後再試",
+        raise api_error(
+            "AUTH_RATE_LIMITED",
+            "Too many resend attempts, please try again later",
+            status.HTTP_429_TOO_MANY_REQUESTS,
         )
 
     # 不論 email 是否存在都記錄 → 避免 rate-limit 行為洩漏帳號是否存在
@@ -404,9 +411,10 @@ async def registration_status(
         window_seconds=REG_STATUS_WINDOW,
     )
     if not ip_allowed:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="查詢過於頻繁，請稍後再試",
+        raise api_error(
+            "AUTH_RATE_LIMITED",
+            "Too many requests, please try again later",
+            status.HTTP_429_TOO_MANY_REQUESTS,
         )
     await rate_limit_repo.record_request(
         limit_type="registration_status_ip",
@@ -475,9 +483,10 @@ async def abandon_registration(
         window_seconds=ABANDON_REGISTRATION_WINDOW,
     )
     if not ip_allowed:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="請求過於頻繁，請稍後再試",
+        raise api_error(
+            "AUTH_RATE_LIMITED",
+            "Too many requests, please try again later",
+            status.HTTP_429_TOO_MANY_REQUESTS,
         )
     await rate_limit_repo.record_request(
         limit_type="abandon_registration_ip",
@@ -557,9 +566,10 @@ async def login(
         window_seconds=LOGIN_RATE_LIMIT_WINDOW
     )
     if not ip_allowed:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="登入嘗試過於頻繁，請稍後再試"
+        raise api_error(
+            "AUTH_RATE_LIMITED",
+            "Too many login attempts, please try again later",
+            status.HTTP_429_TOO_MANY_REQUESTS,
         )
 
     normalized_email = credentials.email.strip().lower()
@@ -570,9 +580,10 @@ async def login(
         window_seconds=LOGIN_RATE_LIMIT_WINDOW
     )
     if not email_allowed:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="登入嘗試過於頻繁，請稍後再試"
+        raise api_error(
+            "AUTH_RATE_LIMITED",
+            "Too many login attempts, please try again later",
+            status.HTTP_429_TOO_MANY_REQUESTS,
         )
 
     # --- 驗證憑證 ---
@@ -592,17 +603,19 @@ async def login(
             status_code=401,
             message=f"登入失敗: {credentials.email}"
         )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Email 或密碼錯誤",
+        raise api_error(
+            "AUTH_INVALID_CREDENTIALS",
+            "Incorrect email or password",
+            status.HTTP_401_UNAUTHORIZED,
             headers={"WWW-Authenticate": "Bearer"},
         )
 
     # 檢查 Email 是否已驗證
     if not user.get("email_verified"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="請先驗證您的 Email"
+        raise api_error(
+            "AUTH_EMAIL_NOT_VERIFIED",
+            "Please verify your email first",
+            status.HTTP_403_FORBIDDEN,
         )
 
     if not user.get("is_active"):
@@ -614,9 +627,10 @@ async def login(
             status_code=403,
             message="嘗試登入已停用帳號"
         )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="帳號已被停用"
+        raise api_error(
+            "AUTH_ACCOUNT_DISABLED",
+            "This account has been disabled",
+            status.HTTP_403_FORBIDDEN,
         )
 
     # 生成 Token
@@ -664,27 +678,30 @@ async def refresh_token(
     """
     cookie_token = request.cookies.get(REFRESH_COOKIE_NAME)
     if not cookie_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="缺少 refresh token cookie"
+        raise api_error(
+            "AUTH_REFRESH_TOKEN_MISSING",
+            "Missing refresh token cookie",
+            status.HTTP_401_UNAUTHORIZED,
         )
 
     token_data = verify_token(cookie_token, "refresh")
     if not token_data:
         # 順手清掉壞掉的 cookie，避免下次再帶錯
         clear_refresh_cookie(response)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="無效的 Refresh Token"
+        raise api_error(
+            "AUTH_REFRESH_TOKEN_INVALID",
+            "Invalid refresh token",
+            status.HTTP_401_UNAUTHORIZED,
         )
 
     # 驗證 Token 是否在資料庫中且未被撤銷
     user_repo = UserRepository(db)
     if not await user_repo.verify_refresh_token(token_data.user_id, cookie_token):
         clear_refresh_cookie(response)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh Token 已被撤銷或過期"
+        raise api_error(
+            "AUTH_REFRESH_TOKEN_REVOKED",
+            "Refresh token has been revoked or expired",
+            status.HTTP_401_UNAUTHORIZED,
         )
 
     # 生成新 Access Token；refresh token 沿用不旋轉（簡化 client 同步）
@@ -750,9 +767,10 @@ async def change_password(
     # 從資料庫獲取完整用戶資料（包含 password_hash）
     user = await user_repo.get_by_id(str(current_user["_id"]))
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用戶不存在"
+        raise api_error(
+            "AUTH_USER_NOT_FOUND",
+            "User not found",
+            status.HTTP_404_NOT_FOUND,
         )
 
     # 驗證目前密碼
@@ -766,35 +784,40 @@ async def change_password(
             status_code=400,
             message="密碼變更失敗：目前密碼錯誤"
         )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="目前密碼錯誤"
+        raise api_error(
+            "AUTH_CURRENT_PASSWORD_INCORRECT",
+            "Current password is incorrect",
+            status.HTTP_400_BAD_REQUEST,
         )
 
     # 檢查新密碼不能與舊密碼相同
     if request.current_password == request.new_password:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="新密碼不能與目前密碼相同"
+        raise api_error(
+            "AUTH_NEW_PASSWORD_SAME_AS_OLD",
+            "New password must be different from the current password",
+            status.HTTP_400_BAD_REQUEST,
         )
 
     # 驗證密碼複雜度（與註冊時相同）
     import re
     new_pwd = request.new_password
     if not re.search(r'[A-Z]', new_pwd):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="新密碼必須包含至少一個大寫字母"
+        raise api_error(
+            "AUTH_PASSWORD_MISSING_UPPERCASE",
+            "New password must contain at least one uppercase letter",
+            status.HTTP_400_BAD_REQUEST,
         )
     if not re.search(r'[a-z]', new_pwd):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="新密碼必須包含至少一個小寫字母"
+        raise api_error(
+            "AUTH_PASSWORD_MISSING_LOWERCASE",
+            "New password must contain at least one lowercase letter",
+            status.HTTP_400_BAD_REQUEST,
         )
     if not re.search(r'[0-9]', new_pwd):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="新密碼必須包含至少一個數字"
+        raise api_error(
+            "AUTH_PASSWORD_MISSING_DIGIT",
+            "New password must contain at least one digit",
+            status.HTTP_400_BAD_REQUEST,
         )
 
     # 更新密碼
@@ -836,9 +859,10 @@ async def get_current_user_info(
     full_user = await user_repo.get_by_id(str(current_user["_id"]))
 
     if not full_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用戶不存在"
+        raise api_error(
+            "AUTH_USER_NOT_FOUND",
+            "User not found",
+            status.HTTP_404_NOT_FOUND,
         )
 
     # 跨月自動歸零配額
@@ -909,9 +933,10 @@ async def update_preferences(
 
     prefs_to_update = request.dict(exclude_none=True)
     if not prefs_to_update:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="未提供任何要更新的偏好設定"
+        raise api_error(
+            "AUTH_NO_PREFERENCES_PROVIDED",
+            "No preferences provided to update",
+            status.HTTP_400_BAD_REQUEST,
         )
 
     updated_preferences = await user_repo.update_preferences(
@@ -920,9 +945,10 @@ async def update_preferences(
     )
 
     if updated_preferences is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用戶不存在"
+        raise api_error(
+            "AUTH_USER_NOT_FOUND",
+            "User not found",
+            status.HTTP_404_NOT_FOUND,
         )
 
     return {"preferences": updated_preferences}
@@ -963,9 +989,10 @@ async def forgot_password(
         window_seconds=3600  # 1 小時
     )
     if not ip_allowed:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="請求過於頻繁，請稍後再試"
+        raise api_error(
+            "AUTH_RATE_LIMITED",
+            "Too many requests, please try again later",
+            status.HTTP_429_TOO_MANY_REQUESTS,
         )
 
     # 記錄此 IP 的請求（無論 email 是否存在都記錄，防止探測）
@@ -983,9 +1010,11 @@ async def forgot_password(
         outcome = await flow.issue(CredentialIntent.FORGOT, request.email)
     except CredentialCooldown as e:
         remaining_minutes = (e.remaining_seconds + 59) // 60  # 向上取整
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"請等待 {remaining_minutes} 分鐘後再試"
+        raise api_error(
+            "AUTH_PASSWORD_RESET_COOLDOWN",
+            "Please wait {minutes} minutes before trying again",
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            minutes=remaining_minutes,
         )
 
     await _dispatch_credential_email(email_service, outcome.email)
@@ -1086,30 +1115,34 @@ async def delete_account(
     # 從資料庫獲取完整用戶資料
     user = await user_repo.get_by_id(user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用戶不存在"
+        raise api_error(
+            "AUTH_USER_NOT_FOUND",
+            "User not found",
+            status.HTTP_404_NOT_FOUND,
         )
 
     # 驗證 email 確認
     if request.confirmation != user["email"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email 確認不符"
+        raise api_error(
+            "AUTH_EMAIL_CONFIRMATION_MISMATCH",
+            "Email confirmation does not match",
+            status.HTTP_400_BAD_REQUEST,
         )
 
     # 密碼用戶需驗證密碼
     auth_providers = user.get("auth_providers", [])
     if "password" in auth_providers:
         if not request.password:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="請輸入密碼以確認刪除"
+            raise api_error(
+                "AUTH_PASSWORD_REQUIRED",
+                "Please enter your password to confirm deletion",
+                status.HTTP_400_BAD_REQUEST,
             )
         if not verify_password(request.password, user["password_hash"]):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="密碼錯誤"
+            raise api_error(
+                "AUTH_PASSWORD_INCORRECT",
+                "Incorrect password",
+                status.HTTP_400_BAD_REQUEST,
             )
 
     # 記錄刪除操作（在刪除前記錄）

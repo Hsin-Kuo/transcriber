@@ -23,6 +23,7 @@ from ..dependencies import get_task_service, get_tag_service
 from ..services.utils.async_utils import get_current_time
 from ..utils.storage.backend import is_aws
 from ..utils.storage.compact import delete_audio_by_path as storage_delete_audio_by_path, move_audio, extract_tier_from_path
+from ..utils.api_errors import api_error
 from ..utils.logger import get_logger
 
 try:
@@ -266,10 +267,7 @@ async def get_task(
     task = await task_service.get_task(task_id, str(current_user["_id"]))
 
     if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任務不存在或無權訪問"
-        )
+        raise api_error("TASK_NOT_FOUND", "Task not found or access denied", status.HTTP_404_NOT_FOUND)
 
     # 豐富任務數據
     enriched_task = enrich_task_data(task)
@@ -416,16 +414,15 @@ async def cancel_task(
     task = await task_service.get_task(task_id, str(current_user["_id"]))
 
     if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任務不存在或無權訪問"
-        )
+        raise api_error("TASK_NOT_FOUND", "Task not found or access denied", status.HTTP_404_NOT_FOUND)
 
     # 只能取消進行中或等待中的任務
     if task["status"] not in ["pending", "processing"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"無法取消已結束的任務（當前狀態：{task['status']}）"
+        raise api_error(
+            "TASK_NOT_CANCELABLE",
+            "Cannot cancel a finished task (current status: {status})",
+            status.HTTP_400_BAD_REQUEST,
+            status=task["status"],
         )
 
     # 1. 立即更新資料庫狀態為「取消中」，避免刷新頁面時誤判任務仍在進行
@@ -505,21 +502,17 @@ async def delete_task(
     task = await task_service.get_task(task_id, str(current_user["_id"]))
 
     if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任務不存在或無權訪問"
-        )
+        raise api_error("TASK_NOT_FOUND", "Task not found or access denied", status.HTTP_404_NOT_FOUND)
 
     if task.get("deleted", False):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="任務已被刪除"
-        )
+        raise api_error("TASK_ALREADY_DELETED", "Task already deleted", status.HTTP_400_BAD_REQUEST)
 
     if task["status"] in ["pending", "processing"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"無法刪除進行中的任務（當前狀態：{task['status']}），請先取消任務"
+        raise api_error(
+            "TASK_NOT_DELETABLE",
+            "Cannot delete a task in progress (current status: {status}); cancel it first",
+            status.HTTP_400_BAD_REQUEST,
+            status=task["status"],
         )
 
     deleted_files = await task_service.soft_delete_full(task, task_id)
@@ -583,10 +576,7 @@ async def update_task_tags(
         task = await task_service.get_task(task_id, str(current_user["_id"]))
 
         if not task:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="任務不存在或無權訪問"
-            )
+            raise api_error("TASK_NOT_FOUND", "Task not found or access denied", status.HTTP_404_NOT_FOUND)
 
         # 更新標籤
         tags = tags_data.get("tags", [])
@@ -623,9 +613,11 @@ async def update_task_tags(
         raise
     except Exception as e:
         log.error("task.tags.update_failed", error_type=type(e).__name__, error=str(e), exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"更新標籤失敗：{str(e)}"
+        raise api_error(
+            "TASK_TAGS_UPDATE_FAILED",
+            "Failed to update tags: {error}",
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error=str(e),
         )
 
 
@@ -751,10 +743,7 @@ async def batch_delete_tasks(
     task_ids = delete_data.get("task_ids", [])
 
     if not task_ids:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="未提供要刪除的任務 ID"
-        )
+        raise api_error("TASK_IDS_REQUIRED", "No task IDs provided for deletion", status.HTTP_400_BAD_REQUEST)
 
     deleted_count = 0
     failed_count = 0
@@ -809,10 +798,7 @@ async def batch_add_tags(
     tags_to_add = tags_data.get("tags", [])
 
     if not task_ids or not tags_to_add:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="未提供任務 ID 或標籤"
-        )
+        raise api_error("TASK_IDS_OR_TAGS_REQUIRED", "No task IDs or tags provided", status.HTTP_400_BAD_REQUEST)
 
     # 自動為新標籤創建記錄到 tags 表
     user_id = str(current_user["_id"])
@@ -886,10 +872,7 @@ async def batch_remove_tags(
     tags_to_remove = tags_data.get("tags", [])
 
     if not task_ids or not tags_to_remove:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="未提供任務 ID 或標籤"
-        )
+        raise api_error("TASK_IDS_OR_TAGS_REQUIRED", "No task IDs or tags provided", status.HTTP_400_BAD_REQUEST)
 
     updated_count = 0
 
@@ -1026,9 +1009,10 @@ async def cleanup_orphaned_processes_endpoint(
         清理結果
     """
     if not PSUTIL_AVAILABLE:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="psutil 未安裝，無法執行進程清理"
+        raise api_error(
+            "TASK_PSUTIL_UNAVAILABLE",
+            "psutil is not installed; cannot run process cleanup",
+            status.HTTP_503_SERVICE_UNAVAILABLE,
         )
 
     try:
@@ -1043,7 +1027,9 @@ async def cleanup_orphaned_processes_endpoint(
 
     except Exception as e:
         log.error("task.system.cleanup.failed", error=str(e), exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"清理失敗: {str(e)}"
+        raise api_error(
+            "TASK_CLEANUP_FAILED",
+            "Process cleanup failed: {error}",
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error=str(e),
         )

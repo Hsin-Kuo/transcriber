@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from src.utils.api_errors import api_error, ErrorCode  # noqa: E402
+from src.utils.api_errors import api_error  # noqa: E402
 
 
 def test_api_error_basic_shape():
@@ -15,7 +15,7 @@ def test_api_error_basic_shape():
 
 
 def test_api_error_with_params():
-    exc = api_error(ErrorCode.FILE_TOO_LARGE, "檔案超過 3072MB 上限", 413, max=3072)
+    exc = api_error("FILE_TOO_LARGE", "檔案超過 3072MB 上限", 413, max=3072)
     assert exc.status_code == 413
     assert exc.detail["code"] == "FILE_TOO_LARGE"
     assert exc.detail["message"] == "檔案超過 3072MB 上限"
@@ -24,5 +24,18 @@ def test_api_error_with_params():
 
 def test_api_error_omits_params_when_empty():
     """無 params 時不放空 dict，detail 保持精簡。"""
-    exc = api_error(ErrorCode.INVALID_FILE_SIZE, "檔案大小無效", 400)
+    exc = api_error("INVALID_FILE_SIZE", "檔案大小無效", 400)
     assert "params" not in exc.detail
+
+
+def test_api_error_with_headers():
+    exc = api_error("AUTH_X", "msg", 401, headers={"WWW-Authenticate": "Bearer"})
+    assert exc.status_code == 401
+    assert exc.headers == {"WWW-Authenticate": "Bearer"}
+    assert exc.detail == {"code": "AUTH_X", "message": "msg"}
+
+
+def test_api_error_headers_and_params_coexist():
+    exc = api_error("X", "need {n}", 400, headers={"H": "1"}, n=5)
+    assert exc.headers == {"H": "1"}
+    assert exc.detail["params"] == {"n": 5}
