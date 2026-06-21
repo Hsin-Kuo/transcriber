@@ -1,7 +1,6 @@
 <template>
-  <Teleport to="body">
-    <div class="notification-container" aria-live="polite" aria-atomic="false" role="status">
-      <TransitionGroup name="notification">
+  <div class="notification-container" aria-live="polite" aria-atomic="false" role="status">
+    <TransitionGroup name="notification">
         <div
           v-for="notification in notifications"
           :key="notification.id"
@@ -42,8 +41,7 @@
           </button>
         </div>
       </TransitionGroup>
-    </div>
-  </Teleport>
+  </div>
 </template>
 
 <script setup>
@@ -129,14 +127,12 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* 定位由 App.vue 的 .notify-stack 共用容器負責；這裡只排列自身 toast 堆疊 */
 .notification-container {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  z-index: 9999;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  align-items: flex-end;
   pointer-events: none;
 }
 
@@ -145,10 +141,13 @@ onUnmounted(() => {
   align-items: flex-start;
   gap: 12px;
   min-width: 300px;
-  max-width: 400px;
-  padding: 16px;
+  max-width: 360px;
+  padding: 14px 16px;
   background: var(--main-bg);
-  border-radius: 12px;
+  /* 與 GlobalUploadProgress 一致的卡片樣式（圓角 / 陰影 / 邊框） */
+  border-radius: 14px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.15);
   pointer-events: auto;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -256,15 +255,11 @@ onUnmounted(() => {
 }
 
 @media (max-width: 768px) {
-  .notification-container {
-    left: 20px;
-    right: 20px;
-    bottom: 20px;
-  }
-
+  /* 定位由 .notify-stack 負責；行動裝置滿版 */
   .notification-toast {
     min-width: auto;
     max-width: none;
+    width: 100%;
   }
 }
 </style>

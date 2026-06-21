@@ -531,18 +531,11 @@ async function confirmAndUpload() {
       const detail = error.response?.data?.detail
       const errorMsg = uploadErrorMessage(error)
       uploadStore.fail(errorMsg)
-      // 額度不足 → 改用引導購買的對話框（而非一般錯誤 toast）
+      // 額度不足 → 改用引導購買的對話框；其餘錯誤：GlobalUploadProgress 浮層
+      // 已以 error 狀態顯示 errorMsg，不再另彈 toast，避免同一事件雙重通知（兩張卡）
       const quota = quotaErrorFromDetail(detail)
       if (quota) {
         uiStore.showQuotaModal(quota.type)
-      } else if (showNotification) {
-        showNotification({
-          title: $t('transcription.uploadFailed'),
-          message: errorMsg,
-          type: 'error'
-        })
-      } else {
-        alert($t('transcription.uploadFailedMessage', { message: errorMsg }))
       }
     }
   } finally {
@@ -711,14 +704,8 @@ async function confirmBatchUpload(formData) {
     if (!isUploadCancelled(error)) {
       console.error('批次上傳失敗:', error)
       const errorMsg = uploadErrorMessage(error)
+      // GlobalUploadProgress 浮層已以 error 狀態顯示 errorMsg，不再另彈 toast
       uploadStore.fail(errorMsg)
-      if (showNotification) {
-        showNotification({
-          title: $t('batchUpload.failed'),
-          message: errorMsg,
-          type: 'error'
-        })
-      }
     }
   } finally {
     uploading.value = false

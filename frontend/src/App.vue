@@ -9,9 +9,14 @@
         </transition>
       </router-view>
     </main>
-    <NotificationToast ref="notificationToast" />
-    <!-- 全域上傳進度浮層：跳頁也持續顯示大檔上傳進度 -->
-    <GlobalUploadProgress />
+    <!-- 右下角通知堆疊：上傳進度浮層 + toast 共用同一欄，避免互相覆蓋、視覺一致 -->
+    <Teleport to="body">
+      <div class="notify-stack">
+        <!-- 上傳浮層在上、toast 在下（靠近右下角最易點） -->
+        <GlobalUploadProgress />
+        <NotificationToast ref="notificationToast" />
+      </div>
+    </Teleport>
     <!-- 全域方案面板 / 額度不足對話框（任何頁面可觸發）-->
     <PlanPanel v-model="uiStore.planPanelOpen" :current-tier="currentTier" @plan-changed="handlePlanChanged" />
     <QuotaExceededModal />
@@ -116,6 +121,30 @@ onUnmounted(() => {
 </script>
 
 <style>
+/* 右下角通知堆疊容器：上傳浮層 + toast 共用同一欄，垂直堆疊不重疊。
+   teleport 到 body，避免任何祖層 overflow/transform 影響 fixed 定位。 */
+.notify-stack {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-end;
+  pointer-events: none; /* 子卡片各自 re-enable */
+  max-width: calc(100vw - 40px);
+}
+
+@media (max-width: 768px) {
+  .notify-stack {
+    left: 12px;
+    right: 12px;
+    bottom: calc(60px + env(safe-area-inset-bottom, 0px) + 8px);
+    align-items: stretch;
+  }
+}
+
 /* 路由過渡動畫 */
 .fade-enter-active,
 .fade-leave-active {

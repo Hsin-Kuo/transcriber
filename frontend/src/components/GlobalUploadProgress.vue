@@ -123,10 +123,8 @@ onUnmounted(() => {
 
 <style scoped>
 .global-upload {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
-  z-index: 1200;
+  /* 定位由 App.vue 的 .notify-stack 共用容器負責 */
+  pointer-events: auto;
   display: flex;
   align-items: flex-start;
   gap: 12px;
@@ -341,13 +339,10 @@ onUnmounted(() => {
   opacity: 0;
 }
 
-/* 手機版：貼齊底部、避開底部導航 */
+/* 手機版滿版（定位與避開底部導航由 .notify-stack 負責）*/
 @media (max-width: 768px) {
   .global-upload {
-    left: 12px;
-    right: 12px;
-    width: auto;
-    bottom: calc(60px + env(safe-area-inset-bottom, 0px) + 8px);
+    width: 100%;
   }
 }
 </style>
