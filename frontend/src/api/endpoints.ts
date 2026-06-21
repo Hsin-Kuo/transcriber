@@ -56,6 +56,7 @@ export const NEW_ENDPOINTS = {
     init: '/uploads/init',
     chunk: (uploadId: string, chunkIndex: number) => `/uploads/${uploadId}/chunks/${chunkIndex}`,
     complete: (uploadId: string) => `/uploads/${uploadId}/complete`,
+    abort: (uploadId: string) => `/uploads/${uploadId}`,
   },
 
   // 公開分享

@@ -2,16 +2,16 @@
   <div class="auth-container">
     <div class="auth-card">
       <div class="auth-content">
-          <h1 class="auth-title">忘記密碼</h1>
-          <p class="auth-subtitle">Sound Lite 轉錄服務</p>
+          <h1 class="auth-title">{{ $t('auth.forgotPasswordTitle') }}</h1>
+          <p class="auth-subtitle">{{ $t('auth.forgotPasswordSubtitle') }}</p>
 
           <form v-if="!success" @submit.prevent="handleSubmit" class="auth-form">
             <p class="form-description">
-              請輸入您註冊時使用的 Email，我們將發送密碼重設連結給您。
+              {{ $t('auth.forgotPasswordDescription') }}
             </p>
 
             <div class="form-group">
-              <label for="email">Email</label>
+              <label for="email">{{ $t('auth.email') }}</label>
               <input
                 type="email"
                 id="email"
@@ -31,7 +31,7 @@
               class="btn-primary"
               :disabled="loading || !email"
             >
-              {{ loading ? '發送中...' : '發送重設郵件' }}
+              {{ loading ? $t('auth.sending') : $t('auth.sendResetEmail') }}
             </button>
           </form>
 
@@ -39,10 +39,10 @@
             <div class="success-icon">📧</div>
             <p class="success-title">{{ successMessage }}</p>
             <p class="success-subtitle">
-              如果 <strong>{{ email }}</strong> 已註冊，您將會收到密碼重設郵件。
+              {{ $t('auth.forgotPasswordEmailHint', { email }) }}
             </p>
             <p class="success-note">
-              沒收到郵件？請檢查垃圾郵件資料夾，或稍後再試。
+              {{ $t('auth.checkSpamFolder') }}
             </p>
 
             <button
@@ -50,12 +50,12 @@
               class="btn-secondary"
               @click="router.push('/login')"
             >
-              返回登入頁面
+              {{ $t('auth.backToLoginPage') }}
             </button>
           </div>
 
           <div v-if="!success" class="auth-footer">
-            <p>想起密碼了？<router-link to="/login">返回登入</router-link></p>
+            <p>{{ $t('auth.rememberPassword') }}<router-link to="/login">{{ $t('auth.backToLogin') }}</router-link></p>
           </div>
         </div>
     </div>
@@ -65,10 +65,12 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const { t: $t } = useI18n()
 
 const email = ref('')
 const loading = ref(false)
@@ -84,7 +86,7 @@ async function handleSubmit() {
 
   if (result.success) {
     success.value = true
-    successMessage.value = result.message || '重設郵件已發送'
+    successMessage.value = result.message || $t('auth.resetEmailSent')
   } else {
     error.value = result.error
   }

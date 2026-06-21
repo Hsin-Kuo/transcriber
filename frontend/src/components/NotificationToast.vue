@@ -34,7 +34,7 @@
             <div class="notification-title">{{ notification.title }}</div>
             <div v-if="notification.message" class="notification-message">{{ notification.message }}</div>
           </div>
-          <button class="notification-close" @click.stop="removeNotification(notification.id)" aria-label="關閉通知">
+          <button class="notification-close" @click.stop="removeNotification(notification.id)" :aria-label="$t('common.close')">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="18" y1="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -211,6 +211,8 @@ onUnmounted(() => {
   font-size: 0.85rem;
   color: var(--main-text-light);
   line-height: 1.4;
+  /* 保留訊息中的換行（批次部分失敗會用 \n 列出各檔原因）；單行訊息不受影響 */
+  white-space: pre-line;
 }
 
 .notification-close {

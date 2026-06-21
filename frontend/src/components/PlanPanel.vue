@@ -45,7 +45,7 @@
             <h3>{{ $t('userSettings.planPanel.' + plan.key) }}</h3>
             <div class="plan-price">
               <span class="price-amount">{{ getPrice(plan) }}</span>
-              <span class="price-period">{{ billing === 'yearly' ? '/月（年繳）' : $t('userSettings.planPanel.perMonth') }}</span>
+              <span class="price-period">{{ billing === 'yearly' ? $t('userSettings.planPanel.perMonthYearly') : $t('userSettings.planPanel.perMonth') }}</span>
             </div>
           </div>
 
@@ -218,15 +218,15 @@ async function selectPlan(planKey) {
       // 升級或降級需要付款：auto-submit 到藍新
       emit('update:modelValue', false)
       if (result.action === 'upgrade' && (result.extra_duration_minutes > 0 || result.extra_ai_summaries > 0)) {
-        const durMsg = result.extra_duration_minutes > 0 ? `+${result.extra_duration_minutes} 分鐘` : ''
-        const aiMsg = result.extra_ai_summaries > 0 ? `+${result.extra_ai_summaries} 次 AI 摘要` : ''
-        const parts = [durMsg, aiMsg].filter(Boolean).join('、')
-        alert(`升級後，剩餘額度（${parts}）將保留為額外額度，不受每月重置影響。`)
+        const durMsg = result.extra_duration_minutes > 0 ? $t('userSettings.planPanel.extraMinutes', { n: result.extra_duration_minutes }) : ''
+        const aiMsg = result.extra_ai_summaries > 0 ? $t('userSettings.planPanel.extraAiSummaries', { n: result.extra_ai_summaries }) : ''
+        const parts = [durMsg, aiMsg].filter(Boolean).join($t('common.listSeparator'))
+        alert($t('userSettings.planPanel.upgradeKeepQuota', { parts }))
       }
       if (result.action === 'downgrade') {
         const msg = result.effective === 'end_of_period'
-          ? `降級後仍可使用目前方案直到 ${result.scheduled_date}，屆時自動切換為 ${planKey} 方案。\n\n請完成付款授權（不會立即扣款）。`
-          : '將立即切換為新方案並扣款。'
+          ? $t('userSettings.planPanel.downgradeScheduled', { date: result.scheduled_date, plan: planKey })
+          : $t('userSettings.planPanel.downgradeImmediate')
         if (!confirm(msg)) {
           changingPlan.value = false
           return

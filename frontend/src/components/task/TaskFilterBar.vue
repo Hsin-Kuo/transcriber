@@ -417,10 +417,14 @@ async function saveEditing() {
   }
 
   if (errors.length > 0) {
-    const stepLabels = { create: '建立標籤', order: '保存順序', color: '保存顏色' }
-    const failedSteps = errors.map(e => stepLabels[e.step]).join('、')
+    const stepLabels = {
+      create: $t('taskList.tagStepCreate'),
+      order: $t('taskList.tagStepOrder'),
+      color: $t('taskList.tagStepColor'),
+    }
+    const failedSteps = errors.map(e => stepLabels[e.step]).join($t('common.listSeparator'))
     const firstMessage = errors[0].error?.message || String(errors[0].error)
-    alert(`部分標籤編輯操作失敗（${failedSteps}）：${firstMessage}`)
+    alert($t('taskList.tagEditPartialFailed', { steps: failedSteps, message: firstMessage }))
   } else {
     emit('update:customTagOrder', [...editingTagOrder.value])
     emit('tags-reordered')

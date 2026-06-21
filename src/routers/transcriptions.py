@@ -32,6 +32,7 @@ from ..services.utils.audio_validator import (
 from ..services.utils.whisper_processor import WhisperProcessor
 from ..services.utils.punctuation_processor import PunctuationProcessor
 from ..services.utils.diarization_processor import DiarizationProcessor
+from ..utils.api_errors import api_error
 from ..utils.storage.backend import is_aws
 from ..utils.config_loader import get_parameter, get_temp_dir
 from ..utils.logger import get_logger
@@ -180,19 +181,19 @@ def get_task_field(task: dict, field: str):
 def _validate_create_params(task_type, chunk_minutes, max_speakers, language, punct_provider, custom_name):
     """輸入驗證（純 HTTP 層白名單檢查）。"""
     if task_type not in ("paragraph", "subtitle"):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "任務類型必須是 'paragraph' 或 'subtitle'")
+        raise api_error("TRANSCRIPTION_INVALID_TASK_TYPE", "Task type must be 'paragraph' or 'subtitle'", status.HTTP_400_BAD_REQUEST)
     if chunk_minutes < 1 or chunk_minutes > 120:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "分段長度必須在 1-120 分鐘之間")
+        raise api_error("TRANSCRIPTION_INVALID_CHUNK_MINUTES", "Chunk length must be between 1 and 120 minutes", status.HTTP_400_BAD_REQUEST)
     if max_speakers is not None and (max_speakers < 2 or max_speakers > 10):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "最大講者人數必須在 2-10 之間")
+        raise api_error("TRANSCRIPTION_INVALID_MAX_SPEAKERS", "Max speakers must be between 2 and 10", status.HTTP_400_BAD_REQUEST)
     ALLOWED_LANGUAGES = {"zh", "zh-TW", "zh-CN", "en", "ja", "ko", "auto"}
     if language not in ALLOWED_LANGUAGES:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"不支援的語言：{language}，可選：{', '.join(ALLOWED_LANGUAGES)}")
+        raise api_error("TRANSCRIPTION_UNSUPPORTED_LANGUAGE", "Unsupported language: {language}. Allowed: {allowed}", status.HTTP_400_BAD_REQUEST, language=language, allowed=', '.join(ALLOWED_LANGUAGES))
     ALLOWED_PUNCT = {"openai", "gemini", "none"}
     if punct_provider not in ALLOWED_PUNCT:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"不支援的標點提供者：{punct_provider}")
+        raise api_error("TRANSCRIPTION_UNSUPPORTED_PUNCT_PROVIDER", "Unsupported punctuation provider: {punct_provider}", status.HTTP_400_BAD_REQUEST, punct_provider=punct_provider)
     if custom_name and len(custom_name) > 255:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "自訂名稱過長（最多 255 字元）")
+        raise api_error("TRANSCRIPTION_CUSTOM_NAME_TOO_LONG", "Custom name too long (max 255 characters)", status.HTTP_400_BAD_REQUEST)
 
 
 async def _assemble_upload(
@@ -218,7 +219,7 @@ async def _assemble_upload(
     if upload_id:
         meta = await consume_upload(upload_id, user_id)
         if not meta:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "upload_id 無效、尚未完成組裝、或無權使用")
+            raise api_error("TRANSCRIPTION_INVALID_UPLOAD_ID", "upload_id is invalid, not yet assembled, or not authorized", status.HTTP_400_BAD_REQUEST)
         temp_dir = meta["temp_dir"]
         file_path = meta["assembled_path"]
         filename = custom_name.strip() if custom_name and custom_name.strip() else file_path.name
@@ -230,9 +231,9 @@ async def _assemble_upload(
         try:
             uid_list = json.loads(merge_upload_ids)
         except json.JSONDecodeError:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "merge_upload_ids 格式錯誤")
+            raise api_error("TRANSCRIPTION_INVALID_MERGE_UPLOAD_IDS", "Invalid merge_upload_ids format", status.HTTP_400_BAD_REQUEST)
         if len(uid_list) < 2:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "合併模式至少需要 2 個檔案")
+            raise api_error("TRANSCRIPTION_MERGE_NEEDS_TWO_FILES", "Merge mode requires at least 2 files", status.HTTP_400_BAD_REQUEST)
 
         merge_paths = []
         merge_temp_dirs = []
@@ -241,7 +242,7 @@ async def _assemble_upload(
             if not meta:
                 for d in merge_temp_dirs:
                     if d.exists(): shutil.rmtree(d)
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, f"upload_id {uid} 無效、尚未完成組裝、或無權使用")
+                raise api_error("TRANSCRIPTION_INVALID_UPLOAD_ID", "upload_id {uid} is invalid, not yet assembled, or not authorized", status.HTTP_400_BAD_REQUEST, uid=uid)
             merge_paths.append(meta["assembled_path"])
             merge_temp_dirs.append(meta["temp_dir"])
 
@@ -266,15 +267,15 @@ async def _assemble_upload(
     if merge_files and files and len(files) > 0:
         uploaded_files = files
         if len(uploaded_files) < 2:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "合併模式至少需要2個檔案")
+            raise api_error("TRANSCRIPTION_MERGE_NEEDS_TWO_FILES", "Merge mode requires at least 2 files", status.HTTP_400_BAD_REQUEST)
     elif file:
         uploaded_files = [file]
     else:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "請提供音檔或 upload_id")
+        raise api_error("TRANSCRIPTION_NO_FILE_PROVIDED", "Please provide an audio file or upload_id", status.HTTP_400_BAD_REQUEST)
 
     total_size = sum(f.size or 0 for f in uploaded_files)
     if total_size > 0 and total_size > MAX_UPLOAD_SIZE:
-        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, f"檔案總大小超過限制（最大 {MAX_UPLOAD_SIZE_MB}MB）")
+        raise api_error("TRANSCRIPTION_FILES_TOO_LARGE", "Total file size exceeds limit (max {max}MB)", status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, max=MAX_UPLOAD_SIZE_MB)
 
     for uf in uploaded_files:
         validate_filename_extension(uf.filename)
@@ -467,16 +468,10 @@ async def download_transcription(
     task = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
 
     if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任務不存在或無權訪問"
-        )
+        raise api_error("TRANSCRIPTION_TASK_NOT_FOUND", "Task not found or access denied", status.HTTP_404_NOT_FOUND)
 
     if task["status"] != "completed":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"任務尚未完成（當前狀態：{task['status']}）"
-        )
+        raise api_error("TRANSCRIPTION_TASK_NOT_COMPLETED", "Task not completed yet (current status: {status})", status.HTTP_400_BAD_REQUEST, status=task['status'])
 
     # 從 transcriptions collection 讀取內容（新方式）
     from src.database.repositories.transcription_repo import TranscriptionRepository
@@ -494,15 +489,9 @@ async def download_transcription(
             if result_file.exists():
                 content = result_file.read_text(encoding='utf-8')
             else:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="轉錄內容不存在"
-                )
+                raise api_error("TRANSCRIPTION_CONTENT_NOT_FOUND", "Transcription content not found", status.HTTP_404_NOT_FOUND)
         else:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="轉錄內容不存在"
-            )
+            raise api_error("TRANSCRIPTION_CONTENT_NOT_FOUND", "Transcription content not found", status.HTTP_404_NOT_FOUND)
     else:
         content = transcription["content"]
 
@@ -581,15 +570,9 @@ async def export_transcription_pdf(
     task_repo = TaskRepository(db)
     task = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
     if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任務不存在或無權訪問"
-        )
+        raise api_error("TRANSCRIPTION_TASK_NOT_FOUND", "Task not found or access denied", status.HTTP_404_NOT_FOUND)
     if task["status"] != "completed":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"任務尚未完成（當前狀態：{task['status']}）"
-        )
+        raise api_error("TRANSCRIPTION_TASK_NOT_COMPLETED", "Task not completed yet (current status: {status})", status.HTTP_400_BAD_REQUEST, status=task['status'])
 
     # 2. 抓 summary（如需要）
     summary_doc = None
@@ -686,37 +669,25 @@ async def download_audio(
     elif token:
         access_token = token
     else:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="需要認證：請提供 Authorization header 或 token 查詢參數"
-        )
+        raise api_error("TRANSCRIPTION_AUTH_REQUIRED", "Authentication required: provide Authorization header or token query parameter", status.HTTP_401_UNAUTHORIZED)
 
     # 驗證 token 並獲取用戶資訊
     from ..auth.jwt_handler import verify_token
     token_data = verify_token(access_token, "access")
 
     if not token_data:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="無效的認證令牌"
-        )
+        raise api_error("TRANSCRIPTION_INVALID_TOKEN", "Invalid authentication token", status.HTTP_401_UNAUTHORIZED)
 
     user_id = token_data.user_id
     if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="無效的認證令牌"
-        )
+        raise api_error("TRANSCRIPTION_INVALID_TOKEN", "Invalid authentication token", status.HTTP_401_UNAUTHORIZED)
 
     # 從資料庫獲取任務
     task_repo = TaskRepository(db)
     task = await task_repo.get_by_id_and_user(task_id, user_id)
 
     if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任務不存在或無權訪問"
-        )
+        raise api_error("TRANSCRIPTION_TASK_NOT_FOUND", "Task not found or access denied", status.HTTP_404_NOT_FOUND)
 
     if is_aws():
         # AWS 模式：回傳 S3 presigned URL redirect
@@ -734,37 +705,25 @@ async def download_audio(
                     "result.audio_file": None,
                     "result.audio_filename": None
                 })
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="音檔已過期或已被刪除"
-            )
+            raise api_error("TRANSCRIPTION_AUDIO_EXPIRED", "Audio file has expired or been deleted", status.HTTP_404_NOT_FOUND)
 
         presigned_url = get_presigned_url_by_path(audio_file_path, expires_in=3600)
 
         # 驗證 presigned URL 指向合法的 S3 域名，防止 open redirect
         parsed = urlparse(presigned_url)
         if not parsed.hostname or not parsed.hostname.endswith(".amazonaws.com"):
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="產生的下載連結異常"
-            )
+            raise api_error("TRANSCRIPTION_INVALID_DOWNLOAD_URL", "Generated download link is invalid", status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return RedirectResponse(url=presigned_url)
     else:
         # 本地模式：回傳 FileResponse
         audio_file_path = get_task_field(task, "audio_file")
         if not audio_file_path:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="音檔不存在（可能已被刪除）"
-            )
+            raise api_error("TRANSCRIPTION_AUDIO_NOT_FOUND", "Audio file not found (may have been deleted)", status.HTTP_404_NOT_FOUND)
 
         audio_file = Path(audio_file_path)
         if not audio_file.exists():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="音檔不存在"
-            )
+            raise api_error("TRANSCRIPTION_AUDIO_NOT_FOUND", "Audio file not found", status.HTTP_404_NOT_FOUND)
 
         # 使用 task_id 作為下載檔名，確保唯一性且不會重複
         download_filename = f"{task_id}{audio_file.suffix}"
@@ -830,16 +789,10 @@ async def get_segments(
     task = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
 
     if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任務不存在或無權訪問"
-        )
+        raise api_error("TRANSCRIPTION_TASK_NOT_FOUND", "Task not found or access denied", status.HTTP_404_NOT_FOUND)
 
     if task["status"] != "completed":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"任務尚未完成（當前狀態：{task['status']}）"
-        )
+        raise api_error("TRANSCRIPTION_TASK_NOT_COMPLETED", "Task not completed yet (current status: {status})", status.HTTP_400_BAD_REQUEST, status=task['status'])
 
     # 從 segments collection 讀取資料（新方式）
     from src.database.repositories.segment_repo import SegmentRepository
@@ -857,20 +810,11 @@ async def get_segments(
                     with open(segments_file, 'r', encoding='utf-8') as f:
                         segments_data = json.load(f)
                 except Exception as e:
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=f"讀取 segments 檔案失敗：{str(e)}"
-                    )
+                    raise api_error("TRANSCRIPTION_SEGMENTS_READ_FAILED", "Failed to read segments file: {error}", status.HTTP_500_INTERNAL_SERVER_ERROR, error=str(e))
             else:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Segments 不存在"
-                )
+                raise api_error("TRANSCRIPTION_SEGMENTS_NOT_FOUND", "Segments not found", status.HTTP_404_NOT_FOUND)
         else:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Segments 不存在"
-            )
+            raise api_error("TRANSCRIPTION_SEGMENTS_NOT_FOUND", "Segments not found", status.HTTP_404_NOT_FOUND)
     else:
         segments_data = segment_doc["segments"]
 
@@ -912,16 +856,10 @@ async def update_content(
     task = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
 
     if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任務不存在或無權訪問"
-        )
+        raise api_error("TRANSCRIPTION_TASK_NOT_FOUND", "Task not found or access denied", status.HTTP_404_NOT_FOUND)
 
     if task["status"] != "completed":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"只能更新已完成任務的內容（當前狀態：{task['status']}）"
-        )
+        raise api_error("TRANSCRIPTION_CONTENT_UPDATE_NOT_COMPLETED", "Can only update content of completed tasks (current status: {status})", status.HTTP_400_BAD_REQUEST, status=task['status'])
 
     # 更新 MongoDB collections（新方式）
     from src.database.repositories.transcription_repo import TranscriptionRepository
@@ -984,10 +922,7 @@ async def update_content(
             "segments_updated": new_segments is not None
         }
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"更新轉錄內容失敗：{str(e)}"
-        )
+        raise api_error("TRANSCRIPTION_CONTENT_UPDATE_FAILED", "Failed to update transcription content: {error}", status.HTTP_500_INTERNAL_SERVER_ERROR, error=str(e))
 
 
 @router.put("/{task_id}/metadata")
@@ -1018,10 +953,7 @@ async def update_metadata(
     task = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
 
     if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任務不存在或無權訪問"
-        )
+        raise api_error("TRANSCRIPTION_TASK_NOT_FOUND", "Task not found or access denied", status.HTTP_404_NOT_FOUND)
 
     # 準備更新數據
     updates = {}
@@ -1032,19 +964,13 @@ async def update_metadata(
         updates["custom_name"] = metadata["title"]
 
     if not updates:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="沒有提供需要更新的元數據"
-        )
+        raise api_error("TRANSCRIPTION_NO_METADATA_PROVIDED", "No metadata provided to update", status.HTTP_400_BAD_REQUEST)
 
     # 更新資料庫
     success = await task_repo.update(task_id, updates)
 
     if not success:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="更新元數據失敗"
-        )
+        raise api_error("TRANSCRIPTION_METADATA_UPDATE_FAILED", "Failed to update metadata", status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     log.info("task.metadata.updated", task_id=task_id, updates=updates)
 
@@ -1096,19 +1022,13 @@ async def update_speaker_names(
     task = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
 
     if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任務不存在或無權訪問"
-        )
+        raise api_error("TRANSCRIPTION_TASK_NOT_FOUND", "Task not found or access denied", status.HTTP_404_NOT_FOUND)
 
     # 更新資料庫
     success = await task_repo.update(task_id, {"speaker_names": speaker_names})
 
     if not success:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="更新講者名稱失敗"
-        )
+        raise api_error("TRANSCRIPTION_SPEAKER_NAMES_UPDATE_FAILED", "Failed to update speaker names", status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     log.info("task.speaker_names.updated", task_id=task_id, speaker_names=speaker_names)
 
@@ -1145,10 +1065,7 @@ async def update_subtitle_settings(
     task = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
 
     if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任務不存在或無權訪問"
-        )
+        raise api_error("TRANSCRIPTION_TASK_NOT_FOUND", "Task not found or access denied", status.HTTP_404_NOT_FOUND)
 
     # 準備更新數據
     subtitle_settings = task.get("subtitle_settings", {})
@@ -1158,20 +1075,14 @@ async def update_subtitle_settings(
         density = settings["density_threshold"]
         # 驗證範圍
         if not isinstance(density, (int, float)) or density < 0 or density > 180:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="density_threshold 必須是 0-180 之間的數字"
-            )
+            raise api_error("TRANSCRIPTION_INVALID_DENSITY_THRESHOLD", "density_threshold must be a number between 0 and 180", status.HTTP_400_BAD_REQUEST)
         subtitle_settings["density_threshold"] = float(density)
 
     # 更新資料庫
     success = await task_repo.update(task_id, {"subtitle_settings": subtitle_settings})
 
     if not success:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="更新字幕設定失敗"
-        )
+        raise api_error("TRANSCRIPTION_SUBTITLE_SETTINGS_UPDATE_FAILED", "Failed to update subtitle settings", status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     log.info("task.subtitle_settings.updated", task_id=task_id, subtitle_settings=subtitle_settings)
 
@@ -1217,7 +1128,7 @@ async def create_batch_transcriptions(
         try:
             chunked_uploads_map = json.loads(upload_ids)
         except json.JSONDecodeError:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "upload_ids 格式錯誤")
+            raise api_error("TRANSCRIPTION_INVALID_UPLOAD_IDS", "Invalid upload_ids format", status.HTTP_400_BAD_REQUEST)
 
     if files is None:
         files = []
@@ -1225,19 +1136,19 @@ async def create_batch_transcriptions(
     total_files = len(files) + len(chunked_uploads_map)
     MAX_BATCH_FILES = 10
     if total_files > MAX_BATCH_FILES:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"批次上傳最多支援 {MAX_BATCH_FILES} 個檔案，您提供了 {total_files} 個")
+        raise api_error("TRANSCRIPTION_BATCH_TOO_MANY_FILES", "Batch upload supports at most {max} files, you provided {provided}", status.HTTP_400_BAD_REQUEST, max=MAX_BATCH_FILES, provided=total_files)
     if total_files == 0:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "請至少上傳一個檔案")
+        raise api_error("TRANSCRIPTION_BATCH_NO_FILES", "Please upload at least one file", status.HTTP_400_BAD_REQUEST)
 
     # ── 解析配置 ──
     try:
         config = json.loads(default_config)
     except json.JSONDecodeError:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "default_config 格式錯誤，必須是有效的 JSON")
+        raise api_error("TRANSCRIPTION_INVALID_DEFAULT_CONFIG", "Invalid default_config format, must be valid JSON", status.HTTP_400_BAD_REQUEST)
     try:
         file_overrides = json.loads(overrides)
     except json.JSONDecodeError:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "overrides 格式錯誤，必須是有效的 JSON")
+        raise api_error("TRANSCRIPTION_INVALID_OVERRIDES", "Invalid overrides format, must be valid JSON", status.HTTP_400_BAD_REQUEST)
 
     task_type = config.get("taskType", "paragraph")
     diarize = config.get("diarize", True)
@@ -1250,7 +1161,7 @@ async def create_batch_transcriptions(
     punct_provider = "none" if task_type == "subtitle" else "gemini"
 
     if diarize and not is_aws() and not _diarization_processor:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Speaker diarization 功能未啟用")
+        raise api_error("TRANSCRIPTION_DIARIZATION_UNAVAILABLE", "Speaker diarization feature is not enabled", status.HTTP_400_BAD_REQUEST)
 
     intake_service.set_diarization_available(bool(_diarization_processor))
 

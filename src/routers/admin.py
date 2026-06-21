@@ -19,6 +19,7 @@ from ..utils.audit_logger import log_admin_action
 from ..utils.email_service import get_email_service
 from ..utils.sentry_helpers import create_background_task
 from ..utils.logger import get_logger
+from ..utils.api_errors import api_error
 from ..services.admin_analytics import build_admin_analytics
 
 
@@ -171,10 +172,8 @@ async def get_user_detail(
 
     user = await user_repo.get_by_id(user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用戶不存在"
-        )
+        raise api_error("ADMIN_USER_NOT_FOUND", "User not found",
+                        status.HTTP_404_NOT_FOUND)
 
     # 計算任務統計
     task_count = await task_repo.count_by_user(user_id)
@@ -227,16 +226,13 @@ async def update_user_status(
 
     user = await user_repo.get_by_id(user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用戶不存在"
-        )
+        raise api_error("ADMIN_USER_NOT_FOUND", "User not found",
+                        status.HTTP_404_NOT_FOUND)
 
     if str(admin["_id"]) == user_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="不能停用自己的帳號"
-        )
+        raise api_error("ADMIN_CANNOT_DISABLE_SELF",
+                        "You cannot disable your own account",
+                        status.HTTP_400_BAD_REQUEST)
 
     success = await user_repo.update(user_id, {"is_active": body.is_active})
 
@@ -280,25 +276,21 @@ async def update_user_role(
 ):
     """修改用戶角色（管理員）"""
     if body.role not in ["user", "admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="角色只能是 'user' 或 'admin'"
-        )
+        raise api_error("ADMIN_INVALID_ROLE",
+                        "Role must be 'user' or 'admin'",
+                        status.HTTP_400_BAD_REQUEST)
 
     user_repo = UserRepository(db)
 
     user = await user_repo.get_by_id(user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用戶不存在"
-        )
+        raise api_error("ADMIN_USER_NOT_FOUND", "User not found",
+                        status.HTTP_404_NOT_FOUND)
 
     if str(admin["_id"]) == user_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="不能修改自己的角色"
-        )
+        raise api_error("ADMIN_CANNOT_CHANGE_OWN_ROLE",
+                        "You cannot change your own role",
+                        status.HTTP_400_BAD_REQUEST)
 
     old_role = user.get("role", "user")
     success = await user_repo.update(user_id, {"role": body.role})
@@ -344,10 +336,8 @@ async def update_user_quota(
 
     user = await user_repo.get_by_id(user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用戶不存在"
-        )
+        raise api_error("ADMIN_USER_NOT_FOUND", "User not found",
+                        status.HTTP_404_NOT_FOUND)
 
     current_quota = user.get("quota", {})
 
@@ -366,17 +356,16 @@ async def update_user_quota(
                 "features": tier_quota["features"]
             }
         except (ValueError, KeyError):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"無效的配額等級: {body.tier}"
-            )
+            raise api_error("ADMIN_INVALID_QUOTA_TIER",
+                            "Invalid quota tier: {tier}",
+                            status.HTTP_400_BAD_REQUEST,
+                            tier=body.tier)
     elif body.custom:
         new_quota = {**current_quota, **body.custom}
     else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="請提供 tier 或 custom 配額設定"
-        )
+        raise api_error("ADMIN_QUOTA_INPUT_REQUIRED",
+                        "Provide either a tier or custom quota settings",
+                        status.HTTP_400_BAD_REQUEST)
 
     old_tier = current_quota.get("tier")
     new_tier = new_quota.get("tier")
@@ -430,10 +419,8 @@ async def reset_user_monthly_quota(
 
     user = await user_repo.get_by_id(user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用戶不存在"
-        )
+        raise api_error("ADMIN_USER_NOT_FOUND", "User not found",
+                        status.HTTP_404_NOT_FOUND)
 
     old_usage = user.get("usage", {})
     old_transcriptions = old_usage.get("transcriptions", 0)
@@ -495,29 +482,26 @@ async def adjust_user_extra_quota(
     使用原子操作保證扣除時不會變負；單次調整有最大值限制避免誤操作。
     """
     if not body.duration_minutes and not body.ai_summaries:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="duration_minutes 與 ai_summaries 不可同時為 0"
-        )
+        raise api_error("ADMIN_EXTRA_QUOTA_DELTA_REQUIRED",
+                        "duration_minutes and ai_summaries cannot both be 0",
+                        status.HTTP_400_BAD_REQUEST)
 
     if abs(body.duration_minutes) > MAX_EXTRA_QUOTA_DELTA_DURATION:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"單次轉錄時長調整不可超過 {MAX_EXTRA_QUOTA_DELTA_DURATION} 分鐘"
-        )
+        raise api_error("ADMIN_EXTRA_QUOTA_DURATION_TOO_LARGE",
+                        "A single duration adjustment cannot exceed {max} minutes",
+                        status.HTTP_400_BAD_REQUEST,
+                        max=MAX_EXTRA_QUOTA_DELTA_DURATION)
     if abs(body.ai_summaries) > MAX_EXTRA_QUOTA_DELTA_SUMMARIES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"單次 AI 摘要調整不可超過 {MAX_EXTRA_QUOTA_DELTA_SUMMARIES} 次"
-        )
+        raise api_error("ADMIN_EXTRA_QUOTA_SUMMARIES_TOO_LARGE",
+                        "A single AI summary adjustment cannot exceed {max} times",
+                        status.HTTP_400_BAD_REQUEST,
+                        max=MAX_EXTRA_QUOTA_DELTA_SUMMARIES)
 
     user_repo = UserRepository(db)
     user = await user_repo.get_by_id(user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用戶不存在"
-        )
+        raise api_error("ADMIN_USER_NOT_FOUND", "User not found",
+                        status.HTTP_404_NOT_FOUND)
 
     updated_user = await user_repo.adjust_extra_quota_atomic(
         user_id,
@@ -526,10 +510,9 @@ async def adjust_user_extra_quota(
     )
 
     if updated_user is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="扣除失敗：餘額不足，請重新整理頁面確認當前餘額"
-        )
+        raise api_error("ADMIN_EXTRA_QUOTA_INSUFFICIENT_BALANCE",
+                        "Deduction failed: insufficient balance, please refresh to confirm the current balance",
+                        status.HTTP_409_CONFLICT)
 
     new_extra = updated_user.get("extra_quota", {})
     new_duration = new_extra.get("duration_minutes", 0)
@@ -612,16 +595,13 @@ async def reset_user_password(
 
     user = await user_repo.get_by_id(user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用戶不存在"
-        )
+        raise api_error("ADMIN_USER_NOT_FOUND", "User not found",
+                        status.HTTP_404_NOT_FOUND)
 
     if len(body.new_password) < 8:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="密碼長度至少需要 8 個字元"
-        )
+        raise api_error("ADMIN_PASSWORD_TOO_SHORT",
+                        "Password must be at least 8 characters",
+                        status.HTTP_400_BAD_REQUEST)
 
     hashed_password = hash_password(body.new_password)
     success = await user_repo.update(user_id, {"password_hash": hashed_password})
@@ -760,10 +740,8 @@ async def get_task_detail(
 
     task = await task_repo.get_by_id(task_id)
     if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任務不存在"
-        )
+        raise api_error("ADMIN_TASK_NOT_FOUND", "Task not found",
+                        status.HTTP_404_NOT_FOUND)
 
     # 取得用戶資訊
     task_user_id = task.get("user", {}).get("user_id")
@@ -818,17 +796,15 @@ async def admin_cancel_task(
 
     task = await task_repo.get_by_id(task_id)
     if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任務不存在"
-        )
+        raise api_error("ADMIN_TASK_NOT_FOUND", "Task not found",
+                        status.HTTP_404_NOT_FOUND)
 
     current_status = task.get("status")
     if current_status not in ["pending", "processing"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"無法取消狀態為 '{current_status}' 的任務"
-        )
+        raise api_error("ADMIN_TASK_NOT_CANCELLABLE",
+                        "Cannot cancel a task in status '{status}'",
+                        status.HTTP_400_BAD_REQUEST,
+                        status=current_status)
 
     # 更新任務狀態
     now = get_utc_timestamp()
@@ -864,17 +840,14 @@ async def admin_delete_task(
 
     task = await task_repo.get_by_id(task_id)
     if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任務不存在"
-        )
+        raise api_error("ADMIN_TASK_NOT_FOUND", "Task not found",
+                        status.HTTP_404_NOT_FOUND)
 
     current_status = task.get("status")
     if current_status in ["pending", "processing"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="無法刪除進行中的任務，請先取消"
-        )
+        raise api_error("ADMIN_TASK_IN_PROGRESS_CANNOT_DELETE",
+                        "Cannot delete an in-progress task, cancel it first",
+                        status.HTTP_400_BAD_REQUEST)
 
     # 軟刪除任務
     now = get_utc_timestamp()
@@ -963,9 +936,11 @@ async def get_admin_statistics(
 
     except Exception as e:
         logger.error("admin.statistics.failed", error=str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"獲取統計資料失敗：{str(e)}"
+        raise api_error(
+            "ADMIN_STATISTICS_FAILED",
+            "Failed to fetch statistics: {error}",
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error=str(e),
         )
 
 

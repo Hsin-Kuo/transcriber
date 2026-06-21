@@ -71,7 +71,7 @@ export const useAuthStore = defineStore('auth', () => {
         emailSent: response.data.email_sent !== false,
       }
     } catch (err) {
-      error.value = err.response?.data?.detail || '註冊失敗'
+      error.value = err.response?.data?.detail || i18n.global.t('auth.registerFailed')
       return {
         success: false,
         error: error.value
@@ -94,7 +94,7 @@ export const useAuthStore = defineStore('auth', () => {
 
       return { success: true }
     } catch (err) {
-      error.value = err.response?.data?.detail || '帳號或密碼錯誤'
+      error.value = err.response?.data?.detail || i18n.global.t('auth.wrongCredentials')
       return {
         success: false,
         error: error.value
@@ -168,7 +168,7 @@ export const useAuthStore = defineStore('auth', () => {
         message: response.data.message
       }
     } catch (err) {
-      error.value = err.response?.data?.detail || '發送重設郵件失敗'
+      error.value = err.response?.data?.detail || i18n.global.t('auth.sendResetEmailFailed')
       return {
         success: false,
         error: error.value
@@ -192,7 +192,7 @@ export const useAuthStore = defineStore('auth', () => {
         message: response.data.message
       }
     } catch (err) {
-      error.value = err.response?.data?.detail || '重設密碼失敗'
+      error.value = err.response?.data?.detail || i18n.global.t('auth.resetPasswordFailed')
       return {
         success: false,
         error: error.value
@@ -214,7 +214,7 @@ export const useAuthStore = defineStore('auth', () => {
 
       return { success: true }
     } catch (err) {
-      error.value = err.response?.data?.detail || 'Google 登入失敗'
+      error.value = err.response?.data?.detail || i18n.global.t('auth.googleLoginError')
       return {
         success: false,
         error: error.value
@@ -236,7 +236,7 @@ export const useAuthStore = defineStore('auth', () => {
         message: response.data.message
       }
     } catch (err) {
-      error.value = err.response?.data?.detail || '綁定 Google 失敗'
+      error.value = err.response?.data?.detail || i18n.global.t('auth.googleBindError')
       return {
         success: false,
         error: error.value
@@ -258,7 +258,7 @@ export const useAuthStore = defineStore('auth', () => {
         message: response.data.message
       }
     } catch (err) {
-      error.value = err.response?.data?.detail || '解除綁定失敗'
+      error.value = err.response?.data?.detail || i18n.global.t('auth.googleUnbindError')
       return {
         success: false,
         error: error.value
@@ -281,7 +281,7 @@ export const useAuthStore = defineStore('auth', () => {
     } catch (err) {
       return {
         success: false,
-        error: err.response?.data?.detail || '更新偏好設定失敗'
+        error: err.response?.data?.detail || i18n.global.t('auth.updatePreferencesFailed')
       }
     }
   }
@@ -372,7 +372,7 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = null
       return { success: true }
     } catch (err) {
-      error.value = err.response?.data?.detail || '刪除帳號失敗'
+      error.value = err.response?.data?.detail || i18n.global.t('auth.deleteAccountFailed')
       return {
         success: false,
         error: error.value
@@ -396,7 +396,7 @@ export const useAuthStore = defineStore('auth', () => {
         message: response.data.message
       }
     } catch (err) {
-      error.value = err.response?.data?.detail || '設定密碼失敗'
+      error.value = err.response?.data?.detail || i18n.global.t('auth.setPasswordFailed')
       return {
         success: false,
         error: error.value

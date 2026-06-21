@@ -14,11 +14,12 @@ Ops 設定：
 import json
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 
 from ..database.mongodb import get_database
 from ..database.repositories.processed_webhook_repo import ProcessedWebhookRepository
 from ..database.repositories.user_repo import UserRepository
+from ..utils.api_errors import api_error
 from ..utils.audit_logger import get_audit_logger
 from ..utils.config_loader import get_parameter
 from ..utils.logger import get_logger
@@ -67,7 +68,7 @@ async def resend_webhook(
     if not secret:
         log.error("resend_webhook.no_secret_configured")
         # 不暴露細節；只回 500 讓 ops 看 log
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "webhook misconfigured")
+        raise api_error("WEBHOOK_MISCONFIGURED", "webhook misconfigured", status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     # 2. 驗簽
     raw_body = await request.body()
@@ -103,13 +104,13 @@ async def resend_webhook(
                 status_code=401,
                 message=f"webhook 簽名驗證失敗: {e}",
             )
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid signature")
+        raise api_error("WEBHOOK_INVALID_SIGNATURE", "invalid signature", status.HTTP_401_UNAUTHORIZED)
 
     # 3. 解析 body
     try:
         payload = json.loads(raw_body.decode("utf-8"))
     except json.JSONDecodeError:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid json body")
+        raise api_error("WEBHOOK_INVALID_JSON", "invalid json body", status.HTTP_400_BAD_REQUEST)
 
     event_type = payload.get("type", "")
     data = payload.get("data") or {}

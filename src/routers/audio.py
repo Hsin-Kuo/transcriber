@@ -10,6 +10,7 @@ import shutil
 
 from ..auth.dependencies import get_current_user
 from ..services.audio_service import AudioService
+from ..utils.api_errors import api_error
 from ..utils.config_loader import get_temp_dir
 from ..utils.logger import get_logger
 
@@ -257,18 +258,20 @@ async def merge_audio_files(
     """
     # 驗證
     if len(files) < 2:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="至少需要2個檔案進行合併"
+        raise api_error(
+            "AUDIO_MERGE_TOO_FEW_FILES",
+            "At least 2 files are required to merge",
+            status.HTTP_400_BAD_REQUEST,
         )
 
     # 檢查總大小（注意：UploadFile.size 可能為 None）
     total_size = sum(f.size or 0 for f in files)
     MAX_TOTAL_SIZE = 200 * 1024 * 1024  # 200MB
     if total_size > 0 and total_size > MAX_TOTAL_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="檔案總大小超過限制（最大200MB）"
+        raise api_error(
+            "AUDIO_MERGE_TOTAL_TOO_LARGE",
+            "Total file size exceeds the limit (max 200MB)",
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
         )
 
     # 創建臨時目錄
@@ -317,9 +320,11 @@ async def merge_audio_files(
 
     except Exception as e:
         log.error("merge.failed", error=str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"音檔合併失敗：{str(e)}"
+        raise api_error(
+            "AUDIO_MERGE_FAILED",
+            "Audio merge failed: {error}",
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error=str(e),
         )
 
     finally:
@@ -338,18 +343,20 @@ async def download_merged_audio(
     file_path = merged_dir / filename
 
     if not file_path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="檔案不存在"
+        raise api_error(
+            "AUDIO_FILE_NOT_FOUND",
+            "File does not exist",
+            status.HTTP_404_NOT_FOUND,
         )
 
     # 安全檢查：防止路徑穿越攻擊
     try:
         file_path.resolve().relative_to(merged_dir.resolve())
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="無效的檔案路徑"
+        raise api_error(
+            "AUDIO_INVALID_FILE_PATH",
+            "Invalid file path",
+            status.HTTP_403_FORBIDDEN,
         )
 
     return FileResponse(

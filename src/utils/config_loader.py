@@ -41,6 +41,15 @@ def get_temp_dir(prefix: str = "") -> Path:
     return Path(tempfile.mkdtemp(prefix=prefix, dir=_TEMP_BASE))
 
 
+def temp_free_bytes() -> int:
+    """回傳暫存所在檔案系統（_TEMP_BASE）目前的可用空間 bytes。
+
+    分片上傳、轉錄 working copy 都落在這個檔案系統，上傳前用它做容量守門。
+    """
+    _TEMP_BASE.mkdir(parents=True, exist_ok=True)
+    return shutil.disk_usage(_TEMP_BASE).free
+
+
 def cleanup_stale_temp_dirs(max_age_hours: int = 2):
     """清理超過指定時間的暫存目錄（服務啟動時呼叫）
 
