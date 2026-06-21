@@ -140,8 +140,9 @@ onUnmounted(() => {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  min-width: 300px;
-  max-width: 360px;
+  /* 與 GlobalUploadProgress 一致的固定寬度，兩者堆疊時對齊 */
+  width: 340px;
+  max-width: calc(100vw - 40px);
   padding: 14px 16px;
   background: var(--main-bg);
   /* 與 GlobalUploadProgress 一致的卡片樣式（圓角 / 陰影 / 邊框） */

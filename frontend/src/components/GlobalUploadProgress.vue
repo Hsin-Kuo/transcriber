@@ -1,49 +1,32 @@
 <template>
   <transition name="upload-slide">
-    <div v-if="store.active" class="global-upload" :class="`is-${store.status}`" role="status" aria-live="polite">
+    <!-- 只負責「上傳中」的進度顯示；完成/失敗/取消等終態一律走統一的 toast -->
+    <div v-if="store.busy" class="global-upload is-uploading" role="status" aria-live="polite">
       <div class="gu-icon">
-        <span v-if="store.status === 'uploading'" class="gu-spinner"></span>
-        <span v-else-if="store.status === 'done'" class="gu-mark gu-mark--ok">✓</span>
-        <span v-else-if="store.status === 'error'" class="gu-mark gu-mark--err">!</span>
-        <span v-else class="gu-mark gu-mark--cancel">×</span>
+        <span class="gu-spinner"></span>
       </div>
 
       <div class="gu-body">
         <div class="gu-head">
           <span class="gu-status">{{ statusText }}</span>
-          <span v-if="store.status === 'uploading' && percentText" class="gu-percent">{{ percentText }}</span>
+          <span v-if="percentText" class="gu-percent">{{ percentText }}</span>
         </div>
 
         <div class="gu-label" :title="store.label">{{ store.label }}</div>
 
         <!-- 進度條：分片上傳顯示百分比；單次 POST（progress 為 0）顯示不確定動畫 -->
-        <div v-if="store.status === 'uploading'" class="gu-bar" :class="{ indeterminate: store.progress === 0 }">
+        <div class="gu-bar" :class="{ indeterminate: store.progress === 0 }">
           <div class="gu-bar-fill" :style="{ width: store.progress > 0 ? store.progress + '%' : '100%' }"></div>
         </div>
 
-        <div v-if="store.status === 'uploading' && store.kind === 'batch' && store.batchTotal > 0" class="gu-sub">
+        <div v-if="store.kind === 'batch' && store.batchTotal > 0" class="gu-sub">
           {{ $t('globalUpload.batchProgress', { current: store.batchCurrent, total: store.batchTotal }) }}
-        </div>
-        <div v-else-if="store.status === 'error' && store.errorMessage" class="gu-sub gu-sub--err" :title="store.errorMessage">
-          {{ store.errorMessage }}
         </div>
       </div>
 
       <div class="gu-actions">
-        <button v-if="store.status === 'uploading'" type="button" class="gu-btn gu-btn--cancel" @click="store.cancel()">
+        <button type="button" class="gu-btn gu-btn--cancel" @click="store.cancel()">
           {{ $t('globalUpload.cancel') }}
-        </button>
-        <button v-else-if="store.status === 'done'" type="button" class="gu-btn gu-btn--view" @click="goToTasks">
-          {{ $t('globalUpload.view') }}
-        </button>
-        <button
-          v-if="store.status !== 'uploading'"
-          type="button"
-          class="gu-close"
-          :aria-label="$t('globalUpload.close')"
-          @click="store.dismiss()"
-        >
-          ×
         </button>
       </div>
     </div>
@@ -53,52 +36,22 @@
 <script setup>
 import { computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
 import { useUploadStore } from '../stores/upload'
 
 const { t: $t } = useI18n()
-const router = useRouter()
 const store = useUploadStore()
 
-const statusText = computed(() => {
-  switch (store.status) {
-    case 'done':
-      return $t('globalUpload.statusDone')
-    case 'error':
-      return $t('globalUpload.statusError')
-    case 'cancelled':
-      return $t('globalUpload.statusCancelled')
-    default:
-      return $t('globalUpload.statusUploading')
-  }
-})
-
+// 浮層只負責「上傳中」，狀態文字固定；終態交給統一 toast
+const statusText = computed(() => $t('globalUpload.statusUploading'))
 const percentText = computed(() => (store.progress > 0 ? `${store.progress}%` : $t('globalUpload.processing')))
 
-function goToTasks() {
-  // 已在任務列表頁：push 同一路由 Vue Router 會忽略 → 點了沒反應。
-  // 改整頁重新整理，確保使用者看到明確結果（新任務刷新出現）。
-  if (router.currentRoute.value.name === 'tasks') {
-    window.location.reload()
-    return
-  }
-  store.dismiss()
-  router.push({ name: 'tasks' })
-}
-
-// 完成後 8 秒自動收起（仍可手動關閉；若期間又有新上傳則不誤關）
-let dismissTimer = null
+// 終態（done/error/cancelled）不在浮層顯示——由呼叫端用統一 toast 呈現；
+// 這裡只把 store 收乾淨，讓浮層滑出後狀態歸零。
 watch(
   () => store.status,
   (status) => {
-    if (dismissTimer) {
-      clearTimeout(dismissTimer)
-      dismissTimer = null
-    }
-    if (status === 'done') {
-      dismissTimer = setTimeout(() => {
-        if (store.status === 'done') store.dismiss()
-      }, 8000)
+    if (status === 'done' || status === 'error' || status === 'cancelled') {
+      store.dismiss()
     }
   },
 )
@@ -116,7 +69,6 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  if (dismissTimer) clearTimeout(dismissTimer)
   window.removeEventListener('beforeunload', handleBeforeUnload)
 })
 </script>
@@ -128,7 +80,7 @@ onUnmounted(() => {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  width: 320px;
+  width: 340px;
   max-width: calc(100vw - 40px);
   padding: 14px 16px;
   border-radius: 14px;
