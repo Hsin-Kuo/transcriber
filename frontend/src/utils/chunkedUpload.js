@@ -59,45 +59,68 @@ export async function uploadChunked(file, { onProgress, signal } = {}) {
   // 切片大小以後端為準，舊後端未回傳時 fallback 到本地常數
   const chunkSize = initRes.data.chunk_size || CHUNK_SIZE
 
-  // 2. Worker pool 並行上傳（PARALLEL_CHUNKS 個 worker 從共享 queue 各自取 index）
-  const queue = Array.from({ length: total_chunks }, (_, i) => i)
-  let completed = 0
-  let aborted = false
+  // 取得 upload_id 後，任何失敗 / 取消都即時通知後端清掉半成品（不做續傳，
+  // 留著只是佔後端磁碟到 grace sweep）。abort 是 best-effort，不阻斷原錯誤。
+  try {
+    // 2. Worker pool 並行上傳（PARALLEL_CHUNKS 個 worker 從共享 queue 各自取 index）
+    const queue = Array.from({ length: total_chunks }, (_, i) => i)
+    let completed = 0
+    let aborted = false
 
-  async function worker() {
-    while (!aborted && queue.length > 0) {
-      // 使用者取消：停止取新 chunk，讓 worker 收斂
-      if (signal?.aborted) {
-        aborted = true
-        return
-      }
-      // JS single-thread，shift() 原子；多 worker 不會搶到同 index
-      const i = queue.shift()
-      if (i === undefined) return
-      try {
-        const start = i * chunkSize
-        const end = Math.min(start + chunkSize, file.size)
-        const blob = file.slice(start, end)
-        await uploadChunkWithRetry(upload_id, i, blob, signal)
-        completed++
-        if (onProgress) {
-          onProgress(Math.round((completed / total_chunks) * 100))
+    async function worker() {
+      while (!aborted && queue.length > 0) {
+        // 使用者取消：停止取新 chunk，讓 worker 收斂
+        if (signal?.aborted) {
+          aborted = true
+          return
         }
-      } catch (err) {
-        // 任一 chunk 重試耗盡（或被取消）：通知其他 worker 停下、整體 fail-fast
-        aborted = true
-        throw err
+        // JS single-thread，shift() 原子；多 worker 不會搶到同 index
+        const i = queue.shift()
+        if (i === undefined) return
+        try {
+          const start = i * chunkSize
+          const end = Math.min(start + chunkSize, file.size)
+          const blob = file.slice(start, end)
+          await uploadChunkWithRetry(upload_id, i, blob, signal)
+          completed++
+          if (onProgress) {
+            onProgress(Math.round((completed / total_chunks) * 100))
+          }
+        } catch (err) {
+          // 任一 chunk 重試耗盡（或被取消）：通知其他 worker 停下、整體 fail-fast
+          aborted = true
+          throw err
+        }
       }
     }
+
+    const workerCount = Math.min(PARALLEL_CHUNKS, total_chunks)
+    await Promise.all(Array.from({ length: workerCount }, () => worker()))
+
+    // 3. 完成組裝（送出前同樣確保 token 新鮮，避免最後一步被 401 卡住）
+    await ensureFreshAccessToken()
+    const completeRes = await api.post(NEW_ENDPOINTS.uploads.complete(upload_id), null, { signal })
+    return completeRes.data.upload_id
+  } catch (err) {
+    // fire-and-forget：不 await，讓取消/失敗即時往上拋，不被後端 rmtree（刪多 GB
+    // 半成品可能要一兩秒）卡住回饋。abort 內部自吞錯誤，floating promise 安全；
+    // 清不掉也有後端 grace sweep 兜底。
+    abortUploadSession(upload_id)
+    throw err
   }
+}
 
-  const workerCount = Math.min(PARALLEL_CHUNKS, total_chunks)
-  await Promise.all(Array.from({ length: workerCount }, () => worker()))
-
-  // 3. 完成組裝（送出前同樣確保 token 新鮮，避免最後一步被 401 卡住）
-  await ensureFreshAccessToken()
-  const completeRes = await api.post(NEW_ENDPOINTS.uploads.complete(upload_id), null, { signal })
-  return completeRes.data.upload_id
+/**
+ * 主動通知後端中止上傳工作階段，即時回收半成品 temp_dir。
+ * best-effort：清不掉（網路/已被清）就交給後端 grace sweep，不影響使用者流程。
+ * 刻意不帶上傳的 signal——取消情境下 signal 已 aborted，帶了會讓這支 DELETE 也被取消。
+ */
+async function abortUploadSession(uploadId) {
+  try {
+    await api.delete(NEW_ENDPOINTS.uploads.abort(uploadId))
+  } catch {
+    /* 忽略：後端 periodic sweep 會兜底 */
+  }
 }
 
 /**

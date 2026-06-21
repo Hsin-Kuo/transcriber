@@ -21,7 +21,8 @@ from ..services.utils.audio_validator import (
     validate_filename_extension,
     validate_magic_bytes,
 )
-from ..utils.config_loader import get_temp_dir
+from ..utils.api_errors import api_error, ErrorCode
+from ..utils.config_loader import get_temp_dir, temp_free_bytes
 from ..utils.logger import get_logger
 
 router = APIRouter(prefix="/uploads", tags=["Uploads"])
@@ -34,8 +35,18 @@ CHUNK_SIZE = 16 * 1024 * 1024  # 16 MB
 # 單檔上限：以環境變數 MAX_UPLOAD_SIZE_MB 設定（預設 3072 MB = 3 GB）
 MAX_UPLOAD_SIZE_MB = int(os.environ.get("MAX_UPLOAD_SIZE_MB", "3072"))
 MAX_UPLOAD_SIZE = MAX_UPLOAD_SIZE_MB * 1024 * 1024
-UPLOAD_EXPIRY_SECONDS = 10800  # 3 小時無活動即清理（大檔上傳較慢）
+# 60 分鐘無活動即清理。chunk 每傳一片就刷新 last_activity_at，所以「正在進行」
+# 的上傳永遠不會被掃到；只有完全沒動靜的死 session 才清。本專案不做續傳，留著
+# 死 session 沒有任何續傳價值，只是佔本機 EBS，因此取較短 grace 加速回收。
+UPLOAD_EXPIRY_SECONDS = 3600
 CLEANUP_INTERVAL_SECONDS = 300  # 每 5 分鐘掃一次
+
+# 磁碟容量守門：分片暫存與轉錄 working copy 都落在本機 EBS（t3.small 磁碟不大）。
+# init 時若「放得下這個檔後、剩餘空間」會低於這條保留底線就拒絕，避免多人/大檔
+# 上傳把磁碟塞爆拖垮整機。底線要留給：complete 組裝時 chunks 與 assembled 短暫
+# 並存、其他併發上傳、轉錄 working copy、系統本身。預設 2GB，可用環境變數調整。
+DISK_RESERVE_MB = int(os.environ.get("UPLOAD_DISK_RESERVE_MB", "2048"))
+DISK_RESERVE_BYTES = DISK_RESERVE_MB * 1024 * 1024
 
 # 同一 user 最多同時 N 條 chunk 在後端寫磁碟。
 # 對齊前端建議的並行度（Phase 2.1：3 條），避免 disk I/O / RAM 被單一 user 吃滿。
@@ -50,6 +61,11 @@ _user_chunk_semaphores: dict[str, asyncio.Semaphore] = {}
 # 真要嚴格全域協調得上 Redis distributed semaphore，目前流量不值得。
 GLOBAL_CHUNK_CONCURRENCY = 5
 _global_chunk_semaphore = asyncio.Semaphore(GLOBAL_CHUNK_CONCURRENCY)
+
+
+def _has_room_for(total_size: int, free_bytes: int) -> bool:
+    """放得下 total_size 後，剩餘空間是否仍 >= 保留底線。純函式方便測試。"""
+    return free_bytes - total_size >= DISK_RESERVE_BYTES
 
 
 def _get_user_chunk_semaphore(user_id: str) -> asyncio.Semaphore:
@@ -77,22 +93,51 @@ async def init_upload(
 ):
     """初始化分片上傳，回傳 upload_id 和 total_chunks"""
     if total_size <= 0:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "檔案大小無效")
+        raise api_error(ErrorCode.INVALID_FILE_SIZE, "檔案大小無效",
+                        status.HTTP_400_BAD_REQUEST)
     if total_size > MAX_UPLOAD_SIZE:
-        raise HTTPException(
-            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            f"檔案超過 {MAX_UPLOAD_SIZE_MB}MB 上限",
-        )
+        raise api_error(ErrorCode.FILE_TOO_LARGE,
+                        f"檔案超過 {MAX_UPLOAD_SIZE_MB}MB 上限",
+                        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        max=MAX_UPLOAD_SIZE_MB)
 
     validate_filename_extension(filename)
+
+    repo = _repo()
+    user_id = str(current_user["_id"])
+
+    # 重試覆蓋：本專案不做續傳，前端失敗重試會 init 新 upload_id 重傳整個檔。
+    # 在此把同 user、同檔名同大小的未完成舊 session 取走並即時清掉其 temp_dir，
+    # 避免重試的半成品累積佔本機 EBS 到 grace period 才被 sweep。
+    stale = await repo.take_incomplete_for_retry(user_id, filename, total_size)
+    for doc in stale:
+        td = Path(doc.get("temp_dir", ""))
+        if td.exists():
+            await asyncio.to_thread(shutil.rmtree, td, ignore_errors=True)
+    if stale:
+        log.info("chunk_upload.init.evicted_stale", user_id=user_id, count=len(stale))
+
+    # 磁碟容量守門（在 evict 之後檢查：重試同一檔時先釋放自己上一輪的半成品，
+    # 才不會被自己佔的空間擋下）。disk_usage 反映實際已用 bytes，盡力而為——
+    # 已 init 但還沒寫的併發 session 不算在內，因此底線取較寬鬆的 2GB 緩衝。
+    free = await asyncio.to_thread(temp_free_bytes)
+    if not _has_room_for(total_size, free):
+        log.warning(
+            "chunk_upload.init.rejected_low_disk",
+            user_id=user_id, free_mb=free // (1024 * 1024),
+            need_mb=total_size // (1024 * 1024),
+        )
+        raise api_error(ErrorCode.UPLOAD_DISK_FULL,
+                        "伺服器暫存空間不足，請稍後再試",
+                        status.HTTP_507_INSUFFICIENT_STORAGE)
 
     total_chunks = (total_size + CHUNK_SIZE - 1) // CHUNK_SIZE
     upload_id = str(uuid.uuid4())
     temp_dir = get_temp_dir(prefix="chunk_")
 
-    await _repo().init_upload(
+    await repo.init_upload(
         upload_id=upload_id,
-        user_id=str(current_user["_id"]),
+        user_id=user_id,
         filename=filename,
         total_size=total_size,
         total_chunks=total_chunks,
@@ -219,6 +264,28 @@ async def complete_upload(
     }
 
 
+@router.delete("/{upload_id}")
+async def abort_upload(
+    upload_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """主動中止上傳工作階段，即時清掉半成品的 temp_dir。
+
+    前端在「上傳失敗 / 使用者取消」時呼叫，讓本機 EBS 的 chunk 檔當下回收，
+    不必等 periodic_chunk_upload_cleanup 的 grace period。
+
+    Idempotent：找不到（已被 consume / 已中止 / 不存在）也回 200，讓前端能
+    fire-and-forget 不必處理 404。只能中止自己的上傳。
+    """
+    doc = await _repo().abort(upload_id, str(current_user["_id"]))
+    if doc:
+        td = Path(doc.get("temp_dir", ""))
+        if td.exists():
+            await asyncio.to_thread(shutil.rmtree, td, ignore_errors=True)
+        log.info("chunk_upload.aborted", upload_id=upload_id)
+    return {"status": "aborted", "found": doc is not None}
+
+
 def _assemble_chunks(temp_dir: Path, assembled_path: Path, total_chunks: int) -> None:
     """把 N 個 chunk 串接成完整檔。Sync I/O，由 to_thread 包覆。"""
     with assembled_path.open("wb") as out:
@@ -265,7 +332,7 @@ async def periodic_chunk_upload_cleanup(
 
     與舊版差異：
     - 舊版只清未完成的 → completed-but-never-consumed 會永遠留 temp_dir
-    - 新版以 last_activity_at 為準，3 小時無活動就清，不論是否 completed
+    - 新版以 last_activity_at 為準，grace_seconds 無活動就清，不論是否 completed
     - rmtree 跑 threadpool（避免阻塞 event loop）
     """
     repo = ChunkUploadRepository(db)

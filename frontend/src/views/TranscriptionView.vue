@@ -6,7 +6,7 @@
     <!-- 上傳進行中提示：另一批上傳（可能在別頁啟動）尚未完成，暫時鎖住新上傳，
          避免單槽位的 uploadStore 被新 start() 覆蓋掉進度 / 孤兒化前一批的 AbortController -->
     <div v-if="uploadStore.busy && !uploading" class="upload-busy-hint">
-      目前已有一個上傳正在進行，完成或取消後才能開始新的上傳。
+      {{ $t('uploadZone.busyHint') }}
     </div>
 
     <!-- 上傳區域（含三角形合併按鈕） -->
@@ -282,6 +282,7 @@ import { useAuthStore } from '../stores/auth'
 import { useUiStore } from '../stores/ui'
 import { useUploadStore } from '../stores/upload'
 import { quotaErrorFromDetail } from '../utils/quotaError'
+import { errorI18n } from '../utils/apiError'
 
 const { t: $t, locale } = useI18n()
 const router = useRouter()
@@ -564,11 +565,17 @@ async function confirmAndUpload() {
 //  - 網路 / JS 錯誤（無後端 detail）→ 通用 i18n（取代原本會漏出的英文 library 字串）
 //  - 其餘後端訊息（語言由後端決定）→ 沿用（完整 localize 需後端 i18n）
 function uploadErrorMessage(error) {
-  const detail = error?.response?.data?.detail
-  const code = detail && typeof detail === 'object' ? detail.code : null
-  if (code === 'FEATURE_NOT_AVAILABLE') return $t('uploadErrors.featureNotAvailable')
-  const serverMsg = (detail && typeof detail === 'object') ? detail.message : (typeof detail === 'string' ? detail : '')
-  return serverMsg || $t('uploadErrors.generic')
+  return detailToMessage(error?.response?.data?.detail)
+}
+
+// 把後端 detail 本體（字串 或 {code,message,params} 物件）轉成跟隨 UI 語言的訊息。
+// 經集中對照（apiError.ts）：有 code 對應 i18n key → 前端翻譯（多語系）；
+// 否則 fallback 到後端 message（中文）；再不然通用錯誤。
+// 共用給「axios error」與「批次回傳 tasks[].error 的裸 detail」。
+function detailToMessage(detail) {
+  const { key, params, fallback } = errorI18n(detail)
+  if (key) return $t(key, params)
+  return fallback || $t('uploadErrors.generic')
 }
 
 // 取消上傳
@@ -660,12 +667,25 @@ async function confirmBatchUpload(formData) {
     // 顯示結果通知
     if (showNotification) {
       if (result.failed > 0) {
+        // 列出哪些檔失敗、各自原因（後端在 tasks[].error 帶了 detail，先前只用來
+        // 判斷配額 Modal，沒告知使用者明細）。上限 5 筆避免 toast 過長。
+        const FAILED_LIST_MAX = 5
+        const failedLines = (result.tasks || [])
+          .filter(t => t.error)
+          .map(t => $t('batchUpload.failedItem', {
+            filename: t.filename,
+            reason: detailToMessage(t.error),
+          }))
+        const shown = failedLines.slice(0, FAILED_LIST_MAX)
+        if (failedLines.length > FAILED_LIST_MAX) {
+          shown.push($t('batchUpload.moreFailures', { count: failedLines.length - FAILED_LIST_MAX }))
+        }
         showNotification({
           title: $t('batchUpload.partialSuccess'),
-          message: $t('batchUpload.partialSuccessMessage', {
-            created: result.created,
-            failed: result.failed
-          }),
+          message: [
+            $t('batchUpload.partialSuccessMessage', { created: result.created, failed: result.failed }),
+            ...shown,
+          ].join('\n'),
           type: 'warning'
         })
       } else {

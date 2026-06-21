@@ -375,6 +375,11 @@
     "cancel": "Cancel",
     "close": "Close"
   },
+  "errors": {
+    "invalidFileSize": "Invalid file size",
+    "fileTooLarge": "File exceeds the {max}MB limit",
+    "uploadDiskFull": "Server storage is temporarily full. Please try again later."
+  },
   "uploadErrors": {
     "featureNotAvailable": "Batch upload is available on Basic plan or above. Please upgrade to use it.",
     "generic": "Upload failed. Please try again later."
@@ -385,7 +390,8 @@
     "uploadingFile": "Uploading file...",
     "fileTooLarge": "File Too Large",
     "fileTooLargeMessage": "\"{name}\" is {size}, exceeding the {max}MB limit",
-    "filesTooLargeMessage": "{count} file(s) exceed the {max}MB limit and were skipped"
+    "filesTooLargeMessage": "{count} file(s) exceed the {max}MB limit and were skipped",
+    "busyHint": "An upload is already in progress. You can start a new one once it finishes or is cancelled."
   },
   "tasksView": {
     "downloadFailed": "Download failed, please try again later",
@@ -671,7 +677,9 @@
     "success": "Batch Created",
     "successMessage": "Successfully created {count} transcription tasks",
     "partialSuccess": "Partially Successful",
-    "partialSuccessMessage": "Created {created} tasks, {failed} failed",
+    "partialSuccessMessage": "Created {created} tasks, {failed} failed:",
+    "failedItem": "{filename}: {reason}",
+    "moreFailures": "…and {count} more",
     "failed": "Batch Creation Failed",
     "uploadingFiles": "Uploading...",
     "uploadingProgress": "Uploading file {current}/{total}",
