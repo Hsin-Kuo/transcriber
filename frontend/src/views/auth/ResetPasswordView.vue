@@ -2,45 +2,45 @@
   <div class="auth-container">
     <div class="auth-card">
       <div class="auth-content">
-          <h1 class="auth-title">重設密碼</h1>
-          <p class="auth-subtitle">Sound Lite 轉錄服務</p>
+          <h1 class="auth-title">{{ $t('auth.resetPasswordTitle') }}</h1>
+          <p class="auth-subtitle">{{ $t('auth.forgotPasswordSubtitle') }}</p>
 
           <!-- 檢查連結有效性中（避免過期連結先閃出表單）-->
           <div v-if="checking" class="checking-state">
-            <p class="form-description">檢查連結中...</p>
+            <p class="form-description">{{ $t('auth.checkingLink') }}</p>
           </div>
 
           <!-- 無效 token 狀態 -->
           <div v-else-if="invalidToken" class="error-state">
             <div class="error-icon">⚠️</div>
-            <p class="error-title">連結無效或已過期</p>
+            <p class="error-title">{{ $t('auth.invalidToken') }}</p>
             <p class="error-subtitle">
-              此密碼重設連結可能已過期或無效。請重新申請密碼重設。
+              {{ $t('auth.invalidTokenDescription') }}
             </p>
             <button
               type="button"
               class="btn-primary"
               @click="router.push('/forgot-password')"
             >
-              重新申請重設密碼
+              {{ $t('auth.requestNewReset') }}
             </button>
           </div>
 
           <!-- 重設表單 -->
           <form v-else-if="!success" @submit.prevent="handleSubmit" class="auth-form">
             <p class="form-description">
-              請輸入您的新密碼。
+              {{ $t('auth.resetPasswordEnterNew') }}
             </p>
 
             <div class="form-group">
-              <label for="password">新密碼</label>
+              <label for="password">{{ $t('auth.newPassword') }}</label>
               <div class="password-input-wrapper">
                 <input
                   :type="showPassword ? 'text' : 'password'"
                   id="password"
                   v-model="password"
                   required
-                  placeholder="至少 8 個字元"
+                  :placeholder="$t('auth.passwordPlaceholder')"
                   minlength="8"
                   :disabled="loading"
                   @input="validatePassword"
@@ -64,29 +64,29 @@
               </div>
               <div v-if="password" class="password-requirements">
                 <div class="requirement" :class="{ met: passwordChecks.length }">
-                  {{ passwordChecks.length ? '✓' : '○' }} 至少 8 個字元
+                  {{ passwordChecks.length ? '✓' : '○' }} {{ $t('auth.reqLength') }}
                 </div>
                 <div class="requirement" :class="{ met: passwordChecks.hasUpper }">
-                  {{ passwordChecks.hasUpper ? '✓' : '○' }} 包含大寫字母
+                  {{ passwordChecks.hasUpper ? '✓' : '○' }} {{ $t('auth.reqUppercase') }}
                 </div>
                 <div class="requirement" :class="{ met: passwordChecks.hasLower }">
-                  {{ passwordChecks.hasLower ? '✓' : '○' }} 包含小寫字母
+                  {{ passwordChecks.hasLower ? '✓' : '○' }} {{ $t('auth.reqLowercase') }}
                 </div>
                 <div class="requirement" :class="{ met: passwordChecks.hasNumber }">
-                  {{ passwordChecks.hasNumber ? '✓' : '○' }} 包含數字
+                  {{ passwordChecks.hasNumber ? '✓' : '○' }} {{ $t('auth.reqNumber') }}
                 </div>
               </div>
             </div>
 
             <div class="form-group">
-              <label for="confirmPassword">確認新密碼</label>
+              <label for="confirmPassword">{{ $t('auth.confirmNewPassword') }}</label>
               <div class="password-input-wrapper">
                 <input
                   :type="showConfirmPassword ? 'text' : 'password'"
                   id="confirmPassword"
                   v-model="confirmPassword"
                   required
-                  placeholder="再次輸入新密碼"
+                  :placeholder="$t('auth.confirmPasswordPlaceholder')"
                   minlength="8"
                   :disabled="loading"
                 />
@@ -108,7 +108,7 @@
                 </button>
               </div>
               <div v-if="confirmPassword && confirmPassword !== password" class="error-hint">
-                密碼不一致
+                {{ $t('auth.passwordMismatch') }}
               </div>
             </div>
 
@@ -121,23 +121,23 @@
               class="btn-primary"
               :disabled="loading || !isPasswordValid || password !== confirmPassword"
             >
-              {{ loading ? '重設中...' : '重設密碼' }}
+              {{ loading ? $t('auth.resetting') : $t('auth.resetPassword') }}
             </button>
           </form>
 
           <!-- 成功狀態 -->
           <div v-else class="success-message">
             <div class="success-icon">✓</div>
-            <p class="success-title">密碼已重設成功！</p>
+            <p class="success-title">{{ $t('auth.passwordResetSuccess') }}</p>
             <p class="success-subtitle">
-              您現在可以使用新密碼登入。
+              {{ $t('auth.passwordResetSuccessDescription') }}
             </p>
             <button
               type="button"
               class="btn-primary"
               @click="router.push('/login')"
             >
-              前往登入
+              {{ $t('auth.goToLogin') }}
             </button>
           </div>
         </div>
@@ -148,12 +148,14 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth'
 import api from '../../utils/api'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+const { t: $t } = useI18n()
 
 const token = ref('')
 const password = ref('')
@@ -210,12 +212,12 @@ onMounted(async () => {
 
 async function handleSubmit() {
   if (password.value !== confirmPassword.value) {
-    error.value = '密碼不一致'
+    error.value = $t('auth.passwordMismatch')
     return
   }
 
   if (!isPasswordValid.value) {
-    error.value = '密碼不符合要求'
+    error.value = $t('auth.passwordRequirements')
     return
   }
 
