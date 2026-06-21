@@ -3,13 +3,19 @@
     <!-- SVG 濾鏡定義 -->
     <ElectricBorder />
 
+    <!-- 上傳進行中提示：另一批上傳（可能在別頁啟動）尚未完成，暫時鎖住新上傳，
+         避免單槽位的 uploadStore 被新 start() 覆蓋掉進度 / 孤兒化前一批的 AbortController -->
+    <div v-if="uploadStore.busy && !uploading" class="upload-busy-hint">
+      目前已有一個上傳正在進行，完成或取消後才能開始新的上傳。
+    </div>
+
     <!-- 上傳區域（含三角形合併按鈕） -->
     <UploadZone
       @file-selected="handleFileUpload"
       @files-selected="handleFilesUpload"
       @open-merge="openMergeModal"
       :uploading="uploading"
-      :disabled="!!pendingFile || mergeMode.isActive || batchMode.isActive"
+      :disabled="uploadStore.busy || !!pendingFile || mergeMode.isActive || batchMode.isActive"
     />
 
     <!-- 合併對話窗 -->
@@ -730,6 +736,19 @@ onUnmounted(() => {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* 上傳進行中提示橫幅 */
+.upload-busy-hint {
+  max-width: 800px;
+  margin: 16px auto 0;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: rgba(221, 132, 72, 0.1);
+  border: 1px solid var(--electric-primary, #dd8448);
+  color: var(--main-text);
+  font-size: 14px;
+  text-align: center;
 }
 
 /* 確認表單區域（在上傳區下方） */
