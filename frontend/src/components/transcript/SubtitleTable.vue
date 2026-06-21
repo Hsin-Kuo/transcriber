@@ -356,6 +356,8 @@ onUnmounted(() => {
   background: var(--main-bg);
   padding: 12px;
   text-align: left;
+  /* 統一表頭字體：避免「時間」欄繼承 .col-time 的 Courier New monospace */
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 11px;
   font-weight: 700;
   color: var(--main-text-light);
@@ -416,6 +418,7 @@ onUnmounted(() => {
   text-align: center;
   font-family: 'Courier New', monospace;
   font-size: 13px;
+  line-height: 1.6;
   color: var(--main-text-light);
   white-space: nowrap;
   vertical-align: top;
@@ -455,16 +458,19 @@ onUnmounted(() => {
   width: 100px;
   padding: 12px;
   text-align: center;
+  line-height: 1.6;
   vertical-align: top;
 }
 
 .speaker-badge {
   display: inline-block;
-  padding: 4px 10px;
+  padding: 1px 10px;
   background: var(--main-bg);
   border-radius: 8px;
   font-size: 13px;
   font-weight: 600;
+  line-height: 1.6;
+  vertical-align: top;
   color: var(--main-primary);
   transition: all 0.2s ease;
 }
