@@ -2,14 +2,14 @@
 # 釘版本：large-v3-turbo 與 BatchedInferencePipeline 需 faster-whisper>=1.0；
 # 釘死確保部署可重現，避免 pip install 抓到未測過的新版（連帶釘 ctranslate2 後端）
 faster-whisper==1.2.1
-ctranslate2==4.7.1
+ctranslate2==4.8.0
 
 # Speaker Diarization
 # 釘版本：pyannote.audio 4.x 改用 torchcodec 解碼、需 FFmpeg 共享庫（DLAMI / 靜態 ffmpeg 都沒有）
 # → GPU worker 載入即失敗。釘回 prod 驗證過的 3.4.0 + torch/torchaudio 2.5.1（舊解碼後端，免 torchcodec）。
 # unpinned 會抓到 bleeding-edge → 「prod 能跑、新機重建就爆」的典型 drift。
-torch==2.5.1
-torchaudio==2.5.1
+torch==2.12.1
+torchaudio==2.11.0
 pyannote.audio==3.4.0
 # huggingface_hub 0.26+ 移除了 hf_hub_download 的 use_auth_token 參數，pyannote.audio 3.4.0
 # 仍在用它 → 不釘會抓到新版、diarization 載入即 TypeError。釘在最後支援該參數的 0.25.x。
