@@ -62,7 +62,7 @@
       :class="{ disabled: disabled || uploading }"
       @click.stop="handleMergeClick"
       :disabled="disabled || uploading"
-      title="合併多個音檔"
+      :title="$t('uploadZone.mergeMultiple')"
     >
       <div class="merge-icon">
         <svg width="36" height="24" viewBox="0 0 36 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
@@ -80,7 +80,7 @@
           <line x1="20" y1="19" x2="28" y2="19" />
         </svg>
       </div>
-      <span class="merge-label">合併音檔</span>
+      <span class="merge-label">{{ $t('uploadZone.mergeAudio') }}</span>
     </button>
   </div>
 </template>

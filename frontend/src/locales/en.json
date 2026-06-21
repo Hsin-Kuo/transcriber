@@ -360,7 +360,13 @@
     "uploading": "Uploading...",
     "uploadFailed": "Upload Failed",
     "uploadFailedMessage": "Upload failed: {message}",
-    "errorUpload": "Upload failed"
+    "errorUpload": "Upload failed",
+    "language": "Language",
+    "langChineseGeneric": "Chinese (generic)",
+    "mergeMode": "Merge Mode",
+    "fileCount": "{count} file(s)",
+    "taskName": "Task Name",
+    "mergeTaskNameHint": "This name identifies the merged transcription task"
   },
   "globalUpload": {
     "statusUploading": "Uploading",
@@ -391,7 +397,9 @@
     "fileTooLarge": "File Too Large",
     "fileTooLargeMessage": "\"{name}\" is {size}, exceeding the {max}MB limit",
     "filesTooLargeMessage": "{count} file(s) exceed the {max}MB limit and were skipped",
-    "busyHint": "An upload is already in progress. You can start a new one once it finishes or is cancelled."
+    "busyHint": "An upload is already in progress. You can start a new one once it finishes or is cancelled.",
+    "mergeMultiple": "Merge multiple audio files",
+    "mergeAudio": "Merge Audio"
   },
   "tasksView": {
     "downloadFailed": "Download failed, please try again later",
@@ -519,7 +527,8 @@
     "logLoadedTagOrder": "Loaded tag order from server:",
     "logTagCount": "tags",
     "logTagMapping": "Tag \"{name}\" -> ID: {id}",
-    "logSendingTagIds": "Sending tag ID list:"
+    "logSendingTagIds": "Sending tag ID list:",
+    "tagNotFound": "Tag \"{tag}\" not found"
   },
   "downloadDialog": {
     "title": "Download Settings",
@@ -643,7 +652,8 @@
     "updateFailed": "Update Failed",
     "cannotUpdateTaskName": "Cannot update task name",
     "cannotUpdateSpeakerNames": "Cannot update speaker names",
-    "cannotUpdateTags": "Cannot update tags"
+    "cannotUpdateTags": "Cannot update tags",
+    "cannotUpdateSubtitleSettings": "Failed to update subtitle settings"
   },
   "taskInfo": {
     "lastEdited": "Last Updated",
@@ -819,5 +829,24 @@
     "serverErrorMessage": "The server is temporarily unable to handle the request. Please try again later.",
     "networkErrorTitle": "Network error",
     "networkErrorMessage": "Unable to reach the server. Please check your network connection."
+  },
+  "common": {
+    "cancel": "Cancel",
+    "remove": "Remove"
+  },
+  "mergeModal": {
+    "title": "Merge Audio",
+    "uploadSection": "Upload Audio",
+    "uploadZoneAria": "Select or drop audio files",
+    "dragDrop": "Drop audio files here",
+    "clickSelect": "or click to select files",
+    "supportedFormats": "Supports mp3, wav, m4a, mp4 and more",
+    "selectedFiles": "Selected files",
+    "noFiles": "No files selected",
+    "uploadFromLeft": "Upload audio from the left",
+    "dragToReorder": "Drag to reorder",
+    "totalSize": "Total size: {size}",
+    "minTwoFiles": "Select at least 2 files to merge",
+    "nextStep": "Next: Transcription settings"
   }
 }

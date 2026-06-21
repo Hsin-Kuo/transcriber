@@ -53,8 +53,8 @@
             <!-- 合併模式：顯示多檔案資訊 -->
             <template v-if="mergeMode.isActive">
               <div class="merge-info-header">
-                <span class="merge-badge">🔀 合併模式</span>
-                <span class="file-count">{{ mergeMode.files.length }} 個檔案</span>
+                <span class="merge-badge">🔀 {{ $t('transcription.mergeMode') }}</span>
+                <span class="file-count">{{ $t('transcription.fileCount', { count: mergeMode.files.length }) }}</span>
               </div>
               <ul class="merge-file-list">
                 <li v-for="(file, idx) in mergeMode.files" :key="idx" class="merge-file-item">
@@ -65,14 +65,14 @@
               </ul>
               <!-- 任務名稱欄位 -->
               <div class="task-name-section">
-                <label class="sub-label">任務名稱</label>
+                <label class="sub-label">{{ $t('transcription.taskName') }}</label>
                 <input
                   type="text"
                   v-model="mergeTaskName"
                   :placeholder="defaultMergeTaskName"
                   class="text-input task-name-input"
                 />
-                <p class="hint">此名稱將用於識別合併後的轉錄任務</p>
+                <p class="hint">{{ $t('transcription.mergeTaskNameHint') }}</p>
               </div>
             </template>
 
@@ -91,12 +91,12 @@
 
           <!-- 語言選擇（移至左欄） -->
           <div class="modal-section language-section">
-            <label class="section-label">語言</label>
+            <label class="section-label">{{ $t('transcription.language') }}</label>
             <select v-model="selectedLanguage" class="language-select">
-              <option value="auto">自動偵測</option>
+              <option value="auto">{{ $t('transcription.autoDetect') }}</option>
               <option value="zh-TW">繁體中文</option>
               <option value="zh-CN">简体中文</option>
-              <option value="zh">中文（不指定）</option>
+              <option value="zh">{{ $t('transcription.langChineseGeneric') }}</option>
               <option value="en">English</option>
               <option value="ja">日本語</option>
               <option value="ko">한국어</option>

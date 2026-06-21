@@ -147,12 +147,12 @@
 
       <!-- 語言選擇 -->
       <div class="setting-row">
-        <label class="setting-label">語言</label>
+        <label class="setting-label">{{ $t('transcription.language') }}</label>
         <select v-model="config.language" class="language-select">
-          <option value="auto">自動偵測</option>
+          <option value="auto">{{ $t('transcription.autoDetect') }}</option>
           <option value="zh-TW">繁體中文</option>
           <option value="zh-CN">简体中文</option>
-          <option value="zh">中文（不指定）</option>
+          <option value="zh">{{ $t('transcription.langChineseGeneric') }}</option>
           <option value="en">English</option>
           <option value="ja">日本語</option>
           <option value="ko">한국어</option>

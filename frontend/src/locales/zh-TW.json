@@ -360,7 +360,13 @@
     "uploading": "上傳中...",
     "uploadFailed": "上傳失敗",
     "uploadFailedMessage": "上傳失敗：{message}",
-    "errorUpload": "上傳失敗"
+    "errorUpload": "上傳失敗",
+    "language": "語言",
+    "langChineseGeneric": "中文（不指定）",
+    "mergeMode": "合併模式",
+    "fileCount": "{count} 個檔案",
+    "taskName": "任務名稱",
+    "mergeTaskNameHint": "此名稱將用於識別合併後的轉錄任務"
   },
   "globalUpload": {
     "statusUploading": "上傳中",
@@ -391,7 +397,9 @@
     "fileTooLarge": "檔案過大",
     "fileTooLargeMessage": "「{name}」大小為 {size}，超過 {max}MB 上限",
     "filesTooLargeMessage": "有 {count} 個檔案超過 {max}MB 上限，已自動略過",
-    "busyHint": "目前已有一個上傳正在進行，完成或取消後才能開始新的上傳。"
+    "busyHint": "目前已有一個上傳正在進行，完成或取消後才能開始新的上傳。",
+    "mergeMultiple": "合併多個音檔",
+    "mergeAudio": "合併音檔"
   },
   "tasksView": {
     "downloadFailed": "下載失敗，請稍後再試",
@@ -521,7 +529,8 @@
     "logLoadedTagOrder": "已從伺服器載入標籤順序：",
     "logTagCount": "個標籤",
     "logTagMapping": "標籤 \"{name}\" -> ID: {id}",
-    "logSendingTagIds": "發送的標籤 ID 列表："
+    "logSendingTagIds": "發送的標籤 ID 列表：",
+    "tagNotFound": "找不到標籤「{tag}」"
   },
   "downloadDialog": {
     "title": "下載設定",
@@ -647,7 +656,8 @@
     "updateFailed": "更新失敗",
     "cannotUpdateTaskName": "無法更新任務名稱",
     "cannotUpdateSpeakerNames": "無法更新講者名稱",
-    "cannotUpdateTags": "無法更新標籤"
+    "cannotUpdateTags": "無法更新標籤",
+    "cannotUpdateSubtitleSettings": "無法更新字幕設定"
   },
   "taskInfo": {
     "lastEdited": "完成時間",
@@ -826,6 +836,23 @@
     "networkErrorMessage": "無法連接伺服器，請檢查網路連線"
   },
   "common": {
-    "close": "關閉"
+    "close": "關閉",
+    "cancel": "取消",
+    "remove": "移除"
+  },
+  "mergeModal": {
+    "title": "音檔合併服務",
+    "uploadSection": "上傳音檔",
+    "uploadZoneAria": "選擇或拖放音檔",
+    "dragDrop": "拖放音檔到此處",
+    "clickSelect": "或點擊選擇檔案",
+    "supportedFormats": "支援 mp3, wav, m4a, mp4 等格式",
+    "selectedFiles": "已選擇的檔案",
+    "noFiles": "尚未選擇檔案",
+    "uploadFromLeft": "從左側上傳音檔",
+    "dragToReorder": "拖曳調整順序",
+    "totalSize": "合計大小：{size}",
+    "minTwoFiles": "請至少選擇 2 個檔案進行合併",
+    "nextStep": "下一步：轉錄設定"
   }
 }
