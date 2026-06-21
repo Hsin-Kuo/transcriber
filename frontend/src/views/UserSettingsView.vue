@@ -983,6 +983,9 @@ onMounted(async () => {
   } else if (checkout === 'canceled') {
     showToast($t('userSettings.subscription.checkoutCanceled'), 'error')
     router.replace({ path: '/settings' })
+  } else {
+    // 進頁一律重抓，確保時數/額度反映最近完成的轉錄（否則需手動 refresh 才更新）
+    await authStore.fetchCurrentUser()
   }
 
   // 如果 localStorage 已有值但後端沒有，首次同步寫入後端

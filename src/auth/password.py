@@ -1,6 +1,7 @@
 """密碼加密與驗證"""
 import bcrypt
 import hashlib
+from typing import Optional
 
 
 def hash_password(plain_password: str) -> str:
@@ -18,16 +19,21 @@ def hash_password(plain_password: str) -> str:
     return hashed.decode('utf-8')
 
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
+def verify_password(plain_password: str, hashed_password: Optional[str]) -> bool:
     """驗證密碼
 
     Args:
         plain_password: 明文密碼
-        hashed_password: 加密後的密碼
+        hashed_password: 加密後的密碼（OAuth-only 帳號為 None）
 
     Returns:
         是否匹配
     """
+    # OAuth-only 帳號的 password_hash 為 None（見 src/routers/oauth.py），
+    # 若直接 .encode() 會拋 AttributeError → login 變成未處理的 500。
+    # 無密碼憑證一律視為驗證失敗，交由呼叫端回 401。
+    if not hashed_password:
+        return False
     return bcrypt.checkpw(
         plain_password.encode('utf-8'),
         hashed_password.encode('utf-8')
