@@ -53,6 +53,7 @@ import DownloadDialog from '../components/transcript/DownloadDialog.vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { usePullToRefresh } from '../composables/usePullToRefresh'
+import { useAuthStore } from '../stores/auth'
 
 // 新 API 服務層
 import { transcriptionService, taskService } from '../api/services'
@@ -64,6 +65,7 @@ import { useTranscriptDownload } from '../composables/transcript/useTranscriptDo
 
 const router = useRouter()
 const { t } = useI18n()
+const authStore = useAuthStore()
 const showNotification = inject('showNotification')
 const tasks = ref([])
 const eventSources = new Map() // SSE 連接管理
@@ -409,8 +411,9 @@ function connectTaskSSE(taskId) {
         Object.assign(task, data)
         console.log(`📊 更新後任務狀態:`, { progress: task.progress, progress_percentage: task.progress_percentage })
 
-        // 如果任務剛完成，顯示通知
+        // 如果任務剛完成，顯示通知 + 重抓使用者額度（後端已扣時數，否則 UI 需手動 refresh 才更新）
         if (oldStatus !== 'completed' && data.status === 'completed') {
+          authStore.fetchCurrentUser()
           if (showNotification) {
             showNotification({
               title: t('tasksView.transcriptionComplete'),
@@ -499,7 +502,12 @@ function startPollTimer() {
             taskInList.progress_percentage = updated.progress_percentage
           }
           if (updated.status !== taskInList.status) {
+            const wasCompleted = taskInList.status === 'completed'
             taskInList.status = updated.status
+            // SSE 被緩衝時的備援：完成才扣時數，重抓額度讓 UI 同步
+            if (!wasCompleted && updated.status === 'completed') {
+              authStore.fetchCurrentUser()
+            }
           }
         }
       } catch (_) { /* ignore */ }
