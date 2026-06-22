@@ -461,16 +461,21 @@ async def startup_event():
 
         sqs_region = os.getenv("S3_REGION", "ap-northeast-1")
         sqs_queue_url = os.getenv("SQS_QUEUE_URL", "")
+        priority_sqs_queue_url = os.getenv("PRIORITY_SQS_QUEUE_URL", "")
         worker_secret = _gp(
             "/transcriber/worker-secret", fallback_env="WORKER_SECRET", default=""
         )
         init_task_dispatch(WorkerDispatch(
             sqs_client=boto3.client("sqs", region_name=sqs_region),
             sqs_queue_url=sqs_queue_url,
+            priority_sqs_queue_url=priority_sqs_queue_url,
             worker_secret=worker_secret,
             handoff_uploader=upload_to_handoff,
         ))
-        logger.info("app.worker_dispatch.initialized")
+        logger.info(
+            "app.worker_dispatch.initialized",
+            priority_queue_enabled=bool(priority_sqs_queue_url),
+        )
 
     # 10. 啟動 dispatch 背景機制（LocalDispatch 起撿單器；WorkerDispatch no-op）
     get_task_dispatch().start()
