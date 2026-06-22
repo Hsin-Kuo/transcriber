@@ -30,7 +30,7 @@ git checkout -b feature/xxx
 # 開發 + commit
 git push -u origin feature/xxx
 gh pr create --base main                    # CI 跑 5 個 status check
-gh pr merge --squash --delete-branch
+gh pr merge --merge --delete-branch         # repo 已停 squash/rebase，一律 merge commit
 
 # 2. main → staging（部署 + 驗證 staging）
 gh pr create --base staging --head main     # Promotion Guard 檢查 head=main
