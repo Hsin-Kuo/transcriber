@@ -48,8 +48,13 @@ class TaskDispatch(Protocol):
         audio_local_path: Path,
         temp_dir: Path,
         user_tier: str,
+        is_priority: bool = False,
     ) -> DispatchResult:
-        """移交 Task。temp_dir 在返回後即歸 adapter 負責清理。"""
+        """移交 Task。temp_dir 在返回後即歸 adapter 負責清理。
+
+        is_priority：該任務是否享優先排隊權（intake 以 has_feature 判定）。
+        只有 WorkerDispatch（AWS 雙佇列）會用到；LocalDispatch 忽略。
+        """
         ...
 
     def start(self) -> None:
@@ -114,6 +119,7 @@ class LocalDispatch:
         audio_local_path: Path,
         temp_dir: Path,
         user_tier: str,
+        is_priority: bool = False,  # 本地單佇列無優先權，忽略（見 plan Q5）
     ) -> DispatchResult:
         """未滿載立即啟動轉錄；滿載則留 pending 等撿單器。"""
         task_id = job.task_id

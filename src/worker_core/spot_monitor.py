@@ -12,7 +12,7 @@ import urllib.request
 
 import boto3
 
-from src.worker_core.config import SQS_QUEUE_URL, S3_REGION, SPOT_CHECK_INTERVAL_SECONDS, SPOT_INTERRUPT_VISIBILITY_TIMEOUT
+from src.worker_core.config import S3_REGION, SPOT_CHECK_INTERVAL_SECONDS, SPOT_INTERRUPT_VISIBILITY_TIMEOUT
 from src.worker_core.db import get_db, update_task
 from src.utils.logger import get_logger
 import src.worker_core.state as state
@@ -54,10 +54,12 @@ def _handle_spot_interruption(sqs) -> None:
         except Exception as e:
             log.error("spot.task.requeue_failed", task_id=state.current_task_id, error=str(e))
 
-    if state.current_receipt_handle and SQS_QUEUE_URL:
+    # 必須打到訊息實際所屬的佇列（priority 或 normal），不可用全域 SQS_QUEUE_URL，
+    # 否則 priority 任務的快速 requeue 會打錯佇列。
+    if state.current_receipt_handle and state.current_queue_url:
         try:
             sqs.change_message_visibility(
-                QueueUrl=SQS_QUEUE_URL,
+                QueueUrl=state.current_queue_url,
                 ReceiptHandle=state.current_receipt_handle,
                 VisibilityTimeout=SPOT_INTERRUPT_VISIBILITY_TIMEOUT,
             )

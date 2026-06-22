@@ -40,6 +40,27 @@ class TestHasFeature:
         # free 方案提供說話者辨識（與方案頁一致），不做 gating
         assert has_feature({"quota": {"tier": "free"}}, "speaker_diarization") is True
 
+    @pytest.mark.parametrize("tier", ["pro", "enterprise"])
+    def test_priority_processing_on_for_pro_and_enterprise(self, tier):
+        # 優先佇列路由的真實來源（intake 用 has_feature 決定 is_priority）
+        assert has_feature({"quota": {"tier": tier}}, "priority_processing") is True
+
+    @pytest.mark.parametrize("tier", ["free", "basic"])
+    def test_priority_processing_off_for_free_and_basic(self, tier):
+        assert has_feature({"quota": {"tier": tier}}, "priority_processing") is False
+
+    def test_priority_processing_honors_per_user_override(self):
+        # per-user quota.features 覆寫優先於 tier 預設（這正是改走 has_feature 的理由）
+        assert has_feature(
+            {"quota": {"tier": "free", "features": {"priority_processing": True}}},
+            "priority_processing",
+        ) is True
+
+    def test_priority_processing_fails_safe_on_bad_tier(self):
+        # 壞/缺 tier → 退回 free 預設 False，不誤升級到優先佇列
+        assert has_feature({"quota": {"tier": "bogus"}}, "priority_processing") is False
+        assert has_feature({}, "priority_processing") is False
+
 
 class TestPublicTierPlans:
     """方案頁資料的唯一真實來源——前端 PlanPanel 改抓此 API，不再自行 hardcode。"""
