@@ -83,12 +83,13 @@ gh pr merge --merge                          # → 觸發 deploy-aws.yml
 | 項目 | 值 |
 |------|-----|
 | 網址 | `https://staging.soundlite.app`（Cloudflare Access 鎖 email allowlist；`/subscriptions/notify/*`、`/webhooks/*`、`/health` 為 bypass） |
+| Admin 網址 | `https://admin-staging.soundlite.app`（獨立 server block，Cloudflare Access 鎖 email allowlist，無 bypass） |
 | Web EC2 | `i-0e328071b52856681`（t3.micro），EIP `52.196.120.189` |
 | GPU Worker | `i-01a34a514d56269db`（g4dn.xlarge On-Demand，**手動啟動**，idle 3 分鐘自停） |
 | 資源 | SQS `transcriber-tasks-staging`、S3 `transcriber-files-staging-...`、Atlas **M0**（獨立 project）、SSM `/transcriber-staging/*` |
 | Admin 帳號 | `admin@example.com` / `Admin@123456`（在 Cloudflare Access 後，刻意用弱密碼） |
 
-**部署**：PR `main → staging` merge → `deploy-staging.yml` 自動部署 web（只部使用者前端，不含 admin）。
+**部署**：PR `main → staging` merge → `deploy-staging.yml` 自動部署 web（使用者前端 + admin 後台 `admin-staging.soundlite.app`）。
 
 **測轉錄**（worker 平常停著）：
 ```bash
