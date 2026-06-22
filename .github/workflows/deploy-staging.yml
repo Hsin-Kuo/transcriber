@@ -6,7 +6,8 @@ name: Deploy to Staging
 #   - environment: staging（無 reviewer；prod 是 production + reviewer approve）
 #   - sync deploy/.env.aws.staging + deploy/nginx-staging.conf
 #   - VITE_SENTRY_ENVIRONMENT=staging
-#   - 只部使用者前端（staging 先不部 admin）
+#   - 部使用者前端 + admin 後台（admin-staging.soundlite.app，由 nginx-staging.conf 的
+#     admin server block serve；DNS + Cloudflare Access 須在後台先備妥）
 #   - health check 打 staging.soundlite.app（/health 已在 Cloudflare Access bypass）
 #
 # ⚠️ 依賴 deploy/nginx-staging.conf（server_name staging.soundlite.app、單一入口、
@@ -78,6 +79,24 @@ jobs:
         working-directory: frontend
         run: tar -czvf ../frontend.tar.gz dist
 
+      # ===== Admin Frontend 建置 =====
+      - name: Build admin-frontend
+        working-directory: admin-frontend
+        run: |
+          # admin-frontend/.env.production 在 .gitignore，由 CI 從 secrets 產生
+          cat > .env.production <<EOF
+          VITE_SENTRY_DSN=${{ secrets.VITE_SENTRY_DSN_ADMIN }}
+          VITE_SENTRY_ENVIRONMENT=staging-admin
+          VITE_SENTRY_TRACES_SAMPLE_RATE=0.1
+          VITE_SENTRY_RELEASE=${{ github.sha }}
+          EOF
+          npm ci
+          npm run build
+
+      - name: Package admin-frontend
+        working-directory: admin-frontend
+        run: tar -czvf ../admin-frontend.tar.gz dist
+
       # ===== SSH 部署 =====
       - name: Setup SSH agent
         uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555  # v0.10.0
@@ -93,6 +112,7 @@ jobs:
         run: |
           scp backend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/backend-${SHA}.tar.gz
           scp frontend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/frontend-${SHA}.tar.gz
+          scp admin-frontend.tar.gz ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:/tmp/admin-frontend-${SHA}.tar.gz
 
       - name: Deploy backend
         env:
@@ -142,7 +162,7 @@ jobs:
           sudo install -m 0755 /opt/transcriber/deploy/rollback.sh /usr/local/bin/transcriber-rollback
 
           echo "${SHA}" | sudo tee /opt/transcriber/releases/CURRENT > /dev/null
-          for prefix in backend frontend; do
+          for prefix in backend frontend admin-frontend; do
             ls -1t /opt/transcriber/releases/${prefix}-*.tar.gz 2>/dev/null | tail -n +6 | xargs -r sudo rm -f
           done
           echo "=== Staging Backend deployed [${SHA}] ==="
@@ -167,6 +187,27 @@ jobs:
           sudo chown -R nginx:nginx /var/www/transcriber
           rm -rf /tmp/dist
           echo "=== Staging Frontend deployed [${SHA}] ==="
+          ENDSSH
+
+      - name: Deploy admin-frontend
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "SHA=${SHA} bash -s" << 'ENDSSH'
+          set -e
+          echo "=== Deploying Staging Admin Frontend [${SHA}] ==="
+          sudo mkdir -p /opt/transcriber/releases
+          sudo mv /tmp/admin-frontend-${SHA}.tar.gz /opt/transcriber/releases/
+          sudo chown ec2-user:ec2-user /opt/transcriber/releases/admin-frontend-${SHA}.tar.gz
+
+          cd /tmp
+          tar -xzf /opt/transcriber/releases/admin-frontend-${SHA}.tar.gz
+          sudo mkdir -p /var/www/admin
+          sudo rm -rf /var/www/admin/*
+          sudo cp -r dist/* /var/www/admin/
+          sudo chown -R nginx:nginx /var/www/admin
+          rm -rf /tmp/dist
+          echo "=== Staging Admin Frontend deployed [${SHA}] ==="
           ENDSSH
 
       - name: Verify deployment
