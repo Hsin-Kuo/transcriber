@@ -7,6 +7,8 @@ import os
 from src.utils.config_loader import get_parameter
 
 SQS_QUEUE_URL: str = os.getenv("SQS_QUEUE_URL", "")
+# 優先佇列（pro+enterprise）；未設定時退化為純單佇列行為（不抽優先）
+PRIORITY_SQS_QUEUE_URL: str = os.getenv("PRIORITY_SQS_QUEUE_URL", "")
 S3_REGION: str = os.getenv("S3_REGION", "ap-northeast-1")
 S3_BUCKET: str = os.getenv("S3_BUCKET", "")
 MONGODB_URL: str = get_parameter(
@@ -26,6 +28,8 @@ AUTO_SHUTDOWN_IDLE_MINUTES: int = int(os.getenv("AUTO_SHUTDOWN_IDLE_MINUTES", "5
 # SQS 行為
 SQS_LONG_POLL_SECONDS: int = 20          # receive_message WaitTimeSeconds
 SQS_VISIBILITY_TIMEOUT_SECONDS: int = 600  # 10 分鐘，單個任務最長處理時間
+# 防餓死比例：連續處理 N 顆 priority 後，保留一個時隙讓一般佇列先選
+PRIORITY_RATIO: int = int(os.getenv("PRIORITY_RATIO", "3"))
 
 # Spot 中斷監控
 SPOT_CHECK_INTERVAL_SECONDS: int = 30

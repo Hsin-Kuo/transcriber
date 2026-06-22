@@ -44,12 +44,14 @@ def _make_dispatch(
     *,
     sqs_client=None,
     sqs_queue_url="https://sqs.example.com/queue",
+    priority_sqs_queue_url="",
     worker_secret="test-secret-32-chars-minimum-len",
     handoff_uploader=None,
 ):
     return WorkerDispatch(
         sqs_client=sqs_client or MagicMock(),
         sqs_queue_url=sqs_queue_url,
+        priority_sqs_queue_url=priority_sqs_queue_url,
         worker_secret=worker_secret,
         handoff_uploader=handoff_uploader or MagicMock(),
     )
@@ -138,6 +140,43 @@ class TestHappyPath:
         uploader.assert_called_once()
         sqs.send_message.assert_not_called()  # 沒 URL 就不送
         assert not fake_audio.parent.exists()
+
+
+class TestQueueRouting:
+    """依 is_priority 旗標（intake 以 has_feature 判定）路由到 priority / normal 佇列。"""
+
+    NORMAL = "https://sqs.example.com/normal"
+    PRIORITY = "https://sqs.example.com/priority"
+
+    async def _dispatch_is_priority(self, fake_audio: Path, is_priority: bool, *, priority_url=PRIORITY):
+        sqs = MagicMock()
+        d = _make_dispatch(
+            sqs_client=sqs,
+            sqs_queue_url=self.NORMAL,
+            priority_sqs_queue_url=priority_url,
+            handoff_uploader=MagicMock(),
+        )
+        await d._dispatch(
+            job=_make_job(task_id="task-route"),
+            audio_local_path=fake_audio,
+            temp_dir=fake_audio.parent,
+            user_tier="pro",  # tier 不再決定路由，僅 S3 prefix
+            is_priority=is_priority,
+        )
+        return sqs.send_message.call_args.kwargs["QueueUrl"]
+
+    @pytest.mark.asyncio
+    async def test_priority_goes_to_priority_queue(self, fake_audio: Path):
+        assert await self._dispatch_is_priority(fake_audio, True) == self.PRIORITY
+
+    @pytest.mark.asyncio
+    async def test_non_priority_goes_to_normal_queue(self, fake_audio: Path):
+        assert await self._dispatch_is_priority(fake_audio, False) == self.NORMAL
+
+    @pytest.mark.asyncio
+    async def test_priority_falls_back_to_normal_when_queue_unconfigured(self, fake_audio: Path):
+        # 優先佇列未配置（功能未啟用）→ 即使 is_priority 也走一般佇列
+        assert await self._dispatch_is_priority(fake_audio, True, priority_url="") == self.NORMAL
 
 
 class TestFailurePath:
