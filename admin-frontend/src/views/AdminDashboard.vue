@@ -569,7 +569,7 @@ onMounted(() => {
 
 <style scoped>
 .admin-container {
-  max-width: 1400px;
+  max-width: none;
   margin: 0 auto;
   padding: 0 20px 40px;
 }
@@ -585,6 +585,7 @@ onMounted(() => {
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-auto-flow: row dense;
   gap: 20px;
   margin-bottom: 30px;
 }

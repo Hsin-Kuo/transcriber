@@ -263,7 +263,7 @@ onMounted(() => {
 
 <style scoped>
 .audit-logs-container {
-  max-width: 1600px;
+  max-width: none;
   margin: 0 auto;
   padding: 0 20px 40px;
 }
