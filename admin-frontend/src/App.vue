@@ -1,7 +1,7 @@
 <template>
   <div class="app-container">
     <ElectricBorder />
-    <main class="content-wrapper admin-only">
+    <main class="content-wrapper" :class="isGuest ? 'guest-full' : 'admin-only'">
       <router-view v-slot="{ Component }">
         <transition name="fade" mode="out-in">
           <component :is="Component" />
@@ -12,7 +12,13 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
 import ElectricBorder from './components/shared/ElectricBorder.vue'
+
+const route = useRoute()
+// guest 路由（如登入頁）自行掌管整個視窗背景，不套 admin 內容頁的 12px 邊框
+const isGuest = computed(() => route.meta.guest === true)
 </script>
 
 <style>
@@ -30,15 +36,24 @@ import ElectricBorder from './components/shared/ElectricBorder.vue'
 .app-container {
   height: 100vh;
   display: flex;
-  padding: 20px;
   box-sizing: border-box;
   overflow: hidden;
 }
 
 .content-wrapper.admin-only {
   flex: 1;
-  max-width: 1600px;
+  max-width: none;
   margin: 0 auto;
+  width: 100%;
+  height: 100%;
+  padding: 12px;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+
+/* guest 頁（登入）：滿版、無邊框，背景由 view 自行鋪滿整個視窗 */
+.content-wrapper.guest-full {
+  flex: 1;
   width: 100%;
   height: 100%;
   overflow-y: auto;

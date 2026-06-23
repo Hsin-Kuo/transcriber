@@ -355,7 +355,7 @@ onMounted(() => {
 
 <style scoped>
 .tasks-container {
-  max-width: 1800px;
+  max-width: none;
   margin: 0 auto;
   padding: 20px;
 }
