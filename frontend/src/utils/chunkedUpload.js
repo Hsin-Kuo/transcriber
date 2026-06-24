@@ -10,7 +10,7 @@
 import api, { ensureFreshAccessToken } from './api.js'
 import { NEW_ENDPOINTS } from '../api/endpoints.js'
 
-const CHUNK_THRESHOLD = 95 * 1024 * 1024 // 95 MB
+export const CHUNK_THRESHOLD = 95 * 1024 * 1024 // 95 MB
 // fallback only：實際切片大小以後端回傳的 chunk_size 為準（見 uploadChunked）
 const CHUNK_SIZE = 16 * 1024 * 1024 // 16 MB
 const MAX_RETRIES = 3
