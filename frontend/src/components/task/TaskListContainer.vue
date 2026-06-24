@@ -113,6 +113,7 @@ import { useI18n } from 'vue-i18n'
 import api from '../../utils/api'
 import { useTaskTags } from '../../composables/task/useTaskTags'
 import { taskService } from '../../api/services'
+import { useAuthStore } from '../../stores/auth'
 import TaskFilterBar from './TaskFilterBar.vue'
 import BatchEditToolbar from './BatchEditToolbar.vue'
 import TaskGrid from './TaskGrid.vue'
@@ -120,6 +121,7 @@ import RulerPagination from '../common/RulerPagination.vue'
 
 const { t: $t } = useI18n()
 const { fetchTagColors, tagsData } = useTaskTags($t)
+const authStore = useAuthStore()
 
 // Props
 const props = defineProps({
@@ -368,7 +370,7 @@ async function handleToggleKeepAudio(task) {
     const errorCode = error.response?.data?.detail?.error_code || error.response?.data?.error_code
 
     if (errorCode === 'KEEP_AUDIO_LIMIT_EXCEEDED') {
-      alert($t('taskList.errorKeepAudioLimit'))
+      alert($t('taskList.errorKeepAudioLimit', { n: authStore.maxKeepAudio }))
     } else if (errorCode === 'TASK_NOT_FOUND') {
       alert($t('transcriptData.taskNotFound'))
     } else {

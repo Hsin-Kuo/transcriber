@@ -629,7 +629,7 @@
     "errorUpdateKeepAudio": "Failed to update audio retention status",
     "errorToggleKeepAudio": "Failed to toggle audio retention",
     "errorUpdateFailed": "Update failed: {message}",
-    "errorKeepAudioLimit": "Maximum 3 audio files can be kept",
+    "errorKeepAudioLimit": "You can keep at most {n} audio files",
     "errorSelectTasksFirst": "Please select tasks to delete first",
     "errorSelectTasksForTags": "Please select tasks to add tags first",
     "errorEnterTags": "Please enter tags to add",
