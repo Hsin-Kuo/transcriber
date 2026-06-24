@@ -2,7 +2,19 @@
   <div>
     <!-- 空狀態 -->
     <div v-if="tasks.length === 0" class="empty-state">
-      <p>{{ $t('taskList.noTranscriptionTasks') }}</p>
+      <!-- 完全沒有任務（新使用者）：引導 + CTA -->
+      <template v-if="isFirstTime">
+        <svg class="empty-illustration" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M32 40V14" />
+          <path d="M23 23l9-9 9 9" />
+          <path d="M14 40v6a4 4 0 0 0 4 4h28a4 4 0 0 0 4-4v-6" />
+        </svg>
+        <h3>{{ $t('taskList.empty.title') }}</h3>
+        <p class="empty-subtitle">{{ $t('taskList.empty.subtitle') }}</p>
+        <router-link to="/" class="empty-cta">{{ $t('taskList.empty.cta') }}</router-link>
+      </template>
+      <!-- 有任務、但目前篩選/分類為空：維持單行提示 -->
+      <p v-else>{{ $t('taskList.noTranscriptionTasks') }}</p>
     </div>
 
     <!-- 任務列表 -->
@@ -72,6 +84,9 @@ const emit = defineEmits([
 ])
 
 // Computed
+// 區分「完全沒任務的新使用者」與「篩選後為空」：只有前者顯示引導 + CTA
+const isFirstTime = computed(() => props.allTasks.length === 0)
+
 const keepAudioCount = computed(() => {
   return props.allTasks.filter(t =>
     t.status === 'completed' &&
@@ -111,6 +126,46 @@ function isNewestTask(task) {
   font-weight: 500;
   margin-bottom: 8px;
   color: rgba(var(--color-text-dark-rgb), 0.7);
+}
+
+.empty-illustration {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 18px;
+  color: rgba(var(--color-text-dark-rgb), 0.35);
+  display: block;
+}
+
+.empty-state h3 {
+  font-size: 17px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  color: rgba(var(--color-text-dark-rgb), 0.85);
+}
+
+.empty-subtitle {
+  max-width: 420px;
+  margin: 0 auto 22px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(var(--color-text-dark-rgb), 0.6);
+}
+
+.empty-cta {
+  display: inline-block;
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--main-primary, #dd8448);
+  border-radius: 10px;
+  text-decoration: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.empty-cta:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
 }
 
 .tasks {
