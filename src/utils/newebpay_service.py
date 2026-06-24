@@ -400,8 +400,8 @@ class NewebpayService:
         prices = {
             ("basic", "monthly"): int(os.getenv("NEWEBPAY_PRICE_BASIC_MONTHLY", "299")),
             ("basic", "yearly"):  int(os.getenv("NEWEBPAY_PRICE_BASIC_YEARLY",  "3289")),
-            ("pro",   "monthly"): int(os.getenv("NEWEBPAY_PRICE_PRO_MONTHLY",   "899")),
-            ("pro",   "yearly"):  int(os.getenv("NEWEBPAY_PRICE_PRO_YEARLY",    "9889")),
+            ("pro",   "monthly"): int(os.getenv("NEWEBPAY_PRICE_PRO_MONTHLY",   "999")),
+            ("pro",   "yearly"):  int(os.getenv("NEWEBPAY_PRICE_PRO_YEARLY",    "10989")),
         }
         return prices.get((tier, billing_cycle))
 

@@ -1,6 +1,7 @@
 <template>
   <div
     class="electric-card task-wrapper"
+    :data-tour="task.__demo ? 'demo-card' : undefined"
   >
     <div
       class="task-item"

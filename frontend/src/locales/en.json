@@ -450,6 +450,7 @@
   "uploadZone": {
     "clickToUpload": "Click to upload or drag and drop",
     "supportedFormats": "Supports audio (M4A, MP3, WAV) and video (MP4, MOV, AVI) formats",
+    "outcomeHint": "After uploading, files are transcribed automatically into an editable transcript and subtitles (SRT), with speaker identification and AI punctuation.",
     "uploadingFile": "Uploading file...",
     "fileTooLarge": "File Too Large",
     "fileTooLargeMessage": "\"{name}\" is {size}, exceeding the {max}MB limit",
@@ -457,6 +458,64 @@
     "busyHint": "An upload is already in progress. You can start a new one once it finishes or is cancelled.",
     "mergeMultiple": "Merge multiple audio files",
     "mergeAudio": "Merge Audio"
+  },
+  "tour": {
+    "next": "Next",
+    "prev": "Back",
+    "done": "Get started",
+    "replay": "How it works",
+    "replayShort": "Tutorial",
+    "demoFileName": "sample-meeting.mp3",
+    "welcome": {
+      "title": "Welcome to SoundLite",
+      "desc": "A 30-second tour from upload to viewing your results. Press ✕ to skip anytime.",
+      "start": "Start tour"
+    },
+    "upload": {
+      "title": "① Upload audio",
+      "desc": "Click here or drag and drop an audio/video file. Supports MP3, M4A, WAV, MP4 and more."
+    },
+    "language": {
+      "title": "② Choose language",
+      "desc": "Leave it on \"Auto-detect\" and we'll figure it out, or pick a language manually for better accuracy."
+    },
+    "diarize": {
+      "title": "③ Speaker identification",
+      "desc": "Turn this on to automatically separate speakers (e.g. interviews, meetings); the transcript is labelled \"Speaker 1, 2…\"."
+    },
+    "taskType": {
+      "title": "④ Output format",
+      "desc": "\"Transcript\" produces readable paragraphs; \"Subtitles\" produces time-coded SRT, ideal for video captions."
+    },
+    "start": {
+      "title": "⑤ Start transcribing",
+      "desc": "Click here once you're set. Let's use a sample task to show you what happens next →"
+    },
+    "toList": "See the result",
+    "toDetail": "Open transcript",
+    "finish": "Finish tour",
+    "list": {
+      "title": "Your tasks",
+      "desc": "Uploaded tasks show up here — you can watch progress while transcribing and open them once done. Click \"Open transcript\" to see the result →"
+    },
+    "detail": {
+      "transcript": {
+        "title": "Transcript & speakers",
+        "desc": "This is the transcription. With speaker identification on, speakers are labelled automatically — rename them by editing or find-and-replace."
+      },
+      "actions": {
+        "title": "Download & share",
+        "desc": "From this menu you can download the transcript/subtitles (TXT, SRT, VTT) or create a share link for others to view without signing in."
+      },
+      "summary": {
+        "title": "AI summary",
+        "desc": "Generate an AI summary of the content in one click to grasp the key points without reading the whole transcript."
+      },
+      "audio": {
+        "title": "Follow the audio",
+        "desc": "The built-in player lets you read while listening — click any line to jump to its timestamp. Great for proofreading."
+      }
+    }
   },
   "tasksView": {
     "downloadFailed": "Download failed, please try again later",
@@ -491,6 +550,11 @@
     "cancelling": "Cancelling",
     "noTasks": "No tasks available",
     "noTranscriptionTasks": "No transcription tasks yet",
+    "empty": {
+      "title": "Upload your first file to start transcribing",
+      "subtitle": "Supports MP3, M4A, WAV, MP4 and more. Speakers are identified and punctuation added automatically, then you can download the transcript and subtitles.",
+      "cta": "Upload audio"
+    },
     "confirmDelete": "Are you sure you want to delete this task?",
     "deleteButtonText": "Delete",
     "batchEdit": "",
@@ -565,7 +629,7 @@
     "errorUpdateKeepAudio": "Failed to update audio retention status",
     "errorToggleKeepAudio": "Failed to toggle audio retention",
     "errorUpdateFailed": "Update failed: {message}",
-    "errorKeepAudioLimit": "Maximum 3 audio files can be kept",
+    "errorKeepAudioLimit": "You can keep at most {n} audio files",
     "errorSelectTasksFirst": "Please select tasks to delete first",
     "errorSelectTasksForTags": "Please select tasks to add tags first",
     "errorEnterTags": "Please enter tags to add",

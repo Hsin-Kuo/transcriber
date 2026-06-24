@@ -5,7 +5,7 @@
 
 import api, { API_BASE } from '../utils/api'
 import { NEW_ENDPOINTS } from './endpoints'
-import { needsChunking, uploadChunked } from '../utils/chunkedUpload'
+import { needsChunking, uploadChunked, CHUNK_THRESHOLD } from '../utils/chunkedUpload'
 
 // ========== Response Types ==========
 
@@ -135,7 +135,7 @@ export const transcriptionService = {
     const mergeFiles = formData.getAll('files') as File[]
     if (mergeFiles.length > 0) {
       const totalSize = mergeFiles.reduce((sum, f) => sum + f.size, 0)
-      if (totalSize >= 95 * 1024 * 1024) {
+      if (totalSize >= CHUNK_THRESHOLD) {
         const uploadIds: string[] = []
         let done = 0
         for (const f of mergeFiles) {
@@ -198,11 +198,18 @@ export const transcriptionService = {
     const chunkedMap: Record<string, string> = {}
     const smallFiles: Array<{ index: number; file: File }> = []
 
+    // Cloudflare 限制整個 request body（~100MB）；分片與否必須看「全部檔案加總」而非
+    // 逐檔判斷，否則兩個各自 <95MB 但相加破百的檔案會被塞進同一個 multipart，於後端
+    // 之前就被 Cloudflare 擋下 413。對齊單檔 merge 路徑（create()）的加總邏輯：總和
+    // 超過門檻時整批改走分片，讓 batch POST 的 body 只剩 metadata。
+    const totalSize = files.reduce((sum, f) => sum + f.size, 0)
+    const chunkAll = totalSize >= CHUNK_THRESHOLD
+
     const totalFiles = files.length
     let chunkedDone = 0
 
     for (let i = 0; i < files.length; i++) {
-      if (needsChunking(files[i])) {
+      if (chunkAll || needsChunking(files[i])) {
         if (onFileProgress) onFileProgress(chunkedDone + 1, totalFiles)
         const uploadId = await uploadChunked(files[i], {
           signal,

@@ -641,7 +641,7 @@ onMounted(() => {
 
 <style scoped>
 .user-detail-container {
-  max-width: 1400px;
+  max-width: none;
   margin: 0 auto;
   padding: 20px;
 }
