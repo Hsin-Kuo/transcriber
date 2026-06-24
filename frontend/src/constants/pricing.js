@@ -5,7 +5,7 @@
 export const TIER_PRICES = {
   free: { monthly: 0, yearly: 0 },
   basic: { monthly: 299, yearly: 3289 },
-  pro: { monthly: 899, yearly: 9889 },
+  pro: { monthly: 999, yearly: 10989 },
 }
 
 /** 取得某方案在指定計費週期的價格（找不到回 0）。 */
