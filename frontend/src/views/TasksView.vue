@@ -18,7 +18,7 @@ v-if="!isRefreshing" class="ptr-arrow"
 
     <!-- 任務列表 -->
     <TaskList
-      :tasks="tasks"
+      :tasks="displayTasks"
       :current-page="currentPage"
       :total-pages="totalPages"
       @download="downloadTask"
@@ -45,7 +45,7 @@ v-if="!isRefreshing" class="ptr-arrow"
 </template>
 
 <script setup>
-import { ref, onBeforeUnmount, inject, computed } from 'vue'
+import { ref, onBeforeUnmount, onMounted, nextTick, inject, computed } from 'vue'
 import api, { TokenManager } from '../utils/api'
 import TaskList from '../components/task/TaskListContainer.vue'
 import RulerPagination from '../components/common/RulerPagination.vue'
@@ -54,6 +54,9 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { usePullToRefresh } from '../composables/usePullToRefresh'
 import { useAuthStore } from '../stores/auth'
+import { useTourStore, TOUR_PHASES, TOUR_ANCHORS, tourSel } from '../stores/tour'
+import { useProductTour } from '../composables/useProductTour'
+import { buildDemoListTask, DEMO_ID } from '../utils/tourFixtures'
 
 // 新 API 服務層
 import { transcriptionService, taskService } from '../api/services'
@@ -64,10 +67,19 @@ import { useSubtitleMode } from '../composables/transcript/useSubtitleMode'
 import { useTranscriptDownload } from '../composables/transcript/useTranscriptDownload'
 
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const authStore = useAuthStore()
+const tourStore = useTourStore()
+const tour = useProductTour()
 const showNotification = inject('showNotification')
 const tasks = ref([])
+
+// 導覽列表 phase：注入一張 demo 卡片（不污染真實資料，狀態由 tourStore 驅動動畫）
+const displayTasks = computed(() =>
+  tourStore.showDemoCard
+    ? [buildDemoListTask(locale.value, tourStore.demoStatus, tourStore.demoProgress), ...tasks.value]
+    : tasks.value
+)
 const eventSources = new Map() // SSE 連接管理
 let pollTimer = null // 進行中任務的輪詢備用計時器
 
@@ -522,11 +534,62 @@ function stopPollTimer() {
   }
 }
 
+// === 新手導覽（方案 C）：列表 phase ===
+
+// demo 卡片「轉錄中 → 完成」動畫的計時器
+let demoTimers = []
+function animateDemoCard() {
+  tourStore.setDemoStatus('processing', 10)
+  demoTimers.push(setTimeout(() => tourStore.setDemoStatus('processing', 45), 500))
+  demoTimers.push(setTimeout(() => tourStore.setDemoStatus('processing', 80), 1000))
+  demoTimers.push(setTimeout(() => tourStore.setDemoStatus('completed', 100), 1600))
+}
+function clearDemoTimers() {
+  demoTimers.forEach(clearTimeout)
+  demoTimers = []
+}
+
+function buildListSteps() {
+  return [
+    {
+      element: tourSel(TOUR_ANCHORS.DEMO_CARD),
+      popover: {
+        title: t('tour.list.title'),
+        description: t('tour.list.desc'),
+        doneBtnText: t('tour.toDetail'),
+        // 列表 phase 最後一步：交棒到詳情 phase
+        onNextClick: () =>
+          tour.advanceTo(tourStore, router, TOUR_PHASES.DETAIL, `/transcript/${DEMO_ID}`),
+      },
+    },
+  ]
+}
+
+async function maybeRunListTour() {
+  if (!tourStore.active || tourStore.phase !== TOUR_PHASES.LIST) return
+  tourStore.endAdvance() // 已抵達列表頁
+  animateDemoCard()
+  await nextTick() // 等 demo 卡片渲染出來，data-tour 錨點才存在
+  // 換頁到詳情 phase 時不收尾；使用者關閉則清計時器並結束導覽
+  tour.run({
+    steps: buildListSteps(),
+    t,
+    onDestroyed: tour.makeDestroyHandler(tourStore, clearDemoTimers),
+  })
+}
+
+onMounted(() => {
+  maybeRunListTour()
+})
+
 // 組件卸載前斷開所有連接
 onBeforeUnmount(() => {
   console.log('🔌 組件即將卸載，關閉所有 SSE 連接')
   disconnectAllSSE()
   stopPollTimer()
+  clearDemoTimers()
+  // 離開頁面時若列表導覽仍在跑，強制收掉避免殘留 overlay
+  tour.getDriver()?.destroy?.()
 })
 </script>
 

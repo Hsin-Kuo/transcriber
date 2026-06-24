@@ -1,5 +1,8 @@
 <template>
   <div class="transcript-detail-container">
+    <!-- 導覽專用假選單（teleport 到 body；僅「下載與分享」步顯示） -->
+    <TourActionsMenu :visible="tourMenuVisible" />
+
     <!-- 固定頂部 Header -->
     <TranscriptHeader
       ref="headerRef"
@@ -273,6 +276,7 @@ class="transcript-layout"
           v-if="currentTranscript.hasAudio"
           v-show="!isEffectivelyCollapsed"
           ref="audioPlayerRef"
+          data-tour="t-audio"
           class="desktop-audio-player"
           :has-audio-element="true"
           :audio-url="audioUrl"
@@ -307,9 +311,12 @@ class="transcript-layout"
         class="right-panel card"
         :style="{ '--content-font-size': contentFontSize + 'px', '--content-font-weight': contentFontWeight, '--content-font-family': contentFontFamily === 'serif' ? 'Georgia, Times New Roman, serif' : '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif' }"
       >
+        <!-- 導覽「AI 摘要」步：以假摘要卡取代真實元件（展開狀態、純展示） -->
+        <TourSummaryCard v-if="tourSummaryVisible" />
+
         <!-- AI 摘要組件 -->
         <AISummary
-          v-if="currentTranscript.task_id"
+          v-if="currentTranscript.task_id && !tourSummaryVisible"
           :task-id="currentTranscript.task_id"
           :initial-summary-status="currentTranscript.summary_status"
           :display-mode="displayMode"
@@ -318,7 +325,7 @@ class="transcript-layout"
         />
 
         <!-- 逐字稿內容區域 -->
-        <div class="transcript-content-wrapper">
+        <div class="transcript-content-wrapper" data-tour="t-transcript">
           <div v-if="loadingTranscript" class="loading-state">
             <div class="spinner"></div>
             <p>{{ $t('transcriptDetail.loadingTranscript') }}</p>
@@ -492,7 +499,7 @@ class="transcript-layout"
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
@@ -540,10 +547,19 @@ import { usePageLifecycle } from '../composables/transcript/usePageLifecycle'
 import { useTaskTags } from '../composables/task/useTaskTags'
 import { isModifierPressed } from '../utils/platform'
 import { useAuthStore } from '../stores/auth'
+import { useTourStore, TOUR_PHASES, TOUR_ANCHORS, tourSel } from '../stores/tour'
+import { useProductTour } from '../composables/useProductTour'
+import { DEMO_ID } from '../utils/tourFixtures'
+import TourActionsMenu from '../components/tour/TourActionsMenu.vue'
+import TourSummaryCard from '../components/tour/TourSummaryCard.vue'
 
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const tourStore = useTourStore()
+const detailTour = useProductTour()
+const tourMenuVisible = ref(false) // 導覽「下載與分享」步顯示的假選單
+const tourSummaryVisible = ref(false) // 導覽「AI 摘要」步顯示的假摘要
 
 // 組件引用
 const audioPlayerRef = ref(null)
@@ -586,6 +602,86 @@ watch(
   () => currentTranscript.value?.custom_name || currentTranscript.value?.filename,
   (name) => {
     document.title = name ? `${name} - Sound Lite` : 'Sound Lite'
+  }
+)
+
+// === 新手導覽（方案 C）：詳情 phase ===
+let detailTourStarted = false
+
+function buildDetailSteps() {
+  return [
+    {
+      element: tourSel(TOUR_ANCHORS.T_TRANSCRIPT),
+      popover: {
+        title: $t('tour.detail.transcript.title'),
+        description: $t('tour.detail.transcript.desc'),
+        // 先顯示導覽假選單、等它進 DOM，再進到 actions 步直接高亮它
+        onNextClick: () => {
+          tourMenuVisible.value = true
+          nextTick(() => detailTour.getDriver()?.moveNext?.())
+        },
+      },
+    },
+    {
+      // 高亮導覽專用假選單（TourActionsMenu，data-tour="t-actions"）
+      element: tourSel(TOUR_ANCHORS.T_ACTIONS),
+      onDeselected: () => { tourMenuVisible.value = false },
+      popover: {
+        title: $t('tour.detail.actions.title'),
+        description: $t('tour.detail.actions.desc'),
+        // 先顯示假摘要卡、等它進 DOM，再進到 summary 步直接高亮它
+        onNextClick: () => {
+          tourSummaryVisible.value = true
+          nextTick(() => detailTour.getDriver()?.moveNext?.())
+        },
+      },
+    },
+    {
+      // 高亮導覽專用假摘要卡（TourSummaryCard，data-tour="t-summary"）
+      element: tourSel(TOUR_ANCHORS.T_SUMMARY),
+      onDeselected: () => { tourSummaryVisible.value = false },
+      popover: { title: $t('tour.detail.summary.title'), description: $t('tour.detail.summary.desc') },
+    },
+    {
+      element: tourSel(TOUR_ANCHORS.T_AUDIO),
+      popover: {
+        title: $t('tour.detail.audio.title'),
+        description: $t('tour.detail.audio.desc'),
+        doneBtnText: $t('tour.finish'),
+      },
+    },
+  ]
+}
+
+// 詳情是最後一個 phase：driver 結束（完成或關閉）→ 收尾導覽。
+// demo 詳情頁非真實任務，結束後離開回上傳頁。
+const onDetailTourDestroyed = detailTour.makeDestroyHandler(tourStore, () => {
+  tourMenuVisible.value = false
+  tourSummaryVisible.value = false
+  if (route.params.taskId === DEMO_ID) router.push('/')
+})
+
+onUnmounted(() => {
+  // 防止瀏覽器返回等情況留下殘留 overlay
+  detailTour.getDriver()?.destroy?.()
+})
+
+// 當 demo 逐字稿載入完成（fixture 已注入）且處於 detail phase → 啟動詳情導覽
+watch(
+  () => currentTranscript.value?.task_id,
+  (taskId) => {
+    if (
+      taskId === DEMO_ID &&
+      tourStore.active &&
+      tourStore.phase === TOUR_PHASES.DETAIL &&
+      !detailTourStarted
+    ) {
+      detailTourStarted = true
+      tourStore.endAdvance() // 已抵達詳情頁
+      nextTick(() => {
+        detailTour.run({ steps: buildDetailSteps(), t: $t, onDestroyed: onDetailTourDestroyed })
+      })
+    }
   }
 )
 
