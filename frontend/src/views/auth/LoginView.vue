@@ -112,6 +112,7 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth'
 import { API_BASE } from '../../utils/api'
 import { resolveLandingPath } from '../../utils/loginRedirect'
+import { errorI18n } from '../../utils/apiError'
 import GoogleSignInButton from '../../components/GoogleSignInButton.vue'
 
 const { t: $t } = useI18n()
@@ -179,7 +180,9 @@ async function resendVerification() {
         resendSuccess.value = false
       }, 5000)
     } else {
-      error.value = data.detail || $t('auth.sendVerificationFailed')
+      // detail 為 coded 物件（如 AUTH_RESEND_COOLDOWN）時不可直印，走統一解析
+      const { key, params, fallback } = errorI18n(data.detail)
+      error.value = key ? $t(key, params) : (fallback || $t('auth.sendVerificationFailed'))
     }
   } catch (err) {
     error.value = $t('auth.networkError')
