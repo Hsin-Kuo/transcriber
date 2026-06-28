@@ -81,7 +81,9 @@ const displayTasks = computed(() =>
     : tasks.value
 )
 const eventSources = new Map() // SSE 連接管理
+const lastSSEUpdate = new Map() // taskId → 最後收到 SSE 更新的時間戳（ms），用來判斷 SSE 是否健康
 let pollTimer = null // 進行中任務的輪詢備用計時器
+const SSE_FRESH_MS = 15000 // SSE 在此時間內有更新即視為健康，該輪輪詢跳過（SSE 優先、輪詢降級）
 
 // 分頁相關狀態
 const currentPage = ref(1)
@@ -415,6 +417,9 @@ function connectTaskSSE(taskId) {
       const data = JSON.parse(event.data)
       console.log(`📊 SSE update ${taskId}:`, data)
 
+      // 記錄 SSE 健康時間戳：輪詢會據此跳過 SSE 正常的任務，避免冗餘 API
+      lastSSEUpdate.set(taskId, Date.now())
+
       // 找到對應的任務並更新
       const task = tasks.value.find(t => t.task_id === taskId)
       if (task) {
@@ -477,6 +482,7 @@ function disconnectTaskSSE(taskId) {
     eventSource.onerror = null
     eventSource.close()
     eventSources.delete(taskId)
+    lastSSEUpdate.delete(taskId)
     console.log(`🔌 關閉 SSE: ${taskId}`)
   }
 }
@@ -491,10 +497,11 @@ function disconnectAllSSE() {
     console.log(`🔌 關閉 SSE: ${taskId}`)
   })
   eventSources.clear()
+  lastSSEUpdate.clear()
 }
 
-// 輪詢備用：當有進行中任務時，每 5 秒直接查 API 更新進度
-// 確保即使 SSE 被 Cloudflare/nginx 緩衝，進度仍能更新
+// 輪詢備用：SSE 優先、輪詢降級。每 5 秒檢查一次，但只在 SSE 失聯時才打 API，
+// 確保即使 SSE 被 Cloudflare/nginx 緩衝，進度仍能更新。
 function startPollTimer() {
   if (pollTimer) return
   pollTimer = setInterval(async () => {
@@ -503,27 +510,59 @@ function startPollTimer() {
       stopPollTimer()
       return
     }
-    for (const t of activeTasks) {
-      try {
-        const response = await taskService.get(t.task_id)
-        const updated = response.task || response
-        const taskInList = tasks.value.find(lt => lt.task_id === t.task_id)
-        if (taskInList && updated.progress) {
+
+    // SSE 優先：所有進行中任務的 SSE 都在 SSE_FRESH_MS 內有更新 → SSE 健康，本輪不打 API
+    const now = Date.now()
+    const sseHealthy = activeTasks.every(t => {
+      const ts = lastSSEUpdate.get(t.task_id)
+      return ts != null && (now - ts) < SSE_FRESH_MS
+    })
+    if (sseHealthy) return
+
+    // 降級備援：一次批次查回所有進行中任務（O(1)，不再逐任務打 API）
+    try {
+      const response = await taskService.list({ status: 'active', limit: 100 })
+      const activeList = response.tasks || []
+      const stillActive = new Set(activeList.map(t => t.task_id))
+
+      // 更新仍在進行中任務的進度與狀態（含 pending → processing 轉換）
+      for (const updated of activeList) {
+        const taskInList = tasks.value.find(lt => lt.task_id === updated.task_id)
+        if (!taskInList) continue
+        if (updated.progress) {
           taskInList.progress = updated.progress
           if (updated.progress_percentage != null) {
             taskInList.progress_percentage = updated.progress_percentage
           }
-          if (updated.status !== taskInList.status) {
+        }
+        // active 結果裡的 status 只會是 pending/processing；終態由下方 transitioned 分支處理
+        if (updated.status && updated.status !== taskInList.status) {
+          taskInList.status = updated.status
+        }
+      }
+
+      // 偵測「剛離開進行中」的任務：列表仍標 pending/processing 但已不在 active 結果
+      // → 個別查回終態（completed/failed/cancelled），完成時重抓額度讓 UI 同步
+      const transitioned = activeTasks.filter(t => !stillActive.has(t.task_id))
+      for (const t of transitioned) {
+        try {
+          const resp = await taskService.get(t.task_id)
+          const fresh = resp.task || resp
+          const taskInList = tasks.value.find(lt => lt.task_id === t.task_id)
+          if (taskInList && fresh.status && fresh.status !== taskInList.status) {
             const wasCompleted = taskInList.status === 'completed'
-            taskInList.status = updated.status
-            // SSE 被緩衝時的備援：完成才扣時數，重抓額度讓 UI 同步
-            if (!wasCompleted && updated.status === 'completed') {
+            taskInList.status = fresh.status
+            if (fresh.progress) taskInList.progress = fresh.progress
+            if (fresh.progress_percentage != null) {
+              taskInList.progress_percentage = fresh.progress_percentage
+            }
+            if (!wasCompleted && fresh.status === 'completed') {
               authStore.fetchCurrentUser()
             }
           }
-        }
-      } catch (_) { /* ignore */ }
-    }
+        } catch (_) { /* ignore */ }
+      }
+    } catch (_) { /* ignore */ }
   }, 5000)
 }
 
