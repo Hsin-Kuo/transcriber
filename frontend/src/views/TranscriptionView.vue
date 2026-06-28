@@ -299,6 +299,17 @@ const uploadStore = useUploadStore()
 const audioRetentionDays = computed(() => authStore.quota?.audio_retention_days || 3)
 
 const showNotification = inject('showNotification')
+
+// 上傳完成 toast 的「查看」動作：導向任務列表。
+// 已在任務列表頁時 router.push 同路由會被忽略 → 改整頁重整，確保新任務刷新出現。
+function goToTasks() {
+  if (router.currentRoute.value.name === 'tasks') {
+    window.location.reload()
+    return
+  }
+  router.push({ name: 'tasks' })
+}
+
 const uploading = ref(false)
 const uploadProgress = ref(0) // 分片上傳進度 0-100
 const batchUploadCurrent = ref(0) // 批次上傳：目前第幾個檔案
@@ -526,11 +537,21 @@ async function confirmAndUpload() {
       }
     })
 
-    // 上傳完成 → 全域浮層顯示「已建立轉錄任務」（取代原本的「正在轉錄」toast，避免重複訊號）
+    // 上傳完成 → 收掉上傳中浮層，終態統一走 toast
     uploadStore.succeed()
 
+    // 完成通知（帶「查看」動作）。使用者上傳途中切去別頁時不會自動跳轉，
+    // 這顆按鈕是他直達新任務的唯一入口。
+    if (showNotification) {
+      showNotification({
+        title: $t('globalUpload.statusDone'),
+        type: 'success',
+        action: { label: $t('globalUpload.view'), handler: goToTasks },
+      })
+    }
+
     // 轉錄已建立，若使用者仍在上傳頁則自動跳轉到任務列表；
-    // 已離開本頁則不強拉回來，改由全域浮層的「查看」按鈕引導
+    // 已離開本頁則不強拉回來，改由 toast 的「查看」按鈕引導
     if (router.currentRoute.value.name === 'transcription') {
       router.push({ name: 'tasks' })
     }
@@ -696,13 +717,16 @@ async function confirmBatchUpload(formData) {
             $t('batchUpload.partialSuccessMessage', { created: result.created, failed: result.failed }),
             ...shown,
           ].join('\n'),
-          type: 'warning'
+          type: 'warning',
+          // 仍有任務建立成功 → 提供「查看」直達（部分失敗不會自動跳轉）
+          action: result.created > 0 ? { label: $t('globalUpload.view'), handler: goToTasks } : undefined,
         })
       } else {
         showNotification({
           title: $t('batchUpload.success'),
           message: $t('batchUpload.successMessage', { count: result.created }),
-          type: 'success'
+          type: 'success',
+          action: { label: $t('globalUpload.view'), handler: goToTasks },
         })
       }
     }
