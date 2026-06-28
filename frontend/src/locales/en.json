@@ -481,11 +481,11 @@
     },
     "diarize": {
       "title": "③ Speaker identification",
-      "desc": "Turn this on to automatically separate speakers (e.g. interviews, meetings); the transcript is labelled \"Speaker 1, 2…\"."
+      "desc": "Turn this on to automatically separate speakers; the transcript is labelled \"SPEAKER_01, 02…\"."
     },
     "taskType": {
       "title": "④ Output format",
-      "desc": "\"Transcript\" produces readable paragraphs; \"Subtitles\" produces time-coded SRT, ideal for video captions."
+      "desc": "\"Document\" produces readable paragraphs; \"Subtitles\" produces time-coded text segments, ideal for video captions."
     },
     "start": {
       "title": "⑤ Start transcribing",
@@ -495,25 +495,25 @@
     "toDetail": "Open transcript",
     "finish": "Finish tour",
     "list": {
-      "title": "Your tasks",
+      "title": "⑥ Your tasks",
       "desc": "Uploaded tasks show up here — you can watch progress while transcribing and open them once done. Click \"Open transcript\" to see the result →"
     },
     "detail": {
       "transcript": {
-        "title": "Transcript & speakers",
+        "title": "⑦ Transcript & speakers",
         "desc": "This is the transcription. With speaker identification on, speakers are labelled automatically — rename them by editing or find-and-replace."
       },
       "actions": {
-        "title": "Download & share",
-        "desc": "From this menu you can download the transcript/subtitles (TXT, SRT, VTT) or create a share link for others to view without signing in."
+        "title": "⑧ Download & share",
+        "desc": "From this menu you can download the transcript (TXT, PDF) or subtitles (SRT, VTT), or create a share link for others to view without signing in."
       },
       "summary": {
-        "title": "AI summary",
+        "title": "⑨ AI summary",
         "desc": "Generate an AI summary of the content in one click to grasp the key points without reading the whole transcript."
       },
       "audio": {
-        "title": "Follow the audio",
-        "desc": "The built-in player lets you read while listening — click any line to jump to its timestamp. Great for proofreading."
+        "title": "⑩ Follow the audio",
+        "desc": "The built-in player lets you read while listening — hold \"Alt\" and click any line to jump to its timestamp. Great for proofreading."
       }
     }
   },
