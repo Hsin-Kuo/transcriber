@@ -5,6 +5,23 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import api, { TokenManager } from '../utils/api'
 import i18n from '../i18n'
+import { errorI18n } from '../utils/apiError'
+
+/**
+ * 把後端錯誤解析成「可顯示字串」：
+ *   1. 有對應 i18n key（coded 錯誤如 AUTH_INVALID_CREDENTIALS）→ 翻譯
+ *   2. 否則用後端回傳的 message（舊式字串 detail / 尚未對映的 code）
+ *   3. 再否則用呼叫端的 fallback key
+ *
+ * 為什麼需要這層：後端 detail 現在是 `{ code, message }` 物件，直接
+ * `err.response?.data?.detail || ...` 會把整個物件塞進 error.value，
+ * 模板 `{{ error }}` 便 JSON.stringify 把 `{"code":...,"message":...}` 印給使用者。
+ */
+function resolveAuthError(err, fallbackKey) {
+  const { key, params, fallback } = errorI18n(err)
+  if (key) return i18n.global.t(key, params)
+  return fallback || i18n.global.t(fallbackKey)
+}
 
 export const useAuthStore = defineStore('auth', () => {
   // State
@@ -71,7 +88,7 @@ export const useAuthStore = defineStore('auth', () => {
         emailSent: response.data.email_sent !== false,
       }
     } catch (err) {
-      error.value = err.response?.data?.detail || i18n.global.t('auth.registerFailed')
+      error.value = resolveAuthError(err, 'auth.registerFailed')
       return {
         success: false,
         error: error.value
@@ -94,7 +111,7 @@ export const useAuthStore = defineStore('auth', () => {
 
       return { success: true }
     } catch (err) {
-      error.value = err.response?.data?.detail || i18n.global.t('auth.wrongCredentials')
+      error.value = resolveAuthError(err, 'auth.wrongCredentials')
       return {
         success: false,
         error: error.value
@@ -168,7 +185,7 @@ export const useAuthStore = defineStore('auth', () => {
         message: response.data.message
       }
     } catch (err) {
-      error.value = err.response?.data?.detail || i18n.global.t('auth.sendResetEmailFailed')
+      error.value = resolveAuthError(err, 'auth.sendResetEmailFailed')
       return {
         success: false,
         error: error.value
@@ -192,7 +209,7 @@ export const useAuthStore = defineStore('auth', () => {
         message: response.data.message
       }
     } catch (err) {
-      error.value = err.response?.data?.detail || i18n.global.t('auth.resetPasswordFailed')
+      error.value = resolveAuthError(err, 'auth.resetPasswordFailed')
       return {
         success: false,
         error: error.value
@@ -214,7 +231,7 @@ export const useAuthStore = defineStore('auth', () => {
 
       return { success: true }
     } catch (err) {
-      error.value = err.response?.data?.detail || i18n.global.t('auth.googleLoginError')
+      error.value = resolveAuthError(err, 'auth.googleLoginError')
       return {
         success: false,
         error: error.value
@@ -236,7 +253,7 @@ export const useAuthStore = defineStore('auth', () => {
         message: response.data.message
       }
     } catch (err) {
-      error.value = err.response?.data?.detail || i18n.global.t('auth.googleBindError')
+      error.value = resolveAuthError(err, 'auth.googleBindError')
       return {
         success: false,
         error: error.value
@@ -258,7 +275,7 @@ export const useAuthStore = defineStore('auth', () => {
         message: response.data.message
       }
     } catch (err) {
-      error.value = err.response?.data?.detail || i18n.global.t('auth.googleUnbindError')
+      error.value = resolveAuthError(err, 'auth.googleUnbindError')
       return {
         success: false,
         error: error.value
@@ -281,7 +298,7 @@ export const useAuthStore = defineStore('auth', () => {
     } catch (err) {
       return {
         success: false,
-        error: err.response?.data?.detail || i18n.global.t('auth.updatePreferencesFailed')
+        error: resolveAuthError(err, 'auth.updatePreferencesFailed')
       }
     }
   }
@@ -372,7 +389,7 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = null
       return { success: true }
     } catch (err) {
-      error.value = err.response?.data?.detail || i18n.global.t('auth.deleteAccountFailed')
+      error.value = resolveAuthError(err, 'auth.deleteAccountFailed')
       return {
         success: false,
         error: error.value
@@ -396,7 +413,7 @@ export const useAuthStore = defineStore('auth', () => {
         message: response.data.message
       }
     } catch (err) {
-      error.value = err.response?.data?.detail || i18n.global.t('auth.setPasswordFailed')
+      error.value = resolveAuthError(err, 'auth.setPasswordFailed')
       return {
         success: false,
         error: error.value
