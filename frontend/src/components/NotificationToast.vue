@@ -32,6 +32,14 @@
           <div class="notification-content">
             <div class="notification-title">{{ notification.title }}</div>
             <div v-if="notification.message" class="notification-message">{{ notification.message }}</div>
+            <button
+              v-if="notification.action"
+              type="button"
+              class="notification-action"
+              @click.stop="handleAction(notification)"
+            >
+              {{ notification.action.label }}
+            </button>
           </div>
           <button class="notification-close" @click.stop="removeNotification(notification.id)" :aria-label="$t('common.close')">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -50,7 +58,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 const notifications = ref([])
 let notificationId = 0
 
-function addNotification({ title, message, type = 'info', duration }) {
+function addNotification({ title, message, type = 'info', duration, action }) {
   // 預設停留時間依類型決定（呼叫端仍可顯式傳 duration 覆寫）：
   //   error / warning → 永久停留（duration 0），需使用者點擊整則或按關閉鈕才消失，避免重要訊息被錯過
   //   success / info / processing → 10 秒後自動關閉
@@ -63,7 +71,9 @@ function addNotification({ title, message, type = 'info', duration }) {
     id,
     title,
     message,
-    type
+    type,
+    // optional 動作按鈕（如上傳完成的「查看」）：{ label, handler }
+    action
   }
 
   notifications.value.push(notification)
@@ -86,6 +96,12 @@ function removeNotification(id) {
     if (removed?.timer) clearTimeout(removed.timer)
   }
   hoverEnterTimes.delete(id)
+}
+
+// 動作按鈕（如「查看」）：執行 handler 後關閉該則通知。
+function handleAction(notification) {
+  notification.action?.handler?.()
+  removeNotification(notification.id)
 }
 
 // hover-and-leave 關閉（所有 toast 皆適用）：記錄進入時間，離開時若停留夠久才關。
@@ -213,6 +229,23 @@ onUnmounted(() => {
   line-height: 1.4;
   /* 保留訊息中的換行（批次部分失敗會用 \n 列出各檔原因）；單行訊息不受影響 */
   white-space: pre-line;
+}
+
+.notification-action {
+  margin-top: 8px;
+  padding: 5px 14px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;
+  background: var(--color-primary, #6366f1);
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.notification-action:hover {
+  background: var(--color-primary-dark, #4f46e5);
 }
 
 .notification-close {
