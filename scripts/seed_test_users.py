@@ -44,12 +44,12 @@ TEST_USERS = [
     {
         "email": "test.basic@soundlite.app",
         "tier": "basic",
-        "near_limit_usage": {"duration_minutes": 570.0, "ai_summaries": 28},
+        "near_limit_usage": {"duration_minutes": 595.0, "ai_summaries": 29},
     },
     {
         "email": "test.pro@soundlite.app",
         "tier": "pro",
-        "near_limit_usage": {"duration_minutes": 2850.0, "ai_summaries": 95},
+        "near_limit_usage": {"duration_minutes": 2995.0, "ai_summaries": 99},
     },
     {
         "email": "test.enterprise@soundlite.app",
@@ -162,7 +162,7 @@ def _build_mock_task(cfg: dict, user_id: str, now_ts: float) -> dict:
     return {
         "_id": task_id,
         "task_id": task_id,
-        "task_type": "transcription",
+        "task_type": "paragraph",
         "custom_name": "示範轉錄（SoundLite 功能展示）",
         "user": {
             "user_id": user_id,
