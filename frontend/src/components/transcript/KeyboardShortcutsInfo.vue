@@ -20,7 +20,7 @@
       <div class="shortcuts-title">{{ $t('audioPlayer.audioControlShortcuts') }}</div>
       <div class="shortcuts-section">
         <div class="shortcut-item">
-          <kbd>Ctrl</kbd> + <kbd>{{ modifierKeyLabel }}</kbd>
+          <kbd>{{ modifierKeyLabel }}</kbd> + <kbd>Ctrl</kbd>
           <span>{{ $t('audioPlayer.playPause') }}</span>
         </div>
         <div class="shortcut-item">
