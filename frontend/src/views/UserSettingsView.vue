@@ -988,6 +988,12 @@ onMounted(async () => {
     await authStore.fetchCurrentUser()
   }
 
+  // 外部連結帶升級意圖（intent=upgrade）→ 守衛轉址成 ?panel=plan，這裡開面板並清 query
+  if (route.query.panel === 'plan') {
+    uiStore.openPlanPanel()
+    router.replace({ path: '/settings' })
+  }
+
   // 如果 localStorage 已有值但後端沒有，首次同步寫入後端
   const prefs = authStore.preferences
   const localSync = {}
