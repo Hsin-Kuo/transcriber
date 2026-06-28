@@ -3,6 +3,8 @@
 解析 SQS 訊息 → SQS 重送 dedup → 建 S3Source → 呼叫統一 TranscriptionOrchestrator。
 轉錄 pipeline 本身在 src/transcription/orchestrator.py,Web Server 與 Worker 共用同一份。
 """
+from typing import Optional
+
 from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from src.models.worker_job import TranscriptionJob
@@ -21,6 +23,19 @@ log = get_logger(__name__)
 _SKIP_STATUSES = {"completed", "canceling", "cancelled"}
 
 
+def _should_skip(task_doc: Optional[dict]) -> bool:
+    """是否該跳過這顆任務(不處理、直接刪訊息)。
+
+    - 軟刪除(deleted=True):刪任務不會、也無法即時移除已在佇列的 SQS 訊息
+      (SQS 只能憑 ReceiptHandle 刪),訊息會留到 worker 收到才清。此時音檔/文檔
+      皆已物理刪除,絕不能復活去 S3 抓已不存在的音檔。**不分 status 一律跳過。**
+    - 終態(_SKIP_STATUSES):completed / 取消中 / 已取消。
+    """
+    if not task_doc:
+        return False
+    return bool(task_doc.get("deleted")) or task_doc.get("status") in _SKIP_STATUSES
+
+
 def process_task(message_body: dict, progress_store: ProgressStore) -> None:
     """處理單個轉錄任務(由 sqs_consumer 呼叫)。
 
@@ -32,9 +47,13 @@ def process_task(message_body: dict, progress_store: ProgressStore) -> None:
     bind_contextvars(task_id=task_id)
     try:
         db = get_db()
-        task_doc = db.tasks.find_one({"_id": task_id}, {"status": 1})
-        if task_doc and task_doc.get("status") in _SKIP_STATUSES:
-            log.info("worker.task.skipped", status=task_doc.get("status"))
+        task_doc = db.tasks.find_one({"_id": task_id}, {"status": 1, "deleted": 1})
+        if _should_skip(task_doc):
+            log.info(
+                "worker.task.skipped",
+                status=task_doc.get("status"),
+                deleted=bool(task_doc.get("deleted")),
+            )
             progress_store.clear(task_id)
             return
 
