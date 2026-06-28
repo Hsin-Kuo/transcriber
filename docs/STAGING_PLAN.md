@@ -128,6 +128,15 @@ Region 一律 `ap-northeast-1`（同 prod）。
 ```bash
 aws sqs create-queue --queue-name transcriber-tasks-staging \
   --attributes VisibilityTimeout=600,MessageRetentionPeriod=345600
+
+# DLQ（對齊 prod transcriber-tasks-dlq / staging-priority；poison message 重投 3 次後隔離）
+# 2026-06-28 補上：原 staging 主佇列無 redrive，poison message 會無限重投。
+aws sqs create-queue --queue-name transcriber-tasks-staging-dlq \
+  --attributes MessageRetentionPeriod=345600
+DLQ_ARN=arn:aws:sqs:ap-northeast-1:696637902131:transcriber-tasks-staging-dlq
+aws sqs set-queue-attributes \
+  --queue-url https://sqs.ap-northeast-1.amazonaws.com/696637902131/transcriber-tasks-staging \
+  --attributes '{"RedrivePolicy":"{\"deadLetterTargetArn\":\"'"$DLQ_ARN"'\",\"maxReceiveCount\":3}"}'
 ```
 
 ### 2. S3
