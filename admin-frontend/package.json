@@ -10,10 +10,10 @@
     "type-check": "vue-tsc --noEmit"
   },
   "dependencies": {
-    "@sentry/vue": "^10.56.0",
-    "axios": "^1.17.0",
+    "@sentry/vue": "^10.62.0",
+    "axios": "^1.18.1",
     "pinia": "^3.0.4",
-    "vue": "^3.5.35",
+    "vue": "^3.5.39",
     "vue-router": "^5.1.0"
   },
   "devDependencies": {
@@ -22,9 +22,9 @@
     "@vue/tsconfig": "^0.9.1",
     "eslint": "^9.39.4",
     "eslint-plugin-vue": "^9.33.0",
-    "globals": "^17.6.0",
+    "globals": "^17.7.0",
     "typescript": "^5.9.3",
-    "vite": "^8.0.16",
+    "vite": "^8.1.0",
     "vue-tsc": "^2.2.12"
   }
 }
