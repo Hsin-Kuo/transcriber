@@ -6,7 +6,7 @@
     <div
       class="task-item"
       :class="{
-        'animated': task.status === 'processing',
+        'animated': ['pending', 'processing'].includes(task.status),
         'batch-edit-mode': isBatchMode,
         'clickable': task.status === 'completed' && !isBatchMode
       }"
@@ -543,11 +543,8 @@ function getKeepAudioTooltip() {
   font-weight: 500;
 }
 
-.badge-pending {
-  background: rgba(59, 130, 246, 0.15);
-  color: var(--color-info);
-}
-
+/* pending 在 UI 上比照 processing 呈現（內部 status 仍為 pending） */
+.badge-pending,
 .badge-processing {
   background: rgba(var(--color-primary-rgb), 0.15);
   color: var(--color-primary);
