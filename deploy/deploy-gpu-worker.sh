@@ -33,6 +33,8 @@ case "$APP_ENV" in
 esac
 S3_REGION=ap-northeast-1
 SQS_QUEUE_URL="https://sqs.${S3_REGION}.amazonaws.com/696637902131/${SQS_NAME}"
+# 優先佇列（pro+enterprise）；命名慣例 = 一般佇列名 + -priority
+PRIORITY_SQS_QUEUE_URL="https://sqs.${S3_REGION}.amazonaws.com/696637902131/${SQS_NAME}-priority"
 REPO=git@github.com:Hsin-Kuo/transcriber.git
 
 echo "=== 佈建 ${APP_ENV} GPU worker（branch=${DEPLOY_BRANCH}）==="
@@ -97,6 +99,7 @@ DEPLOY_BRANCH=${DEPLOY_BRANCH}
 S3_BUCKET=${S3_BUCKET}
 S3_REGION=${S3_REGION}
 SQS_QUEUE_URL=${SQS_QUEUE_URL}
+PRIORITY_SQS_QUEUE_URL=${PRIORITY_SQS_QUEUE_URL}
 SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT}
 AUTO_SHUTDOWN_IDLE_MINUTES=${IDLE_MIN}
 EOF

@@ -1,8 +1,29 @@
 <template>
   <div class="upload-zone-wrapper">
+    <!-- 使用教學按鈕（三角形，嵌入左上角；與右下角合併鈕對稱） -->
+    <button
+      class="tour-triangle-btn"
+      :class="{ disabled: disabled || uploading }"
+      @click.stop="handleTourClick"
+      :disabled="disabled || uploading"
+      :title="$t('tour.replay')"
+    >
+      <div class="tour-content">
+        <div class="tour-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+        </div>
+        <span class="tour-label">{{ $t('tour.replayShort') }}</span>
+      </div>
+    </button>
+
     <!-- 上傳區域 -->
     <div
       class="upload-zone"
+      data-tour="upload"
       :class="{
         'drag-over': isDragOver && !disabled,
         'uploading': uploading,
@@ -48,6 +69,7 @@
         </svg>
         <h3>{{ $t('uploadZone.clickToUpload') }}</h3>
         <p>{{ $t('uploadZone.supportedFormats') }}</p>
+        <p class="upload-outcome-hint">{{ $t('uploadZone.outcomeHint') }}</p>
       </div>
 
       <div v-else class="uploading-content">
@@ -62,7 +84,7 @@
       :class="{ disabled: disabled || uploading }"
       @click.stop="handleMergeClick"
       :disabled="disabled || uploading"
-      title="合併多個音檔"
+      :title="$t('uploadZone.mergeMultiple')"
     >
       <div class="merge-icon">
         <svg width="36" height="24" viewBox="0 0 36 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
@@ -80,7 +102,7 @@
           <line x1="20" y1="19" x2="28" y2="19" />
         </svg>
       </div>
-      <span class="merge-label">合併音檔</span>
+      <span class="merge-label">{{ $t('uploadZone.mergeAudio') }}</span>
     </button>
   </div>
 </template>
@@ -93,7 +115,7 @@ const props = defineProps({
   disabled: Boolean
 })
 
-const emit = defineEmits(['file-selected', 'files-selected', 'open-merge'])
+const emit = defineEmits(['file-selected', 'files-selected', 'open-merge', 'open-tour'])
 
 const fileInput = ref(null)
 const isDragOver = ref(false)
@@ -143,25 +165,34 @@ function handleMergeClick() {
     emit('open-merge')
   }
 }
+
+function handleTourClick() {
+  if (!props.uploading && !props.disabled) {
+    emit('open-tour')
+  }
+}
 </script>
 
 <style scoped>
 .upload-zone {
   margin: 24px auto;
   padding: 60px 20px;
+  min-height: 240px;
+  box-sizing: border-box;
   max-width: 800px;
   text-align: center;
   cursor: pointer;
   transition: all 0.3s ease;
   /* background: var(--upload-bg); */
   border: 1px solid var(--nav-text);
+  /* 左上切角較小(110px)嵌「使用教學」、右下切角(140px)嵌「合併」三角鈕 */
   clip-path: polygon(
-    60px 0,
+    110px 0,
     100% 0,
     100% calc(100% - 140px),
     calc(100% - 140px) 100%,
     0 100%,
-    0 60px
+    0 110px
   );
   position: relative;
 }
@@ -210,6 +241,14 @@ function handleMergeClick() {
   font-size: 14px;
   position: relative;
   z-index: 1;
+}
+
+.upload-content p.upload-outcome-hint {
+  max-width: 460px;
+  margin: -12px auto 0;
+  font-size: 12px;
+  line-height: 1.6;
+  opacity: 0.75;
 }
 
 .uploading-content {
@@ -309,7 +348,90 @@ function handleMergeClick() {
   transition: color 0.3s ease;
 }
 
+/* 三角形使用教學按鈕 - 嵌入左上角（比合併鈕小，內容貼左上外緣） */
+.tour-triangle-btn {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 110px;
+  height: 110px;
+  background: var(--main-bg, #e0e5ec);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  /* 內容釘在左上角、貼近外側邊緣 */
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 12px 0 0 14px;
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+  transition: all 0.3s ease;
+  box-shadow:
+    -3px -3px 6px var(--main-shadow-light, rgba(255, 255, 255, 0.8)),
+    3px 3px 6px var(--main-shadow-dark, rgba(163, 177, 198, 0.6));
+}
+
+.tour-triangle-btn:hover:not(.disabled) {
+  background: rgba(221, 132, 72, 0.1);
+}
+
+.tour-triangle-btn:hover:not(.disabled) .tour-icon svg {
+  stroke: var(--electric-primary, #dd8448);
+}
+
+.tour-triangle-btn:hover:not(.disabled) .tour-label {
+  color: var(--electric-primary, #dd8448);
+}
+
+.tour-triangle-btn.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* shrink-wrap 容器：整塊靠左上(由按鈕 flex-start 決定)，內部 icon 置中於文字上方 */
+.tour-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.tour-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tour-icon svg {
+  width: 16px;
+  height: 16px;
+  stroke: rgba(var(--color-text-dark-rgb), 0.5);
+  transition: stroke 0.3s ease;
+}
+
+.tour-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(var(--color-text-dark-rgb), 0.6);
+  margin-top: 3px;
+  transition: color 0.3s ease;
+}
+
 @media (max-width: 768px) {
+  .tour-triangle-btn {
+    width: 88px;
+    height: 88px;
+    padding: 10px 0 0 11px;
+  }
+
+  .tour-icon svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .tour-label {
+    font-size: 10px;
+  }
+
   .merge-triangle-btn {
     width: 100px;
     height: 100px;

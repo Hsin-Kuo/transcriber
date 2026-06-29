@@ -2,7 +2,7 @@
 管理後台 API - 用戶管理、任務管理、統計、審計日誌
 """
 from typing import Optional, List
-from datetime import datetime, timezone, timedelta
+from datetime import timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from pydantic import BaseModel, EmailStr
 from bson import ObjectId
@@ -19,6 +19,8 @@ from ..utils.audit_logger import log_admin_action
 from ..utils.email_service import get_email_service
 from ..utils.sentry_helpers import create_background_task
 from ..utils.logger import get_logger
+from ..utils.api_errors import api_error
+from ..services.admin_analytics import build_admin_analytics
 
 
 def _notify_user_async(to_email: str, action_label: str, admin_email: str, details_lines: list) -> None:
@@ -170,10 +172,8 @@ async def get_user_detail(
 
     user = await user_repo.get_by_id(user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用戶不存在"
-        )
+        raise api_error("ADMIN_USER_NOT_FOUND", "User not found",
+                        status.HTTP_404_NOT_FOUND)
 
     # 計算任務統計
     task_count = await task_repo.count_by_user(user_id)
@@ -226,16 +226,13 @@ async def update_user_status(
 
     user = await user_repo.get_by_id(user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用戶不存在"
-        )
+        raise api_error("ADMIN_USER_NOT_FOUND", "User not found",
+                        status.HTTP_404_NOT_FOUND)
 
     if str(admin["_id"]) == user_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="不能停用自己的帳號"
-        )
+        raise api_error("ADMIN_CANNOT_DISABLE_SELF",
+                        "You cannot disable your own account",
+                        status.HTTP_400_BAD_REQUEST)
 
     success = await user_repo.update(user_id, {"is_active": body.is_active})
 
@@ -279,25 +276,21 @@ async def update_user_role(
 ):
     """修改用戶角色（管理員）"""
     if body.role not in ["user", "admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="角色只能是 'user' 或 'admin'"
-        )
+        raise api_error("ADMIN_INVALID_ROLE",
+                        "Role must be 'user' or 'admin'",
+                        status.HTTP_400_BAD_REQUEST)
 
     user_repo = UserRepository(db)
 
     user = await user_repo.get_by_id(user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用戶不存在"
-        )
+        raise api_error("ADMIN_USER_NOT_FOUND", "User not found",
+                        status.HTTP_404_NOT_FOUND)
 
     if str(admin["_id"]) == user_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="不能修改自己的角色"
-        )
+        raise api_error("ADMIN_CANNOT_CHANGE_OWN_ROLE",
+                        "You cannot change your own role",
+                        status.HTTP_400_BAD_REQUEST)
 
     old_role = user.get("role", "user")
     success = await user_repo.update(user_id, {"role": body.role})
@@ -343,10 +336,8 @@ async def update_user_quota(
 
     user = await user_repo.get_by_id(user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用戶不存在"
-        )
+        raise api_error("ADMIN_USER_NOT_FOUND", "User not found",
+                        status.HTTP_404_NOT_FOUND)
 
     current_quota = user.get("quota", {})
 
@@ -365,17 +356,16 @@ async def update_user_quota(
                 "features": tier_quota["features"]
             }
         except (ValueError, KeyError):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"無效的配額等級: {body.tier}"
-            )
+            raise api_error("ADMIN_INVALID_QUOTA_TIER",
+                            "Invalid quota tier: {tier}",
+                            status.HTTP_400_BAD_REQUEST,
+                            tier=body.tier)
     elif body.custom:
         new_quota = {**current_quota, **body.custom}
     else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="請提供 tier 或 custom 配額設定"
-        )
+        raise api_error("ADMIN_QUOTA_INPUT_REQUIRED",
+                        "Provide either a tier or custom quota settings",
+                        status.HTTP_400_BAD_REQUEST)
 
     old_tier = current_quota.get("tier")
     new_tier = new_quota.get("tier")
@@ -429,10 +419,8 @@ async def reset_user_monthly_quota(
 
     user = await user_repo.get_by_id(user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用戶不存在"
-        )
+        raise api_error("ADMIN_USER_NOT_FOUND", "User not found",
+                        status.HTTP_404_NOT_FOUND)
 
     old_usage = user.get("usage", {})
     old_transcriptions = old_usage.get("transcriptions", 0)
@@ -494,29 +482,26 @@ async def adjust_user_extra_quota(
     使用原子操作保證扣除時不會變負；單次調整有最大值限制避免誤操作。
     """
     if not body.duration_minutes and not body.ai_summaries:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="duration_minutes 與 ai_summaries 不可同時為 0"
-        )
+        raise api_error("ADMIN_EXTRA_QUOTA_DELTA_REQUIRED",
+                        "duration_minutes and ai_summaries cannot both be 0",
+                        status.HTTP_400_BAD_REQUEST)
 
     if abs(body.duration_minutes) > MAX_EXTRA_QUOTA_DELTA_DURATION:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"單次轉錄時長調整不可超過 {MAX_EXTRA_QUOTA_DELTA_DURATION} 分鐘"
-        )
+        raise api_error("ADMIN_EXTRA_QUOTA_DURATION_TOO_LARGE",
+                        "A single duration adjustment cannot exceed {max} minutes",
+                        status.HTTP_400_BAD_REQUEST,
+                        max=MAX_EXTRA_QUOTA_DELTA_DURATION)
     if abs(body.ai_summaries) > MAX_EXTRA_QUOTA_DELTA_SUMMARIES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"單次 AI 摘要調整不可超過 {MAX_EXTRA_QUOTA_DELTA_SUMMARIES} 次"
-        )
+        raise api_error("ADMIN_EXTRA_QUOTA_SUMMARIES_TOO_LARGE",
+                        "A single AI summary adjustment cannot exceed {max} times",
+                        status.HTTP_400_BAD_REQUEST,
+                        max=MAX_EXTRA_QUOTA_DELTA_SUMMARIES)
 
     user_repo = UserRepository(db)
     user = await user_repo.get_by_id(user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用戶不存在"
-        )
+        raise api_error("ADMIN_USER_NOT_FOUND", "User not found",
+                        status.HTTP_404_NOT_FOUND)
 
     updated_user = await user_repo.adjust_extra_quota_atomic(
         user_id,
@@ -525,10 +510,9 @@ async def adjust_user_extra_quota(
     )
 
     if updated_user is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="扣除失敗：餘額不足，請重新整理頁面確認當前餘額"
-        )
+        raise api_error("ADMIN_EXTRA_QUOTA_INSUFFICIENT_BALANCE",
+                        "Deduction failed: insufficient balance, please refresh to confirm the current balance",
+                        status.HTTP_409_CONFLICT)
 
     new_extra = updated_user.get("extra_quota", {})
     new_duration = new_extra.get("duration_minutes", 0)
@@ -611,16 +595,13 @@ async def reset_user_password(
 
     user = await user_repo.get_by_id(user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用戶不存在"
-        )
+        raise api_error("ADMIN_USER_NOT_FOUND", "User not found",
+                        status.HTTP_404_NOT_FOUND)
 
     if len(body.new_password) < 8:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="密碼長度至少需要 8 個字元"
-        )
+        raise api_error("ADMIN_PASSWORD_TOO_SHORT",
+                        "Password must be at least 8 characters",
+                        status.HTTP_400_BAD_REQUEST)
 
     hashed_password = hash_password(body.new_password)
     success = await user_repo.update(user_id, {"password_hash": hashed_password})
@@ -759,10 +740,8 @@ async def get_task_detail(
 
     task = await task_repo.get_by_id(task_id)
     if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任務不存在"
-        )
+        raise api_error("ADMIN_TASK_NOT_FOUND", "Task not found",
+                        status.HTTP_404_NOT_FOUND)
 
     # 取得用戶資訊
     task_user_id = task.get("user", {}).get("user_id")
@@ -817,17 +796,15 @@ async def admin_cancel_task(
 
     task = await task_repo.get_by_id(task_id)
     if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任務不存在"
-        )
+        raise api_error("ADMIN_TASK_NOT_FOUND", "Task not found",
+                        status.HTTP_404_NOT_FOUND)
 
     current_status = task.get("status")
     if current_status not in ["pending", "processing"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"無法取消狀態為 '{current_status}' 的任務"
-        )
+        raise api_error("ADMIN_TASK_NOT_CANCELLABLE",
+                        "Cannot cancel a task in status '{status}'",
+                        status.HTTP_400_BAD_REQUEST,
+                        status=current_status)
 
     # 更新任務狀態
     now = get_utc_timestamp()
@@ -863,17 +840,14 @@ async def admin_delete_task(
 
     task = await task_repo.get_by_id(task_id)
     if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任務不存在"
-        )
+        raise api_error("ADMIN_TASK_NOT_FOUND", "Task not found",
+                        status.HTTP_404_NOT_FOUND)
 
     current_status = task.get("status")
     if current_status in ["pending", "processing"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="無法刪除進行中的任務，請先取消"
-        )
+        raise api_error("ADMIN_TASK_IN_PROGRESS_CANNOT_DELETE",
+                        "Cannot delete an in-progress task, cancel it first",
+                        status.HTTP_400_BAD_REQUEST)
 
     # 軟刪除任務
     now = get_utc_timestamp()
@@ -958,322 +932,15 @@ async def get_admin_statistics(
         except Exception as e:
             logger.warning("audit_log.write_failed", error=str(e))
 
-        # 1. 總體統計
-        total_tasks = await db.tasks.count_documents({})
-        completed_tasks = await db.tasks.count_documents({"status": "completed"})
-        processing_tasks = await db.tasks.count_documents({"status": "processing"})
-        failed_tasks = await db.tasks.count_documents({"status": "failed"})
-
-        # 2. Token 使用統計
-        # 2.1 標點符號 Token 統計（從 tasks.stats.token_usage）
-        punctuation_token_pipeline = [
-            {
-                "$match": {
-                    "stats.token_usage.total": {"$exists": True, "$ne": None}
-                }
-            },
-            {
-                "$group": {
-                    "_id": None,
-                    "total_tokens": {"$sum": "$stats.token_usage.total"},
-                    "total_prompt_tokens": {"$sum": "$stats.token_usage.prompt"},
-                    "total_completion_tokens": {"$sum": "$stats.token_usage.completion"},
-                    "tasks_with_tokens": {"$sum": 1}
-                }
-            }
-        ]
-        punct_token_cursor = db.tasks.aggregate(punctuation_token_pipeline)
-        punct_token_list = await punct_token_cursor.to_list(length=1)
-        punct_token_stats = punct_token_list[0] if punct_token_list else {
-            "total_tokens": 0,
-            "total_prompt_tokens": 0,
-            "total_completion_tokens": 0,
-            "tasks_with_tokens": 0
-        }
-
-        # 2.2 AI 總結 Token 統計（從 summaries.metadata.token_usage）
-        summary_token_pipeline = [
-            {
-                "$match": {
-                    "metadata.token_usage.total": {"$exists": True, "$ne": None}
-                }
-            },
-            {
-                "$group": {
-                    "_id": None,
-                    "total_tokens": {"$sum": "$metadata.token_usage.total"},
-                    "total_prompt_tokens": {"$sum": "$metadata.token_usage.prompt"},
-                    "total_completion_tokens": {"$sum": "$metadata.token_usage.completion"},
-                    "summaries_with_tokens": {"$sum": 1}
-                }
-            }
-        ]
-        summary_token_cursor = db.summaries.aggregate(summary_token_pipeline)
-        summary_token_list = await summary_token_cursor.to_list(length=1)
-        summary_token_stats = summary_token_list[0] if summary_token_list else {
-            "total_tokens": 0,
-            "total_prompt_tokens": 0,
-            "total_completion_tokens": 0,
-            "summaries_with_tokens": 0
-        }
-
-        # 2.3 合併總計
-        combined_total_tokens = punct_token_stats.get("total_tokens", 0) + summary_token_stats.get("total_tokens", 0)
-        combined_prompt_tokens = punct_token_stats.get("total_prompt_tokens", 0) + summary_token_stats.get("total_prompt_tokens", 0)
-        combined_completion_tokens = punct_token_stats.get("total_completion_tokens", 0) + summary_token_stats.get("total_completion_tokens", 0)
-
-        # 3. 模型使用統計
-        # 3.1 標點符號模型統計
-        punctuation_model_pipeline = [
-            {"$match": {"models.punctuation": {"$exists": True, "$ne": None}}},
-            {"$group": {"_id": "$models.punctuation", "count": {"$sum": 1}}},
-            {"$sort": {"count": -1}}
-        ]
-        punct_model_cursor = db.tasks.aggregate(punctuation_model_pipeline)
-        punct_model_stats = await punct_model_cursor.to_list(length=None)
-
-        # 3.2 轉錄模型統計
-        transcription_model_pipeline = [
-            {"$match": {"models.transcription": {"$exists": True, "$ne": None}}},
-            {"$group": {"_id": "$models.transcription", "count": {"$sum": 1}}},
-            {"$sort": {"count": -1}}
-        ]
-        trans_model_cursor = db.tasks.aggregate(transcription_model_pipeline)
-        trans_model_stats = await trans_model_cursor.to_list(length=None)
-
-        # 3.3 說話者辨識模型統計
-        diarization_model_pipeline = [
-            {"$match": {"models.diarization": {"$exists": True, "$ne": None}}},
-            {"$group": {"_id": "$models.diarization", "count": {"$sum": 1}}},
-            {"$sort": {"count": -1}}
-        ]
-        diar_model_cursor = db.tasks.aggregate(diarization_model_pipeline)
-        diar_model_stats = await diar_model_cursor.to_list(length=None)
-
-        # 3.4 AI 總結模型統計（從 summaries.metadata.model）
-        summary_model_pipeline = [
-            {"$match": {"metadata.model": {"$exists": True, "$ne": None}}},
-            {"$group": {"_id": "$metadata.model", "count": {"$sum": 1}}},
-            {"$sort": {"count": -1}}
-        ]
-        summary_model_cursor = db.summaries.aggregate(summary_model_pipeline)
-        summary_model_stats = await summary_model_cursor.to_list(length=None)
-
-        # 4. 每日統計（最近 30 天）
-        # 計算 30 天前的 UTC Unix timestamp（從當天 00:00:00 UTC+8 開始）
-        thirty_days_ago_dt = datetime.now(TZ_UTC8).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=30)
-        thirty_days_ago_timestamp = int(thirty_days_ago_dt.timestamp())
-
-        # 4.1 每日任務統計（含標點符號 token）
-        # timestamps.created_at 是 Unix timestamp（秒），需要轉換為日期
-        daily_tasks_pipeline = [
-            {"$match": {"timestamps.created_at": {"$gte": thirty_days_ago_timestamp}}},
-            {
-                "$group": {
-                    # 將 Unix timestamp 轉換為日期字串（UTC+8 時區）
-                    "_id": {
-                        "$dateToString": {
-                            "format": "%Y-%m-%d",
-                            "date": {"$toDate": {"$multiply": ["$timestamps.created_at", 1000]}},
-                            "timezone": "+08:00"
-                        }
-                    },
-                    "tasks_count": {"$sum": 1},
-                    "punctuation_tokens": {"$sum": {"$ifNull": ["$stats.token_usage.total", 0]}}
-                }
-            },
-            {"$sort": {"_id": 1}}
-        ]
-        daily_tasks_cursor = db.tasks.aggregate(daily_tasks_pipeline)
-        daily_tasks_stats = await daily_tasks_cursor.to_list(length=None)
-
-        # 4.2 每日 AI 總結統計
-        # summaries.created_at 也是 Unix timestamp（秒）
-        daily_summaries_pipeline = [
-            {"$match": {"created_at": {"$gte": thirty_days_ago_timestamp}}},
-            {
-                "$group": {
-                    "_id": {
-                        "$dateToString": {
-                            "format": "%Y-%m-%d",
-                            "date": {"$toDate": {"$multiply": ["$created_at", 1000]}},
-                            "timezone": "+08:00"
-                        }
-                    },
-                    "summaries_count": {"$sum": 1},
-                    "summary_tokens": {"$sum": {"$ifNull": ["$metadata.token_usage.total", 0]}}
-                }
-            },
-            {"$sort": {"_id": 1}}
-        ]
-        daily_summaries_cursor = db.summaries.aggregate(daily_summaries_pipeline)
-        daily_summaries_stats = await daily_summaries_cursor.to_list(length=None)
-
-        # 4.3 合併每日統計
-        daily_summaries_map = {stat["_id"]: stat for stat in daily_summaries_stats}
-        daily_stats = []
-        for task_stat in daily_tasks_stats:
-            date = task_stat["_id"]
-            summary_stat = daily_summaries_map.get(date, {})
-            daily_stats.append({
-                "date": date,
-                "tasks_count": task_stat["tasks_count"],
-                "summaries_count": summary_stat.get("summaries_count", 0),
-                "punctuation_tokens": task_stat["punctuation_tokens"],
-                "summary_tokens": summary_stat.get("summary_tokens", 0),
-                "total_tokens": task_stat["punctuation_tokens"] + summary_stat.get("summary_tokens", 0)
-            })
-
-        # 5. 使用者統計
-        # 5.1 任務統計（含標點符號 token）
-        user_tasks_pipeline = [
-            {
-                "$group": {
-                    "_id": "$user.user_id",
-                    "tasks_count": {"$sum": 1},
-                    "punctuation_tokens": {"$sum": {"$ifNull": ["$stats.token_usage.total", 0]}}
-                }
-            },
-            {"$sort": {"tasks_count": -1}},
-            {"$limit": 20}  # 取多一點，後面合併後再取 top 10
-        ]
-        user_tasks_cursor = db.tasks.aggregate(user_tasks_pipeline)
-        user_tasks_stats = await user_tasks_cursor.to_list(length=None)
-
-        # 5.2 獲取這些用戶的 summary token 使用量
-        # 先建立 task_id -> user_id 的映射
-        user_summary_pipeline = [
-            {
-                "$lookup": {
-                    "from": "tasks",
-                    "localField": "_id",
-                    "foreignField": "_id",
-                    "as": "task_info"
-                }
-            },
-            {"$unwind": {"path": "$task_info", "preserveNullAndEmptyArrays": True}},
-            {
-                "$group": {
-                    "_id": "$task_info.user.user_id",
-                    "summaries_count": {"$sum": 1},
-                    "summary_tokens": {"$sum": {"$ifNull": ["$metadata.token_usage.total", 0]}}
-                }
-            }
-        ]
-        user_summary_cursor = db.summaries.aggregate(user_summary_pipeline)
-        user_summary_stats = await user_summary_cursor.to_list(length=None)
-
-        # 5.3 合併用戶統計
-        user_summary_map = {stat["_id"]: stat for stat in user_summary_stats}
-        top_users = []
-        for user_stat in user_tasks_stats:
-            user_id = user_stat["_id"]
-            summary_stat = user_summary_map.get(user_id, {})
-            punctuation_tokens = user_stat["punctuation_tokens"]
-            summary_tokens = summary_stat.get("summary_tokens", 0)
-            top_users.append({
-                "user_id": user_id,
-                "tasks_count": user_stat["tasks_count"],
-                "summaries_count": summary_stat.get("summaries_count", 0),
-                "punctuation_tokens": punctuation_tokens,
-                "summary_tokens": summary_tokens,
-                "total_tokens": punctuation_tokens + summary_tokens
-            })
-
-        # 按總 token 排序，取 top 10
-        top_users.sort(key=lambda x: x["total_tokens"], reverse=True)
-        top_users = top_users[:10]
-
-        # 6. 平均處理時間
-        avg_duration_pipeline = [
-            {
-                "$match": {
-                    "status": "completed",
-                    "stats.duration_seconds": {"$exists": True, "$ne": None}
-                }
-            },
-            {
-                "$group": {
-                    "_id": None,
-                    "avg_duration": {"$avg": "$stats.duration_seconds"},
-                    "min_duration": {"$min": "$stats.duration_seconds"},
-                    "max_duration": {"$max": "$stats.duration_seconds"}
-                }
-            }
-        ]
-        duration_stats_cursor = db.tasks.aggregate(avg_duration_pipeline)
-        duration_stats_list = await duration_stats_cursor.to_list(length=1)
-        duration_stats = duration_stats_list[0] if duration_stats_list else {
-            "avg_duration": 0,
-            "min_duration": 0,
-            "max_duration": 0
-        }
-
-        # 7. 標點符號服務使用統計
-        punct_pipeline = [
-            {"$group": {"_id": "$config.punct_provider", "count": {"$sum": 1}}},
-            {"$sort": {"count": -1}}
-        ]
-        punct_stats_cursor = db.tasks.aggregate(punct_pipeline)
-        punct_stats = await punct_stats_cursor.to_list(length=None)
-
-        # 8. 用戶統計
-        total_users = await db.users.count_documents({})
-        active_users = await db.users.count_documents({"is_active": True})
-
-        return {
-            "overview": {
-                "total_tasks": total_tasks,
-                "completed_tasks": completed_tasks,
-                "processing_tasks": processing_tasks,
-                "failed_tasks": failed_tasks,
-                "success_rate": round(completed_tasks / total_tasks * 100, 2) if total_tasks > 0 else 0,
-                "total_users": total_users,
-                "active_users": active_users
-            },
-            "token_usage": {
-                # 總計
-                "total_tokens": combined_total_tokens,
-                "prompt_tokens": combined_prompt_tokens,
-                "completion_tokens": combined_completion_tokens,
-                # 標點符號（Punctuation）
-                "punctuation": {
-                    "total_tokens": punct_token_stats.get("total_tokens", 0),
-                    "prompt_tokens": punct_token_stats.get("total_prompt_tokens", 0),
-                    "completion_tokens": punct_token_stats.get("total_completion_tokens", 0),
-                    "tasks_count": punct_token_stats.get("tasks_with_tokens", 0),
-                    "avg_tokens_per_task": round(punct_token_stats.get("total_tokens", 0) / punct_token_stats.get("tasks_with_tokens", 1), 2) if punct_token_stats.get("tasks_with_tokens", 0) > 0 else 0
-                },
-                # AI 總結（Summary）
-                "summary": {
-                    "total_tokens": summary_token_stats.get("total_tokens", 0),
-                    "prompt_tokens": summary_token_stats.get("total_prompt_tokens", 0),
-                    "completion_tokens": summary_token_stats.get("total_completion_tokens", 0),
-                    "summaries_count": summary_token_stats.get("summaries_with_tokens", 0),
-                    "avg_tokens_per_summary": round(summary_token_stats.get("total_tokens", 0) / summary_token_stats.get("summaries_with_tokens", 1), 2) if summary_token_stats.get("summaries_with_tokens", 0) > 0 else 0
-                }
-            },
-            "model_usage": {
-                "punctuation": [{"model": stat["_id"] or "未知", "count": stat["count"]} for stat in punct_model_stats],
-                "transcription": [{"model": stat["_id"] or "未知", "count": stat["count"]} for stat in trans_model_stats],
-                "diarization": [{"model": stat["_id"] or "未知", "count": stat["count"]} for stat in diar_model_stats],
-                "summary": [{"model": stat["_id"] or "未知", "count": stat["count"]} for stat in summary_model_stats]
-            },
-            "daily_stats": daily_stats,
-            "top_users": top_users,
-            "performance": {
-                "avg_duration_seconds": round(duration_stats.get("avg_duration", 0), 2),
-                "min_duration_seconds": round(duration_stats.get("min_duration", 0), 2),
-                "max_duration_seconds": round(duration_stats.get("max_duration", 0), 2)
-            },
-            "punct_provider_usage": [{"provider": stat["_id"] or "none", "count": stat["count"]} for stat in punct_stats]
-        }
+        return await build_admin_analytics(db).full_report()
 
     except Exception as e:
         logger.error("admin.statistics.failed", error=str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"獲取統計資料失敗：{str(e)}"
+        raise api_error(
+            "ADMIN_STATISTICS_FAILED",
+            "Failed to fetch statistics: {error}",
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error=str(e),
         )
 
 
@@ -1285,128 +952,7 @@ async def get_revenue_stats(
     db=Depends(get_database),
 ):
     """營收 dashboard 數據"""
-    from ..utils.newebpay_service import NewebpayService
-
-    now = get_utc_timestamp()
-
-    # 1. 訂閱分佈 + MRR
-    sub_pipeline = [
-        {"$match": {"subscription.status": "active"}},
-        {"$group": {
-            "_id": {
-                "tier": "$subscription.tier",
-                "billing_cycle": "$subscription.billing_cycle",
-            },
-            "count": {"$sum": 1},
-        }},
-    ]
-    sub_cursor = db.users.aggregate(sub_pipeline)
-    sub_list = await sub_cursor.to_list(length=20)
-
-    subscriber_count = {
-        "basic_monthly": 0, "basic_yearly": 0,
-        "pro_monthly": 0, "pro_yearly": 0,
-    }
-    mrr = 0
-    for item in sub_list:
-        tier = item["_id"].get("tier", "")
-        cycle = item["_id"].get("billing_cycle", "")
-        key = f"{tier}_{cycle}"
-        if key in subscriber_count:
-            subscriber_count[key] = item["count"]
-        price = NewebpayService.get_subscription_price(tier, cycle)
-        if price:
-            monthly = price / 12 if cycle == "yearly" else price
-            mrr += monthly * item["count"]
-
-    # 2. 總收入（所有已付款訂單）
-    total_pipeline = [
-        {"$match": {"status": "paid"}},
-        {"$group": {"_id": None, "total": {"$sum": "$amount_twd"}}},
-    ]
-    total_list = await db.orders.aggregate(total_pipeline).to_list(length=1)
-    total_revenue = total_list[0]["total"] if total_list else 0
-
-    # 3. 額外額度收入
-    extra_pipeline = [
-        {"$match": {"status": "paid", "type": "extra_quota"}},
-        {"$group": {"_id": None, "total": {"$sum": "$amount_twd"}}},
-    ]
-    extra_list = await db.orders.aggregate(extra_pipeline).to_list(length=1)
-    extra_quota_revenue = extra_list[0]["total"] if extra_list else 0
-
-    # 4. 近 6 個月月收入
-    six_months_ago = now - (180 * 86400)
-    monthly_pipeline = [
-        {"$match": {"status": "paid", "paid_at": {"$gte": six_months_ago}}},
-        {"$addFields": {
-            "paid_date": {"$toDate": {"$multiply": ["$paid_at", 1000]}},
-        }},
-        {"$group": {
-            "_id": {"$dateToString": {"format": "%Y-%m", "date": "$paid_date"}},
-            "amount": {"$sum": "$amount_twd"},
-        }},
-        {"$sort": {"_id": -1}},
-        {"$limit": 6},
-    ]
-    monthly_list = await db.orders.aggregate(monthly_pipeline).to_list(length=6)
-    monthly_revenue = [{"month": m["_id"], "amount": m["amount"]} for m in monthly_list]
-
-    # 5. 近 10 筆已付款訂單
-    recent_orders_cursor = db.orders.find(
-        {"status": "paid"},
-        {"merchant_order_no": 1, "amount_twd": 1, "type": 1, "tier": 1, "user_id": 1, "paid_at": 1},
-    ).sort("paid_at", -1).limit(10)
-    recent_raw = await recent_orders_cursor.to_list(length=10)
-
-    user_ids = list({o.get("user_id") for o in recent_raw if o.get("user_id")})
-    email_map = {}
-    if user_ids:
-        users_cursor = db.users.find(
-            {"_id": {"$in": [ObjectId(uid) for uid in user_ids]}},
-            {"email": 1},
-        )
-        async for u in users_cursor:
-            email_map[str(u["_id"])] = u.get("email", "")
-
-    recent_orders = []
-    for o in recent_raw:
-        recent_orders.append({
-            "order_no": o.get("merchant_order_no", ""),
-            "user_email": email_map.get(o.get("user_id", ""), ""),
-            "amount": o.get("amount_twd", 0),
-            "type": o.get("type", ""),
-            "tier": o.get("tier", ""),
-            "paid_at": o.get("paid_at"),
-        })
-
-    # 6. 流失指標
-    pending_cancel = await db.users.count_documents({
-        "subscription.status": "active",
-        "subscription.cancel_at_period_end": True,
-    })
-    # 「本月流失」用日曆月初當下限（不是 now - 30 天）。
-    # 原邏輯 now - 30*86400 是「最近 30 天」滾動視窗，會隨日子飄移，
-    # 與前端 label「本月流失」語意不符。
-    now_dt = datetime.fromtimestamp(now, tz=timezone.utc)
-    month_start = int(datetime(now_dt.year, now_dt.month, 1, tzinfo=timezone.utc).timestamp())
-    expired_this_month = await db.users.count_documents({
-        "subscription.status": {"$in": ["expired", "past_due"]},
-        "subscription.current_period_end": {"$gte": month_start, "$lt": now},
-    })
-
-    return {
-        "mrr": int(mrr),
-        "subscriber_count": subscriber_count,
-        "total_revenue": total_revenue,
-        "monthly_revenue": monthly_revenue,
-        "recent_orders": recent_orders,
-        "churn": {
-            "pending_cancel": pending_cancel,
-            "expired_this_month": expired_this_month,
-        },
-        "extra_quota_revenue": extra_quota_revenue,
-    }
+    return await build_admin_analytics(db).revenue()
 
 
 # ========== 審計日誌 API ==========
@@ -1506,7 +1052,8 @@ async def cleanup_handoff_orphans(
     對應 CONTEXT.md「Handoff audio」。手動觸發，未自動排程——
     建議搭 crontab 每日跑一次。
     """
-    from ..utils.storage_service import is_aws, sweep_handoff_orphans
+    from ..utils.storage.backend import is_aws
+    from ..utils.storage.handoff import sweep_handoff_orphans
 
     if not is_aws():
         return {"deleted": 0, "message": "local 模式無 handoff/ 結構"}

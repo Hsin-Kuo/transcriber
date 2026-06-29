@@ -1,7 +1,6 @@
 <template>
-  <Teleport to="body">
-    <div class="notification-container" aria-live="polite" aria-atomic="false" role="status">
-      <TransitionGroup name="notification">
+  <div class="notification-container" aria-live="polite" aria-atomic="false" role="status">
+    <TransitionGroup name="notification">
         <div
           v-for="notification in notifications"
           :key="notification.id"
@@ -33,8 +32,16 @@
           <div class="notification-content">
             <div class="notification-title">{{ notification.title }}</div>
             <div v-if="notification.message" class="notification-message">{{ notification.message }}</div>
+            <button
+              v-if="notification.action"
+              type="button"
+              class="notification-action"
+              @click.stop="handleAction(notification)"
+            >
+              {{ notification.action.label }}
+            </button>
           </div>
-          <button class="notification-close" @click.stop="removeNotification(notification.id)" aria-label="關閉通知">
+          <button class="notification-close" @click.stop="removeNotification(notification.id)" :aria-label="$t('common.close')">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="18" y1="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -42,8 +49,7 @@
           </button>
         </div>
       </TransitionGroup>
-    </div>
-  </Teleport>
+  </div>
 </template>
 
 <script setup>
@@ -52,7 +58,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 const notifications = ref([])
 let notificationId = 0
 
-function addNotification({ title, message, type = 'info', duration }) {
+function addNotification({ title, message, type = 'info', duration, action }) {
   // 預設停留時間依類型決定（呼叫端仍可顯式傳 duration 覆寫）：
   //   error / warning → 永久停留（duration 0），需使用者點擊整則或按關閉鈕才消失，避免重要訊息被錯過
   //   success / info / processing → 10 秒後自動關閉
@@ -65,7 +71,9 @@ function addNotification({ title, message, type = 'info', duration }) {
     id,
     title,
     message,
-    type
+    type,
+    // optional 動作按鈕（如上傳完成的「查看」）：{ label, handler }
+    action
   }
 
   notifications.value.push(notification)
@@ -88,6 +96,12 @@ function removeNotification(id) {
     if (removed?.timer) clearTimeout(removed.timer)
   }
   hoverEnterTimes.delete(id)
+}
+
+// 動作按鈕（如「查看」）：執行 handler 後關閉該則通知。
+function handleAction(notification) {
+  notification.action?.handler?.()
+  removeNotification(notification.id)
 }
 
 // hover-and-leave 關閉（所有 toast 皆適用）：記錄進入時間，離開時若停留夠久才關。
@@ -129,14 +143,12 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* 定位由 App.vue 的 .notify-stack 共用容器負責；這裡只排列自身 toast 堆疊 */
 .notification-container {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  z-index: 9999;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  align-items: flex-end;
   pointer-events: none;
 }
 
@@ -144,11 +156,15 @@ onUnmounted(() => {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  min-width: 300px;
-  max-width: 400px;
-  padding: 16px;
+  /* 與 GlobalUploadProgress 一致的固定寬度，兩者堆疊時對齊 */
+  width: 340px;
+  max-width: calc(100vw - 40px);
+  padding: 14px 16px;
   background: var(--main-bg);
-  border-radius: 12px;
+  /* 與 GlobalUploadProgress 一致的卡片樣式（圓角 / 陰影 / 邊框） */
+  border-radius: 14px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.15);
   pointer-events: auto;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -211,6 +227,25 @@ onUnmounted(() => {
   font-size: 0.85rem;
   color: var(--main-text-light);
   line-height: 1.4;
+  /* 保留訊息中的換行（批次部分失敗會用 \n 列出各檔原因）；單行訊息不受影響 */
+  white-space: pre-line;
+}
+
+.notification-action {
+  margin-top: 8px;
+  padding: 5px 14px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;
+  background: var(--color-primary, #6366f1);
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.notification-action:hover {
+  background: var(--color-primary-dark, #4f46e5);
 }
 
 .notification-close {
@@ -254,15 +289,11 @@ onUnmounted(() => {
 }
 
 @media (max-width: 768px) {
-  .notification-container {
-    left: 20px;
-    right: 20px;
-    bottom: 20px;
-  }
-
+  /* 定位由 .notify-stack 負責；行動裝置滿版 */
   .notification-toast {
     min-width: auto;
     max-width: none;
+    width: 100%;
   }
 }
 </style>

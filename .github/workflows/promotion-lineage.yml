@@ -1,0 +1,53 @@
+name: Promotion Lineage Guard
+
+# 偵測「環境分支被 squash promote 或被直接 commit」——這會製造平行 SHA、導致 staging
+# 與 aws 分歧（2026-06 prod 落後 44 PR + promote 衝突事件的根因）。
+#
+# 健康的 promotion 只能是 merge commit 或 fast-forward，commit 會以同一顆 SHA 流動：
+#   - staging 上的「非-merge commit」必須全部來自 main
+#   - aws     上的「非-merge commit」必須全部來自 staging
+# 一旦出現上游沒有的非-merge commit，就是 squash promote 或直接 commit 到環境分支。
+#
+# 注意：這是「事後偵測」。GitHub 無法在 merge 前限制 merge method（merge-method 開關是
+# 全 repo 層級、無法 per-branch），故只能在 push 後把關、以紅燈 + 失敗告警。
+# 防範請搭配：環境分支 PR 一律用「Create a merge commit」、勿直接 commit staging/aws。
+
+on:
+  push:
+    branches: [staging, aws]
+
+jobs:
+  lineage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Assert this push added no squashed / direct commits
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          if [ "$BRANCH" = "staging" ]; then UP=main; else UP=staging; fi
+          git fetch origin "$UP":"refs/remotes/origin/$UP" --quiet
+
+          # 只檢查「這次 push 新引入」的 commit，歷史包袱自動 grandfather（避免 day-one 誤報）。
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.sha }}"
+          ZERO="0000000000000000000000000000000000000000"
+          if [ "$BEFORE" = "$ZERO" ]; then
+            RANGE="origin/$UP..$AFTER"      # 分支首次建立：與上游比
+          else
+            RANGE="$BEFORE..$AFTER"         # 一般 push：只看新增的部分
+          fi
+
+          # 新增的「非-merge」commit 中，不在上游者 = squash promote 或直接 commit
+          BAD=$(git rev-list --no-merges $RANGE --not "origin/$UP" || true)
+          if [ -n "$BAD" ]; then
+            echo "::error::push 到 '$BRANCH' 引入了不在 origin/$UP 的非-merge commit（squash promote 或直接 commit），會造成分支分歧："
+            echo "$BAD" | while read -r c; do git log -1 --oneline "$c" | sed 's/^/  /'; done
+            echo ""
+            echo "環境分支只能以 merge commit / fast-forward 從上游 promote。"
+            echo "修法：promote 時用『Create a merge commit』而非『Squash and merge』；勿直接 commit 環境分支。"
+            exit 1
+          fi
+          echo "✅ '$BRANCH' 本次 push lineage 乾淨：未引入 squash promote / 直接 commit（vs origin/$UP）"

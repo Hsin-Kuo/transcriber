@@ -1,11 +1,11 @@
 <template>
   <Teleport to="body">
     <div v-if="visible" class="modal-overlay" @click.self="handleCancel">
-      <div ref="modalContainerRef" class="modal-container" role="dialog" aria-modal="true" aria-label="音檔合併服務">
+      <div ref="modalContainerRef" class="modal-container" role="dialog" aria-modal="true" :aria-label="$t('mergeModal.title')">
         <!-- 標題列 -->
         <div class="modal-header">
-          <h2>音檔合併服務</h2>
-          <button class="close-btn" @click="handleCancel" title="關閉" aria-label="關閉">
+          <h2>{{ $t('mergeModal.title') }}</h2>
+          <button class="close-btn" @click="handleCancel" :title="$t('common.close')" :aria-label="$t('common.close')">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="18" y1="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -17,13 +17,13 @@
         <div class="modal-body">
           <!-- 左側：上傳區 -->
           <div class="upload-section">
-            <div class="section-title">上傳音檔</div>
+            <div class="section-title">{{ $t('mergeModal.uploadSection') }}</div>
             <div
               class="upload-zone"
               :class="{ 'drag-over': isDragOver }"
               role="button"
               tabindex="0"
-              aria-label="選擇或拖放音檔"
+              :aria-label="$t('mergeModal.uploadZoneAria')"
               @dragover.prevent="isDragOver = true"
               @dragleave.prevent="isDragOver = false"
               @drop.prevent="handleDrop"
@@ -43,16 +43,16 @@
                 <polyline points="17 8 12 3 7 8"></polyline>
                 <line x1="12" y1="3" x2="12" y2="15"></line>
               </svg>
-              <p class="upload-text">拖放音檔到此處</p>
-              <p class="upload-hint">或點擊選擇檔案</p>
-              <p class="format-hint">支援 mp3, wav, m4a, mp4 等格式</p>
+              <p class="upload-text">{{ $t('mergeModal.dragDrop') }}</p>
+              <p class="upload-hint">{{ $t('mergeModal.clickSelect') }}</p>
+              <p class="format-hint">{{ $t('mergeModal.supportedFormats') }}</p>
             </div>
           </div>
 
           <!-- 右側：檔案列表 -->
           <div class="files-section">
             <div class="section-title">
-              已選擇的檔案
+              {{ $t('mergeModal.selectedFiles') }}
               <span class="file-count" v-if="files.length > 0">({{ files.length }})</span>
             </div>
 
@@ -61,8 +61,8 @@
                 <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
                 <polyline points="13 2 13 9 20 9"></polyline>
               </svg>
-              <p>尚未選擇檔案</p>
-              <p class="hint">從左側上傳音檔</p>
+              <p>{{ $t('mergeModal.noFiles') }}</p>
+              <p class="hint">{{ $t('mergeModal.uploadFromLeft') }}</p>
             </div>
 
             <draggable
@@ -78,7 +78,7 @@
                 :key="file.id"
                 class="file-item"
               >
-                <div class="drag-handle" title="拖曳調整順序">
+                <div class="drag-handle" :title="$t('mergeModal.dragToReorder')">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="9" cy="5" r="1"></circle>
                     <circle cx="9" cy="12" r="1"></circle>
@@ -93,7 +93,7 @@
                   <span class="file-name" :title="file.name">{{ file.name }}</span>
                   <span class="file-size">{{ formatSize(file.size) }}</span>
                 </div>
-                <button class="remove-btn" @click="removeFile(index)" title="移除">
+                <button class="remove-btn" @click="removeFile(index)" :title="$t('common.remove')">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <line x1="18" y1="6" x2="6" y2="18"></line>
                     <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -104,7 +104,7 @@
 
             <!-- 總計資訊 -->
             <div v-if="files.length > 0" class="total-info">
-              <span>合計大小：{{ totalSize }}</span>
+              <span>{{ $t('mergeModal.totalSize', { size: totalSize }) }}</span>
             </div>
           </div>
         </div>
@@ -112,16 +112,16 @@
         <!-- 底部操作區 -->
         <div class="modal-footer">
           <div class="footer-hint" v-if="files.length < 2">
-            請至少選擇 2 個檔案進行合併
+            {{ $t('mergeModal.minTwoFiles') }}
           </div>
           <div class="footer-actions">
-            <button class="btn btn-cancel" @click="handleCancel">取消</button>
+            <button class="btn btn-cancel" @click="handleCancel">{{ $t('common.cancel') }}</button>
             <button
               class="btn btn-primary"
               @click="handleConfirm"
               :disabled="files.length < 2"
             >
-              下一步：轉錄設定
+              {{ $t('mergeModal.nextStep') }}
             </button>
           </div>
         </div>

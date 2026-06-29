@@ -211,7 +211,7 @@ async def startup_event():
 
     # AWS 模式：驗證必要的環境變數
     if DEPLOY_ENV == "aws":
-        from src.utils.storage_service import validate_aws_config
+        from src.utils.storage.backend import validate_aws_config
         validate_aws_config()
         logger.info("app.startup.aws_config_validated")
 
@@ -456,21 +456,26 @@ async def startup_event():
         # AWS 模式：WorkerDispatch（boto3 client + S3 uploader 注入）
         import boto3
         from src.services.worker_dispatch import WorkerDispatch
-        from src.utils.storage_service import upload_to_handoff
+        from src.utils.storage.handoff import upload_to_handoff
         from src.utils.config_loader import get_parameter as _gp
 
         sqs_region = os.getenv("S3_REGION", "ap-northeast-1")
         sqs_queue_url = os.getenv("SQS_QUEUE_URL", "")
+        priority_sqs_queue_url = os.getenv("PRIORITY_SQS_QUEUE_URL", "")
         worker_secret = _gp(
             "/transcriber/worker-secret", fallback_env="WORKER_SECRET", default=""
         )
         init_task_dispatch(WorkerDispatch(
             sqs_client=boto3.client("sqs", region_name=sqs_region),
             sqs_queue_url=sqs_queue_url,
+            priority_sqs_queue_url=priority_sqs_queue_url,
             worker_secret=worker_secret,
             handoff_uploader=upload_to_handoff,
         ))
-        logger.info("app.worker_dispatch.initialized")
+        logger.info(
+            "app.worker_dispatch.initialized",
+            priority_queue_enabled=bool(priority_sqs_queue_url),
+        )
 
     # 10. 啟動 dispatch 背景機制（LocalDispatch 起撿單器；WorkerDispatch no-op）
     get_task_dispatch().start()

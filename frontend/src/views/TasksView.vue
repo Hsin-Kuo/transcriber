@@ -18,7 +18,7 @@ v-if="!isRefreshing" class="ptr-arrow"
 
     <!-- 任務列表 -->
     <TaskList
-      :tasks="tasks"
+      :tasks="displayTasks"
       :current-page="currentPage"
       :total-pages="totalPages"
       @download="downloadTask"
@@ -45,7 +45,7 @@ v-if="!isRefreshing" class="ptr-arrow"
 </template>
 
 <script setup>
-import { ref, onBeforeUnmount, inject, computed } from 'vue'
+import { ref, onBeforeUnmount, onMounted, nextTick, inject, computed } from 'vue'
 import api, { TokenManager } from '../utils/api'
 import TaskList from '../components/task/TaskListContainer.vue'
 import RulerPagination from '../components/common/RulerPagination.vue'
@@ -53,6 +53,10 @@ import DownloadDialog from '../components/transcript/DownloadDialog.vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { usePullToRefresh } from '../composables/usePullToRefresh'
+import { useAuthStore } from '../stores/auth'
+import { useTourStore, TOUR_PHASES, TOUR_ANCHORS, tourSel } from '../stores/tour'
+import { useProductTour } from '../composables/useProductTour'
+import { buildDemoListTask, DEMO_ID } from '../utils/tourFixtures'
 
 // 新 API 服務層
 import { transcriptionService, taskService } from '../api/services'
@@ -63,11 +67,23 @@ import { useSubtitleMode } from '../composables/transcript/useSubtitleMode'
 import { useTranscriptDownload } from '../composables/transcript/useTranscriptDownload'
 
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
+const authStore = useAuthStore()
+const tourStore = useTourStore()
+const tour = useProductTour()
 const showNotification = inject('showNotification')
 const tasks = ref([])
+
+// 導覽列表 phase：注入一張 demo 卡片（不污染真實資料，狀態由 tourStore 驅動動畫）
+const displayTasks = computed(() =>
+  tourStore.showDemoCard
+    ? [buildDemoListTask(locale.value, tourStore.demoStatus, tourStore.demoProgress), ...tasks.value]
+    : tasks.value
+)
 const eventSources = new Map() // SSE 連接管理
+const lastSSEUpdate = new Map() // taskId → 最後收到 SSE 更新的時間戳（ms），用來判斷 SSE 是否健康
 let pollTimer = null // 進行中任務的輪詢備用計時器
+const SSE_FRESH_MS = 15000 // SSE 在此時間內有更新即視為健康，該輪輪詢跳過（SSE 優先、輪詢降級）
 
 // 分頁相關狀態
 const currentPage = ref(1)
@@ -401,6 +417,9 @@ function connectTaskSSE(taskId) {
       const data = JSON.parse(event.data)
       console.log(`📊 SSE update ${taskId}:`, data)
 
+      // 記錄 SSE 健康時間戳：輪詢會據此跳過 SSE 正常的任務，避免冗餘 API
+      lastSSEUpdate.set(taskId, Date.now())
+
       // 找到對應的任務並更新
       const task = tasks.value.find(t => t.task_id === taskId)
       if (task) {
@@ -409,8 +428,9 @@ function connectTaskSSE(taskId) {
         Object.assign(task, data)
         console.log(`📊 更新後任務狀態:`, { progress: task.progress, progress_percentage: task.progress_percentage })
 
-        // 如果任務剛完成，顯示通知
+        // 如果任務剛完成，顯示通知 + 重抓使用者額度（後端已扣時數，否則 UI 需手動 refresh 才更新）
         if (oldStatus !== 'completed' && data.status === 'completed') {
+          authStore.fetchCurrentUser()
           if (showNotification) {
             showNotification({
               title: t('tasksView.transcriptionComplete'),
@@ -462,6 +482,7 @@ function disconnectTaskSSE(taskId) {
     eventSource.onerror = null
     eventSource.close()
     eventSources.delete(taskId)
+    lastSSEUpdate.delete(taskId)
     console.log(`🔌 關閉 SSE: ${taskId}`)
   }
 }
@@ -476,10 +497,11 @@ function disconnectAllSSE() {
     console.log(`🔌 關閉 SSE: ${taskId}`)
   })
   eventSources.clear()
+  lastSSEUpdate.clear()
 }
 
-// 輪詢備用：當有進行中任務時，每 5 秒直接查 API 更新進度
-// 確保即使 SSE 被 Cloudflare/nginx 緩衝，進度仍能更新
+// 輪詢備用：SSE 優先、輪詢降級。每 5 秒檢查一次，但只在 SSE 失聯時才打 API，
+// 確保即使 SSE 被 Cloudflare/nginx 緩衝，進度仍能更新。
 function startPollTimer() {
   if (pollTimer) return
   pollTimer = setInterval(async () => {
@@ -488,22 +510,59 @@ function startPollTimer() {
       stopPollTimer()
       return
     }
-    for (const t of activeTasks) {
-      try {
-        const response = await taskService.get(t.task_id)
-        const updated = response.task || response
-        const taskInList = tasks.value.find(lt => lt.task_id === t.task_id)
-        if (taskInList && updated.progress) {
+
+    // SSE 優先：所有進行中任務的 SSE 都在 SSE_FRESH_MS 內有更新 → SSE 健康，本輪不打 API
+    const now = Date.now()
+    const sseHealthy = activeTasks.every(t => {
+      const ts = lastSSEUpdate.get(t.task_id)
+      return ts != null && (now - ts) < SSE_FRESH_MS
+    })
+    if (sseHealthy) return
+
+    // 降級備援：一次批次查回所有進行中任務（O(1)，不再逐任務打 API）
+    try {
+      const response = await taskService.list({ status: 'active', limit: 100 })
+      const activeList = response.tasks || []
+      const stillActive = new Set(activeList.map(t => t.task_id))
+
+      // 更新仍在進行中任務的進度與狀態（含 pending → processing 轉換）
+      for (const updated of activeList) {
+        const taskInList = tasks.value.find(lt => lt.task_id === updated.task_id)
+        if (!taskInList) continue
+        if (updated.progress) {
           taskInList.progress = updated.progress
           if (updated.progress_percentage != null) {
             taskInList.progress_percentage = updated.progress_percentage
           }
-          if (updated.status !== taskInList.status) {
-            taskInList.status = updated.status
-          }
         }
-      } catch (_) { /* ignore */ }
-    }
+        // active 結果裡的 status 只會是 pending/processing；終態由下方 transitioned 分支處理
+        if (updated.status && updated.status !== taskInList.status) {
+          taskInList.status = updated.status
+        }
+      }
+
+      // 偵測「剛離開進行中」的任務：列表仍標 pending/processing 但已不在 active 結果
+      // → 個別查回終態（completed/failed/cancelled），完成時重抓額度讓 UI 同步
+      const transitioned = activeTasks.filter(t => !stillActive.has(t.task_id))
+      for (const t of transitioned) {
+        try {
+          const resp = await taskService.get(t.task_id)
+          const fresh = resp.task || resp
+          const taskInList = tasks.value.find(lt => lt.task_id === t.task_id)
+          if (taskInList && fresh.status && fresh.status !== taskInList.status) {
+            const wasCompleted = taskInList.status === 'completed'
+            taskInList.status = fresh.status
+            if (fresh.progress) taskInList.progress = fresh.progress
+            if (fresh.progress_percentage != null) {
+              taskInList.progress_percentage = fresh.progress_percentage
+            }
+            if (!wasCompleted && fresh.status === 'completed') {
+              authStore.fetchCurrentUser()
+            }
+          }
+        } catch (_) { /* ignore */ }
+      }
+    } catch (_) { /* ignore */ }
   }, 5000)
 }
 
@@ -514,11 +573,62 @@ function stopPollTimer() {
   }
 }
 
+// === 新手導覽（方案 C）：列表 phase ===
+
+// demo 卡片「轉錄中 → 完成」動畫的計時器
+let demoTimers = []
+function animateDemoCard() {
+  tourStore.setDemoStatus('processing', 10)
+  demoTimers.push(setTimeout(() => tourStore.setDemoStatus('processing', 45), 500))
+  demoTimers.push(setTimeout(() => tourStore.setDemoStatus('processing', 80), 1000))
+  demoTimers.push(setTimeout(() => tourStore.setDemoStatus('completed', 100), 1600))
+}
+function clearDemoTimers() {
+  demoTimers.forEach(clearTimeout)
+  demoTimers = []
+}
+
+function buildListSteps() {
+  return [
+    {
+      element: tourSel(TOUR_ANCHORS.DEMO_CARD),
+      popover: {
+        title: t('tour.list.title'),
+        description: t('tour.list.desc'),
+        doneBtnText: t('tour.toDetail'),
+        // 列表 phase 最後一步：交棒到詳情 phase
+        onNextClick: () =>
+          tour.advanceTo(tourStore, router, TOUR_PHASES.DETAIL, `/transcript/${DEMO_ID}`),
+      },
+    },
+  ]
+}
+
+async function maybeRunListTour() {
+  if (!tourStore.active || tourStore.phase !== TOUR_PHASES.LIST) return
+  tourStore.endAdvance() // 已抵達列表頁
+  animateDemoCard()
+  await nextTick() // 等 demo 卡片渲染出來，data-tour 錨點才存在
+  // 換頁到詳情 phase 時不收尾；使用者關閉則清計時器並結束導覽
+  tour.run({
+    steps: buildListSteps(),
+    t,
+    onDestroyed: tour.makeDestroyHandler(tourStore, clearDemoTimers),
+  })
+}
+
+onMounted(() => {
+  maybeRunListTour()
+})
+
 // 組件卸載前斷開所有連接
 onBeforeUnmount(() => {
   console.log('🔌 組件即將卸載，關閉所有 SSE 連接')
   disconnectAllSSE()
   stopPollTimer()
+  clearDemoTimers()
+  // 離開頁面時若列表導覽仍在跑，強制收掉避免殘留 overlay
+  tour.getDriver()?.destroy?.()
 })
 </script>
 

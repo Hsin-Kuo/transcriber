@@ -2,6 +2,7 @@ import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { API_BASE, TokenManager } from '../../utils/api'
 import { NEW_ENDPOINTS } from '../../api/endpoints'
+import { DEMO_ID, getDemoAudioUrl } from '../../utils/tourFixtures'
 
 export function useAudioPlayer() {
   const { t } = useI18n()
@@ -37,6 +38,9 @@ export function useAudioPlayer() {
   // --- Audio URL management ---
 
   function getAudioUrl(taskId) {
+    // 新手導覽 demo：回傳內建靜音 data URI，讓播放器有合法來源、不打 API、不報錯
+    if (taskId === DEMO_ID) return getDemoAudioUrl()
+
     const token = TokenManager.getAccessToken()
     if (!token) {
       console.warn(t('audioPlayer.cannotGetAccessToken'))

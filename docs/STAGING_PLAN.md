@@ -34,7 +34,7 @@
 | MongoDB tier | Staging **M0（免費）**；**prod 升 Flex 拆成獨立任務**（見下）。⚠️ Atlas 已用 **Flex** 取代 M2/M5 shared tier，新建大概率看不到 M2 |
 | Staging web server | **新開 t3.micro** |
 | SSM 路徑 | `/transcriber-staging/*`（與 prod `/transcriber/*` 完全隔離） |
-| 對外入口 | **單一網域 `staging.soundlite.app`**（不拆 landing/app/admin；先不部 admin） |
+| 對外入口 | `staging.soundlite.app`（使用者端）+ `admin-staging.soundlite.app`（admin 後台，2026-06-22 上線；不拆 landing） |
 | CORS | 只允許 `https://staging.soundlite.app` |
 
 ---
@@ -128,6 +128,15 @@ Region 一律 `ap-northeast-1`（同 prod）。
 ```bash
 aws sqs create-queue --queue-name transcriber-tasks-staging \
   --attributes VisibilityTimeout=600,MessageRetentionPeriod=345600
+
+# DLQ（對齊 prod transcriber-tasks-dlq / staging-priority；poison message 重投 3 次後隔離）
+# 2026-06-28 補上：原 staging 主佇列無 redrive，poison message 會無限重投。
+aws sqs create-queue --queue-name transcriber-tasks-staging-dlq \
+  --attributes MessageRetentionPeriod=345600
+DLQ_ARN=arn:aws:sqs:ap-northeast-1:696637902131:transcriber-tasks-staging-dlq
+aws sqs set-queue-attributes \
+  --queue-url https://sqs.ap-northeast-1.amazonaws.com/696637902131/transcriber-tasks-staging \
+  --attributes '{"RedrivePolicy":"{\"deadLetterTargetArn\":\"'"$DLQ_ARN"'\",\"maxReceiveCount\":3}"}'
 ```
 
 ### 2. S3
@@ -376,7 +385,7 @@ feature ──PR──▶ main（整合層，不部署）
 | Health check | `https://my.soundlite.app/health` | `https://staging.soundlite.app/health`（需 Access bypass /health，見 Phase 5） |
 
 > 其餘步驟（打包 backend/frontend、SSH 上傳、解壓、`systemd-analyze verify`、`is-active`）結構相同。
-> Staging web 只部使用者前端，不部 admin。
+> Staging web 部使用者前端 + admin 後台（admin-staging.soundlite.app，2026-06-22 上線；見 PR #163）。
 
 ### 3-C. 新增 `promotion-guard.yml`（強制來源分支）
 

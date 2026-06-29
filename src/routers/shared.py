@@ -1,5 +1,5 @@
 """公開分享路由 — 不需要認證"""
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from fastapi.responses import RedirectResponse
 from typing import Optional
 from datetime import datetime, timezone, timedelta
@@ -8,7 +8,8 @@ import secrets
 from ..auth.dependencies import get_current_user
 from ..database.mongodb import get_database
 from ..database.repositories.task_repo import TaskRepository
-from ..utils.storage_service import is_aws
+from ..utils.api_errors import api_error
+from ..utils.storage.backend import is_aws
 from ..utils.time_utils import get_utc_timestamp
 from ..services.task_query_helpers import is_audio_expired
 
@@ -47,24 +48,27 @@ async def toggle_share(
     full_user = await user_repo.get_by_id(str(current_user["_id"]))
     user_tier = full_user.get("quota", {}).get("tier", "free") if full_user else "free"
     if user_tier == "free":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="公開分享功能僅限付費方案使用"
+        raise api_error(
+            "SHARED_PAID_TIER_ONLY",
+            "Public sharing is only available on paid plans",
+            status.HTTP_403_FORBIDDEN,
         )
 
     task_repo = TaskRepository(db)
     task = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
 
     if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="任務不存在或無權訪問"
+        raise api_error(
+            "SHARED_TASK_NOT_FOUND",
+            "Task not found or access denied",
+            status.HTTP_404_NOT_FOUND,
         )
 
     if task.get("status") != "completed":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="只有已完成的任務可以分享"
+        raise api_error(
+            "SHARED_TASK_NOT_COMPLETED",
+            "Only completed tasks can be shared",
+            status.HTTP_400_BAD_REQUEST,
         )
 
     current_token = task.get("share_token")
@@ -81,9 +85,10 @@ async def toggle_share(
     # 開啟分享：驗證過期參數
     if expires_in_days is not None:
         if expires_in_days < 1 or expires_in_days > 365:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="expires_in_days 必須在 1-365 之間",
+            raise api_error(
+                "SHARED_EXPIRY_OUT_OF_RANGE",
+                "expires_in_days must be between 1 and 365",
+                status.HTTP_400_BAD_REQUEST,
             )
 
     token = secrets.token_urlsafe(16)
@@ -119,12 +124,24 @@ async def update_share_expiry(
     task_repo = TaskRepository(db)
     task = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
     if not task:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "任務不存在或無權訪問")
+        raise api_error(
+            "SHARED_TASK_NOT_FOUND",
+            "Task not found or access denied",
+            status.HTTP_404_NOT_FOUND,
+        )
     if not task.get("share_token"):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "尚未開啟分享")
+        raise api_error(
+            "SHARED_NOT_ENABLED",
+            "Sharing is not enabled yet",
+            status.HTTP_400_BAD_REQUEST,
+        )
 
     if expires_in_days is not None and (expires_in_days < 1 or expires_in_days > 365):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "expires_in_days 必須在 1-365 之間")
+        raise api_error(
+            "SHARED_EXPIRY_OUT_OF_RANGE",
+            "expires_in_days must be between 1 and 365",
+            status.HTTP_400_BAD_REQUEST,
+        )
 
     expires_at: Optional[int] = None
     if expires_in_days:
@@ -153,15 +170,17 @@ async def get_shared_task(
     task = await db.tasks.find_one({"share_token": token})
 
     if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="分享連結無效或已取消"
+        raise api_error(
+            "SHARED_LINK_INVALID",
+            "Share link is invalid or has been revoked",
+            status.HTTP_404_NOT_FOUND,
         )
 
     if _share_is_expired(task):
-        raise HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail="分享連結已過期"
+        raise api_error(
+            "SHARED_LINK_EXPIRED",
+            "Share link has expired",
+            status.HTTP_410_GONE,
         )
 
     # 取得逐字稿內容
@@ -258,35 +277,39 @@ async def get_shared_audio(
     task = await db.tasks.find_one({"share_token": token})
 
     if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="分享連結無效或已取消"
+        raise api_error(
+            "SHARED_LINK_INVALID",
+            "Share link is invalid or has been revoked",
+            status.HTTP_404_NOT_FOUND,
         )
 
     if _share_is_expired(task):
-        raise HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail="分享連結已過期"
+        raise api_error(
+            "SHARED_LINK_EXPIRED",
+            "Share link has expired",
+            status.HTTP_410_GONE,
         )
 
     if is_aws():
-        from ..utils.storage_service import audio_exists_by_path, get_presigned_url_by_path
+        from ..utils.storage.compact import audio_exists_by_path, get_presigned_url_by_path
         from urllib.parse import urlparse
 
         audio_file_path = task.get("result", {}).get("audio_file")
         if not audio_file_path or not audio_exists_by_path(audio_file_path):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="音檔已過期或已被刪除"
+            raise api_error(
+                "SHARED_AUDIO_EXPIRED",
+                "Audio file has expired or been deleted",
+                status.HTTP_404_NOT_FOUND,
             )
 
         presigned_url = get_presigned_url_by_path(audio_file_path, expires_in=3600)
 
         parsed = urlparse(presigned_url)
         if not parsed.hostname or not parsed.hostname.endswith(".amazonaws.com"):
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="產生的下載連結異常"
+            raise api_error(
+                "SHARED_DOWNLOAD_URL_INVALID",
+                "Generated download link is invalid",
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
         return RedirectResponse(url=presigned_url)
@@ -296,16 +319,18 @@ async def get_shared_audio(
 
         audio_file_path = task.get("result", {}).get("audio_file")
         if not audio_file_path:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="音檔不存在"
+            raise api_error(
+                "SHARED_AUDIO_NOT_FOUND",
+                "Audio file does not exist",
+                status.HTTP_404_NOT_FOUND,
             )
 
         audio_file = Path(audio_file_path)
         if not audio_file.exists():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="音檔不存在"
+            raise api_error(
+                "SHARED_AUDIO_NOT_FOUND",
+                "Audio file does not exist",
+                status.HTTP_404_NOT_FOUND,
             )
 
         return FileResponse(

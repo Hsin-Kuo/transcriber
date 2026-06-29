@@ -353,15 +353,15 @@
         </h2>
         <p class="card-subtitle" :class="{ hidden: supportExpanded }">{{ $t('userSettings.supportDesc') }}</p>
         <div class="card-body" :class="{ expanded: supportExpanded }">
-          <a class="setting-item link-item" href="#" target="_blank">
+          <a class="setting-item link-item" href="https://soundlite.app/help" target="_blank" rel="noopener noreferrer">
             <span class="setting-label">{{ $t('userSettings.helpCenter') }}</span>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
           </a>
-          <a class="setting-item link-item" href="#" target="_blank">
+          <a class="setting-item link-item" href="https://soundlite.app/faq" target="_blank" rel="noopener noreferrer">
             <span class="setting-label">{{ $t('userSettings.faq') }}</span>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
           </a>
-          <a class="setting-item link-item" href="#" target="_blank">
+          <a class="setting-item link-item" href="https://soundlite.app/contact" target="_blank" rel="noopener noreferrer">
             <span class="setting-label">{{ $t('userSettings.contactUs') }}</span>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
           </a>
@@ -378,11 +378,11 @@
         </h2>
         <p class="card-subtitle" :class="{ hidden: documentsExpanded }">{{ $t('userSettings.documentsDesc') }}</p>
         <div class="card-body" :class="{ expanded: documentsExpanded }">
-          <a class="setting-item link-item" href="#" target="_blank">
+          <a class="setting-item link-item" href="https://soundlite.app/privacy" target="_blank" rel="noopener noreferrer">
             <span class="setting-label">{{ $t('userSettings.privacyPolicy') }}</span>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
           </a>
-          <a class="setting-item link-item" href="#" target="_blank">
+          <a class="setting-item link-item" href="https://soundlite.app/terms" target="_blank" rel="noopener noreferrer">
             <span class="setting-label">{{ $t('userSettings.termsOfService') }}</span>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
           </a>
@@ -399,7 +399,7 @@
         </h2>
         <p class="card-subtitle" :class="{ hidden: teamExpanded }">{{ $t('userSettings.teamDesc') }}</p>
         <div class="card-body" :class="{ expanded: teamExpanded }">
-          <a class="setting-item link-item" href="#" target="_blank">
+          <a class="setting-item link-item" href="https://soundlite.app/about" target="_blank" rel="noopener noreferrer">
             <span class="setting-label">{{ $t('userSettings.aboutUs') }}</span>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
           </a>
@@ -982,6 +982,15 @@ onMounted(async () => {
     router.replace({ path: '/settings' })
   } else if (checkout === 'canceled') {
     showToast($t('userSettings.subscription.checkoutCanceled'), 'error')
+    router.replace({ path: '/settings' })
+  } else {
+    // 進頁一律重抓，確保時數/額度反映最近完成的轉錄（否則需手動 refresh 才更新）
+    await authStore.fetchCurrentUser()
+  }
+
+  // 外部連結帶升級意圖（intent=upgrade）→ 守衛轉址成 ?panel=plan，這裡開面板並清 query
+  if (route.query.panel === 'plan') {
+    uiStore.openPlanPanel()
     router.replace({ path: '/settings' })
   }
 

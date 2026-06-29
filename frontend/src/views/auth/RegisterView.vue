@@ -2,12 +2,12 @@
   <div class="auth-container">
     <div class="auth-card">
       <div class="auth-content">
-          <h1 class="auth-title">註冊帳號</h1>
+          <h1 class="auth-title">{{ $t('auth.registerTitle') }}</h1>
           <p class="auth-subtitle">Sound Lite</p>
 
           <form @submit.prevent="handleRegister" class="auth-form">
             <div class="form-group">
-              <label for="email">Email</label>
+              <label for="email">{{ $t('auth.email') }}</label>
               <input
                 type="email"
                 id="email"
@@ -19,14 +19,14 @@
             </div>
 
             <div class="form-group">
-              <label for="password">密碼</label>
+              <label for="password">{{ $t('auth.password') }}</label>
               <div class="password-input-wrapper">
                 <input
                   :type="showPassword ? 'text' : 'password'"
                   id="password"
                   v-model="password"
                   required
-                  placeholder="至少 8 個字元"
+                  :placeholder="$t('auth.passwordPlaceholder')"
                   minlength="8"
                   :disabled="loading"
                   @input="validatePassword"
@@ -50,29 +50,29 @@
               </div>
               <div v-if="password" class="password-requirements">
                 <div class="requirement" :class="{ met: passwordChecks.length }">
-                  {{ passwordChecks.length ? '✓' : '○' }} 至少 8 個字元
+                  {{ passwordChecks.length ? '✓' : '○' }} {{ $t('auth.reqLength') }}
                 </div>
                 <div class="requirement" :class="{ met: passwordChecks.hasUpper }">
-                  {{ passwordChecks.hasUpper ? '✓' : '○' }} 包含大寫字母
+                  {{ passwordChecks.hasUpper ? '✓' : '○' }} {{ $t('auth.reqUppercase') }}
                 </div>
                 <div class="requirement" :class="{ met: passwordChecks.hasLower }">
-                  {{ passwordChecks.hasLower ? '✓' : '○' }} 包含小寫字母
+                  {{ passwordChecks.hasLower ? '✓' : '○' }} {{ $t('auth.reqLowercase') }}
                 </div>
                 <div class="requirement" :class="{ met: passwordChecks.hasNumber }">
-                  {{ passwordChecks.hasNumber ? '✓' : '○' }} 包含數字
+                  {{ passwordChecks.hasNumber ? '✓' : '○' }} {{ $t('auth.reqNumber') }}
                 </div>
               </div>
             </div>
 
             <div class="form-group">
-              <label for="confirmPassword">確認密碼</label>
+              <label for="confirmPassword">{{ $t('auth.confirmPassword') }}</label>
               <div class="password-input-wrapper">
                 <input
                   :type="showConfirmPassword ? 'text' : 'password'"
                   id="confirmPassword"
                   v-model="confirmPassword"
                   required
-                  placeholder="再次輸入密碼"
+                  :placeholder="$t('auth.confirmPasswordPlaceholderRegister')"
                   minlength="8"
                   :disabled="loading"
                 />
@@ -94,7 +94,7 @@
                 </button>
               </div>
               <div v-if="confirmPassword && confirmPassword !== password" class="error-hint">
-                密碼不一致
+                {{ $t('auth.passwordMismatch') }}
               </div>
             </div>
 
@@ -107,14 +107,14 @@
               class="btn-primary"
               :disabled="loading || !isPasswordValid || password !== confirmPassword"
             >
-              {{ loading ? '註冊中...' : '註冊' }}
+              {{ loading ? $t('auth.registering') : $t('auth.registerButton') }}
             </button>
           </form>
 
           <!-- Google 註冊 -->
           <div v-if="googleClientId" class="oauth-section">
             <div class="divider">
-              <span>或</span>
+              <span>{{ $t('auth.or') }}</span>
             </div>
             <GoogleSignInButton
               :client-id="googleClientId"
@@ -126,14 +126,14 @@
           </div>
 
           <div class="auth-footer">
-            <p>已有帳號？<router-link to="/login">立即登入</router-link></p>
+            <p>{{ $t('auth.haveAccount') }}<router-link to="/login">{{ $t('auth.loginNow') }}</router-link></p>
           </div>
 
           <div class="quota-info">
-            <p class="quota-title">🎁 註冊即享免費配額</p>
+            <p class="quota-title">🎁 {{ $t('auth.registerFreeQuotaTitle') }}</p>
             <div class="quota-details-single">
-              <span class="quota-label">每月轉錄時長</span>
-              <span class="quota-value">180 分鐘</span>
+              <span class="quota-label">{{ $t('auth.registerQuotaLabel') }}</span>
+              <span class="quota-value">{{ $t('auth.registerQuotaValue') }}</span>
             </div>
           </div>
         </div>
@@ -144,11 +144,13 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth'
 import GoogleSignInButton from '../../components/GoogleSignInButton.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const { t: $t } = useI18n()
 
 // Google OAuth Client ID（從環境變數取得）
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
@@ -187,12 +189,12 @@ function validatePassword() {
 
 async function handleRegister() {
   if (password.value !== confirmPassword.value) {
-    error.value = '密碼不一致'
+    error.value = $t('auth.passwordMismatch')
     return
   }
 
   if (!isPasswordValid.value) {
-    error.value = '密碼不符合要求'
+    error.value = $t('auth.passwordRequirements')
     return
   }
 
@@ -233,7 +235,7 @@ async function handleGoogleSuccess(credential) {
 }
 
 function handleGoogleError(err) {
-  error.value = 'Google 註冊失敗：' + err
+  error.value = $t('auth.googleSignupFailed') + err
 }
 </script>
 

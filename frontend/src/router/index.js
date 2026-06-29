@@ -160,6 +160,11 @@ router.beforeEach(async (to, from, next) => {
   // 訪客頁面（已登入用戶不應訪問）：套用與登入相同的落點邏輯
   // —— 有未刪除任務導任務列表，否則上傳頁（尊重 redirect query）
   if (to.meta.guest && authStore.isAuthenticated) {
+    // 帶升級意圖的外部連結（intent=upgrade）：已登入者改去設定頁並開啟方案面板
+    if (to.query.intent === 'upgrade') {
+      next({ name: 'settings', query: { panel: 'plan' } })
+      return
+    }
     next(await resolveLandingPath(to.query.redirect))
     return
   }

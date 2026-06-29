@@ -211,7 +211,13 @@
       "downgrade": "降級方案",
       "cancelSubscription": "取消訂閱",
       "processing": "處理中...",
-      "changeFailed": "方案變更失敗，請稍後再試"
+      "changeFailed": "方案變更失敗，請稍後再試",
+      "perMonthYearly": "/月（年繳）",
+      "extraMinutes": "+{n} 分鐘",
+      "extraAiSummaries": "+{n} 次 AI 摘要",
+      "upgradeKeepQuota": "升級後，剩餘額度（{parts}）將保留為額外額度，不受每月重置影響。",
+      "downgradeScheduled": "降級後仍可使用目前方案直到 {date}，屆時自動切換為 {plan} 方案。\n\n請完成付款授權（不會立即扣款）。",
+      "downgradeImmediate": "將立即切換為新方案並扣款。"
     },
     "subscription": {
       "currentPlan": "目前方案",
@@ -360,7 +366,13 @@
     "uploading": "上傳中...",
     "uploadFailed": "上傳失敗",
     "uploadFailedMessage": "上傳失敗：{message}",
-    "errorUpload": "上傳失敗"
+    "errorUpload": "上傳失敗",
+    "language": "語言",
+    "langChineseGeneric": "中文（不指定）",
+    "mergeMode": "合併模式",
+    "fileCount": "{count} 個檔案",
+    "taskName": "任務名稱",
+    "mergeTaskNameHint": "此名稱將用於識別合併後的轉錄任務"
   },
   "globalUpload": {
     "statusUploading": "上傳中",
@@ -379,13 +391,131 @@
     "featureNotAvailable": "批次上傳為 Basic 以上方案功能，請升級方案後使用",
     "generic": "上傳失敗，請稍後再試"
   },
+  "errors": {
+    "invalidFileSize": "檔案大小無效",
+    "fileTooLarge": "檔案超過 {max}MB 上限",
+    "uploadDiskFull": "伺服器暫存空間不足，請稍後再試",
+    "uploadSessionNotFound": "上傳工作階段已過期或不存在，請重新選擇檔案上傳",
+    "uploadSessionInvalidated": "上傳工作階段已失效，請重新選擇檔案上傳",
+    "authRateLimited": "請求過於頻繁，請稍後再試",
+    "authResendCooldown": "請等待 {seconds} 秒後再重新發送",
+    "authInvalidCredentials": "Email 或密碼錯誤",
+    "authEmailNotVerified": "請先驗證您的 Email",
+    "authAccountDisabled": "帳號已被停用",
+    "authCurrentPasswordIncorrect": "目前密碼錯誤",
+    "authNewPasswordSameAsOld": "新密碼不能與目前密碼相同",
+    "authPasswordResetCooldown": "請等待 {minutes} 分鐘後再試",
+    "authEmailConfirmationMismatch": "Email 確認不符",
+    "authPasswordRequired": "請輸入密碼以確認刪除",
+    "authPasswordIncorrect": "密碼錯誤",
+    "taskNotFound": "任務不存在或無權訪問",
+    "taskNotCancelable": "無法取消已結束的任務（當前狀態：{status}）",
+    "taskNotDeletable": "無法刪除進行中的任務（當前狀態：{status}），請先取消任務",
+    "transcriptionInvalidUploadId": "upload_id 無效或已過期，請重新上傳",
+    "transcriptionNoFileProvided": "請提供音檔或 upload_id",
+    "transcriptionFilesTooLarge": "檔案總大小超過限制（最大 {max}MB）",
+    "transcriptionTaskNotFound": "任務不存在或無權訪問",
+    "transcriptionTaskNotCompleted": "任務尚未完成（當前狀態：{status}）",
+    "transcriptionContentNotFound": "轉錄內容不存在",
+    "transcriptionAudioExpired": "音檔已過期或已被刪除",
+    "transcriptionAudioNotFound": "音檔不存在（可能已被刪除）",
+    "transcriptionBatchTooManyFiles": "批次上傳最多支援 {max} 個檔案，您提供了 {provided} 個",
+    "transcriptionBatchNoFiles": "請至少上傳一個檔案",
+    "subscriptionAlreadyActive": "已有有效訂閱，請使用變更方案功能",
+    "subscriptionNotActive": "沒有有效的訂閱",
+    "subscriptionAlreadyScheduledCancel": "訂閱已排定取消",
+    "subscriptionNotScheduledCancel": "訂閱未排定取消",
+    "subscriptionRequiredForExtra": "需要有效的付費訂閱才能購買額外額度",
+    "sharedPaidTierOnly": "公開分享功能僅限付費方案使用",
+    "sharedTaskNotFound": "任務不存在或無權訪問",
+    "sharedTaskNotCompleted": "只有已完成的任務可以分享",
+    "sharedLinkInvalid": "分享連結無效或已取消",
+    "sharedLinkExpired": "分享連結已過期",
+    "sharedAudioExpired": "音檔已過期或已被刪除",
+    "sharedAudioNotFound": "音檔不存在",
+    "tagNotFoundOrDenied": "標籤不存在或無權訪問",
+    "summaryNotFound": "摘要不存在或無權存取",
+    "oauthTokenInvalid": "Google Token 無效",
+    "oauthTokenVerifyFailed": "Google Token 驗證失敗",
+    "oauthEmailExistsUnlinked": "此 Email 已有帳號，請使用密碼登入後在設定頁面綁定 Google",
+    "oauthAlreadyLinkedSelf": "此 Google 帳號已綁定到您的帳號",
+    "oauthAlreadyLinkedOther": "此 Google 帳號已綁定到其他帳號",
+    "oauthNotLinked": "尚未綁定 Google 帳號",
+    "oauthUnlinkRequiresPassword": "請先設定密碼後再解除綁定，否則將無法登入",
+    "oauthPasswordAlreadySet": "已設定密碼，請使用「更改密碼」功能",
+    "audioMergeTooFewFiles": "至少需要 2 個檔案進行合併",
+    "audioMergeTotalTooLarge": "檔案總大小超過限制（最大 200MB）",
+    "audioFileNotFound": "檔案不存在"
+  },
   "uploadZone": {
     "clickToUpload": "點擊或拖曳檔案",
     "supportedFormats": "支援音訊（M4A、MP3、WAV）及影片（MP4、MOV、AVI）格式",
+    "outcomeHint": "上傳後自動轉錄，產出可編輯的逐字稿與字幕（SRT），並支援說話者辨識與 AI 標點。",
     "uploadingFile": "上傳檔案中...",
     "fileTooLarge": "檔案過大",
     "fileTooLargeMessage": "「{name}」大小為 {size}，超過 {max}MB 上限",
-    "filesTooLargeMessage": "有 {count} 個檔案超過 {max}MB 上限，已自動略過"
+    "filesTooLargeMessage": "有 {count} 個檔案超過 {max}MB 上限，已自動略過",
+    "busyHint": "目前已有一個上傳正在進行，完成或取消後才能開始新的上傳。",
+    "mergeMultiple": "合併多個音檔",
+    "mergeAudio": "合併音檔"
+  },
+  "tour": {
+    "next": "下一步",
+    "prev": "上一步",
+    "done": "開始使用",
+    "replay": "查看使用教學",
+    "replayShort": "使用教學",
+    "demoFileName": "示範會議錄音.mp3",
+    "welcome": {
+      "title": "歡迎使用 SoundLite",
+      "desc": "30 秒快速導覽，帶你看過從上傳到檢視結果的流程。可隨時按 ✕ 跳過。",
+      "start": "開始導覽"
+    },
+    "upload": {
+      "title": "① 上傳音檔",
+      "desc": "點擊或直接把音訊／影片檔拖曳到這裡。支援 MP3、M4A、WAV、MP4 等常見格式。"
+    },
+    "language": {
+      "title": "② 選擇語言",
+      "desc": "保留「自動偵測」即可，系統會自動判斷；也可以手動指定語言來提升準確度。"
+    },
+    "diarize": {
+      "title": "③ 說話者辨識",
+      "desc": "開啟後會自動區分不同說話者，逐字稿會標上「SPEAKER_01、02…」。"
+    },
+    "taskType": {
+      "title": "④ 輸出格式",
+      "desc": "「文件」產出可閱讀的段落文字；「字幕」產出帶時間軸的文字片段，適合影片字幕。"
+    },
+    "start": {
+      "title": "⑤ 開始轉錄",
+      "desc": "設定完成後就按這裡開始。讓我們用一個示範任務，帶你看看接下來會發生什麼 →"
+    },
+    "toList": "看看結果",
+    "toDetail": "打開逐字稿",
+    "finish": "完成導覽",
+    "list": {
+      "title": "⑥ 你的任務",
+      "desc": "上傳後任務會出現在這裡，轉錄時可看到進度，完成後即可開啟。點「打開逐字稿」看看結果 →"
+    },
+    "detail": {
+      "transcript": {
+        "title": "⑦ 逐字稿與說話者",
+        "desc": "這裡是轉錄結果。開啟說話者辨識時會自動標上不同說話者，名稱可透過編輯修改或全文取代。"
+      },
+      "actions": {
+        "title": "⑧ 下載與分享",
+        "desc": "從這個選單可下載逐字稿（TXT、PDF）／字幕（SRT、VTT），或建立分享連結讓他人免登入檢視。"
+      },
+      "summary": {
+        "title": "⑨ AI 摘要",
+        "desc": "一鍵生成這段內容的 AI 摘要，快速掌握重點，不必讀完整份逐字稿。"
+      },
+      "audio": {
+        "title": "⑩ 對照音檔",
+        "desc": "內建播放器可邊聽邊讀，按著「alt」同時點逐字稿即可跳到對應時間，校稿很方便。"
+      }
+    }
   },
   "tasksView": {
     "downloadFailed": "下載失敗，請稍後再試",
@@ -420,6 +550,11 @@
     "cancelling": "取消中",
     "noTasks": "目前沒有任務",
     "noTranscriptionTasks": "尚無轉錄任務",
+    "empty": {
+      "title": "上傳第一個音檔，開始轉錄",
+      "subtitle": "支援 MP3、M4A、WAV、MP4 等格式；自動辨識說話者並加上標點，完成後可下載逐字稿與字幕。",
+      "cta": "上傳音檔"
+    },
     "confirmDelete": "確定要刪除這個任務嗎？",
     "deleteButtonText": "刪除",
     "batchEdit": "",
@@ -496,7 +631,7 @@
     "errorUpdateKeepAudio": "更新音檔保留狀態失敗",
     "errorToggleKeepAudio": "切換音檔保留狀態失敗",
     "errorUpdateFailed": "更新失敗：{message}",
-    "errorKeepAudioLimit": "最多只能勾選 3 個音檔保留",
+    "errorKeepAudioLimit": "最多只能勾選 {n} 個音檔保留",
     "errorSelectTasksFirst": "請先選擇要刪除的任務",
     "errorSelectTasksForTags": "請先選擇要加入標籤的任務",
     "errorEnterTags": "請輸入要加入的標籤",
@@ -515,7 +650,12 @@
     "logLoadedTagOrder": "已從伺服器載入標籤順序：",
     "logTagCount": "個標籤",
     "logTagMapping": "標籤 \"{name}\" -> ID: {id}",
-    "logSendingTagIds": "發送的標籤 ID 列表："
+    "logSendingTagIds": "發送的標籤 ID 列表：",
+    "tagNotFound": "找不到標籤「{tag}」",
+    "tagStepCreate": "建立標籤",
+    "tagStepOrder": "保存順序",
+    "tagStepColor": "保存顏色",
+    "tagEditPartialFailed": "部分標籤編輯操作失敗（{steps}）：{message}"
   },
   "downloadDialog": {
     "title": "下載設定",
@@ -557,7 +697,12 @@
     "errorSavingSegments": "儲存 segments 失敗",
     "confirmLeave": "你有未儲存的編輯內容，確定要離開嗎？",
     "moreOptions": "更多選項",
-    "replacing": "正在取代..."
+    "replacing": "正在取代...",
+    "collapsePanel": "收合面板",
+    "expandPanel": "展開面板",
+    "timeMarkers": "時間標記",
+    "density": "疏密度",
+    "loadingTranscript": "載入逐字稿中..."
   },
   "audioPlayer": {
     "browserNotSupported": "您的瀏覽器不支援音訊播放。",
@@ -641,7 +786,8 @@
     "updateFailed": "更新失敗",
     "cannotUpdateTaskName": "無法更新任務名稱",
     "cannotUpdateSpeakerNames": "無法更新講者名稱",
-    "cannotUpdateTags": "無法更新標籤"
+    "cannotUpdateTags": "無法更新標籤",
+    "cannotUpdateSubtitleSettings": "無法更新字幕設定"
   },
   "taskInfo": {
     "lastEdited": "完成時間",
@@ -675,7 +821,9 @@
     "success": "批次建立成功",
     "successMessage": "成功建立 {count} 個轉錄任務",
     "partialSuccess": "部分建立成功",
-    "partialSuccessMessage": "成功建立 {created} 個任務，{failed} 個失敗",
+    "partialSuccessMessage": "成功建立 {created} 個任務，{failed} 個失敗：",
+    "failedItem": "{filename}：{reason}",
+    "moreFailures": "…還有 {count} 個",
     "failed": "批次建立失敗",
     "uploadingFiles": "上傳中...",
     "uploadingProgress": "正在上傳第 {current}/{total} 個檔案",
@@ -739,7 +887,79 @@
     "register": "立即註冊",
     "sendVerificationFailed": "發送驗證郵件失敗",
     "networkError": "網路錯誤，請稍後再試",
-    "googleLoginFailed": "Google 登入失敗："
+    "googleLoginFailed": "Google 登入失敗：",
+    "registerTitle": "註冊帳號",
+    "confirmPassword": "確認密碼",
+    "confirmPasswordPlaceholderRegister": "再次輸入密碼",
+    "registering": "註冊中...",
+    "registerButton": "註冊",
+    "haveAccount": "已有帳號？",
+    "loginNow": "立即登入",
+    "registerFreeQuotaTitle": "註冊即享免費配額",
+    "registerQuotaLabel": "每月轉錄時長",
+    "registerQuotaValue": "180 分鐘",
+    "googleSignupFailed": "Google 註冊失敗：",
+    "forgotPasswordSubtitle": "Sound Lite 轉錄服務",
+    "forgotPasswordEmailHint": "如果 {email} 已註冊，您將會收到密碼重設郵件。",
+    "backToLoginPage": "返回登入頁面",
+    "registerFailed": "註冊失敗",
+    "wrongCredentials": "帳號或密碼錯誤",
+    "sendResetEmailFailed": "發送重設郵件失敗",
+    "resetPasswordFailed": "重設密碼失敗",
+    "googleLoginError": "Google 登入失敗",
+    "updatePreferencesFailed": "更新偏好設定失敗",
+    "deleteAccountFailed": "刪除帳號失敗",
+    "setPasswordFailed": "設定密碼失敗",
+    "resetPasswordEnterNew": "請輸入您的新密碼。",
+    "checkingLink": "檢查連結中...",
+    "verifyCheckingTitle": "正在檢查驗證連結...",
+    "verifyPleaseWait": "請稍候",
+    "verifyConfirmTitle": "確認驗證 Email",
+    "verifyConfirmMessage": "您即將完成 {email} 的驗證。",
+    "verifyConfirmHint": "點下方按鈕後即可啟用帳號並自動登入。",
+    "verifying": "驗證中...",
+    "completeVerification": "完成驗證",
+    "verifySuccessTitle": "Email 驗證成功！",
+    "verifySuccessMessage": "即將前往登入頁，請使用您的帳號登入...",
+    "verifyExpiredTitle": "驗證連結已過期",
+    "enterYourEmail": "輸入您的 Email",
+    "resending": "寄送中...",
+    "resendVerificationEmail": "重新寄送驗證信",
+    "verifyFailedTitle": "驗證失敗",
+    "reRegister": "重新註冊",
+    "missingToken": "缺少驗證 token",
+    "verifyLinkExpired": "驗證連結已過期",
+    "verifyLinkInvalid": "驗證連結無效",
+    "verifyFailedRetry": "驗證失敗，請重試",
+    "resendSuccess": "驗證信已重新寄出，請查看您的信箱",
+    "resendFailed": "寄送失敗，請稍後再試",
+    "complainedTitle": "此 Email 已標記為拒收",
+    "emailUndeliverableTitle": "Email 似乎無法送達",
+    "complainedMessage": "我們收到了 {email} 的收件方標示「不想再收信」，將不再嘗試寄送。",
+    "bouncedMessage": "{email} 收信失敗 — 信箱可能不存在或拼字有誤。",
+    "youCan": "您可以：",
+    "checkEmailSpelling": "確認 email 拼字（漏字母 / 多字母 / 域名打錯）",
+    "useAnotherEmail": "使用其他 email 重新註冊",
+    "processing": "處理中...",
+    "reRegisterWithOtherEmail": "改用其他 email 重新註冊",
+    "contactSupportHint": "如果您確定 email 沒打錯，請聯絡支援團隊",
+    "checkInboxTitle": "請查看您的信箱",
+    "accountCreatedResendTitle": "帳號已建立，請重發驗證信",
+    "verifyLinkSentMessage": "我們已將驗證連結寄到 {email}，點開連結即可完成註冊。",
+    "accountCreatedSendFailedMessage": "帳號 {email} 已建立，但驗證信寄送暫時失敗。請按下方按鈕重新寄送。",
+    "noEmailReceived": "沒收到信？",
+    "checkSpamHint": "確認是否進到「垃圾郵件」或「促銷活動」資料夾",
+    "checkEmailCorrectBefore": "確認 email 地址沒打錯（目前是 ",
+    "checkEmailCorrectAfter": "）",
+    "waitAndResend": "等候一兩分鐘後再重新寄送",
+    "resendCooldown": "{seconds} 秒後可重新寄送",
+    "pollTimeoutBefore": "已停止自動偵測。若您已完成驗證，請手動",
+    "pollTimeoutLink": "前往登入",
+    "pollTimeoutAfter": "。",
+    "afterVerifyLogin": "收到信並完成驗證後，",
+    "goToLoginLink": "前往登入",
+    "wrongEmailQuestion": "打錯 email？",
+    "backToRegister": "回到註冊頁"
   },
   "aiSummary": {
     "title": "AI 摘要",
@@ -818,6 +1038,36 @@
     "networkErrorMessage": "無法連接伺服器，請檢查網路連線"
   },
   "common": {
-    "close": "關閉"
+    "close": "關閉",
+    "cancel": "取消",
+    "remove": "移除",
+    "back": "返回",
+    "listSeparator": "、"
+  },
+  "mergeModal": {
+    "title": "音檔合併服務",
+    "uploadSection": "上傳音檔",
+    "uploadZoneAria": "選擇或拖放音檔",
+    "dragDrop": "拖放音檔到此處",
+    "clickSelect": "或點擊選擇檔案",
+    "supportedFormats": "支援 mp3, wav, m4a, mp4 等格式",
+    "selectedFiles": "已選擇的檔案",
+    "noFiles": "尚未選擇檔案",
+    "uploadFromLeft": "從左側上傳音檔",
+    "dragToReorder": "拖曳調整順序",
+    "totalSize": "合計大小：{size}",
+    "minTwoFiles": "請至少選擇 2 個檔案進行合併",
+    "nextStep": "下一步：轉錄設定"
+  },
+  "paymentReturn": {
+    "processing": "付款處理中",
+    "processingHint": "請稍候，正在確認付款狀態...",
+    "success": "付款成功！",
+    "backToSettings": "返回設定頁",
+    "failed": "付款失敗",
+    "failedHint": "請確認信用卡資訊後重試，或聯繫客服。",
+    "subscriptionActivated": "您的訂閱已成功啟用。",
+    "extraQuotaReady": "額外額度已入帳，可立即使用。",
+    "planActivated": "{plan} 方案已啟用。"
   }
 }

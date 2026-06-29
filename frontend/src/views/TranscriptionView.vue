@@ -3,13 +3,20 @@
     <!-- SVG 濾鏡定義 -->
     <ElectricBorder />
 
+    <!-- 上傳進行中提示：另一批上傳（可能在別頁啟動）尚未完成，暫時鎖住新上傳，
+         避免單槽位的 uploadStore 被新 start() 覆蓋掉進度 / 孤兒化前一批的 AbortController -->
+    <div v-if="uploadStore.busy && !uploading" class="upload-busy-hint">
+      {{ $t('uploadZone.busyHint') }}
+    </div>
+
     <!-- 上傳區域（含三角形合併按鈕） -->
     <UploadZone
       @file-selected="handleFileUpload"
       @files-selected="handleFilesUpload"
       @open-merge="openMergeModal"
+      @open-tour="launchTourManually"
       :uploading="uploading"
-      :disabled="!!pendingFile || mergeMode.isActive || batchMode.isActive"
+      :disabled="uploadStore.busy || !!pendingFile || mergeMode.isActive || batchMode.isActive"
     />
 
     <!-- 合併對話窗 -->
@@ -47,8 +54,8 @@
             <!-- 合併模式：顯示多檔案資訊 -->
             <template v-if="mergeMode.isActive">
               <div class="merge-info-header">
-                <span class="merge-badge">🔀 合併模式</span>
-                <span class="file-count">{{ mergeMode.files.length }} 個檔案</span>
+                <span class="merge-badge">🔀 {{ $t('transcription.mergeMode') }}</span>
+                <span class="file-count">{{ $t('transcription.fileCount', { count: mergeMode.files.length }) }}</span>
               </div>
               <ul class="merge-file-list">
                 <li v-for="(file, idx) in mergeMode.files" :key="idx" class="merge-file-item">
@@ -59,14 +66,14 @@
               </ul>
               <!-- 任務名稱欄位 -->
               <div class="task-name-section">
-                <label class="sub-label">任務名稱</label>
+                <label class="sub-label">{{ $t('transcription.taskName') }}</label>
                 <input
                   type="text"
                   v-model="mergeTaskName"
                   :placeholder="defaultMergeTaskName"
                   class="text-input task-name-input"
                 />
-                <p class="hint">此名稱將用於識別合併後的轉錄任務</p>
+                <p class="hint">{{ $t('transcription.mergeTaskNameHint') }}</p>
               </div>
             </template>
 
@@ -84,13 +91,13 @@
           </div>
 
           <!-- 語言選擇（移至左欄） -->
-          <div class="modal-section language-section">
-            <label class="section-label">語言</label>
+          <div class="modal-section language-section" data-tour="language">
+            <label class="section-label">{{ $t('transcription.language') }}</label>
             <select v-model="selectedLanguage" class="language-select">
-              <option value="auto">自動偵測</option>
+              <option value="auto">{{ $t('transcription.autoDetect') }}</option>
               <option value="zh-TW">繁體中文</option>
               <option value="zh-CN">简体中文</option>
-              <option value="zh">中文（不指定）</option>
+              <option value="zh">{{ $t('transcription.langChineseGeneric') }}</option>
               <option value="en">English</option>
               <option value="ja">日本語</option>
               <option value="ko">한국어</option>
@@ -98,7 +105,7 @@
           </div>
 
           <!-- 說話者辨識（移至左欄） -->
-          <div class="modal-section diarize-section">
+          <div class="modal-section diarize-section" data-tour="diarize">
             <label class="section-label">{{ $t('transcription.speakerDiarization') }}</label>
 
             <label class="toggle-label">
@@ -132,7 +139,7 @@
           <div class="confirm-col">
 
           <!-- 任務類型 -->
-          <div class="modal-section task-type-section">
+          <div class="modal-section task-type-section" data-tour="task-type">
             <label class="section-label">{{ $t('transcription.taskType') }}</label>
 
             <div class="radio-group">
@@ -240,6 +247,7 @@
         <div class="modal-actions">
           <button
             class="btn btn-primary btn-start"
+            data-tour="start"
             :class="{ 'is-loading': uploading }"
             :disabled="uploading"
             @click="confirmAndUpload"
@@ -259,7 +267,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, inject } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import ElectricBorder from '../components/shared/ElectricBorder.vue'
@@ -268,14 +276,17 @@ import MergeModal from '../components/merge/MergeModal.vue'
 import BatchUploadPanel from '../components/batch/BatchUploadPanel.vue'
 
 // 新 API 服務層
-import { transcriptionService } from '../api/services'
+import { transcriptionService, taskService } from '../api/services'
 import { exceedsMaxSize, MAX_UPLOAD_SIZE_MB } from '../utils/chunkedUpload.js'
 import { useCollapsibleRows } from '../composables/useCollapsibleRows'
+import { useProductTour } from '../composables/useProductTour'
 import { useTaskTags } from '../composables/task/useTaskTags'
 import { useAuthStore } from '../stores/auth'
 import { useUiStore } from '../stores/ui'
 import { useUploadStore } from '../stores/upload'
+import { useTourStore, TOUR_PHASES, TOUR_ANCHORS, tourSel } from '../stores/tour'
 import { quotaErrorFromDetail } from '../utils/quotaError'
+import { errorI18n } from '../utils/apiError'
 
 const { t: $t, locale } = useI18n()
 const router = useRouter()
@@ -288,6 +299,17 @@ const uploadStore = useUploadStore()
 const audioRetentionDays = computed(() => authStore.quota?.audio_retention_days || 3)
 
 const showNotification = inject('showNotification')
+
+// 上傳完成 toast 的「查看」動作：導向任務列表。
+// 已在任務列表頁時 router.push 同路由會被忽略 → 改整頁重整，確保新任務刷新出現。
+function goToTasks() {
+  if (router.currentRoute.value.name === 'tasks') {
+    window.location.reload()
+    return
+  }
+  router.push({ name: 'tasks' })
+}
+
 const uploading = ref(false)
 const uploadProgress = ref(0) // 分片上傳進度 0-100
 const batchUploadCurrent = ref(0) // 批次上傳：目前第幾個檔案
@@ -299,6 +321,11 @@ const maxSpeakers = ref(null)
 const pendingFile = ref(null)
 const selectedTags = ref([])
 const tagInput = ref('')
+
+// 新手導覽（方案 C）：導覽期間用 demo 檔展開設定表單；tourMode 攔截送出，永不上傳
+const tour = useProductTour()
+const tourStore = useTourStore()
+const tourMode = ref(false)
 
 // 合併模式狀態
 const mergeMode = reactive({
@@ -448,6 +475,9 @@ function removeTag(index) {
 
 // 確認後開始上傳
 async function confirmAndUpload() {
+  // 導覽展示模式：demo 檔不可真的送出（否則會建立垃圾任務、扣配額）。核心防呆。
+  if (tourMode.value) return
+
   // 判斷是合併模式還是單檔模式
   const isMergeMode = mergeMode.isActive && mergeMode.files.length > 0
 
@@ -507,11 +537,21 @@ async function confirmAndUpload() {
       }
     })
 
-    // 上傳完成 → 全域浮層顯示「已建立轉錄任務」（取代原本的「正在轉錄」toast，避免重複訊號）
+    // 上傳完成 → 收掉上傳中浮層，終態統一走 toast
     uploadStore.succeed()
 
+    // 完成通知（帶「查看」動作）。使用者上傳途中切去別頁時不會自動跳轉，
+    // 這顆按鈕是他直達新任務的唯一入口。
+    if (showNotification) {
+      showNotification({
+        title: $t('globalUpload.statusDone'),
+        type: 'success',
+        action: { label: $t('globalUpload.view'), handler: goToTasks },
+      })
+    }
+
     // 轉錄已建立，若使用者仍在上傳頁則自動跳轉到任務列表；
-    // 已離開本頁則不強拉回來，改由全域浮層的「查看」按鈕引導
+    // 已離開本頁則不強拉回來，改由 toast 的「查看」按鈕引導
     if (router.currentRoute.value.name === 'transcription') {
       router.push({ name: 'tasks' })
     }
@@ -523,8 +563,8 @@ async function confirmAndUpload() {
       console.error($t('transcription.errorUpload') + ':', error)
       const detail = error.response?.data?.detail
       const errorMsg = uploadErrorMessage(error)
-      uploadStore.fail(errorMsg)
-      // 額度不足 → 改用引導購買的對話框（而非一般錯誤 toast）
+      uploadStore.fail(errorMsg)  // 收掉上傳中浮層
+      // 終態統一走 toast（浮層只負責上傳中）；額度不足改用引導購買對話框
       const quota = quotaErrorFromDetail(detail)
       if (quota) {
         uiStore.showQuotaModal(quota.type)
@@ -534,8 +574,6 @@ async function confirmAndUpload() {
           message: errorMsg,
           type: 'error'
         })
-      } else {
-        alert($t('transcription.uploadFailedMessage', { message: errorMsg }))
       }
     }
   } finally {
@@ -558,11 +596,17 @@ async function confirmAndUpload() {
 //  - 網路 / JS 錯誤（無後端 detail）→ 通用 i18n（取代原本會漏出的英文 library 字串）
 //  - 其餘後端訊息（語言由後端決定）→ 沿用（完整 localize 需後端 i18n）
 function uploadErrorMessage(error) {
-  const detail = error?.response?.data?.detail
-  const code = detail && typeof detail === 'object' ? detail.code : null
-  if (code === 'FEATURE_NOT_AVAILABLE') return $t('uploadErrors.featureNotAvailable')
-  const serverMsg = (detail && typeof detail === 'object') ? detail.message : (typeof detail === 'string' ? detail : '')
-  return serverMsg || $t('uploadErrors.generic')
+  return detailToMessage(error?.response?.data?.detail)
+}
+
+// 把後端 detail 本體（字串 或 {code,message,params} 物件）轉成跟隨 UI 語言的訊息。
+// 經集中對照（apiError.ts）：有 code 對應 i18n key → 前端翻譯（多語系）；
+// 否則 fallback 到後端 message（中文）；再不然通用錯誤。
+// 共用給「axios error」與「批次回傳 tasks[].error 的裸 detail」。
+function detailToMessage(detail) {
+  const { key, params, fallback } = errorI18n(detail)
+  if (key) return $t(key, params)
+  return fallback || $t('uploadErrors.generic')
 }
 
 // 取消上傳
@@ -654,19 +698,35 @@ async function confirmBatchUpload(formData) {
     // 顯示結果通知
     if (showNotification) {
       if (result.failed > 0) {
+        // 列出哪些檔失敗、各自原因（後端在 tasks[].error 帶了 detail，先前只用來
+        // 判斷配額 Modal，沒告知使用者明細）。上限 5 筆避免 toast 過長。
+        const FAILED_LIST_MAX = 5
+        const failedLines = (result.tasks || [])
+          .filter(t => t.error)
+          .map(t => $t('batchUpload.failedItem', {
+            filename: t.filename,
+            reason: detailToMessage(t.error),
+          }))
+        const shown = failedLines.slice(0, FAILED_LIST_MAX)
+        if (failedLines.length > FAILED_LIST_MAX) {
+          shown.push($t('batchUpload.moreFailures', { count: failedLines.length - FAILED_LIST_MAX }))
+        }
         showNotification({
           title: $t('batchUpload.partialSuccess'),
-          message: $t('batchUpload.partialSuccessMessage', {
-            created: result.created,
-            failed: result.failed
-          }),
-          type: 'warning'
+          message: [
+            $t('batchUpload.partialSuccessMessage', { created: result.created, failed: result.failed }),
+            ...shown,
+          ].join('\n'),
+          type: 'warning',
+          // 仍有任務建立成功 → 提供「查看」直達（部分失敗不會自動跳轉）
+          action: result.created > 0 ? { label: $t('globalUpload.view'), handler: goToTasks } : undefined,
         })
       } else {
         showNotification({
           title: $t('batchUpload.success'),
           message: $t('batchUpload.successMessage', { count: result.created }),
-          type: 'success'
+          type: 'success',
+          action: { label: $t('globalUpload.view'), handler: goToTasks },
         })
       }
     }
@@ -685,7 +745,7 @@ async function confirmBatchUpload(formData) {
     if (!isUploadCancelled(error)) {
       console.error('批次上傳失敗:', error)
       const errorMsg = uploadErrorMessage(error)
-      uploadStore.fail(errorMsg)
+      uploadStore.fail(errorMsg)  // 收掉上傳中浮層；終態統一走 toast
       if (showNotification) {
         showNotification({
           title: $t('batchUpload.failed'),
@@ -703,14 +763,120 @@ async function confirmBatchUpload(formData) {
   }
 }
 
+// === 新手導覽（方案 C）===
+
+// 純導覽展示用的佔位檔；tourMode 會攔截送出，永不上傳。
+// 配置一個合理大小的 buffer 讓檔案資訊區顯示像樣的容量（導覽結束即釋放）。
+function makeDemoFile() {
+  const bytes = new Uint8Array(2_517_000) // ≈ 2.40 MB
+  return new File([bytes], $t('tour.demoFileName'), { type: 'audio/mpeg' })
+}
+
+// 導覽結束（完成 / 略過 / 關閉）→ 還原表單到乾淨初始狀態
+function endTour() {
+  tourMode.value = false
+  pendingFile.value = null
+  taskType.value = 'paragraph'
+  selectedLanguage.value = 'auto'
+  enableDiarization.value = true
+  maxSpeakers.value = null
+  selectedTags.value = []
+  tagInput.value = ''
+}
+
+function buildTourSteps() {
+  return [
+    {
+      // 歡迎步：無錨點 → 置中 popover，導覽開始前先說明
+      popover: {
+        title: $t('tour.welcome.title'),
+        description: $t('tour.welcome.desc'),
+        nextBtnText: $t('tour.welcome.start'),
+        showButtons: ['next', 'close'],
+      },
+    },
+    {
+      element: tourSel(TOUR_ANCHORS.UPLOAD),
+      popover: { title: $t('tour.upload.title'), description: $t('tour.upload.desc') },
+    },
+    {
+      element: tourSel(TOUR_ANCHORS.LANGUAGE),
+      popover: { title: $t('tour.language.title'), description: $t('tour.language.desc') },
+    },
+    {
+      element: tourSel(TOUR_ANCHORS.DIARIZE),
+      popover: { title: $t('tour.diarize.title'), description: $t('tour.diarize.desc') },
+    },
+    {
+      element: tourSel(TOUR_ANCHORS.TASK_TYPE),
+      popover: { title: $t('tour.taskType.title'), description: $t('tour.taskType.desc') },
+    },
+    {
+      // 上傳 phase 最後一步：交棒到任務列表 phase
+      element: tourSel(TOUR_ANCHORS.START),
+      popover: {
+        title: $t('tour.start.title'),
+        description: $t('tour.start.desc'),
+        doneBtnText: $t('tour.toList'),
+        onNextClick: () => tour.advanceTo(tourStore, router, TOUR_PHASES.LIST, '/all'),
+      },
+    },
+  ]
+}
+
+// 是否處於「不該啟動導覽」的忙碌狀態（上傳中／表單填寫中／合併／批次）——
+// 啟動會設 demo pendingFile，這些狀態下會覆蓋使用者正在進行的操作。
+const tourLaunchBlocked = computed(
+  () => uploadStore.busy || !!pendingFile.value || mergeMode.isActive || batchMode.isActive
+)
+
+// 實際啟動導覽（自動與手動共用）。展開示範表單→等 DOM→啟動 driver。
+async function beginTour() {
+  tourStore.start() // phase = 'upload'
+  tourMode.value = true
+  pendingFile.value = makeDemoFile()
+  await nextTick() // 等 confirm-section 渲染，各 data-tour 錨點才存在
+  // 換頁到列表 phase 時不收尾；使用者關閉則還原表單並結束導覽
+  tour.run({
+    steps: buildTourSteps(),
+    t: $t,
+    onDestroyed: tour.makeDestroyHandler(tourStore, endTour),
+  })
+}
+
+// 自動觸發：僅對「零任務新使用者、未看過、非行動裝置、不忙碌」
+async function maybeStartTour() {
+  if (tourStore.hasSeen() || tour.isMobile() || tourLaunchBlocked.value) return
+
+  let total = 0
+  try {
+    ;({ total } = await taskService.list({ limit: 1, skip: 0 }))
+  } catch {
+    return // 查詢失敗：不打擾，靜默略過
+  }
+  if (total >= 1) return
+
+  beginTour()
+}
+
+// 手動觸發（上傳頁「查看使用教學」連結）：略過 hasSeen / 零任務 gating，
+// 讓既有使用者也能重看；但仍避開忙碌狀態以免覆蓋進行中的操作。
+function launchTourManually() {
+  if (tourLaunchBlocked.value) return
+  beginTour()
+}
+
 // 生命週期
 onMounted(() => {
   fetchTagColors()  // 取得 canonical tag 列表（含尚未被使用的孤兒 tag）
   // 限制視窗高度
   document.body.classList.add('upload-page')
+  maybeStartTour()
 })
 
 onUnmounted(() => {
+  // 離開頁面時若導覽仍在跑，強制收掉避免殘留 overlay
+  tour.getDriver()?.destroy?.()
   // 清理：移除視窗高度限制
   document.body.classList.remove('upload-page')
 })
@@ -730,6 +896,19 @@ onUnmounted(() => {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* 上傳進行中提示橫幅 */
+.upload-busy-hint {
+  max-width: 800px;
+  margin: 16px auto 0;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: rgba(221, 132, 72, 0.1);
+  border: 1px solid var(--electric-primary, #dd8448);
+  color: var(--main-text);
+  font-size: 14px;
+  text-align: center;
 }
 
 /* 確認表單區域（在上傳區下方） */
@@ -1563,5 +1742,82 @@ onUnmounted(() => {
     font-size: 16px; /* 防止 iOS 縮放 */
     min-height: 44px;
   }
+}
+</style>
+
+<!-- driver.js popover 主題（非 scoped：popover 掛在 body 外層，scoped 屬性選不到）-->
+<style>
+.driver-popover.sl-tour-popover {
+  background: var(--main-bg, #e0e5ec);
+  color: var(--main-text, #4a5568);
+  border-radius: 14px;
+  box-shadow:
+    6px 6px 14px var(--main-shadow-dark, rgba(163, 177, 198, 0.6)),
+    -6px -6px 14px var(--main-shadow-light, rgba(255, 255, 255, 0.8));
+  max-width: 320px;
+}
+
+.driver-popover.sl-tour-popover .driver-popover-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--main-text, #4a5568);
+}
+
+.driver-popover.sl-tour-popover .driver-popover-description {
+  font-size: 13px;
+  line-height: 1.65;
+  color: rgba(var(--color-text-dark-rgb, 74, 85, 104), 0.75);
+}
+
+.driver-popover.sl-tour-popover .driver-popover-progress-text {
+  font-size: 12px;
+  color: rgba(var(--color-text-dark-rgb, 74, 85, 104), 0.5);
+}
+
+/* ✕ 關閉鈕：用會隨深/淺色主題翻轉的色票（driver 預設 #d2d2d2/hover #2d2d2d 在深色下會隱形）*/
+.driver-popover.sl-tour-popover .driver-popover-close-btn {
+  color: rgba(var(--color-text-dark-rgb, 74, 85, 104), 0.6);
+}
+
+.driver-popover.sl-tour-popover .driver-popover-close-btn:hover,
+.driver-popover.sl-tour-popover .driver-popover-close-btn:focus {
+  color: var(--main-text, #4a5568);
+}
+
+.driver-popover.sl-tour-popover .driver-popover-next-btn {
+  /* 用 electric-primary（深淺色都是品牌橘）；--main-primary 在深色模式會變灰藍 */
+  background: var(--electric-primary, #dd8448);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  text-shadow: none;
+}
+
+/* 蓋掉 driver 預設 hover(#f7f7f7 會把按鈕變淺灰)，維持品牌橘 */
+.driver-popover.sl-tour-popover .driver-popover-next-btn:hover,
+.driver-popover.sl-tour-popover .driver-popover-next-btn:focus {
+  background: var(--electric-primary, #dd8448);
+  color: #fff;
+  filter: brightness(1.06);
+}
+
+.driver-popover.sl-tour-popover .driver-popover-prev-btn {
+  background: transparent;
+  color: rgba(var(--color-text-dark-rgb, 74, 85, 104), 0.7);
+  border: 1px solid rgba(var(--color-text-dark-rgb, 74, 85, 104), 0.2);
+  border-radius: 8px;
+  text-shadow: none;
+}
+
+/* 蓋掉 driver 預設 hover(#f7f7f7 在深色下會讓淺色字看不見) */
+.driver-popover.sl-tour-popover .driver-popover-prev-btn:hover,
+.driver-popover.sl-tour-popover .driver-popover-prev-btn:focus {
+  background: rgba(var(--color-text-dark-rgb, 74, 85, 104), 0.08);
+  color: var(--main-text, #4a5568);
+}
+
+.driver-popover.sl-tour-popover .driver-popover-arrow {
+  border-color: var(--main-bg, #e0e5ec);
 }
 </style>

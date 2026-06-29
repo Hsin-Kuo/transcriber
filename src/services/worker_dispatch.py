@@ -38,20 +38,34 @@ class WorkerDispatch:
         sqs_queue_url: str,
         worker_secret: str,
         handoff_uploader: Callable[[str, Path, str], str],
+        priority_sqs_queue_url: str = "",
     ):
         """
         Args:
             sqs_client: boto3.client("sqs", region_name=...)
-            sqs_queue_url: SQS queue URL；空字串時略過發送（dev/未配置）
+            sqs_queue_url: 一般任務 SQS queue URL；空字串時略過發送（dev/未配置）
             worker_secret: HMAC 簽名密鑰；空字串時略過簽章（dev/未配置）
             handoff_uploader: callable(task_id, local_path, ext) -> str
                               把音檔上傳到 S3 `handoff/{task_id}.{ext}`，回傳 s3:// URI
-                              （包 blocking I/O；典型實作見 storage_service.upload_to_handoff）
+                              （包 blocking I/O；典型實作見 storage.handoff.upload_to_handoff）
+            priority_sqs_queue_url: 優先佇列 URL（pro+enterprise）；空字串時所有任務
+                              都走一般佇列（功能未啟用 / dev）。
         """
         self._sqs_client = sqs_client
         self._sqs_queue_url = sqs_queue_url
+        self._priority_sqs_queue_url = priority_sqs_queue_url
         self._worker_secret = worker_secret
         self._handoff_uploader = handoff_uploader
+
+    def _queue_for(self, is_priority: bool) -> str:
+        """選佇列：享優先權且優先佇列已配置 → priority，否則 → 一般。
+
+        is_priority 由 intake 以 has_feature 判定（與全站 feature gating 同源）。
+        優先佇列未配置（功能未啟用）時一律回一般佇列。
+        """
+        if self._priority_sqs_queue_url and is_priority:
+            return self._priority_sqs_queue_url
+        return self._sqs_queue_url
 
     # ── public（TaskDispatch Protocol）─────────────────────────
 
@@ -62,6 +76,7 @@ class WorkerDispatch:
         audio_local_path: Path,
         temp_dir: Path,
         user_tier: str,
+        is_priority: bool = False,
     ) -> DispatchResult:
         """背景上傳 S3 + 送 SQS（fire-and-forget），立即返回 status=pending。
 
@@ -73,12 +88,14 @@ class WorkerDispatch:
             audio_local_path: 已落地的音檔絕對路徑
             temp_dir: 整個 temp 工作區，dispatch 完成後刪
             user_tier: free / pro / ...，決定 S3 路徑 prefix
+            is_priority: 享優先排隊權則送優先佇列（intake 以 has_feature 判定）
         """
         coro = self._dispatch(
             job=job,
             audio_local_path=audio_local_path,
             temp_dir=temp_dir,
             user_tier=user_tier,
+            is_priority=is_priority,
         )
         create_background_task(coro, name=f"worker_dispatch:{job.task_id}")
         return DispatchResult(status="pending", queue_position=None)
@@ -95,6 +112,7 @@ class WorkerDispatch:
         audio_local_path: Path,
         temp_dir: Path,
         user_tier: str,
+        is_priority: bool = False,
     ) -> None:
         task_id = job.task_id
         try:
@@ -108,11 +126,18 @@ class WorkerDispatch:
             )
             log.debug("dispatch.handoff_uploaded", task_id=task_id, ext=ext)
 
-            # 2. SQS 送出（model_dump → sign envelope → JSON）
-            if self._sqs_queue_url:
+            # 2. SQS 送出（依 is_priority 路由到一般/優先佇列；model_dump → sign envelope → JSON）
+            queue_url = self._queue_for(is_priority)
+            if queue_url:
+                routed_priority = queue_url == self._priority_sqs_queue_url
                 payload = self._sign(job.model_dump())
-                await loop.run_in_executor(None, self._send_sqs_blocking, payload)
-                log.info("dispatch.sqs_message_sent", task_id=task_id)
+                await loop.run_in_executor(None, self._send_sqs_blocking, payload, queue_url)
+                log.info(
+                    "dispatch.sqs_message_sent",
+                    task_id=task_id,
+                    source_queue="priority" if routed_priority else "normal",
+                    user_tier=user_tier,
+                )
             else:
                 log.warning("dispatch.sqs_queue_url_missing", task_id=task_id)
 
@@ -134,9 +159,9 @@ class WorkerDispatch:
         ).hexdigest()
         return {**payload, "_signature": signature}
 
-    def _send_sqs_blocking(self, payload: dict) -> None:
+    def _send_sqs_blocking(self, payload: dict, queue_url: str) -> None:
         self._sqs_client.send_message(
-            QueueUrl=self._sqs_queue_url,
+            QueueUrl=queue_url,
             MessageBody=json.dumps(payload),
         )
 

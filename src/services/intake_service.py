@@ -18,12 +18,13 @@ from ..database.repositories.reservation_repo import ReservationRepository
 from ..database.repositories.task_repo import TaskRepository
 from ..database.repositories.user_repo import UserRepository
 from ..models.intake import IntakeConfig, IntakeResult
+from ..models.quota import has_feature
 from ..models.worker_job import TranscriptionJob
 from ..services.audio_service import AudioService
 from ..services.tag_service import TagService
 from ..services.task_dispatch import get_task_dispatch
 from ..utils.logger import get_logger
-from ..utils.storage_service import is_aws
+from ..utils.storage.backend import is_aws
 from ..utils.time_utils import get_utc_timestamp
 
 log = get_logger(__name__)
@@ -124,6 +125,9 @@ class TranscriptionIntakeService:
 
             # 6. 建立 task 記錄
             user_tier = full_user.get("quota", {}).get("tier", "free")
+            # 優先排隊權：與全站 feature gating 同源（honor per-user features 覆寫，
+            # 缺則退回 tier 預設）。AWS 雙佇列路由用，本地忽略。
+            is_priority = has_feature(full_user, "priority_processing")
             current_time = get_utc_timestamp()
 
             task_data = {
@@ -186,6 +190,7 @@ class TranscriptionIntakeService:
                 audio_local_path=file_path,
                 temp_dir=temp_dir,
                 user_tier=user_tier,
+                is_priority=is_priority,
             )
 
             log.info("task.created", task_id=task_id, status=dispatch_result.status)

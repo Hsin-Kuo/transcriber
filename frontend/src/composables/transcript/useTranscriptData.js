@@ -3,6 +3,13 @@ import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import api from '../../utils/api'
 import { NEW_ENDPOINTS } from '../../api/endpoints'
+import {
+  DEMO_ID,
+  buildDemoTranscript,
+  getDemoSegments,
+  getDemoSpeakerNames,
+  getDemoAudioUrl,
+} from '../../utils/tourFixtures'
 
 /**
  * 逐字稿數據管理 Composable
@@ -14,7 +21,7 @@ import { NEW_ENDPOINTS } from '../../api/endpoints'
  */
 export function useTranscriptData() {
   // i18n
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
 
   // 注入全局通知函數
   const showNotification = inject('showNotification', null)
@@ -49,6 +56,23 @@ export function useTranscriptData() {
     if (!taskId) {
       transcriptError.value = t('transcriptData.invalidTaskId')
       return null
+    }
+
+    // 新手導覽 demo：用前端 fixture 取代 4 個 API，不建立真實任務、不污染資料
+    if (taskId === DEMO_ID) {
+      currentTranscript.value = buildDemoTranscript(locale.value)
+      segments.value = getDemoSegments(locale.value)
+      speakerNames.value = getDemoSpeakerNames(locale.value)
+      subtitleSettings.value = {}
+      originalContent.value = currentTranscript.value.content
+      transcriptError.value = null
+      loadingTranscript.value = false
+      return {
+        audioUrl: getDemoAudioUrl(),
+        timecodeMarkers: generateTimecodeMarkers
+          ? generateTimecodeMarkers(segments.value)
+          : [],
+      }
     }
 
     loadingTranscript.value = true
@@ -318,7 +342,7 @@ export function useTranscriptData() {
       if (showNotification) {
         showNotification({
           title: t('transcriptData.updateFailed'),
-          message: t('transcriptData.cannotUpdateSubtitleSettings') || '無法更新字幕設定',
+          message: t('transcriptData.cannotUpdateSubtitleSettings'),
           type: 'error'
         })
       }
@@ -349,7 +373,7 @@ export function useTranscriptData() {
       if (showNotification) {
         showNotification({
           title: t('transcriptData.updateFailed'),
-          message: t('transcriptData.cannotUpdateTags') || '無法更新標籤',
+          message: t('transcriptData.cannotUpdateTags'),
           type: 'error'
         })
       }

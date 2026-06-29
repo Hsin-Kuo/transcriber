@@ -1,6 +1,6 @@
 """OAuth 第三方登入路由"""
 import os
-from fastapi import APIRouter, Depends, HTTPException, status, Response
+from fastapi import APIRouter, Depends, status, Response
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
@@ -33,6 +33,7 @@ from ..auth.dependencies import get_current_user
 from ..database.mongodb import get_database
 from ..database.repositories.user_repo import UserRepository
 from ..models.quota import QUOTA_TIERS, QuotaTier
+from ..utils.api_errors import api_error
 from ..utils.logger import get_logger
 
 router = APIRouter(prefix="/auth", tags=["OAuth"])
@@ -60,9 +61,10 @@ def verify_google_token(credential: str) -> dict:
         HTTPException: Token 無效
     """
     if not GOOGLE_CLIENT_ID:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Google OAuth 未設定"
+        raise api_error(
+            "OAUTH_NOT_CONFIGURED",
+            "Google OAuth is not configured",
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
     try:
@@ -82,15 +84,17 @@ def verify_google_token(credential: str) -> dict:
     except ValueError as e:
         # 細節只寫 log，response 給通用訊息避免洩漏內部錯誤結構給 client
         log.warning("oauth.google_token.invalid", error=str(e))
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Google Token 無效"
+        raise api_error(
+            "OAUTH_TOKEN_INVALID",
+            "Invalid Google token",
+            status.HTTP_401_UNAUTHORIZED,
         )
     except Exception as e:
         log.warning("oauth.google_token.verify_error", error_type=type(e).__name__, error=str(e))
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Google Token 驗證失敗"
+        raise api_error(
+            "OAUTH_TOKEN_VERIFY_FAILED",
+            "Google token verification failed",
+            status.HTTP_401_UNAUTHORIZED,
         )
 
 
@@ -121,9 +125,10 @@ async def google_auth(
     email = google_info.get('email', '')
 
     if not email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="無法取得 Google 帳號的 Email"
+        raise api_error(
+            "OAUTH_EMAIL_UNAVAILABLE",
+            "Could not retrieve the email of the Google account",
+            status.HTTP_400_BAD_REQUEST,
         )
 
     user_repo = UserRepository(db)
@@ -134,9 +139,10 @@ async def google_auth(
     if user:
         # 已有帳號，直接登入
         if not user.get("is_active"):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="帳號已被停用"
+            raise api_error(
+                "OAUTH_ACCOUNT_DISABLED",
+                "Account has been disabled",
+                status.HTTP_403_FORBIDDEN,
             )
     else:
         # 2. 檢查是否有同 email 的帳號（但未綁定 Google）
@@ -145,9 +151,10 @@ async def google_auth(
         if existing_user:
             # 有同 email 帳號但未綁定 Google，不自動關聯
             # 用戶需要登入後手動綁定
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="此 Email 已有帳號，請使用密碼登入後在設定頁面綁定 Google"
+            raise api_error(
+                "OAUTH_EMAIL_EXISTS_UNLINKED",
+                "An account with this email already exists; please sign in with your password and link Google in settings",
+                status.HTTP_409_CONFLICT,
             )
 
         # 3. 建立新帳號
@@ -226,22 +233,25 @@ async def bind_google(
     existing = await user_repo.get_by_google_id(google_id)
     if existing:
         if str(existing["_id"]) == str(current_user["_id"]):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="此 Google 帳號已綁定到您的帳號"
+            raise api_error(
+                "OAUTH_ALREADY_LINKED_SELF",
+                "This Google account is already linked to your account",
+                status.HTTP_400_BAD_REQUEST,
             )
         else:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="此 Google 帳號已綁定到其他帳號"
+            raise api_error(
+                "OAUTH_ALREADY_LINKED_OTHER",
+                "This Google account is already linked to another account",
+                status.HTTP_409_CONFLICT,
             )
 
     # 取得用戶完整資料
     user = await user_repo.get_by_id(str(current_user["_id"]))
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用戶不存在"
+        raise api_error(
+            "OAUTH_USER_NOT_FOUND",
+            "User does not exist",
+            status.HTTP_404_NOT_FOUND,
         )
 
     # 更新用戶資料
@@ -283,23 +293,26 @@ async def unbind_google(
     # 取得用戶完整資料
     user = await user_repo.get_by_id(str(current_user["_id"]))
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用戶不存在"
+        raise api_error(
+            "OAUTH_USER_NOT_FOUND",
+            "User does not exist",
+            status.HTTP_404_NOT_FOUND,
         )
 
     # 檢查是否有綁定 Google
     if not user.get("google_id"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="尚未綁定 Google 帳號"
+        raise api_error(
+            "OAUTH_NOT_LINKED",
+            "Google account is not linked yet",
+            status.HTTP_400_BAD_REQUEST,
         )
 
     # 檢查是否有其他登入方式（密碼）
     if not user.get("password_hash"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="請先設定密碼後再解除綁定，否則將無法登入"
+        raise api_error(
+            "OAUTH_UNLINK_REQUIRES_PASSWORD",
+            "Please set a password before unlinking, otherwise you will not be able to sign in",
+            status.HTTP_400_BAD_REQUEST,
         )
 
     # 更新用戶資料
@@ -337,34 +350,39 @@ async def set_password(
     # 取得用戶完整資料
     user = await user_repo.get_by_id(str(current_user["_id"]))
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用戶不存在"
+        raise api_error(
+            "OAUTH_USER_NOT_FOUND",
+            "User does not exist",
+            status.HTTP_404_NOT_FOUND,
         )
 
     # 檢查是否已有密碼
     if user.get("password_hash"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="已設定密碼，請使用「更改密碼」功能"
+        raise api_error(
+            "OAUTH_PASSWORD_ALREADY_SET",
+            "Password already set, please use the \"Change password\" feature",
+            status.HTTP_400_BAD_REQUEST,
         )
 
     # 驗證密碼複雜度
     new_pwd = request.new_password
     if not re.search(r'[A-Z]', new_pwd):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="密碼必須包含至少一個大寫字母"
+        raise api_error(
+            "OAUTH_PASSWORD_NO_UPPERCASE",
+            "Password must contain at least one uppercase letter",
+            status.HTTP_400_BAD_REQUEST,
         )
     if not re.search(r'[a-z]', new_pwd):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="密碼必須包含至少一個小寫字母"
+        raise api_error(
+            "OAUTH_PASSWORD_NO_LOWERCASE",
+            "Password must contain at least one lowercase letter",
+            status.HTTP_400_BAD_REQUEST,
         )
     if not re.search(r'[0-9]', new_pwd):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="密碼必須包含至少一個數字"
+        raise api_error(
+            "OAUTH_PASSWORD_NO_DIGIT",
+            "Password must contain at least one digit",
+            status.HTTP_400_BAD_REQUEST,
         )
 
     # 設定密碼
