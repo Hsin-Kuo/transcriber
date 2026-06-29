@@ -74,10 +74,7 @@ async function toggleShare() {
     }
   } catch (error) {
     const detail = error.response?.data?.detail
-    alert(detail || t('shared.paidOnly'))
-    if (error.response?.status === 403) {
-      show.value = false
-    }
+    alert(detail || t('shared.shareFailed'))
   } finally {
     shareLoading.value = false
   }

@@ -53,7 +53,6 @@ export const ERROR_I18N: Record<string, string> = {
   SUBSCRIPTION_NOT_SCHEDULED_CANCEL: 'errors.subscriptionNotScheduledCancel',
   SUBSCRIPTION_REQUIRED_FOR_EXTRA: 'errors.subscriptionRequiredForExtra',
   // Shared
-  SHARED_PAID_TIER_ONLY: 'errors.sharedPaidTierOnly',
   SHARED_TASK_NOT_FOUND: 'errors.sharedTaskNotFound',
   SHARED_TASK_NOT_COMPLETED: 'errors.sharedTaskNotCompleted',
   SHARED_LINK_INVALID: 'errors.sharedLinkInvalid',
