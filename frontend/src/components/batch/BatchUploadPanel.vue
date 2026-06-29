@@ -1094,24 +1094,24 @@ watch(() => props.initialFiles, (newFiles) => {
 }
 
 .btn-secondary {
-  background: rgba(var(--color-text-dark-rgb), 0.1);
-  color: var(--main-text);
+  background: var(--main-bg);
+  color: var(--main-primary);
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: rgba(var(--color-text-dark-rgb), 0.15);
+  color: var(--main-primary-dark);
 }
 
 .btn-primary {
-  background: var(--main-bg);
-  color: var(--main-primary);
+  background: rgba(var(--color-text-dark-rgb), 0.1);
+  color: var(--main-text);
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
 .btn-primary:hover:not(:disabled) {
-  color: var(--main-primary-dark);
+  background: rgba(var(--color-text-dark-rgb), 0.15);
 }
 
 .spinner {
