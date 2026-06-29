@@ -62,7 +62,7 @@ export function useAudioPlayer() {
     stopTokenRefreshTimer()
     tokenRefreshTimer = setInterval(async () => {
       if (currentTaskId) {
-        await silentRefreshAudioUrl()
+        await silentRefreshToken()
       }
     }, TOKEN_REFRESH_INTERVAL)
   }
@@ -74,7 +74,7 @@ export function useAudioPlayer() {
     }
   }
 
-  async function silentRefreshAudioUrl() {
+  async function silentRefreshToken() {
     if (!currentTaskId) return
     try {
       const response = await fetch(`${API_BASE}/auth/refresh`, {
@@ -84,9 +84,10 @@ export function useAudioPlayer() {
       if (response.ok) {
         const data = await response.json()
         TokenManager.setAccessToken(data.access_token)
-        if (!isPlaying.value) {
-          audioUrl.value = getAudioUrl(currentTaskId)
-        }
+        // 僅刷新記憶體中的 access token（供後續 API 與 reloadAudio 取用）。
+        // 刻意不重設 audioUrl：更換 <audio> 的 src 會讓瀏覽器重新載入並把 currentTime 歸零，
+        // 暫停中的播放位置會因此遺失。src 內嵌的 token 過期改由 handleAudioError 在實際
+        // 發生 401（range 請求）時走 reloadAudio（保留位置 + 還原播放狀態）自癒。
       }
     } catch (error) {
       console.warn('靜默刷新 token 失敗:', error)
@@ -153,9 +154,42 @@ export function useAudioPlayer() {
     if (!audio.error) return
     if (!audio.src || audio.src === window.location.href || audio.src === '') return
 
-    if (audio.error.code === audio.error.MEDIA_ERR_SRC_NOT_SUPPORTED) {
+    const ERR = audio.error
+    const code = ERR.code
+
+    // src 內嵌的 token 過期會以兩種 MediaError 浮現：
+    //   - 初始載入失敗 → MEDIA_ERR_SRC_NOT_SUPPORTED (4)
+    //   - 播放途中 range 請求 401 → MEDIA_ERR_NETWORK (2)
+    // 兩者都先探測真正的 HTTP 狀態碼，確認是授權問題就走 reloadAudio
+    //（reloadAudio 會保存 currentTime、刷新 token、還原播放狀態），不會把進度歸零。
+    if (code === ERR.MEDIA_ERR_SRC_NOT_SUPPORTED || code === ERR.MEDIA_ERR_NETWORK) {
       try {
-        const response = await fetch(audio.src)
+        // 帶 Range: bytes=0-0 只探第一個 byte，避免把整個音檔重抓一遍。
+        // 後端本地 FileResponse 與 AWS S3 皆支援 Range（回 206）；授權檢查在 serve 之前，
+        // token 過期仍先回 401，不受 Range 影響。Range 屬 CORS-safelisted，不觸發 preflight。
+        //
+        // redirect: 'manual'：AWS 模式音檔端點成功時回 302 → S3 presigned URL。我方 JWT 與
+        // S3 presigned 是兩套各自過期的憑證：JWT 過期 → 我方 API 回 401（可讀）；JWT 仍有效
+        // 但 S3 presigned（1 小時）過期 → 媒體層 range 打 S3 得 403，而此時打我方 API 只會拿到
+        // 一張「新簽的」302。用 manual 在 302 就停手（opaqueredirect），即可判定「JWT 有效、
+        // 下游 presigned 失效」並直接帶位置重載取得新連結，補上跟隨 redirect 會誤判成 OK 的缺口。
+        // 本地模式無 redirect，永遠走下方 status/content-type 既有分支，行為不變。
+        const response = await fetch(audio.src, {
+          headers: { Range: 'bytes=0-0' },
+          redirect: 'manual',
+        })
+
+        // AWS：我方端點放行（302）但媒體層的 S3 presigned 過期才失敗 → 重載取新連結
+        if (response.type === 'opaqueredirect') {
+          if (retryCount < MAX_RETRY_COUNT && currentTaskId) {
+            retryCount++
+            await reloadAudio(currentTaskId)
+            return
+          }
+          audioError.value = t('audioPlayer.authExpired')
+          return
+        }
+
         const contentType = response.headers.get('content-type')
 
         if (!response.ok) {
@@ -168,9 +202,14 @@ export function useAudioPlayer() {
             audioError.value = t('audioPlayer.authExpired')
           } else if (response.status === 404) {
             audioError.value = t('audioPlayer.audioNotFound')
+          } else if (code === ERR.MEDIA_ERR_NETWORK) {
+            audioError.value = t('audioPlayer.networkError')
           } else {
             audioError.value = t('audioPlayer.backendError', { status: response.status, statusText: response.statusText })
           }
+        } else if (code === ERR.MEDIA_ERR_NETWORK) {
+          // src 可正常存取（非授權問題）→ 視為單純連線中斷
+          audioError.value = t('audioPlayer.networkError')
         } else if (contentType && !contentType.includes('audio')) {
           audioError.value = t('audioPlayer.invalidContentType', { contentType })
         } else {
@@ -185,16 +224,15 @@ export function useAudioPlayer() {
             return
           }
           audioError.value = t('audioPlayer.authTokenExpired')
+        } else if (code === ERR.MEDIA_ERR_NETWORK) {
+          audioError.value = t('audioPlayer.networkError')
         } else {
           audioError.value = t('audioPlayer.cannotAccessAudio')
         }
       }
     } else {
-      switch (audio.error.code) {
-        case audio.error.MEDIA_ERR_NETWORK:
-          audioError.value = t('audioPlayer.networkError')
-          break
-        case audio.error.MEDIA_ERR_DECODE:
+      switch (code) {
+        case ERR.MEDIA_ERR_DECODE:
           audioError.value = t('audioPlayer.audioDecodeError')
           break
         default:
