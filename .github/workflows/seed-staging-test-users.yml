@@ -1,0 +1,73 @@
+name: Seed Staging Test Users
+
+# 手動觸發：在 staging EC2 上刷新測試帳號（usage / tokens / 示範任務）。
+# 與部署解耦 —— 要刷新才刷新，不會在每次 deploy 時洗掉測試狀態。
+#
+# 跑的是 staging EC2 上已部署的 scripts/seed_test_users.py：
+#   - mode=reset （預設）：重置 usage / tokens / 示範任務，不重建帳號
+#   - mode=upsert       ：新增或完整覆蓋四個測試帳號
+#   - mode=list         ：只列出目前狀態
+# dry_run=true 時加 --dry-run，只印不寫。
+#
+# ⚠️ 腳本 connect() 走 get_parameter("/transcriber/mongodb-url")，staging EC2 的
+#    APP_ENV=staging 會自動路由到 /transcriber-staging/*，打 staging Atlas（非 prod）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '操作模式'
+        type: choice
+        required: true
+        default: reset
+        options:
+          - reset
+          - upsert
+          - list
+      dry_run:
+        description: 'Dry run（只印不寫）'
+        type: boolean
+        required: false
+        default: false
+
+env:
+  EC2_HOST: 52.196.120.189
+  EC2_USER: ec2-user
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    environment: staging
+
+    steps:
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555  # v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: Add EC2 host key
+        run: ssh-keyscan -H ${{ env.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Run seed script on staging
+        env:
+          MODE: ${{ inputs.mode }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "MODE=${MODE} DRY_RUN=${DRY_RUN} bash -s" << 'ENDSSH'
+          set -e
+          cd /opt/transcriber
+
+          FLAGS=""
+          case "${MODE}" in
+            reset)  FLAGS="--reset" ;;
+            list)   FLAGS="--list" ;;
+            upsert) FLAGS="" ;;
+            *) echo "[ERROR] unknown mode: ${MODE}"; exit 1 ;;
+          esac
+          if [ "${DRY_RUN}" = "true" ]; then
+            FLAGS="${FLAGS} --dry-run"
+          fi
+
+          echo "=== seed_test_users.py ${FLAGS} (staging) ==="
+          python3.11 scripts/seed_test_users.py ${FLAGS}
+          ENDSSH

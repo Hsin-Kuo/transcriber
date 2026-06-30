@@ -1,39 +1,59 @@
 #!/usr/bin/env python3
 """
-音檔到期清理腳本
+音檔到期清理腳本（DB 收斂 sweep）
 
-功能：
-- 檢查所有 keep_audio != True 的已完成任務
-- 刪除轉錄完成日期超過7天的音檔
-- 更新資料庫記錄
+定位：prod 真正刪音檔的是 **S3 Lifecycle**（依 uploads/{tier}/ 前綴的物件年齡，
+free=3d / paid=7d / kept=永不刪）。本腳本是它的「DB 收斂」搭檔——把 lifecycle
+已（或即將）刪除的音檔，在 DB 把 result.audio_file 清成 None 並標記 audio_expired，
+讓列表/詳情頁不再露出失效的下載連結。
+
+到期判斷**完全複用** src.services.task_query_helpers.is_audio_expired()，與線上
+列表/詳情頁同一套邏輯，因此自動具備：
+  - keep_audio（kept/）永不過期
+  - 降級釋放的 audio_expires_at 寬限期優先（與 S3 Lifecycle 對齊）
+  - 否則依音檔路徑 tier 推導保留天數（free=3 / paid=7），而非寫死 7 天
+  - 支援 int Unix timestamp 與 ISO 字串兩種 completed_at
+
+刪檔走 storage 層 delete_audio_by_path()，local / S3 自動切換（S3 物件多半已被
+lifecycle 刪掉，這裡是 belt-and-suspenders）。
 
 使用方法：
     python scripts/cleanup_expired_audio.py [--dry-run]
 
 參數：
-    --dry-run: 模擬執行，不實際刪除檔案（僅顯示將要刪除的內容）
-    --help: 顯示此幫助訊息
+    --dry-run: 模擬執行，不實際刪除檔案 / 不改 DB（僅顯示將處理的內容）
+    --help:    顯示此幫助訊息
 """
 
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 import argparse
 
 # 添加專案根目錄到 Python 路徑
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+from bson import ObjectId
 from pymongo import MongoClient
 from dotenv import load_dotenv
+
+# 與線上列表/詳情頁同一套到期判斷（含 audio_expires_at 寬限期、path-tier 推導）
+from src.services.task_query_helpers import is_audio_expired
+from src.utils.storage.compact import audio_exists_by_path, delete_audio_by_path
+
+# 找不到 user tier 時的 fallback 保留天數（與 get_user_retention_days 預設一致）。
+# 注意：prod 的 audio_file 是 s3://.../uploads/{tier}/...，is_audio_expired 會優先用
+# path-tier 推導，故此 fallback 僅在 local（無 tier 分區）或路徑異常時才生效。
+DEFAULT_RETENTION_DAYS = 7
 
 
 def parse_args():
     """解析命令列參數"""
     parser = argparse.ArgumentParser(
-        description="清理超過7天的音檔",
+        description="清理已到期的音檔（依 tier 保留天數 / 寬限期，非寫死 7 天）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 範例：
@@ -44,14 +64,13 @@ def parse_args():
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="模擬執行，不實際刪除檔案"
+        help="模擬執行，不實際刪除檔案 / 不改 DB"
     )
     return parser.parse_args()
 
 
 def load_config():
     """載入環境變數配置"""
-    # 載入 .env 檔案
     env_path = project_root / ".env"
     if env_path.exists():
         load_dotenv(env_path)
@@ -59,25 +78,17 @@ def load_config():
     else:
         print(f"⚠️  未找到 .env 檔案：{env_path}")
 
-    # 取得 MongoDB 連接資訊
     mongo_uri = os.getenv("MONGODB_URL") or os.getenv("MONGODB_URI") or "mongodb://localhost:27017"
     db_name = os.getenv("MONGODB_DB_NAME", "transcriber")
 
-    return {
-        "mongo_uri": mongo_uri,
-        "db_name": db_name
-    }
+    return {"mongo_uri": mongo_uri, "db_name": db_name}
 
 
 def connect_mongodb(config: dict):
     """連接到 MongoDB"""
     try:
-        client = MongoClient(
-            config["mongo_uri"],
-            serverSelectionTimeoutMS=5000
-        )
-        # 測試連接
-        client.server_info()
+        client = MongoClient(config["mongo_uri"], serverSelectionTimeoutMS=5000)
+        client.server_info()  # 測試連接
         db = client[config["db_name"]]
         print(f"✅ 成功連接到 MongoDB：{config['db_name']}")
         return client, db
@@ -86,125 +97,94 @@ def connect_mongodb(config: dict):
         sys.exit(1)
 
 
-def parse_iso_datetime(date_str: str) -> datetime:
-    """解析 ISO 格式的日期時間字串
-
-    支援格式：
-    - 2024-01-16T10:30:00Z
-    - 2024-01-16T10:30:00.123Z
-    - 2024-01-16T10:30:00+00:00
-    """
-    if not date_str:
-        return None
-
+def _tier_retention_days(tier: str) -> int:
+    """tier → audio_retention_days（無法辨識時退回預設）。"""
+    from src.models.quota import QUOTA_TIERS, QuotaTier
     try:
-        # 移除尾部的 'Z' 並替換為 +00:00
-        if date_str.endswith('Z'):
-            date_str = date_str[:-1] + '+00:00'
-
-        # Python 3.7+ 支援 fromisoformat
-        return datetime.fromisoformat(date_str)
-    except ValueError:
-        try:
-            # 備用方案：使用 strptime
-            return datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S.%f+00:00")
-        except ValueError:
-            try:
-                return datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S+00:00")
-            except ValueError:
-                print(f"⚠️  無法解析日期格式：{date_str}")
-                return None
+        return QUOTA_TIERS[QuotaTier(tier)].get("audio_retention_days", DEFAULT_RETENTION_DAYS)
+    except (KeyError, ValueError):
+        return DEFAULT_RETENTION_DAYS
 
 
-def find_expired_audio_tasks(db, cutoff_date: datetime) -> List[Dict[str, Any]]:
-    """查詢需要刪除音檔的任務
+def _user_retention_days(db, user_id: str, cache: Dict[str, int]) -> int:
+    """取得任務所屬使用者 tier 的保留天數（帶 cache，避免每筆都查 users）。
 
-    條件：
-    1. status = "completed"
-    2. keep_audio != True
-    3. timestamps.completed_at < cutoff_date（超過7天）
-    4. result.audio_file 存在且不為空
-    5. deleted != True（排除已刪除的任務）
+    這只是 is_audio_expired 的 fallback；有 audio_expires_at 或 S3 path-tier 時不會用到。
+    """
+    if not user_id:
+        return DEFAULT_RETENTION_DAYS
+    if user_id in cache:
+        return cache[user_id]
+    retention = DEFAULT_RETENTION_DAYS
+    try:
+        user = db.users.find_one({"_id": ObjectId(user_id)}, {"quota.tier": 1})
+        if user:
+            retention = _tier_retention_days((user.get("quota") or {}).get("tier", "free"))
+    except Exception:
+        pass
+    cache[user_id] = retention
+    return retention
+
+
+def find_expired_audio_tasks(db) -> List[Dict[str, Any]]:
+    """查詢需要清理音檔的已完成任務。
+
+    粗篩（DB 端）：completed / 未刪除 / 仍有 result.audio_file / 非 keep_audio；
+    細判（Python 端）：交給 is_audio_expired()（含寬限期、path-tier、timestamp 型別處理）。
     """
     query = {
         "status": "completed",
         "keep_audio": {"$ne": True},
-        "timestamps.completed_at": {"$exists": True, "$ne": None},
         "result.audio_file": {"$exists": True, "$ne": None},
-        "deleted": {"$ne": True}
+        "deleted": {"$ne": True},
     }
-
-    # 只查詢必要的欄位
     projection = {
         "_id": 1,
-        "task_id": 1,
         "user.user_id": 1,
         "user.user_email": 1,
         "timestamps.completed_at": 1,
         "result.audio_file": 1,
         "result.audio_filename": 1,
-        "keep_audio": 1
+        "keep_audio": 1,
+        "audio_expires_at": 1,
     }
 
-    tasks = list(db.tasks.find(query, projection))
-
-    # 篩選出真正超過7天的任務
-    expired_tasks = []
-    for task in tasks:
-        completed_at_str = task.get("timestamps", {}).get("completed_at")
-        if not completed_at_str:
-            continue
-
-        completed_at = parse_iso_datetime(completed_at_str)
-        if completed_at and completed_at < cutoff_date:
-            task["_parsed_completed_at"] = completed_at
+    retention_cache: Dict[str, int] = {}
+    expired_tasks: List[Dict[str, Any]] = []
+    for task in db.tasks.find(query, projection):
+        user_id = (task.get("user") or {}).get("user_id")
+        retention_days = _user_retention_days(db, user_id, retention_cache)
+        if is_audio_expired(task, retention_days):
             expired_tasks.append(task)
 
     return expired_tasks
 
 
-def delete_audio_file(audio_path: str, dry_run: bool = False) -> bool:
-    """刪除音檔檔案
+def delete_audio_file(audio_path: str, dry_run: bool = False) -> str:
+    """刪除音檔（local / S3 自動切換）。回傳狀態：deleted / not_found / failed。"""
+    if not audio_path:
+        return "not_found"
 
-    Args:
-        audio_path: 音檔路徑
-        dry_run: 是否為模擬執行
-
-    Returns:
-        是否成功刪除（或檔案不存在）
-    """
-    audio_file = Path(audio_path)
-
-    if not audio_file.exists():
-        print(f"    ⚠️  音檔不存在：{audio_path}")
-        return True  # 檔案不存在也算成功
+    if not audio_exists_by_path(audio_path):
+        # S3 物件通常已被 lifecycle 刪除 → 視為已清理，只需收斂 DB
+        print(f"    ⚠️  音檔已不存在（lifecycle 可能已刪）：{audio_path}")
+        return "not_found"
 
     if dry_run:
-        file_size = audio_file.stat().st_size / (1024 * 1024)  # MB
-        print(f"    [DRY-RUN] 將刪除：{audio_path} ({file_size:.2f} MB)")
-        return True
+        print(f"    [DRY-RUN] 將刪除：{audio_path}")
+        return "deleted"
 
     try:
-        audio_file.unlink()
-        file_size = audio_file.stat().st_size / (1024 * 1024) if audio_file.exists() else 0
+        delete_audio_by_path(audio_path)
         print(f"    ✅ 已刪除：{audio_path}")
-        return True
+        return "deleted"
     except Exception as e:
         print(f"    ❌ 刪除失敗：{audio_path} - {e}")
-        return False
+        return "failed"
 
 
 def update_task_audio_record(db, task_id: str, dry_run: bool = False) -> bool:
-    """更新資料庫記錄，清除音檔路徑
-
-    Args:
-        db: MongoDB 資料庫實例
-        task_id: 任務 ID
-        dry_run: 是否為模擬執行
-
-    Returns:
-        是否成功更新
-    """
+    """收斂 DB：清除音檔路徑並持久化 audio_expired 標記（供詳情頁顯示過期提示）。"""
     if dry_run:
         print(f"    [DRY-RUN] 將更新資料庫：清除 task {task_id} 的音檔記錄")
         return True
@@ -215,17 +195,16 @@ def update_task_audio_record(db, task_id: str, dry_run: bool = False) -> bool:
             {
                 "$set": {
                     "result.audio_file": None,
-                    "result.audio_filename": None
+                    "result.audio_filename": None,
+                    "audio_expired": True,
                 }
             }
         )
-
         if result.modified_count > 0:
             print(f"    ✅ 已更新資料庫記錄")
-            return True
         else:
             print(f"    ⚠️  資料庫記錄未更新（可能已被更新）")
-            return True  # 算作成功
+        return True
     except Exception as e:
         print(f"    ❌ 更新資料庫失敗：{e}")
         return False
@@ -236,15 +215,11 @@ def cleanup_expired_audio(db, dry_run: bool = False):
     print("\n" + "=" * 60)
     print(f"🧹 開始清理到期音檔 {'(模擬執行)' if dry_run else ''}")
     print("=" * 60)
+    print("\n📐 到期判斷：複用 is_audio_expired()（keep_audio / audio_expires_at 寬限期 /")
+    print("   依 path-tier 推導 free=3d、paid=7d；非寫死 7 天）\n")
 
-    # 計算7天前的日期（UTC 時間）
-    seven_days_ago = datetime.utcnow() - timedelta(days=7)
-    print(f"\n📅 基準日期：{seven_days_ago.strftime('%Y-%m-%d %H:%M:%S')} UTC")
-    print(f"   （完成日期早於此時間的音檔將被刪除）\n")
-
-    # 查詢需要刪除的任務
     print("🔍 正在查詢到期的音檔任務...")
-    expired_tasks = find_expired_audio_tasks(db, seven_days_ago)
+    expired_tasks = find_expired_audio_tasks(db)
 
     if not expired_tasks:
         print("✅ 沒有找到需要清理的音檔")
@@ -252,48 +227,40 @@ def cleanup_expired_audio(db, dry_run: bool = False):
 
     print(f"📋 找到 {len(expired_tasks)} 個到期任務\n")
 
-    # 統計資訊
     stats = {
         "total": len(expired_tasks),
         "file_deleted": 0,
         "file_not_found": 0,
         "file_delete_failed": 0,
         "db_updated": 0,
-        "db_update_failed": 0
+        "db_update_failed": 0,
     }
 
-    # 處理每個任務
     for i, task in enumerate(expired_tasks, 1):
         task_id = task.get("_id")
-        audio_path = task.get("result", {}).get("audio_file")
-        completed_at = task.get("_parsed_completed_at")
-        user_email = task.get("user", {}).get("user_email", "unknown")
-
-        days_ago = (datetime.utcnow() - completed_at).days
+        audio_path = (task.get("result") or {}).get("audio_file")
+        user_email = (task.get("user") or {}).get("user_email", "unknown")
 
         print(f"\n[{i}/{len(expired_tasks)}] 任務 ID: {task_id}")
         print(f"    用戶：{user_email}")
-        print(f"    完成時間：{completed_at.strftime('%Y-%m-%d %H:%M:%S')} ({days_ago} 天前)")
         print(f"    音檔路徑：{audio_path}")
 
-        # 刪除音檔檔案
-        audio_file = Path(audio_path) if audio_path else None
-        if audio_file and audio_file.exists():
-            if delete_audio_file(audio_path, dry_run):
-                stats["file_deleted"] += 1
-            else:
-                stats["file_delete_failed"] += 1
-        else:
+        status = delete_audio_file(audio_path, dry_run)
+        if status == "deleted":
+            stats["file_deleted"] += 1
+        elif status == "not_found":
             stats["file_not_found"] += 1
-            print(f"    ⚠️  音檔已不存在")
-
-        # 更新資料庫記錄
-        if update_task_audio_record(db, task_id, dry_run):
-            stats["db_updated"] += 1
         else:
-            stats["db_update_failed"] += 1
+            stats["file_delete_failed"] += 1
 
-    # 顯示統計結果
+        # 即使檔案已不存在，仍要收斂 DB（清掉殘留的 audio_file pointer）；
+        # 只有「刪檔明確失敗」時才不動 DB，避免 DB 說沒檔、S3 卻還在。
+        if status != "failed":
+            if update_task_audio_record(db, task_id, dry_run):
+                stats["db_updated"] += 1
+            else:
+                stats["db_update_failed"] += 1
+
     print("\n" + "=" * 60)
     print("📊 清理統計")
     print("=" * 60)
@@ -316,20 +283,15 @@ def main():
     """主函數"""
     args = parse_args()
 
-    print("🚀 音檔到期清理腳本")
+    print("🚀 音檔到期清理腳本（DB 收斂 sweep）")
     print(f"📁 專案目錄：{project_root}")
 
-    # 載入配置
     config = load_config()
-
-    # 連接資料庫
     client, db = connect_mongodb(config)
 
     try:
-        # 執行清理
         cleanup_expired_audio(db, dry_run=args.dry_run)
     finally:
-        # 關閉資料庫連接
         client.close()
         print("\n🔒 已關閉資料庫連接")
 

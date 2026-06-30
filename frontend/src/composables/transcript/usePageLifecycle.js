@@ -27,7 +27,6 @@ export function usePageLifecycle({
   densityThreshold,
   isEditing,
   hasUnsavedChanges,
-  handleBeforeUnload,
   handleCancelEditing,
   clearHighlights,
   cleanupAudioPlayer,
@@ -131,6 +130,18 @@ export function usePageLifecycle({
     const subtitleWrapper = document.querySelector('.subtitle-table-wrapper')
     if (subtitleWrapper) {
       subtitleWrapper.removeEventListener('scroll', handleContentAreaScroll)
+    }
+  }
+
+  // ========== 瀏覽器關閉/重新整理警告 ==========
+
+  // 與路由守衛（onBeforeRouteLeave）共用同一個 hasUnsavedChanges（由 View 以實際
+  // DOM 內容計算），避免段落模式編輯中關分頁不跳警告。
+  const handleBeforeUnload = (e) => {
+    if (hasUnsavedChanges.value) {
+      e.preventDefault()
+      e.returnValue = ''
+      return ''
     }
   }
 

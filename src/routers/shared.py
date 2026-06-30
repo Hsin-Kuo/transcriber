@@ -34,7 +34,7 @@ async def toggle_share(
     current_user: dict = Depends(get_current_user),
     db=Depends(get_database)
 ):
-    """切換任務的公開分享狀態（需認證，僅付費方案可用）
+    """切換任務的公開分享狀態（需認證，全方案皆可使用）
 
     Args:
         task_id: 任務 ID
@@ -42,18 +42,6 @@ async def toggle_share(
         current_user: 當前用戶
         db: 資料庫實例
     """
-    # 從 DB 取得完整用戶資料以檢查方案
-    from ..database.repositories.user_repo import UserRepository
-    user_repo = UserRepository(db)
-    full_user = await user_repo.get_by_id(str(current_user["_id"]))
-    user_tier = full_user.get("quota", {}).get("tier", "free") if full_user else "free"
-    if user_tier == "free":
-        raise api_error(
-            "SHARED_PAID_TIER_ONLY",
-            "Public sharing is only available on paid plans",
-            status.HTTP_403_FORBIDDEN,
-        )
-
     task_repo = TaskRepository(db)
     task = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
 

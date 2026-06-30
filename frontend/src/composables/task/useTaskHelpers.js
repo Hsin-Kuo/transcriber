@@ -10,7 +10,9 @@ export function useTaskHelpers($t) {
    */
   function getStatusText(status) {
     const statusMap = {
-      pending: $t ? $t('taskList.pending') : 'Pending',
+      // pending 對使用者顯示為「處理中」，避免 pending/processing 兩種文字造成混淆
+      // （內部 status 值仍為 pending，邏輯判斷不受影響）
+      pending: $t ? $t('taskList.processing') : 'Processing',
       processing: $t ? $t('taskList.processing') : 'Processing',
       completed: $t ? $t('taskList.completed') : 'Completed',
       failed: $t ? $t('taskList.failed') : 'Failed',

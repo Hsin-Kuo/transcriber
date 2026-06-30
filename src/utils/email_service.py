@@ -396,6 +396,62 @@ class EmailService:
             text_content=text_content,
         )
 
+    async def send_audio_grace_period_email(
+        self,
+        to_email: str,
+        released_count: int,
+        expiry_date: str,
+    ) -> bool:
+        """通知使用者：方案降級後，超出新方案額度的保留音檔已被取消保留，
+        將於寬限期結束（expiry_date）後自動刪除。
+
+        Args:
+            to_email: 收件使用者
+            released_count: 被取消保留的音檔數
+            expiry_date: 音檔將被刪除的日期字串（YYYY-MM-DD）
+        """
+        tasks_url = f"{self.frontend_url.rstrip('/')}/tasks"
+        plans_url = f"{self.frontend_url.rstrip('/')}/settings?panel=plan"
+
+        intro_html = (
+            '<h2 style="margin-top: 0; color: #44465b;">您的保留音檔即將到期</h2>'
+            f'<p>因為您的方案已變更，有 <strong>{released_count}</strong> 個原本「保留」的音檔'
+            f'超過了新方案可保留的數量，已被取消保留。</p>'
+            f'<p>這些音檔將於 <strong>{expiry_date}</strong> 後自動刪除。'
+            '若仍需要，請在此日期前<strong>下載備份</strong>，或<strong>升級方案</strong>後重新將它們設為保留。</p>'
+        )
+        extra_html = (
+            '<div style="background: #fff3cd; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; color: #856404; border-radius: 4px;">'
+            f'<strong>提醒：</strong>逾期（{expiry_date} 之後）音檔將無法復原，但您的轉錄文字與摘要會完整保留。'
+            '</div>'
+            f'<p style="color: #666; font-size: 14px;">想保留更多音檔？'
+            f'<a href="{plans_url}" style="color: #dd8448;">查看方案</a>。</p>'
+        )
+        html_content = self._render_branded_email(
+            heading="保留音檔即將到期",
+            intro_html=intro_html,
+            cta_label="前往我的音檔",
+            cta_url=tasks_url,
+            extra_html=extra_html,
+            preheader=f"{released_count} 個保留音檔將於 {expiry_date} 後刪除，請及早下載備份",
+        )
+
+        text_content = self._render_branded_text(
+            f"您的保留音檔即將到期\n\n"
+            f"因為您的方案已變更，有 {released_count} 個原本「保留」的音檔超過新方案可保留的數量，"
+            f"已被取消保留。\n\n"
+            f"這些音檔將於 {expiry_date} 後自動刪除。若仍需要，請在此日期前下載備份，"
+            f"或升級方案後重新將它們設為保留：\n{tasks_url}\n\n"
+            f"提醒：逾期音檔將無法復原，但您的轉錄文字與摘要會完整保留。"
+        )
+
+        return await self._send_email(
+            to_email=to_email,
+            subject="您的保留音檔即將到期 - Sound Lite",
+            html_content=html_content,
+            text_content=text_content,
+        )
+
     async def _send_email(
         self,
         to_email: str,
