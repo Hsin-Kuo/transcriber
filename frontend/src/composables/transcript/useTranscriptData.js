@@ -196,9 +196,15 @@ export function useTranscriptData() {
    * @param {string} content - 要儲存的文字內容
    * @param {Array} segments - 要儲存的 segments 數據（字幕模式使用）
    * @param {string} mode - 顯示模式 ('paragraph' | 'subtitle')
+   * @param {string} successMessage - 自訂成功通知訊息
+   * @param {Object} [options]
+   * @param {boolean} [options.silent=false] - 成功時不跳 toast（自動儲存用，改由 header 三態指示器回饋）
+   * @param {boolean} [options.syncCurrentContent=true] - 回寫 currentTranscript.content。
+   *        段落編輯途中的自動儲存必須傳 false：該 div 是 v-text 綁定，回寫會重設游標。
    * @returns {Promise<boolean>} 儲存是否成功
    */
-  async function saveTranscript(content, segments = null, mode = 'paragraph', successMessage = null) {
+  async function saveTranscript(content, segments = null, mode = 'paragraph', successMessage = null, options = {}) {
+    const { silent = false, syncCurrentContent = true } = options
     // 檢查是否有變更
     if (content === originalContent.value && !segments) {
       return true
@@ -217,9 +223,11 @@ export function useTranscriptData() {
         payload
       )
 
-      // 更新原始內容和當前內容
+      // 更新原始內容（dirty 追蹤基準）；currentTranscript.content 視 syncCurrentContent 決定
       originalContent.value = content
-      currentTranscript.value.content = content
+      if (syncCurrentContent) {
+        currentTranscript.value.content = content
+      }
 
       // 如果有更新 segments，也要更新本地的 segments 資料
       if (segments) {
@@ -227,8 +235,8 @@ export function useTranscriptData() {
         console.log(`✅ 已更新本地 segments 資料`)
       }
 
-      // 顯示成功通知
-      if (showNotification) {
+      // 顯示成功通知（自動儲存 silent，改由 header 三態指示器回饋）
+      if (showNotification && !silent) {
         showNotification({
           title: t('transcriptData.saveSuccess'),
           message: successMessage || t('transcriptData.transcriptUpdated'),
@@ -240,6 +248,10 @@ export function useTranscriptData() {
 
     } catch (error) {
       console.error('儲存失敗:', error)
+      // 自動儲存的失敗不在這裡跳 toast；交給呼叫端（useAutosave）退避重試 / 三態指示器處理
+      if (silent) {
+        throw error
+      }
 
       if (showNotification) {
         showNotification({

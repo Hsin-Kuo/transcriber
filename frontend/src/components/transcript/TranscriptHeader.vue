@@ -36,7 +36,60 @@
     </div>
 
     <div class="header-right">
-      <!-- 搜尋按鈕 -->
+      <!-- 編輯/儲存按鈕 -->
+      <button v-if="!isEditing" @click="$emit('start-editing')" class="btn btn-header btn-expandable" :disabled="!isContentReady">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+        </svg>
+        <span class="btn-text">{{ $t('transcriptDetail.edit') }}</span>
+      </button>
+      <!-- 自動儲存指示器（feature flag 開 + 編輯中）：取代「按 Save」的即時回饋；
+           idle 常駐顯示「自動儲存」讓使用者知道有此功能、無需手動存 -->
+      <span v-if="isEditing && autosaveEnabled" class="autosave-indicator" :class="`autosave-${autosaveStatus}`" role="status">
+        <!-- saving / error：循環箭頭（saving 旋轉） -->
+        <svg v-if="autosaveStatus === 'saving' || autosaveStatus === 'error'" class="autosave-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 2v6h-6" />
+          <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+          <path d="M3 22v-6h6" />
+          <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+        </svg>
+        <!-- saved：打勾 -->
+        <svg v-else-if="autosaveStatus === 'saved'" class="autosave-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+        <!-- idle：雲（傳達「自動儲存到雲端」） -->
+        <svg v-else class="autosave-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
+        </svg>
+        <template v-if="autosaveStatus === 'saving'">{{ $t('transcriptDetail.autosaveSaving') }}</template>
+        <template v-else-if="autosaveStatus === 'error'">{{ $t('transcriptDetail.autosaveError') }}</template>
+        <template v-else-if="autosaveStatus === 'saved'">{{ $t('transcriptDetail.autosaveSaved') }}</template>
+        <template v-else>{{ $t('transcriptDetail.autosaveIdle') }}</template>
+      </span>
+      <button v-else-if="isEditing" @click="$emit('save-editing')" class="btn btn-header btn-primary btn-expandable">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+        <span class="btn-text">{{ $t('transcriptDetail.save') }}</span>
+      </button>
+      <!-- 完成編輯 / 退出編輯狀態（自動儲存模式：Save 改為退出語意，已無「放棄」概念） -->
+      <button v-if="isEditing && autosaveEnabled" @click="$emit('save-editing')" class="btn btn-header btn-primary btn-expandable">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+        <span class="btn-text">{{ $t('transcriptDetail.doneEditing') }}</span>
+      </button>
+      <!-- 取消按鈕（僅手動儲存模式；自動儲存下內容已落地，「放棄全部」語意失效故隱藏） -->
+      <button v-if="isEditing && !autosaveEnabled" @click="$emit('cancel-editing')" class="btn btn-header btn-expandable">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+        <span class="btn-text">{{ $t('transcriptDetail.cancel') }}</span>
+      </button>
+
+      <!-- 搜尋按鈕（置於編輯/儲存按鈕右側） -->
       <div class="search-container">
         <button
           @click.stop="toggleSearch"
@@ -74,29 +127,6 @@
           @close="closeSearch"
         />
       </div>
-
-      <!-- 編輯/儲存按鈕 -->
-      <button v-if="!isEditing" @click="$emit('start-editing')" class="btn btn-header btn-expandable" :disabled="!isContentReady">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-        </svg>
-        <span class="btn-text">{{ $t('transcriptDetail.edit') }}</span>
-      </button>
-      <button v-else @click="$emit('save-editing')" class="btn btn-header btn-primary btn-expandable">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="20 6 9 17 4 12"></polyline>
-        </svg>
-        <span class="btn-text">{{ $t('transcriptDetail.save') }}</span>
-      </button>
-      <!-- 取消按鈕（編輯模式） -->
-      <button v-if="isEditing" @click="$emit('cancel-editing')" class="btn btn-header btn-expandable">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="18" y1="6" x2="6" y2="18"></line>
-          <line x1="6" y1="6" x2="18" y2="18"></line>
-        </svg>
-        <span class="btn-text">{{ $t('transcriptDetail.cancel') }}</span>
-      </button>
 
       <!-- 講者設定按鈕（僅字幕模式且有講者資訊時顯示） -->
       <div
@@ -304,6 +334,16 @@ const props = defineProps({
   matchWholeWord: {
     type: Boolean,
     default: false
+  },
+  // 自動儲存（feature flag 開時）：隱藏 Cancel、Save 改「完成編輯」、顯示三態指示器
+  autosaveEnabled: {
+    type: Boolean,
+    default: false
+  },
+  // 'idle' | 'saving' | 'saved' | 'error'
+  autosaveStatus: {
+    type: String,
+    default: 'idle'
   }
 })
 
@@ -641,6 +681,41 @@ onUnmounted(() => {
 .btn-header.btn-primary {
   background: var(--nav-active-bg);
   color: white;
+}
+
+/* 自動儲存指示器 */
+.autosave-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  white-space: nowrap;
+  padding: 0 10px;
+  color: var(--text-secondary, #888);
+  transition: color 0.2s ease;
+}
+.autosave-icon {
+  flex-shrink: 0;
+}
+/* saving 時圖示旋轉，傳達「正在自動儲存」 */
+.autosave-saving .autosave-icon {
+  animation: autosave-spin 0.9s linear infinite;
+}
+@keyframes autosave-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .autosave-saving .autosave-icon { animation: none; }
+}
+.autosave-indicator.autosave-saving {
+  color: var(--text-secondary, #888);
+}
+.autosave-indicator.autosave-saved {
+  color: var(--success-color, #2e9e5b);
+}
+.autosave-indicator.autosave-error {
+  color: var(--error-color, #d64545);
 }
 
 
