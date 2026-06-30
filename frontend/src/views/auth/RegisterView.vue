@@ -2,17 +2,52 @@
   <div class="auth-container">
     <div class="auth-card">
       <div class="auth-content">
-          <h1 class="auth-title">{{ $t('auth.registerTitle') }}</h1>
-          <p class="auth-subtitle">Sound Lite</p>
+          <div class="auth-brand">
+            <img src="/favicon.svg" alt="SoundLite" width="36" height="36" />
+            <h1 class="auth-title">SoundLite</h1>
+          </div>
+          <p class="auth-tagline">{{ $t('auth.registerTagline') }}</p>
 
-          <form @submit.prevent="handleRegister" class="auth-form">
+          <!-- 主要註冊方式：第三方 OAuth -->
+          <div v-if="googleClientId" class="oauth-primary">
+            <GoogleSignInButton
+              :client-id="googleClientId"
+              button-text="signup_with"
+              :width="320"
+              @success="handleGoogleSuccess"
+              @error="handleGoogleError"
+            />
+          </div>
+
+          <!-- 錯誤訊息；表單收合時也看得到 -->
+          <div v-if="error" class="error-message">
+            {{ error }}
+          </div>
+
+          <!-- 分隔線 -->
+          <div v-if="googleClientId" class="divider">
+            <span>{{ $t('auth.or') }}</span>
+          </div>
+
+          <!-- 次要路徑：使用 Email 註冊（點擊後展開帳密欄位） -->
+          <button
+            v-if="googleClientId && !showEmailForm"
+            type="button"
+            class="btn-email-reveal"
+            :aria-expanded="showEmailForm"
+            @click="showEmailForm = true"
+          >
+            {{ $t('auth.useEmailRegister') }}
+          </button>
+
+          <form v-show="showEmailForm" @submit.prevent="handleRegister" class="auth-form">
             <div class="form-group">
               <label for="email">{{ $t('auth.email') }}</label>
               <input
                 type="email"
                 id="email"
                 v-model="email"
-                required
+                :required="showEmailForm"
                 placeholder="your@email.com"
                 :disabled="loading"
               />
@@ -25,7 +60,7 @@
                   :type="showPassword ? 'text' : 'password'"
                   id="password"
                   v-model="password"
-                  required
+                  :required="showEmailForm"
                   :placeholder="$t('auth.passwordPlaceholder')"
                   minlength="8"
                   :disabled="loading"
@@ -71,7 +106,7 @@
                   :type="showConfirmPassword ? 'text' : 'password'"
                   id="confirmPassword"
                   v-model="confirmPassword"
-                  required
+                  :required="showEmailForm"
                   :placeholder="$t('auth.confirmPasswordPlaceholderRegister')"
                   minlength="8"
                   :disabled="loading"
@@ -98,10 +133,6 @@
               </div>
             </div>
 
-            <div v-if="error" class="error-message">
-              {{ error }}
-            </div>
-
             <button
               type="submit"
               class="btn-primary"
@@ -110,20 +141,6 @@
               {{ loading ? $t('auth.registering') : $t('auth.registerButton') }}
             </button>
           </form>
-
-          <!-- Google 註冊 -->
-          <div v-if="googleClientId" class="oauth-section">
-            <div class="divider">
-              <span>{{ $t('auth.or') }}</span>
-            </div>
-            <GoogleSignInButton
-              :client-id="googleClientId"
-              button-text="signup_with"
-              :width="350"
-              @success="handleGoogleSuccess"
-              @error="handleGoogleError"
-            />
-          </div>
 
           <div class="auth-footer">
             <p>{{ $t('auth.haveAccount') }}<router-link to="/login">{{ $t('auth.loginNow') }}</router-link></p>
@@ -136,6 +153,15 @@
               <span class="quota-value">{{ $t('auth.registerQuotaValue') }}</span>
             </div>
           </div>
+
+          <i18n-t keypath="auth.agreeNotice" tag="p" class="legal-consent" scope="global">
+            <template #terms>
+              <a href="https://soundlite.app/terms" target="_blank" rel="noopener noreferrer">{{ $t('auth.termsLink') }}</a>
+            </template>
+            <template #privacy>
+              <a href="https://soundlite.app/privacy" target="_blank" rel="noopener noreferrer">{{ $t('auth.privacyLink') }}</a>
+            </template>
+          </i18n-t>
         </div>
     </div>
   </div>
@@ -160,6 +186,8 @@ const password = ref('')
 const confirmPassword = ref('')
 const showPassword = ref(false)
 const showConfirmPassword = ref(false)
+// 第三方為主：email 表單預設收合；無 Google 時自動展開
+const showEmailForm = ref(!googleClientId)
 const loading = ref(false)
 const error = ref('')
 
@@ -313,7 +341,7 @@ function handleGoogleError(err) {
 
 .auth-card {
   width: 100%;
-  max-width: 500px;
+  max-width: 380px;
   margin: 0 auto;
   background: var(--upload-bg);
   border-radius: 12px;
@@ -327,25 +355,70 @@ function handleGoogleError(err) {
   padding: 40px 30px;
 }
 
-.auth-title {
-  font-size: 2rem;
-  margin: 0 0 10px 0;
-  text-align: center;
-  color: var(--main-primary);
-  font-weight: 700;
+.auth-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 30px;
 }
 
-.auth-subtitle {
+.auth-brand img {
+  flex-shrink: 0;
+}
+
+.auth-title {
+  font-size: 1.75rem;
+  margin: 0;
+  color: var(--main-primary);
+  font-weight: 500;
+  letter-spacing: -0.5px;
+}
+
+.auth-tagline {
   text-align: center;
   color: var(--main-text-light);
-  margin: 0 0 30px 0;
   font-size: 0.9rem;
+  margin: -18px 0 28px;
+}
+
+/* 主要註冊方式：第三方 OAuth */
+.oauth-primary {
+  display: flex;
+  justify-content: center;
+  min-height: 44px;
+}
+
+/* 次要路徑：使用 Email 註冊按鈕（點擊展開表單） */
+.btn-email-reveal {
+  width: 100%;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0 24px;
+  background: transparent;
+  color: var(--main-text-light);
+  border: 1.5px solid rgba(var(--color-divider-rgb), 0.4);
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-email-reveal:hover {
+  border-color: var(--main-primary);
+  color: var(--main-primary);
+  background: rgba(var(--color-primary-rgb), 0.05);
 }
 
 .auth-form {
   display: flex;
   flex-direction: column;
   gap: 20px;
+  margin-top: 20px;
 }
 
 .form-group {
@@ -455,7 +528,7 @@ function handleGoogleError(err) {
   font-size: 0.85rem;
   text-align: left;
   font-weight: 500;
-  margin-bottom: 4px;
+  margin: 16px 0 4px;
 }
 
 .btn-primary {
@@ -529,6 +602,25 @@ function handleGoogleError(err) {
 .auth-footer a:hover {
   color: var(--main-primary-dark);
   text-decoration: underline;
+}
+
+.legal-consent {
+  margin: 20px 0 0;
+  text-align: center;
+  color: var(--main-text-light);
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+.legal-consent a {
+  color: var(--main-text-light);
+  text-decoration: underline;
+  font-weight: 600;
+  transition: color 0.2s ease;
+}
+
+.legal-consent a:hover {
+  color: var(--main-primary);
 }
 
 .quota-info {

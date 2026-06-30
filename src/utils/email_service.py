@@ -37,7 +37,7 @@ class EmailService:
         self.smtp_password = os.getenv("SMTP_PASSWORD", "")
         # 不再對沒有 verified domain 的 SMTP_USER fallback，避免發出 invalid From header
         self.from_email = os.getenv("FROM_EMAIL", "").strip()
-        self.from_name = os.getenv("FROM_NAME", "Sound Lite 服務")
+        self.from_name = os.getenv("FROM_NAME", "SoundLite 服務")
         self.frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
         self._validate_config()
@@ -137,7 +137,7 @@ class EmailService:
     <div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:#f8f4eb;opacity:0;">{preheader}</div>
     <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
         <div style="background: linear-gradient(135deg, {accent} 0%, {accent_dark} 100%); color: white; padding: 30px 20px; text-align: center; border-radius: 10px 10px 0 0;">
-            <img src="{logo_url}" width="64" height="64" alt="Sound Lite" style="display: block; margin: 0 auto 12px auto; border: 0; border-radius: 12px;" />
+            <img src="{logo_url}" width="64" height="64" alt="SoundLite" style="display: block; margin: 0 auto 12px auto; border: 0; border-radius: 12px;" />
             <h1 style="margin: 0; color: white; font-size: 22px; line-height: 1.3;">{heading}</h1>
         </div>
         <div style="background: #ffffff; padding: 30px; border-radius: 0 0 10px 10px; border: 1px solid #efe1c6; border-top: 0;">
@@ -161,7 +161,7 @@ class EmailService:
         </div>
         <div style="text-align: center; margin-top: 30px; color: #666; font-size: 12px;">
             <p style="margin: 0 0 4px 0;">此為系統自動寄送，請勿直接回覆。</p>
-            <p style="margin: 0;">© 2026 <a href="https://soundlite.app" style="color: #666; text-decoration: none;">Sound Lite</a>. All rights reserved.</p>
+            <p style="margin: 0;">© 2026 <a href="https://soundlite.app" style="color: #666; text-decoration: none;">SoundLite</a>. All rights reserved.</p>
         </div>
     </div>
 </body>
@@ -171,7 +171,7 @@ class EmailService:
     def _render_branded_text(body: str) -> str:
         """純文字版本：開頭加品牌行 + 統一 footer。"""
         return (
-            "Sound Lite | https://soundlite.app\n"
+            "SoundLite | https://soundlite.app\n"
             "═════════════════════════════\n\n"
             f"{body.strip()}\n\n"
             "─────────────────────────────\n"
@@ -196,7 +196,7 @@ class EmailService:
 
         intro_html = (
             '<h2 style="margin-top: 0; color: #44465b;">請驗證您的電子郵件地址</h2>'
-            '<p>感謝您註冊 <span style="white-space: nowrap;">Sound Lite</span>！'
+            '<p>感謝您註冊 <span style="white-space: nowrap;">SoundLite</span>！'
             '請點擊下方按鈕完成 Email 驗證：</p>'
         )
         extra_html = (
@@ -213,7 +213,7 @@ class EmailService:
         )
 
         text_content = self._render_branded_text(
-            f"歡迎使用 Sound Lite！\n\n"
+            f"歡迎使用 SoundLite！\n\n"
             f"請點擊以下連結驗證您的 email：\n{verification_url}\n\n"
             f"此驗證連結將在 24 小時後過期。\n\n"
             f"如果您沒有註冊此帳號，請忽略此郵件。"
@@ -221,7 +221,7 @@ class EmailService:
 
         return await self._send_email(
             to_email=to_email,
-            subject="驗證您的 Email - Sound Lite",
+            subject="驗證您的 Email - SoundLite",
             html_content=html_content,
             text_content=text_content
         )
@@ -258,7 +258,7 @@ class EmailService:
             cta_label="重設密碼",
             cta_url=reset_url,
             extra_html=extra_html,
-            preheader="點此重設您的 Sound Lite 密碼，連結 1 小時內有效",
+            preheader="點此重設您的 SoundLite 密碼，連結 1 小時內有效",
         )
 
         text_content = self._render_branded_text(
@@ -270,7 +270,7 @@ class EmailService:
 
         return await self._send_email(
             to_email=to_email,
-            subject="重設您的密碼 - Sound Lite",
+            subject="重設您的密碼 - SoundLite",
             html_content=html_content,
             text_content=text_content
         )
@@ -294,7 +294,7 @@ class EmailService:
         forgot_url = f"{self.frontend_url}/forgot-password"
 
         intro_html = (
-            '<h2 style="margin-top: 0; color: #44465b;">您已經有 Sound Lite 帳號了</h2>'
+            '<h2 style="margin-top: 0; color: #44465b;">您已經有 SoundLite 帳號了</h2>'
             '<p>我們收到一筆使用此 email 的註冊請求，但這個信箱已經註冊過帳號，'
             '您不需要重新註冊，直接登入即可：</p>'
         )
@@ -314,7 +314,7 @@ class EmailService:
         )
 
         text_content = self._render_branded_text(
-            f"您已經有 Sound Lite 帳號了\n\n"
+            f"您已經有 SoundLite 帳號了\n\n"
             f"我們收到一筆使用此 email 的註冊請求，但這個信箱已經註冊過帳號。\n"
             f"直接登入即可：\n{login_url}\n\n"
             f"忘記密碼？請至：{forgot_url}\n\n"
@@ -323,7 +323,7 @@ class EmailService:
 
         return await self._send_email(
             to_email=to_email,
-            subject="您已經有 Sound Lite 帳號了 - Sound Lite",
+            subject="您已經有 SoundLite 帳號了 - SoundLite",
             html_content=html_content,
             text_content=text_content
         )
@@ -357,15 +357,15 @@ class EmailService:
         <!DOCTYPE html>
         <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
         <body style="margin: 0; padding: 0; background: #f8f4eb;">
-            <div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:#f8f4eb;opacity:0;">您的 Sound Lite 帳號剛剛被管理員執行操作，請確認是否為您本人授權。</div>
+            <div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:#f8f4eb;opacity:0;">您的 SoundLite 帳號剛剛被管理員執行操作，請確認是否為您本人授權。</div>
             <div style="font-family: 'Segoe UI', sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
                 <div style="background: linear-gradient(135deg, #d9534f 0%, #c9302c 100%); color: white; padding: 30px 20px; text-align: center; border-radius: 10px 10px 0 0;">
-                    <img src="{logo_url}" width="64" height="64" alt="Sound Lite" style="display: block; margin: 0 auto 12px auto; border: 0; border-radius: 12px;" />
+                    <img src="{logo_url}" width="64" height="64" alt="SoundLite" style="display: block; margin: 0 auto 12px auto; border: 0; border-radius: 12px;" />
                     <h1 style="margin: 0; color: white; font-size: 22px;">⚠️ 帳號異動通知</h1>
                 </div>
                 <div style="background: #ffffff; padding: 30px; border-radius: 0 0 10px 10px; border: 1px solid #efe1c6; border-top: 0;">
                     <p>您好，</p>
-                    <p>您在 Sound Lite 的帳號剛剛由管理員 <strong>{admin_email}</strong> 執行了以下操作：</p>
+                    <p>您在 SoundLite 的帳號剛剛由管理員 <strong>{admin_email}</strong> 執行了以下操作：</p>
                     <p style="font-size: 18px; font-weight: bold; color: #c9302c;">{action_label}</p>
                     {details_block}
                     <p>如果這是您預期或要求的操作（例如協助重設密碼），可忽略此信。</p>
@@ -376,7 +376,7 @@ class EmailService:
                     </ul>
                 </div>
                 <div style="text-align: center; margin-top: 30px; color: #666; font-size: 12px;">
-                    <p style="margin: 0;">© 2026 <a href="https://soundlite.app" style="color: #666; text-decoration: none;">Sound Lite</a>. All rights reserved.</p>
+                    <p style="margin: 0;">© 2026 <a href="https://soundlite.app" style="color: #666; text-decoration: none;">SoundLite</a>. All rights reserved.</p>
                 </div>
             </div>
         </body></html>
@@ -384,14 +384,14 @@ class EmailService:
 
         text_content = (
             f"帳號異動通知\n\n"
-            f"您的 Sound Lite 帳號由管理員 {admin_email} 執行了：\n  {action_label}\n\n"
+            f"您的 SoundLite 帳號由管理員 {admin_email} 執行了：\n  {action_label}\n\n"
             + ("\n".join(f"  - {line}" for line in details_lines) + "\n\n" if details_lines else "")
             + "若您未授權此操作，請立即回信本地址。"
         )
 
         return await self._send_email(
             to_email=to_email,
-            subject=f"[Sound Lite] 帳號異動通知：{action_label}",
+            subject=f"[SoundLite] 帳號異動通知：{action_label}",
             html_content=html_content,
             text_content=text_content,
         )
@@ -447,7 +447,7 @@ class EmailService:
 
         return await self._send_email(
             to_email=to_email,
-            subject="您的保留音檔即將到期 - Sound Lite",
+            subject="您的保留音檔即將到期 - SoundLite",
             html_content=html_content,
             text_content=text_content,
         )

@@ -602,11 +602,11 @@ const {
   cancelPendingRequests,
 } = useTranscriptData()
 
-// 動態更新頁面標題：任務名稱 - Sound Lite
+// 動態更新頁面標題：任務名稱 - SoundLite
 watch(
   () => currentTranscript.value?.custom_name || currentTranscript.value?.filename,
   (name) => {
-    document.title = name ? `${name} - Sound Lite` : 'Sound Lite'
+    document.title = name ? `${name} - SoundLite` : 'SoundLite'
   }
 )
 
