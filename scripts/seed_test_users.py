@@ -3,7 +3,9 @@
 測試帳號 Seed / Reset 腳本
 
 建立四個方案的測試帳號，usage 預設接近方案上限，方便測試邊界情境。
-每個帳號附一筆已完成的 mock 示範任務（含 transcription + segments）。
+每個帳號附 (max_keep_audio + 1) 筆已完成的 mock 示範任務（含假音檔 +
+transcription + segments），讓釘選音檔可以測到「釘滿上限再多 1 筆」的邊界。
+enterprise 無釘選上限，固定給 1 筆。
 
 使用方式：
     python scripts/seed_test_users.py            # upsert（新增或完整覆蓋）
@@ -153,24 +155,40 @@ MOCK_TASK_SEGMENTS = [
 ]
 
 
-def _mock_task_id(tier: str) -> str:
-    return f"test-demo-task-{tier}"
+def _mock_task_id(tier: str, idx: int) -> str:
+    return f"test-demo-task-{tier}-{idx}"
 
 
-def _build_mock_task(cfg: dict, user_id: str, now_ts: float) -> dict:
-    task_id = _mock_task_id(cfg["tier"])
+def _mock_task_id_pattern(tier: str) -> dict:
+    """match 該 tier 的所有 mock 任務（含舊版無索引的 test-demo-task-{tier}）"""
+    return {"$regex": f"^test-demo-task-{tier}(-|$)"}
+
+
+def _mock_task_count(tier: str) -> int:
+    """mock 任務數 = 可釘選音檔上限 (max_keep_audio) + 1。
+
+    多給 1 筆，讓測試可以把音檔釘到上限後，再驗證「超過上限釘不上去」的邊界。
+    enterprise 無上限（max_keep_audio=999999），釘選邊界測不到，固定給 1 筆。
+    """
+    if tier == "enterprise":
+        return 1
+    return QUOTA_BY_TIER[tier]["max_keep_audio"] + 1
+
+
+def _build_mock_task(cfg: dict, user_id: str, now_ts: float, idx: int) -> dict:
+    task_id = _mock_task_id(cfg["tier"], idx)
     return {
         "_id": task_id,
         "task_id": task_id,
         "task_type": "paragraph",
-        "custom_name": "示範轉錄（SoundLite 功能展示）",
+        "custom_name": f"示範轉錄 #{idx + 1}（SoundLite 功能展示）",
         "user": {
             "user_id": user_id,
             "user_email": cfg["email"],
             "tier": cfg["tier"],
         },
         "file": {
-            "filename": "soundlite_demo.mp3",
+            "filename": f"soundlite_demo_{idx + 1}.mp3",
             "size_mb": 0.97,
         },
         "config": {
@@ -206,8 +224,8 @@ def _build_mock_task(cfg: dict, user_id: str, now_ts: float) -> dict:
     }
 
 
-def _build_mock_transcription(cfg: dict, now_ts: float) -> dict:
-    task_id = _mock_task_id(cfg["tier"])
+def _build_mock_transcription(cfg: dict, now_ts: float, idx: int) -> dict:
+    task_id = _mock_task_id(cfg["tier"], idx)
     return {
         "_id": task_id,
         "content": MOCK_TASK_CONTENT,
@@ -217,8 +235,8 @@ def _build_mock_transcription(cfg: dict, now_ts: float) -> dict:
     }
 
 
-def _build_mock_segments(cfg: dict, now_ts: float) -> dict:
-    task_id = _mock_task_id(cfg["tier"])
+def _build_mock_segments(cfg: dict, now_ts: float, idx: int) -> dict:
+    task_id = _mock_task_id(cfg["tier"], idx)
     return {
         "_id": task_id,
         "segments": MOCK_TASK_SEGMENTS,
@@ -282,23 +300,32 @@ def _reset_fields(cfg: dict) -> dict:
     }
 
 
-def _upsert_mock_task(db, cfg: dict, user_id: str):
+def _upsert_mock_task(db, cfg: dict, user_id: str) -> int:
+    """upsert 該 tier 的 mock 任務（數量 = max_keep_audio + 1），回傳筆數。"""
     ts = _now_ts()
-    task_doc = _build_mock_task(cfg, user_id, ts)
-    trans_doc = _build_mock_transcription(cfg, ts)
-    seg_doc = _build_mock_segments(cfg, ts)
-    task_id = task_doc["_id"]
+    count = _mock_task_count(cfg["tier"])
+    task_ops, trans_ops, seg_ops = [], [], []
+    for idx in range(count):
+        task_doc = _build_mock_task(cfg, user_id, ts, idx)
+        trans_doc = _build_mock_transcription(cfg, ts, idx)
+        seg_doc = _build_mock_segments(cfg, ts, idx)
+        tid = task_doc["_id"]
+        task_ops.append(ReplaceOne({"_id": tid}, task_doc, upsert=True))
+        trans_ops.append(ReplaceOne({"_id": tid}, trans_doc, upsert=True))
+        seg_ops.append(ReplaceOne({"_id": tid}, seg_doc, upsert=True))
 
-    db.tasks.replace_one({"_id": task_id}, task_doc, upsert=True)
-    db.transcriptions.replace_one({"_id": task_id}, trans_doc, upsert=True)
-    db.segments.replace_one({"_id": task_id}, seg_doc, upsert=True)
+    db.tasks.bulk_write(task_ops, ordered=False)
+    db.transcriptions.bulk_write(trans_ops, ordered=False)
+    db.segments.bulk_write(seg_ops, ordered=False)
+    return count
 
 
 def _delete_mock_task(db, cfg: dict):
-    task_id = _mock_task_id(cfg["tier"])
-    db.tasks.delete_one({"_id": task_id})
-    db.transcriptions.delete_one({"_id": task_id})
-    db.segments.delete_one({"_id": task_id})
+    """刪掉該 tier 的所有 mock 任務（含舊版無索引 id），避免重置後殘留多餘筆數。"""
+    pat = _mock_task_id_pattern(cfg["tier"])
+    db.tasks.delete_many({"_id": pat})
+    db.transcriptions.delete_many({"_id": pat})
+    db.segments.delete_many({"_id": pat})
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
@@ -333,12 +360,12 @@ def cmd_list(db):
             continue
         quota = user.get("quota", {})
         usage = user.get("usage", {})
-        task = db.tasks.find_one({"_id": _mock_task_id(cfg["tier"])})
+        task_count = db.tasks.count_documents({"_id": _mock_task_id_pattern(cfg["tier"])})
         print(
             f"  {cfg['email']:<36} {quota.get('tier', '?'):<12} "
             f"{usage.get('duration_minutes', 0):>9.1f} {str(quota.get('max_duration_minutes', '?')):>8} "
             f"{usage.get('ai_summaries', 0):>8} {str(quota.get('max_ai_summaries', '?')):>7} "
-            f"{'✅' if task else '❌':>8}"
+            f"{task_count:>8}"
         )
 
 
@@ -351,12 +378,13 @@ def cmd_upsert(db, dry_run: bool):
         nl = cfg["near_limit_usage"]
         dur_max = QUOTA_BY_TIER[tier]["max_duration_minutes"]
         ai_max = QUOTA_BY_TIER[tier]["max_ai_summaries"]
+        task_n = _mock_task_count(tier)
         print(
             f"  {'[dry]' if dry_run else '     '} {cfg['email']}"
             f"  tier={tier}"
             f"  dur={nl['duration_minutes']}/{dur_max}"
             f"  ai={nl['ai_summaries']}/{ai_max}"
-            f"  +mock_task"
+            f"  +{task_n} mock task(s)"
         )
         if dry_run:
             skipped += 1
@@ -365,6 +393,7 @@ def cmd_upsert(db, dry_run: bool):
         doc = _build_full_user(cfg, now)
         res = db.users.update_one({"email": cfg["email"]}, {"$set": doc}, upsert=True)
         user = db.users.find_one({"email": cfg["email"]})
+        _delete_mock_task(db, cfg)
         _upsert_mock_task(db, cfg, str(user["_id"]))
 
         if res.upserted_id:
@@ -388,11 +417,12 @@ def cmd_reset(db, dry_run: bool):
         tier = cfg["tier"]
         dur_max = QUOTA_BY_TIER[tier]["max_duration_minutes"]
         ai_max = QUOTA_BY_TIER[tier]["max_ai_summaries"]
+        task_n = _mock_task_count(tier)
         print(
             f"  {'[dry]' if dry_run else '     '} {cfg['email']}"
             f"  dur={nl['duration_minutes']}/{dur_max}"
             f"  ai={nl['ai_summaries']}/{ai_max}"
-            f"  tokens=cleared  task=reset"
+            f"  tokens=cleared  task=reset({task_n})"
         )
         if dry_run:
             continue
