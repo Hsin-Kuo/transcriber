@@ -26,241 +26,35 @@
       @confirm="handleMergeConfirm"
     />
 
-    <!-- 批次上傳面板 -->
-    <BatchUploadPanel
-      v-if="batchMode.isActive"
+    <!-- 批次上傳跳窗 -->
+    <BatchUploadModal
+      :visible="batchMode.isActive"
       :initial-files="batchMode.files"
       :existing-tags="allTags"
-      :uploading="uploading"
-      :upload-progress="uploadProgress"
-      :upload-current-file="batchUploadCurrent"
-      :upload-total-files="batchUploadTotal"
       @close="cancelBatchUpload"
       @submit="confirmBatchUpload"
     />
 
-    <!-- 確認表單（在上傳區下方） -->
-    <div v-if="pendingFile || mergeMode.showForm" class="confirm-section">
-      <div class="modal-body">
-        <!-- 第一排：任務類型 + 檔案資訊 + 說話者辨識 + 標籤 -->
-        <div class="confirm-row">
-          <!-- 左欄：檔案資訊 + 語言 + 說話者辨識 -->
-          <div class="confirm-col">
-
-          <!-- 檔案資訊（移至左欄） -->
-          <div class="modal-section file-section">
-            <label class="section-label">{{ $t('transcription.fileInfo') }}</label>
-
-            <!-- 合併模式：顯示多檔案資訊 -->
-            <template v-if="mergeMode.isActive">
-              <div class="merge-info-header">
-                <span class="merge-badge">🔀 {{ $t('transcription.mergeMode') }}</span>
-                <span class="file-count">{{ $t('transcription.fileCount', { count: mergeMode.files.length }) }}</span>
-              </div>
-              <ul class="merge-file-list">
-                <li v-for="(file, idx) in mergeMode.files" :key="idx" class="merge-file-item">
-                  <span class="file-number">{{ idx + 1 }}.</span>
-                  <span class="file-name">{{ file.name }}</span>
-                  <span class="file-size">({{ formatFileSize(file.size) }})</span>
-                </li>
-              </ul>
-              <!-- 任務名稱欄位 -->
-              <div class="task-name-section">
-                <label class="sub-label">{{ $t('transcription.taskName') }}</label>
-                <input
-                  type="text"
-                  v-model="mergeTaskName"
-                  :placeholder="defaultMergeTaskName"
-                  class="text-input task-name-input"
-                />
-                <p class="hint">{{ $t('transcription.mergeTaskNameHint') }}</p>
-              </div>
-            </template>
-
-            <!-- 單檔模式：顯示單檔資訊 -->
-            <template v-else>
-              <div class="file-info">
-                <span class="label">{{ $t('transcription.fileName') }}</span>
-                <span class="value">{{ pendingFile?.name }}</span>
-              </div>
-              <div class="file-info" v-if="pendingFile">
-                <span class="label">{{ $t('transcription.fileSize') }}</span>
-                <span class="value">{{ (pendingFile.size / 1024 / 1024).toFixed(2) }} MB</span>
-              </div>
-            </template>
-          </div>
-
-          <!-- 語言選擇（移至左欄） -->
-          <div class="modal-section language-section" data-tour="language">
-            <label class="section-label">{{ $t('transcription.language') }}</label>
-            <select v-model="selectedLanguage" class="language-select">
-              <option value="auto">{{ $t('transcription.autoDetect') }}</option>
-              <option value="zh-TW">繁體中文</option>
-              <option value="zh-CN">简体中文</option>
-              <option value="zh">{{ $t('transcription.langChineseGeneric') }}</option>
-              <option value="en">English</option>
-              <option value="ja">日本語</option>
-              <option value="ko">한국어</option>
-            </select>
-          </div>
-
-          <!-- 說話者辨識（移至左欄） -->
-          <div class="modal-section diarize-section" data-tour="diarize">
-            <label class="section-label">{{ $t('transcription.speakerDiarization') }}</label>
-
-            <label class="toggle-label">
-              <div class="toggle-switch-wrapper">
-                <input type="checkbox" id="modal-diarize" v-model="enableDiarization" class="toggle-input" />
-                <span class="toggle-slider"></span>
-              </div>
-              <span class="toggle-text">{{ $t('transcription.enable') }}</span>
-            </label>
-
-            <div class="sub-setting" v-if="enableDiarization">
-              <label for="modal-maxSpeakers" class="sub-label">
-                {{ $t('transcription.maxSpeakers') }}
-                <span class="hint">{{ $t('transcription.maxSpeakersHint') }}</span>
-              </label>
-              <input
-                type="number"
-                id="modal-maxSpeakers"
-                v-model.number="maxSpeakers"
-                min="2"
-                max="10"
-                :placeholder="$t('transcription.autoDetect')"
-                class="number-input"
-              />
-            </div>
-          </div>
-
-          </div><!-- end left col -->
-
-          <!-- 右欄：任務類型 + 標籤 -->
-          <div class="confirm-col">
-
-          <!-- 任務類型 -->
-          <div class="modal-section task-type-section" data-tour="task-type">
-            <label class="section-label">{{ $t('transcription.taskType') }}</label>
-
-            <div class="radio-group">
-              <label class="radio-item">
-                <input type="radio" name="taskType" value="paragraph" v-model="taskType" />
-                <span class="radio-label">{{ $t('transcription.paragraph') }}</span>
-              </label>
-              <label class="radio-item">
-                <input type="radio" name="taskType" value="subtitle" v-model="taskType" />
-                <span class="radio-label">{{ $t('transcription.subtitle') }}</span>
-              </label>
-            </div>
-
-            <div class="task-type-hint">
-              <span v-if="taskType === 'paragraph'" class="hint">{{ $t('transcription.paragraphHint') }}</span>
-              <span v-else class="hint">{{ $t('transcription.subtitleHint') }}</span>
-            </div>
-          </div>
-
-          <!-- 標籤 -->
-          <div class="modal-section tag-section">
-            <label class="section-label">{{ $t('transcription.tags') }}</label>
-            <div class="tag-input-container">
-              <div class="tag-input-wrapper">
-                <input
-                  type="text"
-                  v-model="tagInput"
-                  @keydown="onTagKeydown"
-                  :placeholder="$t('transcription.tagPlaceholder')"
-                  class="text-input"
-                />
-                <button
-                  type="button"
-                  class="btn-add-tag"
-                  @click="addTag"
-                  :disabled="!tagInput.trim()"
-                >
-                  {{ $t('transcription.add') }}
-                </button>
-              </div>
-
-              <!-- 快速選擇現有標籤（限制兩排，超出可手動展開） -->
-              <div v-if="availableQuickTags.length > 0" class="quick-tags-section">
-                <div
-                  class="quick-tags"
-                  :ref="quickTagsContainerRef"
-                  :style="quickTagsContentStyle"
-                >
-                  <button
-                    v-for="tag in availableQuickTags"
-                    :key="tag"
-                    type="button"
-                    class="quick-tag-btn"
-                    @click="addQuickTag(tag)"
-                    :title="$t('transcription.addTagTooltip', { tag })"
-                  >
-                    + {{ tag }}
-                  </button>
-                </div>
-                <button
-                  v-if="quickTagsOverflowing"
-                  type="button"
-                  class="btn-toggle-quick-tags"
-                  :class="{ expanded: !quickTagsCollapsed }"
-                  @click="toggleQuickTags"
-                >
-                  <span>{{ quickTagsCollapsed ? $t('taskList.showMore') : $t('taskList.collapse') }}</span>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="6 9 12 15 18 9"></polyline>
-                  </svg>
-                </button>
-              </div>
-
-              <div v-if="selectedTags.length > 0" class="selected-tags">
-                <span
-                  v-for="(tag, index) in selectedTags"
-                  :key="index"
-                  class="selected-tag"
-                >
-                  {{ tag }}
-                  <button
-                    type="button"
-                    class="remove-tag"
-                    @click="removeTag(index)"
-                    :title="$t('transcription.removeTagTooltip')"
-                  >
-                    ×
-                  </button>
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <!-- 音檔保留規則（移至右欄最下方） -->
-          <div class="modal-section retention-section">
-            <div class="file-note">
-              {{ $t('transcription.audioRetentionNote', { days: audioRetentionDays }) }}
-            </div>
-          </div>
-
-          </div><!-- end right col -->
-        </div>
-
-        <!-- 動作按鈕 -->
-        <div class="modal-actions">
-          <button
-            class="btn btn-primary btn-start"
-            data-tour="start"
-            :class="{ 'is-loading': uploading }"
-            :disabled="uploading"
-            @click="confirmAndUpload"
-          >
-            <span v-if="uploading" class="btn-spinner"></span>
-            <span v-else>{{ $t('transcription.startTranscription') }}</span>
-            <span v-if="uploading && uploadProgress > 0">{{ $t('transcription.uploading') }} {{ uploadProgress }}%</span>
-            <span v-else-if="uploading">{{ $t('transcription.uploading') }}</span>
-          </button>
-          <button class="btn btn-secondary btn-cancel" @click="cancelUpload">{{ $t('transcription.cancel') }}</button>
-        </div>
-      </div>
-    </div>
+    <!-- 轉錄設定跳窗（單檔上傳 / 合併皆共用） -->
+    <TaskSettingsModal
+      :visible="!!pendingFile || mergeMode.showForm"
+      :is-merge-mode="mergeMode.isActive"
+      :pending-file="pendingFile"
+      :merge-files="mergeMode.files"
+      :default-merge-task-name="defaultMergeTaskName"
+      :all-tags="allTags"
+      :audio-retention-days="audioRetentionDays"
+      :dismissible="!tourMode"
+      v-model:task-type="taskType"
+      v-model:language="selectedLanguage"
+      v-model:diarize="enableDiarization"
+      v-model:max-speakers="maxSpeakers"
+      v-model:tags="selectedTags"
+      v-model:tag-input="tagInput"
+      v-model:merge-task-name="mergeTaskName"
+      @close="cancelUpload"
+      @confirm="confirmAndUpload"
+    />
 
   </div>
 
@@ -273,12 +67,12 @@ import { useRouter } from 'vue-router'
 import ElectricBorder from '../components/shared/ElectricBorder.vue'
 import UploadZone from '../components/UploadZone.vue'
 import MergeModal from '../components/merge/MergeModal.vue'
-import BatchUploadPanel from '../components/batch/BatchUploadPanel.vue'
+import TaskSettingsModal from '../components/transcription/TaskSettingsModal.vue'
+import BatchUploadModal from '../components/batch/BatchUploadModal.vue'
 
 // 新 API 服務層
 import { transcriptionService, taskService } from '../api/services'
 import { exceedsMaxSize, MAX_UPLOAD_SIZE_MB } from '../utils/chunkedUpload.js'
-import { useCollapsibleRows } from '../composables/useCollapsibleRows'
 import { useProductTour } from '../composables/useProductTour'
 import { useTaskTags } from '../composables/task/useTaskTags'
 import { useAuthStore } from '../stores/auth'
@@ -312,8 +106,6 @@ function goToTasks() {
 
 const uploading = ref(false)
 const uploadProgress = ref(0) // 分片上傳進度 0-100
-const batchUploadCurrent = ref(0) // 批次上傳：目前第幾個檔案
-const batchUploadTotal = ref(0) // 批次上傳：總共幾個檔案
 const taskType = ref('paragraph')  // 任務類型：paragraph（段落）或 subtitle（字幕）
 const selectedLanguage = ref('auto')
 const enableDiarization = ref(true)
@@ -366,24 +158,8 @@ function isUploadCancelled(error) {
 }
 
 // 獲取所有唯一標籤（canonical 來源：/tags，包含尚未被任何 task 使用的孤兒 tag）
+// 傳給 TaskSettingsModal（快速標籤）與 BatchUploadModal
 const allTags = computed(() => tagsData.value.map(t => t.name))
-
-// 可用的快速標籤（排除已選擇的）
-const availableQuickTags = computed(() => {
-  return allTags.value.filter(tag => !selectedTags.value.includes(tag))
-})
-
-// 快速標籤區限制最多兩排，超出可手動展開
-const {
-  containerRef: quickTagsContainerRef,
-  contentStyle: quickTagsContentStyle,
-  overflowing: quickTagsOverflowing,
-  isCollapsed: quickTagsCollapsed,
-  toggle: toggleQuickTags,
-} = useCollapsibleRows({
-  itemSelector: '.quick-tag-btn',
-  watchSources: [() => availableQuickTags.value.length],
-})
 
 // 過濾超過單檔上限的檔案，彈出提示；回傳允許上傳的檔案
 function filterOversizedFiles(files) {
@@ -446,32 +222,7 @@ function handleFilesUpload(files) {
   batchMode.isActive = true
 }
 
-// 標籤管理
-function addTag() {
-  const tag = tagInput.value.trim()
-  if (tag && !selectedTags.value.includes(tag)) {
-    selectedTags.value.push(tag)
-  }
-  tagInput.value = ''
-}
-
-function onTagKeydown(e) {
-  // Vue 的 .comma 修飾符不存在；Enter / 逗號都觸發新增 tag
-  if (e.key === 'Enter' || e.key === ',') {
-    e.preventDefault()
-    addTag()
-  }
-}
-
-function addQuickTag(tag) {
-  if (!selectedTags.value.includes(tag)) {
-    selectedTags.value.push(tag)
-  }
-}
-
-function removeTag(index) {
-  selectedTags.value.splice(index, 1)
-}
+// 標籤管理（新增/移除/快速標籤）已移入 TaskSettingsModal，透過 v-model:tags 回寫 selectedTags
 
 // 確認後開始上傳
 async function confirmAndUpload() {
@@ -525,6 +276,13 @@ async function confirmAndUpload() {
 
   // 全域上傳看板：跳頁也持續顯示進度
   uploadStore.start({ kind: isMergeMode ? 'merge' : 'single', label: displayName })
+
+  // 送出即關窗：上傳改由全域浮層顯示進度、完成走 toast，避免使用者被遮罩卡在跳窗後。
+  // formData 已組好、displayName 已擷取，後續流程不再讀這些狀態。finally 仍會再 reset（冪等）。
+  pendingFile.value = null
+  mergeMode.isActive = false
+  mergeMode.showForm = false
+  mergeMode.files = []
 
   try {
     // 使用新 API 服務層（大檔自動走分片上傳）
@@ -662,9 +420,7 @@ function cancelBatchUpload() {
 async function confirmBatchUpload(formData) {
   uploading.value = true
   uploadProgress.value = 0
-  batchUploadCurrent.value = 0
   const batchFileCount = formData.getAll('files').length
-  batchUploadTotal.value = batchFileCount
 
   // 全域上傳看板（批次）
   uploadStore.start({
@@ -672,6 +428,11 @@ async function confirmBatchUpload(formData) {
     label: $t('globalUpload.batchLabel', { count: batchFileCount }),
     batchTotal: batchFileCount,
   })
+
+  // 送出即關窗：批次進度（含 N/總）改由全域浮層顯示，避免使用者被遮罩卡住。
+  // formData 已組好，後續流程不再讀 batchMode。finally 的 cancelBatchUpload 會再 reset（冪等）。
+  batchMode.isActive = false
+  batchMode.files = []
 
   try {
     const result = await transcriptionService.createBatch(formData, {
@@ -681,8 +442,6 @@ async function confirmBatchUpload(formData) {
         uploadStore.setProgress(pct)
       },
       onFileProgress: (current, total) => {
-        batchUploadCurrent.value = current
-        batchUploadTotal.value = total
         uploadStore.setFileProgress(current, total)
       }
     })
@@ -731,7 +490,7 @@ async function confirmBatchUpload(formData) {
       }
     }
 
-    // 上傳完成後重抓 tag 列表（user 可能在 BatchUploadPanel 內建了新 tag）
+    // 上傳完成後重抓 tag 列表（user 可能在 BatchUploadModal 內建了新 tag）
     await fetchTagColors()
 
     // 全部成功且未觸發額度購買 Modal → 跳轉任務列表（與單檔上傳一致）；
@@ -757,8 +516,6 @@ async function confirmBatchUpload(formData) {
   } finally {
     uploading.value = false
     uploadProgress.value = 0
-    batchUploadCurrent.value = 0
-    batchUploadTotal.value = 0
     cancelBatchUpload()
   }
 }
@@ -784,10 +541,35 @@ function endTour() {
   tagInput.value = ''
 }
 
+// 導覽：離開「上傳區」步 → 展開示範設定跳窗，待 Teleport DOM ready 再前進到跳窗內步驟。
+// 跳窗有遮罩，若一開始就展開會蓋住歡迎步與上傳區錨點，故延後到此刻才開。
+async function openDemoFormThenNext() {
+  pendingFile.value = makeDemoFile()
+  await nextTick() // 等 TaskSettingsModal（Teleport→body）渲染，data-tour 錨點才存在
+  tour.getDriver()?.moveNext()
+  // 跳窗有 0.3s slideUp 進場動畫；動畫結束後重算 spotlight 對位，避免高亮框偏移。
+  // 於 timeout 內重新取得 driver：使用者若中途關閉導覽，getDriver() 會回 null（不誤觸已銷毀實例）
+  setTimeout(() => tour.getDriver()?.refresh?.(), 320)
+}
+
+// 導覽：從跳窗第一步（任務類型）返回「上傳區」→ 收起跳窗，讓上傳區錨點重新可被高亮
+async function closeDemoFormThenPrev() {
+  pendingFile.value = null
+  await nextTick()
+  tour.getDriver()?.movePrevious()
+}
+
+// 跳窗內容可能超過視窗高度而內捲（modal-body overflow）。導覽高亮前先把錨點捲進
+// 可視區，否則 driver 以 window 判斷「可見」會把 spotlight 畫在被裁切的位置（看似沒對到）。
+function scrollAnchorIntoView(el) {
+  el?.scrollIntoView?.({ block: 'center', behavior: 'auto' })
+}
+
+// 跳窗內步驟順序對齊新版單欄排版（由上到下）：任務類型 → 語言 → 說話者辨識 → 開始
 function buildTourSteps() {
   return [
     {
-      // 歡迎步：無錨點 → 置中 popover，導覽開始前先說明
+      // 歡迎步：無錨點 → 置中 popover，導覽開始前先說明（跳窗此時仍關閉）
       popover: {
         title: $t('tour.welcome.title'),
         description: $t('tour.welcome.desc'),
@@ -796,20 +578,32 @@ function buildTourSteps() {
       },
     },
     {
+      // 上傳區：跳窗仍關閉，按「下一步」才展開示範跳窗
       element: tourSel(TOUR_ANCHORS.UPLOAD),
-      popover: { title: $t('tour.upload.title'), description: $t('tour.upload.desc') },
+      popover: {
+        title: $t('tour.upload.title'),
+        description: $t('tour.upload.desc'),
+        onNextClick: openDemoFormThenNext,
+      },
+    },
+    {
+      element: tourSel(TOUR_ANCHORS.TASK_TYPE),
+      onHighlightStarted: scrollAnchorIntoView,
+      popover: {
+        title: $t('tour.taskType.title'),
+        description: $t('tour.taskType.desc'),
+        onPrevClick: closeDemoFormThenPrev,
+      },
     },
     {
       element: tourSel(TOUR_ANCHORS.LANGUAGE),
+      onHighlightStarted: scrollAnchorIntoView,
       popover: { title: $t('tour.language.title'), description: $t('tour.language.desc') },
     },
     {
       element: tourSel(TOUR_ANCHORS.DIARIZE),
+      onHighlightStarted: scrollAnchorIntoView,
       popover: { title: $t('tour.diarize.title'), description: $t('tour.diarize.desc') },
-    },
-    {
-      element: tourSel(TOUR_ANCHORS.TASK_TYPE),
-      popover: { title: $t('tour.taskType.title'), description: $t('tour.taskType.desc') },
     },
     {
       // 上傳 phase 最後一步：交棒到任務列表 phase
@@ -825,17 +619,16 @@ function buildTourSteps() {
 }
 
 // 是否處於「不該啟動導覽」的忙碌狀態（上傳中／表單填寫中／合併／批次）——
-// 啟動會設 demo pendingFile，這些狀態下會覆蓋使用者正在進行的操作。
+// 導覽過程會設 demo pendingFile，這些狀態下會覆蓋使用者正在進行的操作。
 const tourLaunchBlocked = computed(
   () => uploadStore.busy || !!pendingFile.value || mergeMode.isActive || batchMode.isActive
 )
 
-// 實際啟動導覽（自動與手動共用）。展開示範表單→等 DOM→啟動 driver。
-async function beginTour() {
+// 實際啟動導覽（自動與手動共用）。歡迎步與上傳區步在跳窗關閉下進行，
+// 故此處不展開跳窗（改由 openDemoFormThenNext 在離開上傳區時才展開）。
+function beginTour() {
   tourStore.start() // phase = 'upload'
   tourMode.value = true
-  pendingFile.value = makeDemoFile()
-  await nextTick() // 等 confirm-section 渲染，各 data-tour 錨點才存在
   // 換頁到列表 phase 時不收尾；使用者關閉則還原表單並結束導覽
   tour.run({
     steps: buildTourSteps(),
@@ -911,836 +704,9 @@ onUnmounted(() => {
   text-align: center;
 }
 
-/* 確認表單區域（在上傳區下方） */
-.confirm-section {
-  width: 100%;
-  max-width: 800px;
-  margin: 20px auto 0;
-  padding: 0;
-  border-radius: 20px;
-  background: var(--main-bg);
-  border: none;
-  animation: slideDown 0.3s ease;
-}
-
-@keyframes slideDown {
-  from {
-    opacity: 0;
-    transform: translateY(-20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.modal-body {
-  padding: 20px;
-  overflow-y: auto;
-  /* max-height 由 flex 布局自動處理，移除以避免衝突 */
-}
-
-/* 確認區響應式排版 */
-.confirm-row {
-  display: flex;
-  gap: 20px;
-  margin-bottom: 20px;
-  align-items: flex-start;
-}
-
-.confirm-col {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-/* 移動版：垂直排列 */
-@media (max-width: 768px) {
-  .confirm-row {
-    flex-direction: column;
-    gap: 0;
-  }
-
-  .confirm-row .modal-section {
-    margin-bottom: 20px;
-  }
-}
-
-.modal-section {
-  margin-bottom: 20px;
-}
-
-/* 確認區的 section 不需要底部邊框和額外 padding */
-.confirm-row .modal-section {
-  margin-bottom: 20px;
-}
-
-.section-label {
-  display: block;
-  font-size: 13px;
-  color: rgba(var(--color-text-dark-rgb), 0.6);
-  font-weight: 600;
-  margin-bottom: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.file-info {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-  font-size: 14px;
-}
-
-.file-info:last-child {
-  margin-bottom: 0;
-}
-
-.file-info .label {
-  color: rgba(var(--color-text-dark-rgb), 0.6);
-  font-weight: 500;
-}
-
-.file-info .value {
-  color: rgba(var(--color-text-dark-rgb), 0.95);
-  font-weight: 600;
-}
-
-.file-note {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid rgba(var(--color-divider-rgb), 0.2);
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--main-text-light);
-  font-style: italic;
-}
-
-/* Toggle 開關 */
-.toggle-label {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  cursor: pointer;
-  user-select: none;
-  padding-right: 5px;
-  position: relative;
-}
-
-.toggle-label:hover .toggle-slider {
-  transform: scale(1.05);
-}
-
-.toggle-switch-wrapper {
-  position: relative;
-  width: 44px;
-  height: 24px;
-  display: inline-block;
-}
-
-.toggle-input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-  position: absolute;
-}
-
-.toggle-slider {
-  position: absolute;
-  cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: var(--color-gray-100);
-  transition: transform 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
-  border-radius: 24px;
-  box-shadow: inset 0 1px 3px var(--color-overlay-light);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.toggle-slider:before {
-  position: absolute;
-  content: "";
-  height: 18px;
-  width: 18px;
-  left: 3px;
-  bottom: 3px;
-  background-color: var(--color-white);
-  transition: 0.3s;
-  border-radius: 50%;
-  box-shadow: 0 2px 4px rgba(var(--color-text-dark-rgb), 0.2);
-}
-
-.toggle-input:checked + .toggle-slider {
-  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
-  box-shadow: inset 0 1px 3px rgba(var(--color-text-dark-rgb), 0.1), 0 0 8px rgba(var(--color-primary-rgb), 0.3);
-}
-
-.toggle-input:checked + .toggle-slider:before {
-  transform: translateX(20px);
-}
-
-.toggle-label:hover .toggle-slider {
-  box-shadow: inset 0 1px 3px rgba(var(--color-text-dark-rgb), 0.2), 0 0 4px rgba(var(--color-text-dark-rgb), 0.1);
-}
-
-.toggle-label:hover .toggle-input:checked + .toggle-slider {
-  box-shadow: inset 0 1px 3px rgba(var(--color-text-dark-rgb), 0.1), 0 0 12px rgba(var(--color-primary-rgb), 0.4);
-}
-
-.toggle-label:active .toggle-slider {
-  transform: scale(0.98);
-  background-color: var(--color-gray-100) !important;
-}
-
-.toggle-label:active .toggle-input:checked + .toggle-slider {
-  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%) !important;
-}
-
-.toggle-slider:active {
-  background-color: var(--color-gray-100) !important;
-}
-
-.toggle-input:checked + .toggle-slider:active {
-  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%) !important;
-}
-
-.toggle-label:active .toggle-slider:before {
-  box-shadow: 0 1px 2px rgba(var(--color-text-dark-rgb), 0.2);
-}
-
-.toggle-text {
-  font-size: 14px;
-  color: var(--main-text);
-  font-weight: 500;
-}
-
-/* Radio 群組 */
-.radio-group {
-  display: flex;
-  gap: 16px;
-  margin-bottom: 10px;
-}
-
-.radio-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.radio-item input[type="radio"] {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  accent-color: var(--electric-primary);
-}
-
-.radio-label {
-  font-size: 14px;
-  color: var(--main-text);
-  font-weight: 500;
-}
-
-.task-type-hint {
-  margin-top: 8px;
-}
-
-.task-type-hint .hint {
-  font-size: 12px;
-  color: rgba(var(--color-text-dark-rgb), 0.6);
-  font-weight: 400;
-  line-height: 1.4;
-}
-
-.sub-setting {
-  margin-top: 14px;
-  padding-left: 28px;
-  animation: slideDown 0.2s ease;
-}
-
-.sub-label {
-  display: block;
-  font-size: 13px;
-  color: rgba(var(--color-text-dark-rgb), 0.8);
-  font-weight: 500;
-  margin-bottom: 8px;
-}
-
-.sub-label .hint {
-  display: block;
-  font-size: 12px;
-  color: rgba(var(--color-text-dark-rgb), 0.6);
-  font-weight: 400;
-  margin-top: 4px;
-}
-
-.number-input {
-  width: 120px;
-  padding: 10px 12px;
-  font-size: 14px;
-  border: 2px solid rgba(var(--color-primary-rgb), 0.3);
-  border-radius: 8px;
-  background: var(--color-bg-light);
-  color: var(--color-text-dark);
-  transition: all 0.3s;
-}
-
-.number-input:focus {
-  outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.1);
-}
-
-.number-input::placeholder {
-  color: rgba(var(--color-text-dark-rgb), 0.4);
-}
-
-/* 語言選擇 */
-.language-select {
-  width: 100%;
-  padding: 10px 12px;
-  font-size: 14px;
-  border: 2px solid rgba(var(--color-primary-rgb), 0.3);
-  border-radius: 8px;
-  background: var(--color-bg-light);
-  color: var(--color-text-dark);
-  cursor: pointer;
-  transition: all 0.3s;
-}
-
-.language-select:focus {
-  outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.1);
-}
-
-/* 標籤輸入樣式 */
-.tag-input-container {
-  margin-top: 10px;
-}
-
-.tag-input-wrapper {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.tag-input-wrapper .text-input {
-  flex: 1;
-  max-width: 300px;
-  padding: 10px 12px;
-  font-size: 14px;
-  border: 2px solid rgba(var(--color-primary-rgb), 0.3);
-  border-radius: 8px;
-  background: var(--color-bg-light);
-  color: var(--color-text-dark);
-  transition: all 0.3s;
-}
-
-.tag-input-wrapper .text-input:focus {
-  outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.1);
-}
-
-.btn-add-tag {
-  padding: 10px 20px;
-  font-size: 14px;
-  font-weight: 500;
-  color: white;
-  background: var(--color-teal);
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.3s;
-  white-space: nowrap;
-}
-
-.btn-add-tag:hover:not(:disabled) {
-  background: var(--color-teal-dark);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(var(--color-teal-rgb), 0.3);
-}
-
-.btn-add-tag:disabled {
-  background: color-mix(in srgb, var(--color-teal) 40%, transparent);
-  cursor: not-allowed;
-}
-
-/* 快速標籤選擇區 */
-.quick-tags-section {
-  margin-bottom: 12px;
-  padding: 10px;
-  background: rgba(var(--color-teal-rgb), 0.05);
-  border-radius: 8px;
-  border: 1px dashed rgba(var(--color-teal-rgb), 0.2);
-}
-
-.quick-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-  transition: max-height 0.25s ease;
-}
-
-.quick-tag-btn {
-  padding: 5px 12px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--color-teal);
-  background: var(--color-white);
-  border: 1.5px solid rgba(var(--color-teal-rgb), 0.3);
-  border-radius: 10px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.quick-tag-btn:hover {
-  background: rgba(var(--color-teal-rgb), 0.1);
-  border-color: var(--color-teal);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 6px rgba(var(--color-teal-rgb), 0.15);
-}
-
-.quick-tag-btn:active {
-  transform: translateY(0);
-}
-
-.btn-toggle-quick-tags {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 8px;
-  padding: 3px 10px;
-  font-size: 12px;
-  font-weight: 500;
-  color: rgba(var(--color-teal-rgb), 0.95);
-  background: transparent;
-  border: 1px dashed rgba(var(--color-teal-rgb), 0.4);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn-toggle-quick-tags:hover {
-  background: rgba(var(--color-teal-rgb), 0.1);
-  border-color: rgba(var(--color-teal-rgb), 0.6);
-}
-
-.btn-toggle-quick-tags svg {
-  transition: transform 0.2s;
-}
-
-.btn-toggle-quick-tags.expanded svg {
-  transform: rotate(180deg);
-}
-
-.selected-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.selected-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  background: color-mix(in srgb, var(--color-purple) 15%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-purple) 30%, transparent);
-  border-radius: 12px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--color-purple);
-  transition: all 0.2s;
-}
-
-.selected-tag:hover {
-  background: color-mix(in srgb, var(--color-purple) 20%, transparent);
-  border-color: color-mix(in srgb, var(--color-purple) 40%, transparent);
-}
-
-.remove-tag {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  margin: 0;
-  background: color-mix(in srgb, var(--color-purple) 20%, transparent);
-  border: none;
-  border-radius: 50%;
-  color: var(--color-purple);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.remove-tag:hover {
-  background: color-mix(in srgb, var(--color-danger) 20%, transparent);
-  color: var(--color-danger);
-}
-
-.modal-actions {
-  display: flex;
-  gap: 12px;
-  margin-top: 24px;
-  justify-content: center;
-  align-items: center;
-}
-
-.modal-actions .btn {
-  padding: 12px 32px;
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.modal-actions .btn-cancel {
-  padding: 8px 20px;
-  font-size: 13px;
-}
-
-/* 開始轉錄按鈕 - 使用者頭貼風格 */
-.modal-actions .btn-start {
-  background: var(--main-bg);
-  color: var(--main-primary);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
-.modal-actions .btn-start:hover:not(:disabled) {
-  color: var(--main-primary-dark);
-}
-
-.modal-actions .btn-start:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-}
-
-.modal-actions .btn-start.is-loading {
-  pointer-events: none;
-}
-
-/* Loading spinner */
-.btn-spinner {
-  display: inline-block;
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(var(--color-primary-rgb), 0.3);
-  border-top-color: var(--color-primary);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-
-/* 合併模式樣式 */
-.merge-info-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.merge-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  background: rgba(var(--color-primary-rgb), 0.15);
-  color: var(--color-primary);
-  border-radius: 12px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.file-count {
-  font-size: 13px;
-  color: rgba(var(--color-text-dark-rgb), 0.7);
-  font-weight: 500;
-}
-
-.merge-file-list {
-  list-style: none;
-  padding: 0;
-  margin: 0 0 16px 0;
-  max-height: 120px;
-  overflow-y: auto;
-}
-
-.merge-file-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 0;
-  font-size: 13px;
-  border-bottom: 1px solid rgba(var(--color-primary-rgb), 0.1);
-}
-
-.merge-file-item:last-child {
-  border-bottom: none;
-}
-
-.merge-file-item .file-number {
-  color: var(--color-primary);
-  font-weight: 600;
-  min-width: 20px;
-}
-
-.merge-file-item .file-name {
-  flex: 1;
-  color: rgba(var(--color-text-dark-rgb), 0.9);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.merge-file-item .file-size {
-  color: rgba(var(--color-text-dark-rgb), 0.5);
-  font-size: 12px;
-}
-
-.task-name-section {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid rgba(var(--color-primary-rgb), 0.15);
-}
-
-.task-name-input {
-  width: 100%;
-  max-width: 100%;
-  padding: 10px 12px;
-  font-size: 14px;
-  border: 2px solid rgba(var(--color-primary-rgb), 0.3);
-  border-radius: 8px;
-  background: var(--color-bg-light);
-  color: var(--color-text-dark);
-  transition: all 0.3s;
-  margin-top: 6px;
-}
-
-.task-name-input:focus {
-  outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.1);
-}
-
-.task-name-input::placeholder {
-  color: rgba(var(--color-text-dark-rgb), 0.4);
-}
-
-.task-name-section .hint {
-  margin-top: 6px;
-  font-size: 11px;
-  color: rgba(var(--color-text-dark-rgb), 0.5);
-}
-
-/* === 響應式設計 === */
-
-/* 平板以下已有 768px 的 .confirm-row 樣式 */
-
-/* 小手機 */
 @media (max-width: 480px) {
   .container {
     padding: 0 8px;
-  }
-
-  /* 確認表單區域 */
-  .confirm-section {
-    margin: 12px auto 0;
-    border-radius: 16px;
-  }
-
-  .modal-body {
-    padding: 16px 12px;
-  }
-
-  .confirm-row {
-    gap: 0;
-  }
-
-  .confirm-row .modal-section {
-    margin-bottom: 16px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid rgba(var(--color-divider-rgb), 0.15);
-  }
-
-  .confirm-row .modal-section:last-child {
-    border-bottom: none;
-    margin-bottom: 0;
-  }
-
-  .section-label {
-    font-size: 12px;
-    margin-bottom: 8px;
-  }
-
-  /* Radio 群組垂直排列 */
-  .radio-group {
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .radio-item {
-    min-height: 44px;
-  }
-
-  .radio-item input[type="radio"] {
-    width: 20px;
-    height: 20px;
-  }
-
-  .radio-label {
-    font-size: 14px;
-  }
-
-  /* 檔案資訊 */
-  .file-info {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
-    font-size: 13px;
-  }
-
-  .file-note {
-    font-size: 10px;
-    margin-top: 10px;
-    padding-top: 10px;
-  }
-
-  /* Toggle 開關 */
-  .toggle-label {
-    gap: 12px;
-  }
-
-  .toggle-switch-wrapper {
-    width: 48px;
-    height: 26px;
-  }
-
-  .toggle-slider:before {
-    height: 20px;
-    width: 20px;
-  }
-
-  .toggle-input:checked + .toggle-slider:before {
-    transform: translateX(22px);
-  }
-
-  .toggle-text {
-    font-size: 14px;
-  }
-
-  /* 子設定 */
-  .sub-setting {
-    padding-left: 0;
-    margin-top: 12px;
-  }
-
-  .number-input {
-    width: 100%;
-    padding: 12px;
-    font-size: 16px; /* 防止 iOS 縮放 */
-    min-height: 44px;
-  }
-
-  /* 標籤輸入 */
-  .tag-input-wrapper {
-    flex-direction: column;
-  }
-
-  .tag-input-wrapper .text-input {
-    max-width: none;
-    width: 100%;
-    padding: 12px;
-    font-size: 16px; /* 防止 iOS 縮放 */
-    min-height: 44px;
-  }
-
-  .btn-add-tag {
-    width: 100%;
-    padding: 12px 20px;
-    min-height: 44px;
-  }
-
-  .quick-tags-section {
-    padding: 8px;
-  }
-
-  .quick-tag-btn {
-    padding: 8px 14px;
-    font-size: 13px;
-    min-height: 36px;
-  }
-
-  .selected-tags {
-    gap: 6px;
-  }
-
-  .selected-tag {
-    padding: 8px 12px;
-    font-size: 13px;
-  }
-
-  .remove-tag {
-    width: 20px;
-    height: 20px;
-  }
-
-  /* 動作按鈕 */
-  .modal-actions {
-    flex-direction: column;
-    gap: 10px;
-    margin-top: 20px;
-  }
-
-  .modal-actions .btn {
-    width: 100%;
-    padding: 14px 24px;
-    font-size: 15px;
-    min-height: 48px;
-  }
-
-  .modal-actions .btn-cancel {
-    padding: 12px 20px;
-    font-size: 14px;
-  }
-
-  /* 合併模式樣式 */
-  .merge-info-header {
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .merge-file-list {
-    max-height: 100px;
-  }
-
-  .merge-file-item {
-    font-size: 12px;
-    padding: 8px 0;
-  }
-
-  .task-name-input {
-    padding: 12px;
-    font-size: 16px; /* 防止 iOS 縮放 */
-    min-height: 44px;
   }
 }
 </style>
