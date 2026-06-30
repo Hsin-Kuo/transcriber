@@ -372,7 +372,9 @@
     "mergeMode": "合併模式",
     "fileCount": "{count} 個檔案",
     "taskName": "任務名稱",
-    "mergeTaskNameHint": "此名稱將用於識別合併後的轉錄任務"
+    "mergeTaskNameHint": "此名稱將用於識別合併後的轉錄任務",
+    "settingsModalTitle": "轉錄設定",
+    "taskTypeSelectAria": "選擇任務類型"
   },
   "globalUpload": {
     "statusUploading": "上傳中",
@@ -812,6 +814,7 @@
   "batchUpload": {
     "title": "批次上傳（{count} 個檔案）",
     "close": "關閉",
+    "cancel": "取消",
     "expandSettings": "展開設定",
     "removeFile": "移除檔案",
     "customName": "自訂名稱",

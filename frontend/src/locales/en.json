@@ -372,7 +372,9 @@
     "mergeMode": "Merge Mode",
     "fileCount": "{count} file(s)",
     "taskName": "Task Name",
-    "mergeTaskNameHint": "This name identifies the merged transcription task"
+    "mergeTaskNameHint": "This name identifies the merged transcription task",
+    "settingsModalTitle": "Transcription Settings",
+    "taskTypeSelectAria": "Select task type"
   },
   "globalUpload": {
     "statusUploading": "Uploading",
@@ -812,6 +814,7 @@
   "batchUpload": {
     "title": "Batch Upload ({count} files)",
     "close": "Close",
+    "cancel": "Cancel",
     "expandSettings": "Expand Settings",
     "removeFile": "Remove File",
     "customName": "Custom Name",
