@@ -722,6 +722,9 @@ async def update_keep_audio(
     update_fields = {"keep_audio": new_keep_audio}
     if new_audio_path != audio_file_path:
         update_fields["result.audio_file"] = new_audio_path
+    if new_keep_audio:
+        # 重新釘選：清掉降級時寫入的寬限期到期標記（重回 kept/，不再受 lifecycle 管）
+        update_fields["audio_expires_at"] = None
     await task_service.update_task_status(task_id, update_fields)
 
     log.info("task.keep_audio.updated", task_id=task_id, keep_audio=new_keep_audio)

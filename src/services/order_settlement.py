@@ -224,6 +224,10 @@ class OrderSettlement:
         log.info("subscription.activated", user_id=user_id, tier=tier, billing_cycle=billing_cycle, type=order_type)
         # 對帳收斂：終止此 user 其他非當前的 active 委託（防雙重完成造成孤兒重複扣款）
         await self._terminate_orphan_contracts(user_id, n.period_no)
+        # 降級生效後（quota 已 commit）：釋放超過新方案額度的釘選音檔，進寬限期。
+        #   best-effort（reconcile 自行吞例外），不影響已成功的訂閱啟用。
+        if order_type == "downgrade_subscription":
+            await self._reconcile_pinned_audio(user_id, tier)
         return SettleResult(SettleOutcome.ACTIVATED, n.order_no)
 
     # ── 額外額度（MPG 一次性）────────────────────────────────────────────────
@@ -258,6 +262,16 @@ class OrderSettlement:
         await self.user_repo.update_subscription(user_id, sub)
         await self.user_repo.update_quota(user_id, build_quota_from_tier("free"))
         log.warning("subscription.renewal.payment_failed", user_id=user_id)
+        # 降為 free（quota 已 commit）：free 不能保留音檔 → 釋放全部釘選進寬限期。
+        await self._reconcile_pinned_audio(user_id, "free")
+
+    async def _reconcile_pinned_audio(self, user_id: str, new_tier: str) -> None:
+        """降額後核對釘選音檔（best-effort，絕不拋例外拖垮結算流程）。"""
+        try:
+            from .pinned_audio_reconciler import reconcile_pinned_audio
+            await reconcile_pinned_audio(self.user_repo.db, user_id, new_tier)
+        except Exception as e:
+            log.error("subscription.reconcile_pinned_audio.failed", user_id=user_id, error=str(e), exc_info=True)
 
     async def _terminate_prev(self, order: dict) -> None:
         """升降級首期成功後，終止被取代的前一張藍新委託。"""

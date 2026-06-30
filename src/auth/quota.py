@@ -375,6 +375,14 @@ class QuotaManager:
         user["quota"] = free_quota
         log.warning("quota.subscription.expired", user_id=user_id, downgraded_to="free")
 
+        # 降為 free（quota 已 commit）：釋放超過 free 額度的釘選音檔進寬限期。
+        #   best-effort：reconcile 自行吞例外；此處再包一層防呆，確保到期降級流程不被拖垮。
+        try:
+            from src.services.pinned_audio_reconciler import reconcile_pinned_audio
+            await reconcile_pinned_audio(db, user_id, "free")
+        except Exception as e:
+            log.warning("quota.subscription.expire.reconcile_failed", user_id=user_id, error=str(e))
+
     @staticmethod
     async def reset_user_monthly_quota(db, user_id: str):
         """手動重置用戶每月配額（新計費週期開始時）"""
