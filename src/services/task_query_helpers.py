@@ -80,6 +80,24 @@ def get_task_field(task: Dict[str, Any], field: str) -> Any:
 
 # ========== Audio Expiration ==========
 
+def _to_aware_utc(value: Any) -> Optional[datetime]:
+    """把 Unix timestamp(秒) / ISO 字串 / datetime 統一成 aware UTC datetime；無法辨識回 None。"""
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value, tz=timezone.utc)
+    if isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    elif isinstance(value, datetime):
+        dt = value
+    else:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def is_audio_expired(task: Dict[str, Any], retention_days: int) -> bool:
     """判斷音檔是否已被 S3 Lifecycle 自動刪除
 
@@ -91,6 +109,15 @@ def is_audio_expired(task: Dict[str, Any], retention_days: int) -> bool:
     """
     if task.get("keep_audio"):
         return False
+
+    # 降級釋放的音檔有明確寬限期到期時間（reconcile_pinned_audio 寫入，與 S3
+    # lifecycle 對齊）。一旦設定就以它為準，不再回頭用 completed_at 計算——否則舊檔
+    # completed_at 早已過期會讓寬限期形同虛設（UI 立刻隱藏、使用者來不及下載）。
+    audio_expires_at = task.get("audio_expires_at")
+    if audio_expires_at:
+        expires_dt = _to_aware_utc(audio_expires_at)
+        if expires_dt is not None:
+            return datetime.now(timezone.utc) > expires_dt
 
     completed_at = task.get("timestamps", {}).get("completed_at")
     if not completed_at:
@@ -166,6 +193,7 @@ def filter_task_for_list(task: Dict[str, Any], retention_days: int = 7) -> Dict[
         "custom_name": task.get("custom_name"),
         "tags": task.get("tags", []),
         "keep_audio": task.get("keep_audio", False),
+        "audio_expires_at": task.get("audio_expires_at"),
         "speaker_names": task.get("speaker_names", {}),
         "subtitle_settings": task.get("subtitle_settings", {}),
         "timestamps": task.get("timestamps", {}),

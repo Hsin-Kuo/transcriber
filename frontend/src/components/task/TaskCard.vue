@@ -113,6 +113,15 @@
               </label>
             </div>
 
+            <!-- 降級後釋放釘選的音檔：寬限期到期提示 -->
+            <span
+              v-if="audioGraceDate"
+              class="audio-grace-badge"
+              :title="$t('taskList.audioGraceTooltip', { date: audioGraceDate })"
+            >
+              {{ $t('taskList.audioGraceBadge', { date: audioGraceDate }) }}
+            </span>
+
             <!-- 桌機：雙聯按鈕組 -->
             <div class="btn-group desktop-action">
               <button
@@ -244,7 +253,7 @@ const authStore = useAuthStore()
 const UNLIMITED_KEEP_AUDIO = 999999
 const maxKeepAudio = computed(() => authStore.maxKeepAudio)
 const isUnlimitedKeepAudio = computed(() => maxKeepAudio.value >= UNLIMITED_KEEP_AUDIO)
-const { formatDateTime: formatTimestamp } = useDateFormatter()
+const { formatDateTime: formatTimestamp, formatDate } = useDateFormatter()
 const {
   getStatusText,
   getProgressWidth,
@@ -375,6 +384,16 @@ function handleToggleKeepAudio() {
 function handleTagsUpdated(data) {
   emit('tags-updated', data)
 }
+
+// 降級釋放的音檔寬限期到期日（後端寫入 audio_expires_at）。
+// 後端在超過寬限期時會把 audio_file 隱藏，故有 audio_file + audio_expires_at 即代表仍在寬限期內。
+const audioGraceDate = computed(() => {
+  const ts = props.task.audio_expires_at
+  if (!ts) return null
+  const hasAudio = props.task.result?.audio_file || props.task.audio_file
+  if (!hasAudio) return null
+  return formatDate(ts)
+})
 
 function getKeepAudioTooltip() {
   // 最新任務音檔自動保留，不受手動額度影響（不帶數字，避免 free=0 / 無限方案顯示怪異）
@@ -760,6 +779,21 @@ function getKeepAudioTooltip() {
   border-radius: 4px;
   box-shadow: 0 2px 4px rgba(255, 107, 107, 0.3);
   pointer-events: none;
+}
+
+/* 降級後寬限期到期提示 badge */
+.audio-grace-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #856404;
+  background: #fff3cd;
+  border: 1px solid #f59e0b;
+  border-radius: 999px;
+  white-space: nowrap;
+  cursor: help;
 }
 
 /* 按鈕 */
