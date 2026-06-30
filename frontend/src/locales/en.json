@@ -681,6 +681,11 @@
   "transcriptDetail": {
     "edit": "Edit",
     "save": "Save",
+    "doneEditing": "Done",
+    "autosaveIdle": "Auto-save",
+    "autosaveSaving": "Saving…",
+    "autosaveSaved": "Saved",
+    "autosaveError": "Save failed, retrying…",
     "cancel": "Cancel",
     "download": "Download",
     "copyText": "Copy text",

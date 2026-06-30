@@ -26,6 +26,9 @@ export function useSubtitleAutosave({
   isEditing,
   originalSegments,
   originalContent,
+  // 完整 I1（feature flag）：speaker 變更改走統一閘門，取代直存 saveSegmentsToBackend
+  autosaveEnabled = false,
+  scheduleAutosave = null,
 }) {
   const { t: $t } = useI18n()
 
@@ -90,6 +93,14 @@ export function useSubtitleAutosave({
       }
       return seg
     })
+
+    // 完整 I1：flag 開時走統一閘門。groupedSegments 已含 speaker 變更，
+    // 閘門 provider 於送出當下重建，與待存的文字編輯無損合併（不再需要 baseline 解耦，
+    // 因 autosave 模式已無 Cancel，文字本就持續落地）。immediate 保留即時存體感。
+    if (autosaveEnabled && scheduleAutosave) {
+      scheduleAutosave({ immediate: true })
+      return
+    }
 
     // 編輯模式：講者與文字解耦。
     // 講者即時存後端，但只帶「編輯開始時的文字 baseline」（originalSegments），

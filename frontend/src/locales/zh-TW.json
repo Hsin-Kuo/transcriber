@@ -681,6 +681,11 @@
   "transcriptDetail": {
     "edit": "編輯",
     "save": "儲存",
+    "doneEditing": "完成編輯",
+    "autosaveIdle": "自動儲存",
+    "autosaveSaving": "儲存中…",
+    "autosaveSaved": "已儲存",
+    "autosaveError": "儲存失敗，重試中…",
     "cancel": "取消",
     "download": "下載",
     "copyText": "複製文字",
