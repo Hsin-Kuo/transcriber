@@ -768,8 +768,7 @@ const {
   startEditing,
   cancelEditing,
   finishEditing,
-  handleBeforeUnload
-} = useTranscriptEditor(currentTranscript, originalContent, displayMode, groupedSegments, convertTableToPlainText)
+} = useTranscriptEditor(currentTranscript, originalContent)
 
 // kebab「複製文字」用：純文字，不含時間碼與講者標籤
 const copyableText = computed(() => {
@@ -1094,7 +1093,6 @@ usePageLifecycle({
   densityThreshold,
   isEditing,
   hasUnsavedChanges,
-  handleBeforeUnload,
   handleCancelEditing,
   clearHighlights,
   cleanupAudioPlayer,

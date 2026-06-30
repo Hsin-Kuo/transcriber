@@ -1,13 +1,15 @@
-import { ref, computed, nextTick } from 'vue'
+import { ref, nextTick } from 'vue'
 
 /**
  * 逐字稿編輯管理 Composable
  *
  * 職責：
  * - 管理編輯狀態（編輯中、標題編輯）
- * - 檢查未儲存的變更
+ *
+ * 註：未儲存變更判斷與 beforeunload 警告不在此（見下方說明），故只需 currentTranscript /
+ * originalContent 兩個依賴。
  */
-export function useTranscriptEditor(currentTranscript, originalContent, displayMode, groupedSegments, convertTableToPlainText, speakerNames = null) {
+export function useTranscriptEditor(currentTranscript, originalContent) {
   // 編輯狀態
   const isEditing = ref(false)
   const isEditingTitle = ref(false)
@@ -16,24 +18,10 @@ export function useTranscriptEditor(currentTranscript, originalContent, displayM
   // 元素引用
   const titleInput = ref(null)
 
-  /**
-   * 檢查是否有未儲存的變更
-   */
-  const hasUnsavedChanges = computed(() => {
-    if (!isEditing.value) return false
-
-    if (displayMode.value === 'paragraph') {
-      // 段落模式：比較 textarea 內容
-      return currentTranscript.value.content !== originalContent.value
-    } else if (displayMode.value === 'subtitle') {
-      // 字幕模式：比較表格內容
-      // 注意：這裡不傳 speakerNames，因為講者名稱變更不通過編輯儲存
-      const currentContent = convertTableToPlainText(groupedSegments.value)
-      return currentContent !== originalContent.value
-    }
-
-    return false
-  })
+  // 注意：未儲存變更的判斷（hasUnsavedChanges）與 beforeunload 警告改由
+  // TranscriptDetailView + usePageLifecycle 負責——段落模式的編輯內容只存在於
+  // contenteditable 的 DOM，本 composable 拿不到 textareaRef 無法準確比對，
+  // 故不在此計算（避免段落模式關分頁不跳警告的 bug）。
 
   // ========== 標題編輯 ==========
 
@@ -83,25 +71,11 @@ export function useTranscriptEditor(currentTranscript, originalContent, displayM
     isEditing.value = false
   }
 
-  // ========== 瀏覽器警告處理 ==========
-
-  /**
-   * 處理瀏覽器關閉/重新整理時的警告
-   */
-  const handleBeforeUnload = (e) => {
-    if (hasUnsavedChanges.value) {
-      e.preventDefault()
-      e.returnValue = ''
-      return ''
-    }
-  }
-
   return {
     // 狀態
     isEditing,
     isEditingTitle,
     editingTaskName,
-    hasUnsavedChanges,
 
     // 元素引用
     titleInput,
@@ -114,8 +88,5 @@ export function useTranscriptEditor(currentTranscript, originalContent, displayM
     startEditing,
     cancelEditing,
     finishEditing,
-
-    // 瀏覽器警告
-    handleBeforeUnload
   }
 }
