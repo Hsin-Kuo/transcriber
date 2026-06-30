@@ -40,6 +40,7 @@ export interface Task {
   custom_name?: string
   tags?: string[]
   keep_audio?: boolean
+  audio_expires_at?: number | null
   speaker_names?: Record<string, string>
   subtitle_settings?: Record<string, unknown>
   timestamps?: TaskTimestamps

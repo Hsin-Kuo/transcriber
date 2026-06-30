@@ -98,6 +98,11 @@ class TaskInDB(BaseModel):
     tags: List[str] = Field(default_factory=list, description="標籤列表")
     custom_name: Optional[str] = Field(None, description="自訂名稱")
     keep_audio: bool = Field(False, description="是否保留音檔")
+    audio_expires_at: Optional[int] = Field(
+        None,
+        description="音檔寬限期到期時間（UTC Unix timestamp）；降級釋放釘選時寫入，"
+                    "is_audio_expired 優先採用此值，與 S3 Lifecycle 對齊",
+    )
 
     # 時間戳記
     timestamps: Timestamps = Field(..., description="時間戳記")
