@@ -83,6 +83,8 @@
     "summaryAlwaysOpen": "Always Open",
     "summaryAlwaysCollapsed": "Always Collapsed",
     "summaryFollowLast": "Remember Last State",
+    "tips": "Usage Tips",
+    "tipsDescription": "Rotate handy tips in the task detail header",
     "deleteAccount": "Delete Account",
     "deleteAccountDescription": "This will permanently delete your account and all data, including:",
     "deleteAccountItem1": "Personal information (email, password, Google link)",
@@ -97,7 +99,7 @@
     "errorDeletePasswordRequired": "Please enter your password",
     "errorDeleteFailed": "Failed to delete account, please try again",
     "securityDesc": "Password, Google account, delete account",
-    "preferencesDesc": "Language, timezone, theme, AI summary",
+    "preferencesDesc": "Language, timezone, theme, AI summary, usage tips",
     "supportDesc": "Help center, FAQ, contact",
     "documentsDesc": "Privacy policy, terms of service",
     "teamDesc": "About our team",
@@ -679,6 +681,17 @@
     "cancel": "Cancel"
   },
   "transcriptDetail": {
+    "tips": {
+      "audioShortcuts": "Hover the top-right icon for audio shortcuts — {mod}+Ctrl to play/pause, {mod}+←→ to skip",
+      "clickTimeJump": "In subtitle mode, click a timestamp to jump playback to that segment",
+      "renameSpeaker": "Click a speaker tag or “Speaker names” to rename each speaker",
+      "timecodeMarkers": "Enable “Timecode markers” in display settings to show timestamps in the transcript",
+      "searchReplace": "Search and batch-replace text to quickly fix repeated wording",
+      "downloadFormats": "Download in multiple formats (TXT / SRT / VTT) for subtitles or archiving",
+      "aiSummary": "Generate a summary of this content with one click using AI",
+      "shareLink": "Create a share link — others can view the transcript without signing in",
+      "darkMode": "Switch to dark mode in settings for easier night-time reading"
+    },
     "edit": "Edit",
     "save": "Save",
     "doneEditing": "Done",
