@@ -60,6 +60,8 @@ jobs:
           VITE_SENTRY_TRACES_SAMPLE_RATE=0.1
           VITE_SENTRY_RELEASE=${{ github.sha }}
           VITE_BACKEND_PDF_ENABLED=true
+          # 任務詳情自動儲存：staging soak 通過後於 prod 開啟（後路：拿掉此行重 deploy 即退回手動存）
+          VITE_AUTOSAVE_ENABLED=true
           EOF
           npm ci
           npm run build
