@@ -35,6 +35,16 @@
       />
     </div>
 
+    <!-- 使用技巧輪播（桌面限定；依任務類型/狀態顯示、偏好可關） -->
+    <div v-if="showTips" class="header-tips" aria-hidden="true">
+      <svg class="tip-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1h6c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z" />
+      </svg>
+      <Transition name="tip-fade" mode="out-in">
+        <span :key="currentTip?.id" class="tip-text">{{ currentTipText }}</span>
+      </Transition>
+    </div>
+
     <div class="header-right">
       <!-- 編輯/儲存按鈕 -->
       <button v-if="!isEditing" @click="$emit('start-editing')" class="btn btn-header btn-expandable" :disabled="!isContentReady">
@@ -251,10 +261,11 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, toRef, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import TranscriptMetadata from './TranscriptMetadata.vue'
 import SearchReplacePopup from './SearchReplacePopup.vue'
 import { useClickOutside } from '../../composables/useClickOutside'
+import { useHeaderTips } from '../../composables/transcript/useHeaderTips'
 
 const props = defineProps({
   taskDisplayName: {
@@ -375,6 +386,13 @@ const emit = defineEmits([
   'replace-current',
   'replace-all'
 ])
+
+// Header 使用技巧輪播（依 displayMode / 講者 / 完成狀態顯示；偏好可關）
+const { currentTip, currentTipText, showTips } = useHeaderTips({
+  displayMode: toRef(props, 'displayMode'),
+  hasSpeakerInfo: toRef(props, 'hasSpeakerInfo'),
+  isContentReady: toRef(props, 'isContentReady'),
+})
 
 // Refs
 const titleInputRef = ref(null)
@@ -611,7 +629,8 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex: 1;
+  /* 讓中間 tips 槽能取得彈性空間；標題仍靠 min-width:0 + ellipsis 截斷 */
+  flex: 0 1 auto;
   min-width: 0;
 }
 
@@ -621,6 +640,46 @@ onUnmounted(() => {
   gap: 16px;
   flex-shrink: 0;
   overflow: visible;
+}
+
+/* 使用技巧輪播（中間槽，桌面限定） */
+.header-tips {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 12px;
+  font-size: 13px;
+  color: var(--text-secondary, #888);
+}
+
+.header-tips .tip-icon {
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+.header-tips .tip-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 輪播淡入淡出（出→入）；reduced-motion 時直接切 */
+.tip-fade-enter-active,
+.tip-fade-leave-active {
+  transition: opacity 0.35s ease;
+}
+.tip-fade-enter-from,
+.tip-fade-leave-to {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tip-fade-enter-active,
+  .tip-fade-leave-active {
+    transition: none;
+  }
 }
 
 /* 返回按鈕 */
@@ -1117,6 +1176,11 @@ onUnmounted(() => {
     gap: 0px;
     height: auto;
     padding: 2px 0px;
+  }
+
+  /* 手機版空間有限，隱藏 tips 輪播（只在桌面顯示） */
+  .header-tips {
+    display: none;
   }
 
   .header-left {

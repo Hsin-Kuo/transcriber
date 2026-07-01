@@ -340,6 +340,18 @@
             </div>
           </div>
         </div>
+
+        <!-- 使用技巧提示（任務詳情頁 header 輪播） -->
+        <div class="setting-item">
+          <span class="setting-label">
+            {{ $t('userSettings.tips') }}
+            <span class="setting-sublabel">{{ $t('userSettings.tipsDescription') }}</span>
+          </span>
+          <label class="toggle-switch" :class="{ active: tipsEnabled }">
+            <input type="checkbox" :checked="tipsEnabled" @change="toggleTips($event.target.checked)" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
         </div>
       </div>
 
@@ -852,6 +864,13 @@ const summaryExpandMode = ref(
 )
 const summaryExpandDropdownOpen = ref(false)
 
+// 使用技巧提示開關（優先 authStore → fallback localStorage → 預設開）
+const tipsEnabled = ref(
+  typeof authStore.preferences.tipsEnabled === 'boolean'
+    ? authStore.preferences.tipsEnabled
+    : localStorage.getItem('tipsEnabled') !== 'false'
+)
+
 // 下拉選單狀態
 const languageDropdownOpen = ref(false)
 const timezoneDropdownOpen = ref(false)
@@ -934,6 +953,12 @@ async function selectSummaryExpandMode(mode) {
   await authStore.updatePreferences({ summaryExpandMode: mode })
 }
 
+async function toggleTips(enabled) {
+  tipsEnabled.value = enabled
+  localStorage.setItem('tipsEnabled', String(enabled))
+  await authStore.updatePreferences({ tipsEnabled: enabled })
+}
+
 // 選擇選項
 function selectLanguage(code) {
   currentLanguage.value = code
@@ -968,6 +993,10 @@ watch(
       currentTheme.value = prefs.theme
       localStorage.setItem('theme', prefs.theme)
       document.documentElement.setAttribute('data-theme', prefs.theme)
+    }
+    if (typeof prefs.tipsEnabled === 'boolean' && prefs.tipsEnabled !== tipsEnabled.value) {
+      tipsEnabled.value = prefs.tipsEnabled
+      localStorage.setItem('tipsEnabled', String(prefs.tipsEnabled))
     }
   },
   { deep: true }
@@ -2176,6 +2205,15 @@ async function confirmDeleteAccount() {
   font-size: 0.95rem;
   color: var(--main-text-light);
   font-weight: 500;
+}
+
+/* 次要說明（設定項標籤下方，較小較淡）*/
+.setting-sublabel {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--text-secondary, #888);
 }
 
 /* 自訂下拉選單 */

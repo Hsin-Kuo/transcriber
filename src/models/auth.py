@@ -68,6 +68,7 @@ class UserPreferences(BaseModel):
     language: str = "zh-TW"
     timezone: str = "Asia/Taipei"
     theme: str = "light"
+    tipsEnabled: bool = True
 
 
 VALID_SUMMARY_EXPAND_MODES = ('always-open', 'always-collapsed', 'follow-last')
@@ -85,6 +86,7 @@ class UpdatePreferencesRequest(BaseModel):
     language: Optional[str] = None
     timezone: Optional[str] = None
     theme: Optional[str] = None
+    tipsEnabled: Optional[bool] = None
 
     @validator('summaryExpandMode')
     def validate_summary_expand_mode(cls, v):
