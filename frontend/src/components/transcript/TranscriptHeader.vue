@@ -854,6 +854,7 @@ onUnmounted(() => {
   padding: 6px 10px;
   border-radius: 6px;
   transition: all 0.2s ease;
+  max-width: 400px; /* 固定寬度，超出以 … 截斷 */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

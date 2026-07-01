@@ -91,7 +91,7 @@
           class="recent-task-item"
           :title="task.display_name"
         >
-          <div class="task-name">{{ truncateName(task.display_name) }}</div>
+          <div class="task-name">{{ task.display_name }}</div>
         </router-link>
       </div>
     </div>
@@ -164,11 +164,6 @@ async function loadRecentTasks() {
 }
 
 // 截斷任務名稱（最多 18 字符）
-function truncateName(name) {
-  const maxLength = 18
-  return name.length <= maxLength ? name : name.substring(0, 15) + '...'
-}
-
 // 取得郵箱首字母
 function getFirstLetter(email) {
   if (!email) return '?'
@@ -662,6 +657,7 @@ watch(() => route.path, (newPath, oldPath) => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0; /* 允許子項收縮，讓 task-name 依寬度以 … 截斷 */
   padding: 3px 12px;
   border-radius: 8px;
   background: transparent;
