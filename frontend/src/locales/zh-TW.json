@@ -682,15 +682,15 @@
   },
   "transcriptDetail": {
     "tips": {
-      "audioShortcuts": "小技巧：把滑鼠移到右上角可看音檔快捷鍵，{mod}+Ctrl 播放/暫停、{mod}+←→ 快退快進",
-      "clickTimeJump": "小技巧：字幕模式下點時間欄，即可跳到該段落播放",
-      "renameSpeaker": "小技巧：點講者標籤或右上角「講者名稱」，可自訂每位說話者的名字",
-      "timecodeMarkers": "小技巧：在顯示設定開啟「時間標記」，逐字稿也能看到時間軸",
-      "searchReplace": "小技巧：支援搜尋與批次取代文字，快速修正重複用詞",
-      "downloadFormats": "小技巧：可下載多種格式（TXT / SRT / VTT），方便上字幕或存檔",
-      "aiSummary": "小技巧：用 AI 一鍵產生這段內容的摘要重點",
-      "shareLink": "小技巧：可產生分享連結，對方免登入也能檢視逐字稿",
-      "darkMode": "小技巧：在設定中可切換深色模式，夜間閱讀更護眼"
+      "audioShortcuts": "把滑鼠移到右上角可看音檔快捷鍵，{mod}+Ctrl 播放/暫停、{mod}+←→ 快退快進",
+      "clickTimeJump": "字幕模式下點時間欄，即可跳到該段落播放",
+      "renameSpeaker": "點講者標籤或右上角「講者名稱」，可自訂每位說話者的名字",
+      "timecodeMarkers": "在顯示設定開啟「時間標記」，逐字稿也能看到時間軸",
+      "searchReplace": "支援搜尋與批次取代文字，快速修正重複用詞",
+      "downloadFormats": "可下載多種格式（TXT / SRT / VTT），方便上字幕或存檔",
+      "aiSummary": "用 AI 一鍵產生這段內容的摘要重點",
+      "shareLink": "可產生分享連結，對方免登入也能檢視逐字稿",
+      "darkMode": "在設定中可切換深色模式，夜間閱讀更護眼"
     },
     "edit": "編輯",
     "save": "儲存",
