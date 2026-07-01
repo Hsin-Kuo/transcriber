@@ -348,6 +348,11 @@ function handleGoogleError(err) {
   letter-spacing: -0.5px;
 }
 
+/* 深色模式下改用 nav 品牌字色，提高對比 */
+:root[data-theme="dark"] .auth-title {
+  color: var(--nav-text);
+}
+
 .auth-tagline {
   text-align: center;
   color: var(--main-text-light);
