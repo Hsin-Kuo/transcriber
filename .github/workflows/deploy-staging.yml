@@ -71,6 +71,8 @@ jobs:
           VITE_SENTRY_TRACES_SAMPLE_RATE=0.1
           VITE_SENTRY_RELEASE=${{ github.sha }}
           VITE_BACKEND_PDF_ENABLED=true
+          # 任務詳情自動儲存：先在 staging soak（prod deploy-aws.yml 尚未開，維持手動存）
+          VITE_AUTOSAVE_ENABLED=true
           EOF
           npm ci
           npm run build

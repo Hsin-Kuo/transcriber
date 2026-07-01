@@ -98,7 +98,7 @@ else:
 # ========== 創建 FastAPI 應用 ==========
 
 app = FastAPI(
-    title="Sound Lite 轉錄服務",
+    title="SoundLite 轉錄服務",
     description="基於三層架構的音檔轉錄服務",
     version="3.0.0",
     # 生產環境關閉互動式文件與 OpenAPI schema 匯出，避免完整 API map（endpoint /

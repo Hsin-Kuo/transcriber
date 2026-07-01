@@ -175,7 +175,7 @@ router.beforeEach(async (to, from, next) => {
 router.afterEach((to) => {
   // 任務詳情頁的標題由組件內動態設定
   if (to.name !== 'transcript') {
-    document.title = 'Sound Lite'
+    document.title = 'SoundLite'
   }
 })
 

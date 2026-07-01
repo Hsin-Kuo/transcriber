@@ -15,7 +15,7 @@
           </svg>
         </div>
         <h1 class="login-title">管理後台</h1>
-        <p class="login-subtitle">Sound Lite 服務</p>
+        <p class="login-subtitle">SoundLite 服務</p>
       </div>
 
       <form @submit.prevent="handleLogin" class="login-form">

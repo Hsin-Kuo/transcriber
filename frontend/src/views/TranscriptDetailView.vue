@@ -27,13 +27,15 @@
       :current-match-index="currentMatchIndex"
       :match-case="matchCase"
       :match-whole-word="matchWholeWord"
+      :autosave-enabled="AUTOSAVE_ENABLED"
+      :autosave-status="autosave.status.value"
       @go-back="goBack"
       @start-title-edit="startTitleEdit"
       @save-task-name="saveTaskName"
       @cancel-title-edit="cancelTitleEdit"
       @update:editing-task-name="editingTaskName = $event"
       @start-editing="handleStartEditing"
-      @save-editing="saveEditing"
+      @save-editing="handleSaveEditing"
       @cancel-editing="handleCancelEditing"
       @download="downloadTranscript"
       @delete-task="deleteTask"
@@ -353,9 +355,10 @@ class="transcript-layout"
               v-text="currentTranscript.content"
               @keydown="handleContentEditableKeyDown"
               @paste="handlePaste"
-              @input="segOffsets.handleInput($event.currentTarget)"
+              @input="handleParagraphInput($event)"
               @compositionstart="segOffsets.handleCompositionStart()"
               @compositionend="handleCompositionEnd($event)"
+              @blur="handleParagraphBlur"
               @mousemove="handleEditorMouseMove"
               @mousedown="handleEditorClickInEditing"
               @scroll="handleEditorScroll"
@@ -405,7 +408,7 @@ class="transcript-layout"
             :is-editing="isEditing"
             :format-timestamp="formatTimestamp"
             @seek-to-time="seekToTime"
-            @update-row-content="updateRowContent"
+            @update-row-content="handleUpdateRowContent"
             @update-segment-speaker="updateSegmentSpeaker"
             @open-speaker-settings="handleOpenSpeakerSettings"
           />
@@ -542,10 +545,12 @@ import { useTranscriptDownload } from '../composables/transcript/useTranscriptDo
 import { useSearchReplace } from '../composables/transcript/useSearchReplace'
 import { useEditingLifecycle } from '../composables/transcript/useEditingLifecycle'
 import { useSubtitleAutosave } from '../composables/transcript/useSubtitleAutosave'
+import { useAutosave } from '../composables/transcript/useAutosave'
 import { useContentEditableInput } from '../composables/transcript/useContentEditableInput'
 import { usePageLifecycle } from '../composables/transcript/usePageLifecycle'
 import { useTaskTags } from '../composables/task/useTaskTags'
 import { isModifierPressed } from '../utils/platform'
+import { AUTOSAVE_ENABLED } from '../utils/featureFlags'
 import { useAuthStore } from '../stores/auth'
 import { useTourStore, TOUR_PHASES, TOUR_ANCHORS, tourSel } from '../stores/tour'
 import { useProductTour } from '../composables/useProductTour'
@@ -597,11 +602,11 @@ const {
   cancelPendingRequests,
 } = useTranscriptData()
 
-// 動態更新頁面標題：任務名稱 - Sound Lite
+// 動態更新頁面標題：任務名稱 - SoundLite
 watch(
   () => currentTranscript.value?.custom_name || currentTranscript.value?.filename,
   (name) => {
-    document.title = name ? `${name} - Sound Lite` : 'Sound Lite'
+    document.title = name ? `${name} - SoundLite` : 'SoundLite'
   }
 )
 
@@ -770,6 +775,88 @@ const {
   finishEditing,
 } = useTranscriptEditor(currentTranscript, originalContent)
 
+// ========== 自動儲存閘門（single-flight + trailing + 退避重試 + 三態） ==========
+// 設計定案見 memory/project_autosave_task_detail.md。AUTOSAVE_ENABLED 關閉時不掛任何 schedule，
+// 手動存檔流程與原本逐位元相同。
+const autosave = useAutosave({
+  saveFn: (p) => saveTranscript(
+    p.text,
+    p.segments ?? null,
+    p.mode,
+    p.successMessage ?? null,
+    { silent: p.silent ?? true, syncCurrentContent: p.syncCurrentContent ?? true },
+  ),
+})
+
+// 段落編輯：每次輸入排程一次「只存 text」的自動儲存（D2）。
+// 關鍵：syncCurrentContent:false —— 編輯中的 div 是 v-text 綁定，回寫 content 會重設游標。
+// segment offset 重算成本高，留待退出編輯時由 saveEditing 一次完整存。
+function scheduleParagraphAutosave(el) {
+  if (!AUTOSAVE_ENABLED) return
+  if (displayMode.value !== 'paragraph' || !isEditing.value || !el) return
+  autosave.schedule(() => ({
+    mode: 'paragraph',
+    text: extractText(el),
+    segments: null,
+    silent: true,
+    syncCurrentContent: false,
+  }))
+}
+
+// @input：保留原本的 segment offset 追蹤，再疊加自動儲存排程
+function handleParagraphInput(e) {
+  segOffsets.handleInput(e.currentTarget)
+  scheduleParagraphAutosave(e.currentTarget)
+}
+
+// blur：把待存的 text flush 落地，避免「打完最後一句立刻點走」漏存（C3）
+function handleParagraphBlur() {
+  if (!AUTOSAVE_ENABLED) return
+  void autosave.flush()
+}
+
+// 字幕模式自動儲存：text 編輯與 speaker 變更都只改 groupedSegments 這個單一來源，
+// provider 在「送出當下」才重建 segments → trailing 合併無損（最後一次重建含全部編輯）。
+// 不 gate isEditing：speaker 變更在非編輯狀態也允許（沿用既有行為）。
+function scheduleSubtitleAutosave({ immediate = false } = {}) {
+  if (!AUTOSAVE_ENABLED) return
+  if (displayMode.value !== 'subtitle') return
+  autosave.schedule(() => ({
+    mode: 'subtitle',
+    text: originalContent.value,   // 字幕編輯不動段落 content，只更新 segments
+    segments: reconstructSegmentsFromGroups(groupedSegments.value),
+    silent: true,
+    syncCurrentContent: false,
+  }))
+  if (immediate) void autosave.flush()   // speaker 變更：保留即時存的體感
+}
+
+// 字幕 row 文字 blur：先更新本地 groupedSegments（原邏輯），再排程自動儲存
+function handleUpdateRowContent(groupId, event) {
+  updateRowContent(groupId, event)
+  scheduleSubtitleAutosave()
+}
+
+// 完整 I1：所有 /content 寫入都過閘門。退出存檔（saveEditing）也用這條：
+// schedule 最新完整 payload（覆蓋任何待送的 text-only）後 flush。
+function gatedContentSave(content, segments, mode) {
+  autosave.schedule(() => ({
+    mode,
+    text: content,
+    segments: segments ?? null,
+    silent: true,
+    syncCurrentContent: true,   // 退出後 read-mode 需反映最終內容
+  }))
+  return autosave.flush()
+}
+
+// 退出編輯（「完成編輯」）：丟棄待送的 debounce，走 saveEditing 做完整 extract + segments 重算
+// （segment 對齊定稿點）；flag 開時 saveEditing 內部經 gatedContentSave 走閘門。
+async function handleSaveEditing() {
+  if (AUTOSAVE_ENABLED) autosave.cancel()
+  await saveEditing()
+}
+
 // kebab「複製文字」用：純文字，不含時間碼與講者標籤
 const copyableText = computed(() => {
   if (displayMode.value === 'paragraph') {
@@ -783,6 +870,8 @@ const copyableText = computed(() => {
 
 // 重新定義 hasUnsavedChanges，檢查實際的 DOM 內容
 const hasUnsavedChanges = computed(() => {
+  // 自動儲存模式：有待 flush 的變更或上次存檔失敗 → 視為未存（beforeunload / 離開守衛攔）
+  if (AUTOSAVE_ENABLED && autosave.isDirty.value) return true
   if (!isEditing.value) return false
 
   if (displayMode.value === 'paragraph') {
@@ -938,7 +1027,8 @@ const {
   clearHighlights,
   reSearch,
   reapplyHighlightsIfNeeded,
-  saveTranscript,
+  // 完整 I1：flag 開時退出存檔也走閘門（gatedContentSave），否則維持直存
+  saveTranscript: AUTOSAVE_ENABLED ? gatedContentSave : saveTranscript,
   updateTaskName,
   editingTaskName,
   isEditingTitle,
@@ -981,6 +1071,9 @@ const {
   isEditing,
   originalSegments,
   originalContent,
+  // 完整 I1：flag 開時 speaker 變更改走閘門（與字幕文字共用同一道），不再直存
+  autosaveEnabled: AUTOSAVE_ENABLED,
+  scheduleAutosave: scheduleSubtitleAutosave,
 })
 
 // ========== 下載功能 ==========

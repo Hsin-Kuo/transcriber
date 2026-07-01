@@ -71,6 +71,8 @@ deploy/               # AWS 部署腳本
                             # （獨立 script 避免 pkill -f 配 inline sh -c self-kill）
   deploy-web.sh             # Web Server 初始部署腳本
   deploy-gpu-worker.sh      # GPU Worker 初始部署腳本
+  apply-s3-lifecycle.sh     # 音檔 S3 Lifecycle 規則（free=3d/paid=7d，kept 不過期）
+                            # 的唯一真實來源；冪等，bash apply-s3-lifecycle.sh [prod|staging]
 ```
 
 ---
