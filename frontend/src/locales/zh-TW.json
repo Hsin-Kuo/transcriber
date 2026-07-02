@@ -83,6 +83,8 @@
     "summaryAlwaysOpen": "總是展開",
     "summaryAlwaysCollapsed": "總是收合",
     "summaryFollowLast": "記住上次狀態",
+    "tips": "使用技巧提示",
+    "tipsDescription": "在任務詳情頁輪播顯示操作小技巧",
     "deleteAccount": "刪除帳號",
     "deleteAccountDescription": "此操作將永久刪除您的帳號及所有資料，包括：",
     "deleteAccountItem1": "個人資料（Email、密碼、Google 綁定）",
@@ -97,7 +99,7 @@
     "errorDeletePasswordRequired": "請輸入密碼",
     "errorDeleteFailed": "刪除帳號失敗，請稍後再試",
     "securityDesc": "密碼、Google 帳號、刪除帳號",
-    "preferencesDesc": "語言、時區、色調、AI 摘要",
+    "preferencesDesc": "語言、時區、色調、AI 摘要、使用技巧",
     "supportDesc": "幫助中心、常見問題、聯繫",
     "documentsDesc": "隱私權政策、服務條款",
     "teamDesc": "關於我們的團隊",
@@ -679,6 +681,18 @@
     "cancel": "取消"
   },
   "transcriptDetail": {
+    "tips": {
+      "audioShortcuts": "播放區右上角可查看音檔快捷鍵，{mod}+Ctrl 播放/暫停、{mod}+←→ 快退快進",
+      "clickTimeJump": "點擊時間欄，即可跳到該段落播放",
+      "renameSpeaker": "點講者標籤或右上角「講者名稱」，可自訂每位說話者的名字",
+      "timecodeMarkers": "在左側設定面板開啟「時間標記」，能在逐字稿中直接看到時間定位",
+      "altClickSeek": "按住 {mod} 時點擊標色的句子，音檔會跳到對應時間",
+      "searchReplace": "使用搜尋與批次取代文字，快速修正重複用詞",
+      "downloadFormats": "可下載多種格式（TXT / SRT / VTT），方便上字幕或存檔",
+      "aiSummary": "用 AI 一鍵產生這段內容的摘要重點",
+      "shareLink": "可產生分享連結，對方免登入也能檢視逐字稿",
+      "darkMode": "在左側設定面板中可切換深/淺色模式"
+    },
     "edit": "編輯",
     "save": "儲存",
     "doneEditing": "完成編輯",
