@@ -682,16 +682,16 @@
   },
   "transcriptDetail": {
     "tips": {
-      "audioShortcuts": "Hover the top-right icon for audio shortcuts — {mod}+Ctrl to play/pause, {mod}+←→ to skip",
-      "clickTimeJump": "In subtitle mode, click a timestamp to jump playback to that segment",
+      "audioShortcuts": "Find audio shortcuts in the top-right of the playback area — {mod}+Ctrl to play/pause, {mod}+←→ to skip",
+      "clickTimeJump": "Click a timestamp to jump playback to that segment",
       "renameSpeaker": "Click a speaker tag or “Speaker names” to rename each speaker",
-      "timecodeMarkers": "Enable “Timecode markers” in display settings to show timestamps in the transcript",
+      "timecodeMarkers": "Enable “Timecode markers” in the left settings panel to see time positions right in the transcript",
       "altClickSeek": "Hold {mod} and click a highlighted sentence to jump the audio to that time",
-      "searchReplace": "Search and batch-replace text to quickly fix repeated wording",
+      "searchReplace": "Use search and batch-replace to quickly fix repeated wording",
       "downloadFormats": "Download in multiple formats (TXT / SRT / VTT) for subtitles or archiving",
       "aiSummary": "Generate a summary of this content with one click using AI",
       "shareLink": "Create a share link — others can view the transcript without signing in",
-      "darkMode": "Switch to dark mode in settings for easier night-time reading"
+      "darkMode": "Switch between dark and light mode in the left settings panel"
     },
     "edit": "Edit",
     "save": "Save",
