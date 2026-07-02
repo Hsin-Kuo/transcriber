@@ -317,6 +317,14 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  hasAudio: {
+    type: Boolean,
+    default: false
+  },
+  audioRetentionDays: {
+    type: Number,
+    default: null
+  },
   uniqueSpeakers: {
     type: Array,
     default: () => []
@@ -392,6 +400,8 @@ const { currentTip, currentTipText, showTips } = useHeaderTips({
   displayMode: toRef(props, 'displayMode'),
   hasSpeakerInfo: toRef(props, 'hasSpeakerInfo'),
   isContentReady: toRef(props, 'isContentReady'),
+  hasAudio: toRef(props, 'hasAudio'),
+  audioRetentionDays: toRef(props, 'audioRetentionDays'),
 })
 
 // Refs

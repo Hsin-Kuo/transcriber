@@ -344,12 +344,8 @@
     "taskType": "Task Type",
     "paragraph": "Document",
     "subtitle": "Subtitle",
-    "paragraphHint": "Merge text with punctuation, suitable for articles or notes",
-    "subtitleHint": "Preserve timeline information, auto-disable punctuation, suitable for subtitle production",
-    "fileInfo": "Information",
     "fileName": "File Name",
     "fileSize": "File Size",
-    "audioRetentionNote": "Audio retention rule: Audio files are automatically deleted after {days} days. Pin a file to keep it.",
     "speakerDiarization": "Speaker Diarization",
     "enable": "Enable",
     "maxSpeakers": "Number of Speakers (Optional)",
@@ -691,7 +687,9 @@
       "downloadFormats": "Download in multiple formats (TXT / SRT / VTT) for subtitles or archiving",
       "aiSummary": "Generate a summary of this content with one click using AI",
       "shareLink": "Create a share link — others can view the transcript without signing in",
-      "darkMode": "Switch between dark and light mode in the left settings panel"
+      "darkMode": "Switch between dark and light mode in the left settings panel",
+      "audioRetentionPin": "Audio is auto-deleted after {days} days — pin it on the task list to keep it longer",
+      "audioRetentionFree": "Audio is auto-deleted after {days} days — upgrade your plan to keep it longer"
     },
     "edit": "Edit",
     "save": "Save",

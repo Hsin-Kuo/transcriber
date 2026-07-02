@@ -129,47 +129,10 @@
           <div class="modal-section">
             <label class="section-label">{{ $t('batchUpload.commonSettings') }}</label>
 
-            <!-- 任務類型（大圖示卡片） -->
+            <!-- 任務類型（迷你預覽卡片） -->
             <div class="setting-block">
               <label class="setting-label">{{ $t('transcription.taskType') }}</label>
-              <div class="task-type-cards" role="radiogroup" :aria-label="$t('transcription.taskTypeSelectAria')">
-                <label class="type-card" :class="{ selected: config.taskType === 'paragraph' }">
-                  <input type="radio" name="batchTaskType" value="paragraph" v-model="config.taskType" class="type-card-input" />
-                  <span class="type-card-icon" aria-hidden="true">
-                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"></path>
-                      <polyline points="14 2 14 8 20 8"></polyline>
-                      <line x1="8" y1="13" x2="16" y2="13"></line>
-                      <line x1="8" y1="17" x2="13" y2="17"></line>
-                    </svg>
-                  </span>
-                  <span class="type-card-title">{{ $t('transcription.paragraph') }}</span>
-                  <span class="type-card-desc">{{ $t('transcription.paragraphHint') }}</span>
-                  <span class="type-card-check" aria-hidden="true">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                      <polyline points="20 6 9 17 4 12"></polyline>
-                    </svg>
-                  </span>
-                </label>
-
-                <label class="type-card" :class="{ selected: config.taskType === 'subtitle' }">
-                  <input type="radio" name="batchTaskType" value="subtitle" v-model="config.taskType" class="type-card-input" />
-                  <span class="type-card-icon" aria-hidden="true">
-                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                      <rect x="2" y="5" width="20" height="14" rx="2"></rect>
-                      <line x1="6" y1="15" x2="12" y2="15"></line>
-                      <line x1="15" y1="15" x2="18" y2="15"></line>
-                    </svg>
-                  </span>
-                  <span class="type-card-title">{{ $t('transcription.subtitle') }}</span>
-                  <span class="type-card-desc">{{ $t('transcription.subtitleHint') }}</span>
-                  <span class="type-card-check" aria-hidden="true">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                      <polyline points="20 6 9 17 4 12"></polyline>
-                    </svg>
-                  </span>
-                </label>
-              </div>
+              <TaskTypeCards v-model="config.taskType" name="batchTaskType" />
             </div>
 
             <!-- 語言 -->
@@ -307,6 +270,7 @@ import { useI18n } from 'vue-i18n'
 import { useCollapsibleRows } from '../../composables/useCollapsibleRows'
 import { useFocusTrap } from '../../composables/useFocusTrap'
 import TruncatedFilename from '../common/TruncatedFilename.vue'
+import TaskTypeCards from '../transcription/TaskTypeCards.vue'
 
 const { t: $t, locale } = useI18n()
 
@@ -833,93 +797,7 @@ watch(() => props.initialFiles, (newFiles) => {
   margin-bottom: 8px;
 }
 
-/* === 任務類型卡片（沿用 TaskSettingsModal） === */
-.task-type-cards {
-  display: flex;
-  gap: 12px;
-}
-
-.type-card {
-  position: relative;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 8px;
-  padding: 18px 14px;
-  border: 2px solid rgba(var(--color-primary-rgb), 0.2);
-  border-radius: 14px;
-  background: var(--color-bg-light);
-  cursor: pointer;
-  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
-}
-
-.type-card:hover {
-  border-color: rgba(var(--color-primary-rgb), 0.45);
-  transform: translateY(-1px);
-}
-
-.type-card.selected {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.12);
-}
-
-.type-card-input {
-  position: absolute;
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.type-card-input:focus-visible + .type-card-icon {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 4px;
-  border-radius: 8px;
-}
-
-.type-card-icon {
-  color: rgba(var(--color-text-dark-rgb), 0.55);
-  transition: color 0.2s;
-}
-
-.type-card.selected .type-card-icon {
-  color: var(--color-primary);
-}
-
-.type-card-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: rgba(var(--color-text-dark-rgb), 0.9);
-}
-
-.type-card-desc {
-  font-size: 12px;
-  line-height: 1.4;
-  color: rgba(var(--color-text-dark-rgb), 0.6);
-}
-
-.type-card-check {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: var(--color-primary);
-  color: var(--color-white);
-  opacity: 0;
-  transform: scale(0.6);
-  transition: opacity 0.2s, transform 0.2s;
-}
-
-.type-card.selected .type-card-check {
-  opacity: 1;
-  transform: scale(1);
-}
+/* 任務類型卡片樣式已抽至 TaskTypeCards.vue */
 
 /* === Toggle 開關 === */
 .toggle-row {
@@ -1231,10 +1109,6 @@ watch(() => props.initialFiles, (newFiles) => {
   .modal-footer {
     padding-left: 16px;
     padding-right: 16px;
-  }
-
-  .task-type-cards {
-    flex-direction: column;
   }
 
   .file-info {

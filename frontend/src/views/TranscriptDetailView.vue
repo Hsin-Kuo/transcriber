@@ -20,6 +20,8 @@
       :density-threshold="densityThreshold"
       :speaker-names="speakerNames"
       :has-speaker-info="hasSpeakerInfo"
+      :has-audio="currentTranscript.hasAudio && !currentTranscript.audioExpired"
+      :audio-retention-days="currentTranscript.audioRetentionDays"
       :unique-speakers="uniqueSpeakers"
       :search-text="searchText"
       :replace-text="replaceText"

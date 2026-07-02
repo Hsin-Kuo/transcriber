@@ -43,7 +43,6 @@
       :merge-files="mergeMode.files"
       :default-merge-task-name="defaultMergeTaskName"
       :all-tags="allTags"
-      :audio-retention-days="audioRetentionDays"
       :dismissible="!tourMode"
       v-model:task-type="taskType"
       v-model:language="selectedLanguage"
@@ -89,8 +88,6 @@ const { tagsData, fetchTagColors } = useTaskTags($t)
 const authStore = useAuthStore()
 const uiStore = useUiStore()
 const uploadStore = useUploadStore()
-// 音檔保留天數依方案動態顯示（FREE=3、付費方案=7），未取得時 fallback 3
-const audioRetentionDays = computed(() => authStore.quota?.audio_retention_days || 3)
 
 const showNotification = inject('showNotification')
 
