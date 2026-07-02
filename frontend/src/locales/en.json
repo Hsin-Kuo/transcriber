@@ -686,6 +686,7 @@
       "clickTimeJump": "In subtitle mode, click a timestamp to jump playback to that segment",
       "renameSpeaker": "Click a speaker tag or “Speaker names” to rename each speaker",
       "timecodeMarkers": "Enable “Timecode markers” in display settings to show timestamps in the transcript",
+      "altClickSeek": "Hold {mod} and click a highlighted sentence to jump the audio to that time",
       "searchReplace": "Search and batch-replace text to quickly fix repeated wording",
       "downloadFormats": "Download in multiple formats (TXT / SRT / VTT) for subtitles or archiving",
       "aiSummary": "Generate a summary of this content with one click using AI",

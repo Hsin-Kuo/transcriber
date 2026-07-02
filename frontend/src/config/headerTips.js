@@ -49,6 +49,14 @@ export const HEADER_TIPS = [
     weight: 3,
   },
   {
+    id: 'alt-click-seek',
+    i18nKey: 'altClickSeek',
+    modes: ['paragraph'],
+    requiresSpeaker: false,
+    requiresCompleted: true,
+    weight: 5,
+  },
+  {
     id: 'search-replace',
     i18nKey: 'searchReplace',
     modes: ['paragraph', 'subtitle'],
