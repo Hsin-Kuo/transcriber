@@ -344,12 +344,8 @@
     "taskType": "任務類型",
     "paragraph": "文件",
     "subtitle": "字幕",
-    "paragraphHint": "合併文字並添加標點符號，適合文章或筆記",
-    "subtitleHint": "保留時間軸資訊，自動停用標點符號，適合字幕製作",
-    "fileInfo": "檔案資訊",
     "fileName": "檔案名稱",
     "fileSize": "檔案大小",
-    "audioRetentionNote": "音檔保留規則：音檔會在 {days} 天後自動刪除，可手動釘選保留。",
     "speakerDiarization": "說話者辨識",
     "enable": "啟用",
     "maxSpeakers": "預估說話者人數（可選）",
@@ -691,7 +687,9 @@
       "downloadFormats": "可下載多種格式（TXT / SRT / VTT），方便上字幕或存檔",
       "aiSummary": "用 AI 一鍵產生這段內容的摘要重點",
       "shareLink": "可產生分享連結，對方免登入也能檢視逐字稿",
-      "darkMode": "在左側設定面板中可切換深/淺色模式"
+      "darkMode": "在左側設定面板中可切換深/淺色模式",
+      "audioRetentionPin": "音檔會在 {days} 天後自動刪除，可在任務列表頁釘選以長期保留",
+      "audioRetentionFree": "音檔會在 {days} 天後自動刪除，升級方案以長期保留"
     },
     "edit": "編輯",
     "save": "儲存",
