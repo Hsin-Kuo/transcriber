@@ -682,7 +682,8 @@
   },
   "transcriptDetail": {
     "tips": {
-      "audioShortcuts": "播放區右上角可查看音檔快捷鍵，{mod}+Ctrl 播放/暫停、{mod}+←→ 快退快進",
+      "audioShortcuts": "播放區右上角的 {icon} 可查看音檔快捷鍵，{mod} + Ctrl 播放/暫停、{mod} + ← → 快退快進",
+      "shortcutsIconLabel": "圖示",
       "clickTimeJump": "點擊時間欄，即可跳到該段落播放",
       "renameSpeaker": "點講者標籤或右上角「講者名稱」，可自訂每位說話者的名字",
       "timecodeMarkers": "在左側設定面板開啟「時間標記」，能在逐字稿中直接看到時間定位",

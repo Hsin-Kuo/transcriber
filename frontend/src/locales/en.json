@@ -682,7 +682,8 @@
   },
   "transcriptDetail": {
     "tips": {
-      "audioShortcuts": "Find audio shortcuts in the top-right of the playback area — {mod}+Ctrl to play/pause, {mod}+←→ to skip",
+      "audioShortcuts": "Find the {icon} in the top-right of the playback area for audio shortcuts — {mod}+Ctrl to play/pause, {mod}+←→ to skip",
+      "shortcutsIconLabel": "icon",
       "clickTimeJump": "Click a timestamp to jump playback to that segment",
       "renameSpeaker": "Click a speaker tag or “Speaker names” to rename each speaker",
       "timecodeMarkers": "Enable “Timecode markers” in the left settings panel to see time positions right in the transcript",
