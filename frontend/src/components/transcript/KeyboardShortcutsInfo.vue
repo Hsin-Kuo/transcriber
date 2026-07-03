@@ -1,20 +1,7 @@
 <template>
   <div class="keyboard-shortcuts-info" :class="popDirection">
     <button class="shortcuts-trigger-btn" :title="$t('audioPlayer.keyboardShortcuts')">
-      <svg width="32" height="24" viewBox="0 0 48 36" fill="currentColor">
-        <circle cx="9" cy="8" r="2.5" fill="currentColor" />
-        <circle cx="19" cy="8" r="2.5" fill="currentColor" />
-        <circle cx="29" cy="8" r="2.5" fill="currentColor" />
-        <circle cx="39" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1" />
-        <circle cx="9" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1" />
-        <circle cx="19" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1" />
-        <circle cx="29" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1" />
-        <circle cx="39" cy="18" r="2.5" fill="currentColor" />
-        <circle cx="9" cy="28" r="2" fill="none" stroke="currentColor" stroke-width="1" />
-        <circle cx="19" cy="28" r="2" fill="none" stroke="currentColor" stroke-width="1" />
-        <circle cx="29" cy="28" r="2" fill="none" stroke="currentColor" stroke-width="1" />
-        <circle cx="39" cy="28" r="2.5" fill="currentColor" />
-      </svg>
+      <ShortcutsGridIcon width="32" height="24" />
     </button>
     <div class="shortcuts-tooltip">
       <div class="shortcuts-title">{{ $t('audioPlayer.audioControlShortcuts') }}</div>
@@ -43,6 +30,7 @@
 <script setup>
 import { useI18n } from 'vue-i18n'
 import { modifierKeyLabel } from '../../utils/platform'
+import ShortcutsGridIcon from './ShortcutsGridIcon.vue'
 
 const { t: $t } = useI18n()
 
