@@ -615,10 +615,18 @@ async def period_notify(request: Request, db=Depends(get_database)):
 
     log.info("subscription.webhook.received", merchant_order_no=merchant_order_no, status=notify_status, is_first_payment=is_first_payment)
 
-    # 冪等性：每期授權的 natural_id = order + already_times，重複到達直接略過
-    # 避免重發 Notify 造成重複授信、period_end 多滾一期等問題
+    # 冪等性 natural_id：
+    # - 每期授權（有 AlreadyTimes）：order + already_times，per-period 唯一——絕不併入
+    #   TradeNo，否則藍新重送若換號會重複滾 period_end / 重置用量。
+    # - 建立完成類（無 AlreadyTimes）：同一 order 的「建約當下」與 type-3「期末首扣」
+    #   可能都是這格式，只用 :init 會撞在一起、後到那封被冪等擋掉 → 排程降級卡住不生效。
+    #   併入 TradeNo（各次授權唯一）區分不同授權事件；藍新重送同一封仍帶同 TradeNo →
+    #   照樣去重。settle() 另有 order 生命週期短路（已 paid），重複套用仍安全。
     webhook_repo = ProcessedWebhookRepository(db)
-    natural_id = f"{merchant_order_no}:{already_times if already_times is not None else 'init'}"
+    if already_times is not None:
+        natural_id = f"{merchant_order_no}:{already_times}"
+    else:
+        natural_id = f"{merchant_order_no}:init:{trade_no}"
     if not await webhook_repo.claim(
         provider="newebpay-period",
         natural_id=natural_id,

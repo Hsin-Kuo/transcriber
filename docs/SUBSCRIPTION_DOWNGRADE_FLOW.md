@@ -114,16 +114,23 @@ sequenceDiagram
 
 ---
 
-## ⚠️ 尚待 sandbox 驗證的殘留風險：webhook natural_id 碰撞
+## webhook natural_id 冪等鍵（已防禦 type-3 碰撞）
 
-webhook 冪等鍵 `natural_id = f"{order}:{already_times if not None else 'init'}"`。
-建立完成類 Notify（無 `AlreadyTimes`）一律編為 `{order}:init`。
+webhook 依 Notify 型態選冪等鍵：
 
-若藍新對 `PeriodStartType=3` 在**建約當下**與**期末首扣**都送建立完成格式，兩封
-`natural_id` 會**碰撞**，期末那封被 `ProcessedWebhookRepository.claim` 當重複擋掉、
-進不了 `settle()` → 降級不生效。此取決於藍新 type-3 期末首扣的實際 Notify 型態
-（手冊未明確）。
+| Notify 型態 | natural_id | 理由 |
+|-------------|-----------|------|
+| 每期授權（有 `AlreadyTimes`） | `{order}:{already_times}` | per-period 唯一；**不併入 TradeNo**，否則藍新換號重送會重複滾 period_end / 重置用量 |
+| 建立完成類（無 `AlreadyTimes`） | `{order}:init:{trade_no}` | 同一 order 的建約當下與 type-3 期末首扣可能都是此格式，靠 `TradeNo`（各次授權唯一）區分，避免後到那封被冪等擋掉 |
 
-**部署前務必用 cloudflared sandbox 跑一次完整排程降級**，撈 `subscription.webhook.received`
-的 log 確認：(a) 建約當下有無 Notify、(b) 期末首扣的 `AlreadyTimes` 有無、`natural_id`
-是否碰撞。若碰撞，需再補 webhook 層修法（例如 init 類 natural_id 併入 `trade_no`）。
+**背景**：若只用 `{order}:init`，當藍新對 `PeriodStartType=3` 在**建約當下**與**期末首扣**
+都送建立完成格式（無 `AlreadyTimes`），兩封會碰撞、期末那封被 `ProcessedWebhookRepository.claim`
+當重複擋掉 → 降級卡住不生效。改併入 `TradeNo` 後：不同授權事件 → 不同鍵 → 都能處理；
+藍新重送同一封仍帶同 `TradeNo` → 照樣去重。`settle()` 另有 order 生命週期短路（已 paid），
+雙重保險。
+
+> 本地 `scripts/sim_downgrade_webhook.py` 已重現此碰撞並驗證防禦（S4）。
+
+**Level 2 sandbox 仍建議確認**（非阻擋部署，屬最終驗證）：撈 `subscription.webhook.received`
+的 log 看藍新 type-3 (a) 建約當下有無 Notify、(b) 期末首扣的 `AlreadyTimes` 有無 —
+只是確認實際型態，正確性已由日期 gate + TradeNo natural_id 兩層保住。
