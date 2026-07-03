@@ -239,10 +239,13 @@ export function useSegmentNavigation({
     }
 
     if (e.altKey) {
-      e.preventDefault()
+      // 只設狀態驅動 Alt-highlight / hover chip；preventDefault 僅限播放器快捷鍵，
+      // 否則會連 Option+Delete（deleteWordBackward）這類原生編輯行為一起擋掉。
       isAltPressed.value = true
       const shortcutKeys = ['m', 'M', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']
-      if (shortcutKeys.includes(e.key)) {
+      // 按住 Shift 時放行，讓原生的整字/整段擴選（Option+Shift+方向鍵）生效。
+      if (shortcutKeys.includes(e.key) && !e.shiftKey) {
+        e.preventDefault()
         e.stopPropagation()
       }
     }

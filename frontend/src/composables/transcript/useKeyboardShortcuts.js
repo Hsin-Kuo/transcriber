@@ -19,7 +19,8 @@ export function useKeyboardShortcuts(audioPlayerRef, { isEditing, isEditingTitle
     }
 
     // Alt + key combos (work in both editing and non-editing mode)
-    if (event.altKey) {
+    // 按住 Shift 時放行，讓原生的整字/整段擴選（Option+Shift+方向鍵）在編輯區生效。
+    if (event.altKey && !event.shiftKey) {
       switch(event.key) {
         case 'ArrowLeft':
           event.preventDefault()
