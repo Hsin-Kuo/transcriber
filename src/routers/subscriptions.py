@@ -419,6 +419,10 @@ async def change_plan(
                 "extra_duration_minutes": 0,
                 "extra_ai_summaries": 0,
                 "scheduled_date": period_first_date,
+                # 排程降級的 pending 單要存活到首扣日才由期末首扣 Notify 收斂，
+                # 不能沿用預設 1 小時 expires_at（否則會被 periodic_order_cleanup 掃成
+                # expired）。設到首扣日 +3 天緩衝：期末順利收斂前不被掃、真沒收到才過期。
+                "expires_at": get_utc_timestamp() + (days_until_end + 3) * 86400,
             })
             form = svc.create_period_form_scheduled(
                 order_no=order_no,
