@@ -20,6 +20,8 @@
       :density-threshold="densityThreshold"
       :speaker-names="speakerNames"
       :has-speaker-info="hasSpeakerInfo"
+      :has-audio="currentTranscript.hasAudio && !currentTranscript.audioExpired"
+      :audio-retention-days="currentTranscript.audioRetentionDays"
       :unique-speakers="uniqueSpeakers"
       :search-text="searchText"
       :replace-text="replaceText"
@@ -394,6 +396,21 @@ class="transcript-layout"
               class="segment-hover-chip"
               :style="hoverChipStyle"
             >{{ hoverChipTime }}</div>
+
+            <!-- 導覽「⑨ 快速跳到對應時間」：於真實逐字稿上腳本化重演。
+                 真實橘色高亮由 demoActive 驅動；此層只疊「假游標 + 黑底時間標記」，
+                 座標對齊真實目標句（jumpDemoPos），循環播放。 -->
+            <div v-if="tourJumpVisible && jumpDemoPos" class="tour-jump-anim" aria-hidden="true">
+              <span class="tja-badge" :style="jumpBadgeStyle">{{ jumpDemoTime }}</span>
+              <span class="tja-cursor" :style="jumpCursorStyle">
+                <svg viewBox="0 0 24 24" width="26" height="26">
+                  <path d="M5 3l14 7-6 1.5L10 18z" fill="#111" stroke="#fff" stroke-width="1.2" stroke-linejoin="round" />
+                </svg>
+                <span class="tja-ripple"></span>
+                <!-- 鍵帽跟隨假游標，讓「長按 Alt/Option」提示始終貼在動作發生處 -->
+                <span class="tja-key">{{ altKeyLabel }}</span>
+              </span>
+            </div>
           </div>
 
           <!-- 字幕模式：表格組件 -->
@@ -549,7 +566,7 @@ import { useAutosave } from '../composables/transcript/useAutosave'
 import { useContentEditableInput } from '../composables/transcript/useContentEditableInput'
 import { usePageLifecycle } from '../composables/transcript/usePageLifecycle'
 import { useTaskTags } from '../composables/task/useTaskTags'
-import { isModifierPressed } from '../utils/platform'
+import { isModifierPressed, isMac, modifierKeyLabel } from '../utils/platform'
 import { AUTOSAVE_ENABLED } from '../utils/featureFlags'
 import { useAuthStore } from '../stores/auth'
 import { useTourStore, TOUR_PHASES, TOUR_ANCHORS, tourSel } from '../stores/tour'
@@ -557,6 +574,7 @@ import { useProductTour } from '../composables/useProductTour'
 import { DEMO_ID } from '../utils/tourFixtures'
 import TourActionsMenu from '../components/tour/TourActionsMenu.vue'
 import TourSummaryCard from '../components/tour/TourSummaryCard.vue'
+import { formatTime } from '../utils/formatTime'
 
 const route = useRoute()
 const router = useRouter()
@@ -565,6 +583,7 @@ const tourStore = useTourStore()
 const detailTour = useProductTour()
 const tourMenuVisible = ref(false) // 導覽「下載與分享」步顯示的假選單
 const tourSummaryVisible = ref(false) // 導覽「AI 摘要」步顯示的假摘要
+const tourJumpVisible = ref(false) // 導覽「快速跳到對應時間」步顯示的假卡片
 
 // 組件引用
 const audioPlayerRef = ref(null)
@@ -616,11 +635,35 @@ let detailTourStarted = false
 function buildDetailSteps() {
   return [
     {
+      // ⑦ 逐字稿與說話者 → 下一步接「對照音檔」
       element: tourSel(TOUR_ANCHORS.T_TRANSCRIPT),
       popover: {
         title: $t('tour.detail.transcript.title'),
         description: $t('tour.detail.transcript.desc'),
-        // 先顯示導覽假選單、等它進 DOM，再進到 actions 步直接高亮它
+      },
+    },
+    {
+      // ⑧ 對照音檔（左側播放器）
+      element: tourSel(TOUR_ANCHORS.T_AUDIO),
+      popover: {
+        title: $t('tour.detail.audio.title'),
+        description: $t('tour.detail.audio.desc'),
+        // 先顯示「跳時間」假卡、等它進 DOM，再進到 jump 步直接高亮它
+        onNextClick: () => {
+          tourJumpVisible.value = true
+          nextTick(() => detailTour.getDriver()?.moveNext?.())
+        },
+      },
+    },
+    {
+      // ⑨ 快速跳到對應時間：spotlight 真實逐字稿，於真文字上腳本化重演
+      //   （tourJumpVisible → demoActive 驅動真實橘色高亮 + 疊假游標/badge）
+      element: tourSel(TOUR_ANCHORS.T_TRANSCRIPT),
+      onDeselected: () => { tourJumpVisible.value = false },
+      popover: {
+        title: $t('tour.detail.jump.title'),
+        description: $t('tour.detail.jump.desc', { key: modifierKeyLabel }),
+        // 先顯示假選單、等它進 DOM，再進到 actions 步直接高亮它
         onNextClick: () => {
           tourMenuVisible.value = true
           nextTick(() => detailTour.getDriver()?.moveNext?.())
@@ -628,7 +671,7 @@ function buildDetailSteps() {
       },
     },
     {
-      // 高亮導覽專用假選單（TourActionsMenu，data-tour="t-actions"）
+      // ⑩ 下載與分享（TourActionsMenu，data-tour="t-actions"）
       element: tourSel(TOUR_ANCHORS.T_ACTIONS),
       onDeselected: () => { tourMenuVisible.value = false },
       popover: {
@@ -642,16 +685,12 @@ function buildDetailSteps() {
       },
     },
     {
-      // 高亮導覽專用假摘要卡（TourSummaryCard，data-tour="t-summary"）
+      // ⑪ AI 摘要（TourSummaryCard，data-tour="t-summary"）—— 最後一步
       element: tourSel(TOUR_ANCHORS.T_SUMMARY),
       onDeselected: () => { tourSummaryVisible.value = false },
-      popover: { title: $t('tour.detail.summary.title'), description: $t('tour.detail.summary.desc') },
-    },
-    {
-      element: tourSel(TOUR_ANCHORS.T_AUDIO),
       popover: {
-        title: $t('tour.detail.audio.title'),
-        description: $t('tour.detail.audio.desc'),
+        title: $t('tour.detail.summary.title'),
+        description: $t('tour.detail.summary.desc'),
         doneBtnText: $t('tour.finish'),
       },
     },
@@ -663,6 +702,7 @@ function buildDetailSteps() {
 const onDetailTourDestroyed = detailTour.makeDestroyHandler(tourStore, () => {
   tourMenuVisible.value = false
   tourSummaryVisible.value = false
+  tourJumpVisible.value = false
   if (route.params.taskId === DEMO_ID) router.push('/')
 })
 
@@ -959,6 +999,7 @@ const {
   handleMarkerClick,
   showHoverChipAt,
   hideHoverChip,
+  measureSegmentRect,
 } = useSegmentNavigation({
   textareaRef,
   segOffsets: navSegOffsets,
@@ -968,6 +1009,7 @@ const {
   seekToTime,
   headerRef,
   isModifierPressed,
+  demoActive: tourJumpVisible, // 導覽「跳時間」步驟：強制真實橘色高亮
 })
 
 // ========== 非編輯模式 ▼ 時間標記 overlay ==========
@@ -990,6 +1032,49 @@ function onMarkerEnter(m, e) {
   const rect = e.currentTarget.getBoundingClientRect()
   showHoverChipAt(m.start, rect.left + rect.width / 2, rect.top)
 }
+
+// ========== 導覽「⑨ 快速跳到對應時間」：於真實逐字稿上的假游標/badge 動畫 ==========
+// 真實橘色高亮由 useSegmentNavigation 的 demoActive（= tourJumpVisible）驅動；
+// 此處只負責量測「目標真句子」的座標，讓假游標與黑底時間標記精準疊在該句上。
+const jumpDemoPos = ref(null)
+// 鍵帽依作業系統擇一：Mac 顯示 ⌥ Option，其餘顯示 Alt
+const altKeyLabel = isMac ? '⌥ Option' : 'Alt'
+const jumpDemoTime = computed(() =>
+  jumpDemoPos.value ? formatTime(jumpDemoPos.value.start) : ''
+)
+const jumpBadgeStyle = computed(() => {
+  const p = jumpDemoPos.value
+  if (!p) return {}
+  return { left: `${p.left + Math.min(p.width * 0.4, 90)}px`, top: `${p.top}px` }
+})
+const jumpCursorStyle = computed(() => {
+  const p = jumpDemoPos.value
+  if (!p) return {}
+  return {
+    left: `${p.left + Math.min(p.width * 0.4, 90)}px`,
+    top: `${p.top + p.height}px`,
+  }
+})
+
+watch(tourJumpVisible, (on) => {
+  if (!on) {
+    jumpDemoPos.value = null
+    return
+  }
+  // 等真實高亮 / driver spotlight 的排版穩定後，量測目標句座標
+  nextTick(() => {
+    requestAnimationFrame(() => {
+      const ranges = readSegmentRanges.value
+      if (!ranges.length) {
+        jumpDemoPos.value = null
+        return
+      }
+      // 取第 2 個 segment（通常靠上、較短），退化用第 1 個
+      const target = ranges.length > 1 ? ranges[1] : ranges[0]
+      jumpDemoPos.value = measureSegmentRect(target.segmentIndex)
+    })
+  })
+})
 
 // 計算唯一講者列表（用於字幕模式設定）
 const uniqueSpeakers = computed(() => {
@@ -1467,6 +1552,163 @@ usePageLifecycle({
   transform: translateX(-50%);
   border: 4px solid transparent;
   border-top-color: rgba(0, 0, 0, 0.85);
+}
+
+/* === 導覽「⑨ 快速跳到對應時間」動畫層（疊在真實逐字稿上）=== */
+.tour-jump-anim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1001;
+}
+
+/* Alt/Option 鍵帽（跟隨假游標，點亮態）：定位相對於 .tja-cursor，貼在箭頭右下 */
+.tja-key {
+  position: absolute;
+  left: 18px;
+  top: 14px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--main-text, #4a5568);
+  background: var(--color-white, #fff);
+  border: 1px solid rgba(var(--color-primary-rgb, 221, 132, 72), 0.6);
+  box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb, 221, 132, 72), 0.3);
+}
+
+/* 黑底時間標記（對照真實 .segment-hover-chip） */
+.tja-badge {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 4px));
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+.tja-badge::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top-color: rgba(0, 0, 0, 0.85);
+}
+
+/* 假游標 */
+.tja-cursor {
+  position: absolute;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+}
+.tja-ripple {
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(var(--color-primary-rgb, 221, 132, 72), 0.5);
+  opacity: 0;
+  transform: scale(0.2);
+}
+
+/* 動畫僅在使用者未要求減少動態時播放；否則直接停在「已點亮＋badge 顯示」終態 */
+@media (prefers-reduced-motion: no-preference) {
+  .tja-key {
+    animation: tja-key 3.4s linear infinite;
+  }
+  .tja-badge {
+    animation: tja-badge 3.4s linear infinite;
+  }
+  .tja-cursor {
+    animation: tja-cursor 3.4s ease-in-out infinite;
+  }
+  .tja-ripple {
+    animation: tja-ripple 3.4s linear infinite;
+  }
+
+  @keyframes tja-key {
+    0% {
+      transform: translateY(0);
+      box-shadow: 0 0 0 0 rgba(var(--color-primary-rgb, 221, 132, 72), 0);
+    }
+    4%,
+    88% {
+      transform: translateY(1px);
+      box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb, 221, 132, 72), 0.35);
+    }
+    100% {
+      transform: translateY(0);
+      box-shadow: 0 0 0 0 rgba(var(--color-primary-rgb, 221, 132, 72), 0);
+    }
+  }
+
+  @keyframes tja-badge {
+    0%,
+    40% {
+      opacity: 0;
+      transform: translate(-50%, calc(-100% - 4px)) translateY(6px);
+    }
+    52%,
+    88% {
+      opacity: 1;
+      transform: translate(-50%, calc(-100% - 4px)) translateY(0);
+    }
+    100% {
+      opacity: 0;
+      transform: translate(-50%, calc(-100% - 4px)) translateY(6px);
+    }
+  }
+
+  /* 20–40% 移入 → 54% 點擊下壓 → 回彈 → 收尾移出 loop */
+  @keyframes tja-cursor {
+    0%,
+    20% {
+      transform: translate(46px, 30px) scale(1);
+    }
+    40% {
+      transform: translate(0, 0) scale(1);
+    }
+    54% {
+      transform: translate(0, 0) scale(0.8);
+    }
+    60%,
+    88% {
+      transform: translate(0, 0) scale(1);
+    }
+    100% {
+      transform: translate(46px, 30px) scale(1);
+    }
+  }
+
+  @keyframes tja-ripple {
+    0%,
+    52% {
+      opacity: 0;
+      transform: scale(0.2);
+    }
+    56% {
+      opacity: 0.55;
+      transform: scale(0.6);
+    }
+    66% {
+      opacity: 0;
+      transform: scale(2.2);
+    }
+    100% {
+      opacity: 0;
+      transform: scale(0.2);
+    }
+  }
 }
 
 /* === 面板收合按鈕 === */

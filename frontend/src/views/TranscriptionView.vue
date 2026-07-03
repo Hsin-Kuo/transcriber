@@ -43,7 +43,6 @@
       :merge-files="mergeMode.files"
       :default-merge-task-name="defaultMergeTaskName"
       :all-tags="allTags"
-      :audio-retention-days="audioRetentionDays"
       :dismissible="!tourMode"
       v-model:task-type="taskType"
       v-model:language="selectedLanguage"
@@ -89,8 +88,6 @@ const { tagsData, fetchTagColors } = useTaskTags($t)
 const authStore = useAuthStore()
 const uiStore = useUiStore()
 const uploadStore = useUploadStore()
-// 音檔保留天數依方案動態顯示（FREE=3、付費方案=7），未取得時 fallback 3
-const audioRetentionDays = computed(() => authStore.quota?.audio_retention_days || 3)
 
 const showNotification = inject('showNotification')
 
@@ -546,10 +543,11 @@ function endTour() {
 async function openDemoFormThenNext() {
   pendingFile.value = makeDemoFile()
   await nextTick() // 等 TaskSettingsModal（Teleport→body）渲染，data-tour 錨點才存在
-  tour.getDriver()?.moveNext()
-  // 跳窗有 0.3s slideUp 進場動畫；動畫結束後重算 spotlight 對位，避免高亮框偏移。
-  // 於 timeout 內重新取得 driver：使用者若中途關閉導覽，getDriver() 會回 null（不誤觸已銷毀實例）
-  setTimeout(() => tour.getDriver()?.refresh?.(), 320)
+  // 跳窗有 0.3s slideUp 進場動畫。若立刻 moveNext，driver 會在動畫/版面未定時就用舊 rect
+  // 定位 ④（task-type 高區塊），造成 popover 甩到螢幕左上角、與 spotlight 脫開。
+  // 改為等動畫 settle 後再 moveNext，讓 driver 一次就用最終 rect 把 popover 定在卡片正下方。
+  // 延遲取 360ms > 動畫 300ms；timeout 內重新取得 driver（使用者中途關閉導覽時 getDriver() 回 null）。
+  setTimeout(() => tour.getDriver()?.moveNext(), 360)
 }
 
 // 導覽：從跳窗第一步（任務類型）返回「上傳區」→ 收起跳窗，讓上傳區錨點重新可被高亮
@@ -590,6 +588,10 @@ function buildTourSteps() {
       element: tourSel(TOUR_ANCHORS.TASK_TYPE),
       onHighlightStarted: scrollAnchorIntoView,
       popover: {
+        // task-type 是彈窗內最高的區塊；固定 popover 於卡片下方（下方空間最充足），
+        // 避免 driver 預設側邊放不下時把 popover 甩到螢幕左上角、與 spotlight 脫開。
+        side: 'bottom',
+        align: 'center',
         title: $t('tour.taskType.title'),
         description: $t('tour.taskType.desc'),
         onPrevClick: closeDemoFormThenPrev,
@@ -783,7 +785,8 @@ onUnmounted(() => {
   color: var(--main-text, #4a5568);
 }
 
+/* 隱藏 popover 指向箭頭（小白色三角條塊） */
 .driver-popover.sl-tour-popover .driver-popover-arrow {
-  border-color: var(--main-bg, #e0e5ec);
+  display: none !important;
 }
 </style>

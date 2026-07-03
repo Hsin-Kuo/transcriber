@@ -83,6 +83,8 @@
     "summaryAlwaysOpen": "Always Open",
     "summaryAlwaysCollapsed": "Always Collapsed",
     "summaryFollowLast": "Remember Last State",
+    "tips": "Usage Tips",
+    "tipsDescription": "Rotate handy tips in the task detail header",
     "deleteAccount": "Delete Account",
     "deleteAccountDescription": "This will permanently delete your account and all data, including:",
     "deleteAccountItem1": "Personal information (email, password, Google link)",
@@ -97,7 +99,7 @@
     "errorDeletePasswordRequired": "Please enter your password",
     "errorDeleteFailed": "Failed to delete account, please try again",
     "securityDesc": "Password, Google account, delete account",
-    "preferencesDesc": "Language, timezone, theme, AI summary",
+    "preferencesDesc": "Language, timezone, theme, AI summary, usage tips",
     "supportDesc": "Help center, FAQ, contact",
     "documentsDesc": "Privacy policy, terms of service",
     "teamDesc": "About our team",
@@ -342,12 +344,8 @@
     "taskType": "Task Type",
     "paragraph": "Document",
     "subtitle": "Subtitle",
-    "paragraphHint": "Merge text with punctuation, suitable for articles or notes",
-    "subtitleHint": "Preserve timeline information, auto-disable punctuation, suitable for subtitle production",
-    "fileInfo": "Information",
     "fileName": "File Name",
     "fileSize": "File Size",
-    "audioRetentionNote": "Audio retention rule: Audio files are automatically deleted after {days} days. Pin a file to keep it.",
     "speakerDiarization": "Speaker Diarization",
     "enable": "Enable",
     "maxSpeakers": "Number of Speakers (Optional)",
@@ -477,15 +475,15 @@
       "desc": "Click here or drag and drop an audio/video file. Supports MP3, M4A, WAV, MP4 and more."
     },
     "language": {
-      "title": "② Choose language",
+      "title": "③ Choose language",
       "desc": "Leave it on \"Auto-detect\" and we'll figure it out, or pick a language manually for better accuracy."
     },
     "diarize": {
-      "title": "③ Speaker identification",
+      "title": "④ Speaker identification",
       "desc": "Turn this on to automatically separate speakers; the transcript is labelled \"SPEAKER_01, 02…\"."
     },
     "taskType": {
-      "title": "④ Output format",
+      "title": "② Output format",
       "desc": "\"Document\" produces readable paragraphs; \"Subtitles\" produces time-coded text segments, ideal for video captions."
     },
     "start": {
@@ -504,17 +502,21 @@
         "title": "⑦ Transcript & speakers",
         "desc": "This is the transcription. With speaker identification on, speakers are labelled automatically — rename them by editing or find-and-replace."
       },
+      "audio": {
+        "title": "⑧ Follow the audio",
+        "desc": "The built-in player lets you read while listening, so you can check the transcript against the audio."
+      },
+      "jump": {
+        "title": "⑨ Jump straight to the audio",
+        "desc": "Press and hold {key} to light up the text, then click to jump to the matching audio time — handy for proofreading by ear."
+      },
       "actions": {
-        "title": "⑧ Download & share",
+        "title": "⑩ Download & share",
         "desc": "From this menu you can download the transcript (TXT, PDF) or subtitles (SRT, VTT), or create a share link for others to view without signing in."
       },
       "summary": {
-        "title": "⑨ AI summary",
+        "title": "⑪ AI summary",
         "desc": "Generate an AI summary of the content in one click to grasp the key points without reading the whole transcript."
-      },
-      "audio": {
-        "title": "⑩ Follow the audio",
-        "desc": "The built-in player lets you read while listening — hold \"Alt\" and click any line to jump to its timestamp. Great for proofreading."
       }
     }
   },
@@ -679,6 +681,21 @@
     "cancel": "Cancel"
   },
   "transcriptDetail": {
+    "tips": {
+      "audioShortcuts": "Find the {icon} in the top-right of the playback area for audio shortcuts — {mod}+Ctrl to play/pause, {mod}+←→ to skip",
+      "shortcutsIconLabel": "icon",
+      "clickTimeJump": "Click a timestamp to jump playback to that segment",
+      "renameSpeaker": "Click a speaker tag or “Speaker names” to rename each speaker",
+      "timecodeMarkers": "Enable “Timecode markers” in the left settings panel to see time positions right in the transcript",
+      "altClickSeek": "Hold {mod} and click a highlighted sentence to jump the audio to that time",
+      "searchReplace": "Use search and batch-replace to quickly fix repeated wording",
+      "downloadFormats": "Download in multiple formats (TXT / SRT / VTT) for subtitles or archiving",
+      "aiSummary": "Generate a summary of this content with one click using AI",
+      "shareLink": "Create a share link — others can view the transcript without signing in",
+      "darkMode": "Switch between dark and light mode in the left settings panel",
+      "audioRetentionPin": "Audio is auto-deleted after {days} days — pin it on the task list to keep it longer",
+      "audioRetentionFree": "Audio is auto-deleted after {days} days — upgrade your plan to keep it longer"
+    },
     "edit": "Edit",
     "save": "Save",
     "doneEditing": "Done",

@@ -15,10 +15,33 @@ const CONTENT = {
     tagName: '範例',
     speakerNames: { SPEAKER_01: '主持人', SPEAKER_02: '來賓' },
     segments: [
-      { start: 0.0, end: 4.2, speaker: 'SPEAKER_01', text: '大家好，歡迎參加今天的產品會議。' },
-      { start: 4.2, end: 9.6, speaker: 'SPEAKER_02', text: '謝謝，我先快速同步一下上週的進度。' },
-      { start: 9.6, end: 15.0, speaker: 'SPEAKER_01', text: '好的，請開始，我們會把重點記在逐字稿裡。' },
-      { start: 15.0, end: 21.3, speaker: 'SPEAKER_02', text: '我們完成了新版上傳流程，使用者回饋比預期更好。' },
+      {
+        start: 0.0,
+        end: 7.0,
+        speaker: 'SPEAKER_01',
+        text: '歡迎使用 SoundLite 逐字稿工具。很高興能與你相遇！',
+      },
+      { start: 7.0, end: 11.0, speaker: 'SPEAKER_02', text: 'SoundLite有什麼特色呢？' },
+      {
+        start: 11.0,
+        end: 35.0,
+        speaker: 'SPEAKER_01',
+        text: 'SoundLite 以獨創的文字流文件模式，使你的使用體驗更貼近一般文書處理情境。我們也支援區分說話者和字幕模式，當然，錄音環境越安靜、說話口齒越清晰，辨識的正確率就會越高喔！',
+      },
+      { start: 35.0, end: 40.0, speaker: 'SPEAKER_02', text: '還有沒有其他很讚的功能？說來聽聽？' },
+      {
+        start: 40.0,
+        end: 58.0,
+        speaker: 'SPEAKER_01',
+        text: '這裡分享一個新手小撇步，在文件模式中按下快捷鍵 Alt / Option，即可快速跳到某段文句對應的音檔位置，讓你來回聽打時有如神助！',
+      },
+      { start: 58.0, end: 63.0, speaker: 'SPEAKER_02', text: '好耶！我迫不及待想試試上傳音檔了！' },
+      {
+        start: 63.0,
+        end: 111.0,
+        speaker: 'SPEAKER_01',
+        text: '在上傳音檔的流程中，考量使用者在錄音過程中可能發生的中斷或突發狀況，我們提供合併音檔與批次上傳的功能，減少事前彙整音檔的麻煩。逐字稿完成後，你可以直接在線上編輯內容、修正辨識結果、調整說話者名稱。SoundLite 也搭配 AI 功能快速整理重點、摘要內容、產生會議紀錄或萃取關鍵資訊，減少重複性的整理工作。所有修改都會即時儲存，方便你隨時回來繼續編輯，也能將成果匯出為不同格式，或以線上連結輕鬆分享給同事、研究夥伴或客戶。',
+      },
     ],
   },
   en: {
@@ -40,7 +63,7 @@ function pick(locale) {
 
 // 段落內容帶上 [SPEAKER_01] 標記（與啟用說話者辨識的真實輸出一致）
 function joinContent(segments) {
-  return segments.map((s) => `[${s.speaker}] ${s.text}`).join('\n')
+  return segments.map((s) => `[${s.speaker}] ${s.text}`).join('\n\n')
 }
 
 // 固定時間戳，避免每次渲染不同（與 demo 性質一致）
@@ -80,7 +103,8 @@ export function buildDemoTranscript(locale) {
     created_at: DEMO_CREATED_AT,
     updated_at: DEMO_CREATED_AT,
     text_length: content.length,
-    duration_text: '00:21',
+    // demo 不顯示音檔時長：真實播放器讀的是 0.3s 靜音 WAV，標一個假時長只會與播放器對不上
+    duration_text: '',
     hasAudio: true,
     audioExpired: false,
     audioRetentionDays: 7,
@@ -115,11 +139,11 @@ export function getDemoAudioUrl() {
 const DEMO_SUMMARY = {
   'zh-TW': {
     summary:
-      '這是一場產品會議的示範摘要：團隊同步了上週進度，確認新版上傳流程已上線，且使用者回饋優於預期，後續將聚焦在體驗優化與下一階段規劃。',
+      '這是 SoundLite 的功能介紹示範：SoundLite 提供獨創的文字流文件模式，並支援說話者區分與字幕模式，適用於訪談、會議、課程、Podcast 等各種音訊與影片；上傳時可合併音檔與批次上傳，轉錄完成後能線上編輯、調整說話者，並用 AI 快速整理重點與摘要，所有修改即時儲存，也能匯出或以連結分享。',
     points: [
-      '新版上傳流程已完成並上線',
-      '使用者回饋比預期更好',
-      '下一步聚焦體驗優化與規劃',
+      '獨創文字流文件模式，支援說話者區分與字幕模式',
+      '可合併音檔、批次上傳，適用會議／訪談／Podcast 等情境',
+      '線上編輯搭配 AI 摘要重點，修改即時儲存並可匯出、分享',
     ],
   },
   en: {

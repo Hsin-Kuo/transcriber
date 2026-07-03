@@ -35,6 +35,30 @@
       />
     </div>
 
+    <!-- 使用技巧輪播（桌面限定；依任務類型/狀態顯示、偏好可關） -->
+    <div v-if="showTips" ref="headerTipsRef" class="header-tips" aria-hidden="true">
+      <svg class="tip-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1h6c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z" />
+      </svg>
+      <Transition name="tip-fade" mode="out-in">
+        <span :key="currentTip?.id" ref="tipTextRef" class="tip-text">
+          <!-- audioShortcuts：把播放區那顆快捷鍵 icon 就地插進文案（slot 插值） -->
+          <i18n-t
+            v-if="currentTip?.id === 'audio-shortcuts'"
+            keypath="transcriptDetail.tips.audioShortcuts"
+            tag="span"
+            scope="global"
+          >
+            <template #icon><ShortcutsGridIcon class="tip-inline-icon" /></template>
+            <template #mod>{{ modifierKeyLabel }}</template>
+          </i18n-t>
+          <template v-else>{{ currentTipText }}</template>
+        </span>
+      </Transition>
+      <!-- 文字被截斷時，hover 顯示完整文字（僅截斷才掛，避免短 tip 也彈窗） -->
+      <div v-if="isTipTruncated" class="tip-tooltip" role="tooltip">{{ currentTipText }}</div>
+    </div>
+
     <div class="header-right">
       <!-- 編輯/儲存按鈕 -->
       <button v-if="!isEditing" @click="$emit('start-editing')" class="btn btn-header btn-expandable" :disabled="!isContentReady">
@@ -251,10 +275,13 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, toRef, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import TranscriptMetadata from './TranscriptMetadata.vue'
 import SearchReplacePopup from './SearchReplacePopup.vue'
 import { useClickOutside } from '../../composables/useClickOutside'
+import { useHeaderTips } from '../../composables/transcript/useHeaderTips'
+import { modifierKeyLabel } from '../../utils/platform'
+import ShortcutsGridIcon from './ShortcutsGridIcon.vue'
 
 const props = defineProps({
   taskDisplayName: {
@@ -305,6 +332,14 @@ const props = defineProps({
   hasSpeakerInfo: {
     type: Boolean,
     default: false
+  },
+  hasAudio: {
+    type: Boolean,
+    default: false
+  },
+  audioRetentionDays: {
+    type: Number,
+    default: null
   },
   uniqueSpeakers: {
     type: Array,
@@ -375,6 +410,39 @@ const emit = defineEmits([
   'replace-current',
   'replace-all'
 ])
+
+// Header 使用技巧輪播（依 displayMode / 講者 / 完成狀態顯示；偏好可關）
+const { currentTip, currentTipText, showTips } = useHeaderTips({
+  displayMode: toRef(props, 'displayMode'),
+  hasSpeakerInfo: toRef(props, 'hasSpeakerInfo'),
+  isContentReady: toRef(props, 'isContentReady'),
+  hasAudio: toRef(props, 'hasAudio'),
+  audioRetentionDays: toRef(props, 'audioRetentionDays'),
+})
+
+// Tip 截斷偵測：文字被 ellipsis 截掉時才掛 hover tooltip（避免短 tip 也彈窗）
+const headerTipsRef = ref(null)
+const tipTextRef = ref(null)
+const isTipTruncated = ref(false)
+
+function measureTipTruncation() {
+  const el = tipTextRef.value
+  // scrollWidth（完整內容）> clientWidth（可見寬度）即代表被截斷
+  isTipTruncated.value = !!el && el.scrollWidth > el.clientWidth + 1
+}
+
+// 容器寬度變動（視窗縮放 / header 內容增減）時重新量測
+const tipResizeObserver = typeof ResizeObserver !== 'undefined'
+  ? new ResizeObserver(() => measureTipTruncation())
+  : null
+watch(headerTipsRef, (el) => {
+  if (!tipResizeObserver) return
+  tipResizeObserver.disconnect()
+  if (el) tipResizeObserver.observe(el)
+}, { immediate: true })
+// 切換到不同 tip 後（DOM 更新完）重新量測
+watch(currentTip, () => nextTick(measureTipTruncation))
+onUnmounted(() => tipResizeObserver?.disconnect())
 
 // Refs
 const titleInputRef = ref(null)
@@ -611,7 +679,8 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex: 1;
+  /* 讓中間 tips 槽能取得彈性空間；標題仍靠 min-width:0 + ellipsis 截斷 */
+  flex: 0 1 auto;
   min-width: 0;
 }
 
@@ -621,6 +690,99 @@ onUnmounted(() => {
   gap: 16px;
   flex-shrink: 0;
   overflow: visible;
+}
+
+/* 使用技巧輪播（中間槽，桌面限定） */
+.header-tips {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 12px;
+  font-size: 13px;
+  color: var(--text-secondary, #888);
+}
+
+/* 截斷時 hover 顯示的完整文字 tooltip（風格對齊 KeyboardShortcutsInfo） */
+.header-tips .tip-tooltip {
+  position: absolute;
+  top: 100%;
+  left: 12px;
+  margin-top: 8px;
+  max-width: min(480px, 80vw);
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--main-bg);
+  color: var(--main-text);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: normal;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 99999;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
+}
+
+.header-tips .tip-tooltip::before {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 20px;
+  border: 6px solid transparent;
+  border-bottom-color: var(--main-bg);
+}
+
+.header-tips:hover .tip-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .header-tips .tip-tooltip {
+    transition: none;
+  }
+}
+
+.header-tips .tip-icon {
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+.header-tips .tip-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 就地插入的快捷鍵 icon：跟文字同色、對齊基線、略比字大 */
+.header-tips .tip-inline-icon {
+  width: 22px;
+  height: 16px;
+  vertical-align: -3px;
+  opacity: 0.85;
+}
+
+/* 輪播淡入淡出（出→入）；reduced-motion 時直接切 */
+.tip-fade-enter-active,
+.tip-fade-leave-active {
+  transition: opacity 0.35s ease;
+}
+.tip-fade-enter-from,
+.tip-fade-leave-to {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tip-fade-enter-active,
+  .tip-fade-leave-active {
+    transition: none;
+  }
 }
 
 /* 返回按鈕 */
@@ -795,6 +957,7 @@ onUnmounted(() => {
   padding: 6px 10px;
   border-radius: 6px;
   transition: all 0.2s ease;
+  max-width: 400px; /* 固定寬度，超出以 … 截斷 */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1117,6 +1280,11 @@ onUnmounted(() => {
     gap: 0px;
     height: auto;
     padding: 2px 0px;
+  }
+
+  /* 手機版空間有限，隱藏 tips 輪播（只在桌面顯示） */
+  .header-tips {
+    display: none;
   }
 
   .header-left {
