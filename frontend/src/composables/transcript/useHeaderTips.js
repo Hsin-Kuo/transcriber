@@ -113,12 +113,15 @@ export function useHeaderTips({
   onMounted(startRotation)
   onUnmounted(stopRotation)
 
-  // 文案：{mod} 佔位帶入平台修飾鍵（Mac→Option、其他→Alt）；{days} 帶入音檔保留天數
+  // 文案：{mod} 佔位帶入平台修飾鍵（Mac→Option、其他→Alt）；{days} 帶入音檔保留天數。
+  // {icon}（audioShortcuts 專用）在此解析成可讀詞——渲染時走 <i18n-t> 塞真 icon，
+  // 這份純文字只作截斷時的 title（hover 顯示全文）用。
   const currentTipText = computed(() => {
     if (!currentTip.value) return ''
     return t(`transcriptDetail.tips.${currentTip.value.i18nKey}`, {
       mod: modifierKeyLabel,
       days: audioRetentionDays.value,
+      icon: t('transcriptDetail.tips.shortcutsIconLabel'),
     })
   })
 
