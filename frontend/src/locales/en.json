@@ -475,15 +475,15 @@
       "desc": "Click here or drag and drop an audio/video file. Supports MP3, M4A, WAV, MP4 and more."
     },
     "language": {
-      "title": "② Choose language",
+      "title": "③ Choose language",
       "desc": "Leave it on \"Auto-detect\" and we'll figure it out, or pick a language manually for better accuracy."
     },
     "diarize": {
-      "title": "③ Speaker identification",
+      "title": "④ Speaker identification",
       "desc": "Turn this on to automatically separate speakers; the transcript is labelled \"SPEAKER_01, 02…\"."
     },
     "taskType": {
-      "title": "④ Output format",
+      "title": "② Output format",
       "desc": "\"Document\" produces readable paragraphs; \"Subtitles\" produces time-coded text segments, ideal for video captions."
     },
     "start": {

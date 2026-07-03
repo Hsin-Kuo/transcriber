@@ -401,13 +401,14 @@ class="transcript-layout"
                  真實橘色高亮由 demoActive 驅動；此層只疊「假游標 + 黑底時間標記」，
                  座標對齊真實目標句（jumpDemoPos），循環播放。 -->
             <div v-if="tourJumpVisible && jumpDemoPos" class="tour-jump-anim" aria-hidden="true">
-              <span class="tja-key">{{ altKeyLabel }}</span>
               <span class="tja-badge" :style="jumpBadgeStyle">{{ jumpDemoTime }}</span>
               <span class="tja-cursor" :style="jumpCursorStyle">
-                <svg viewBox="0 0 24 24" width="20" height="20">
+                <svg viewBox="0 0 24 24" width="26" height="26">
                   <path d="M5 3l14 7-6 1.5L10 18z" fill="#111" stroke="#fff" stroke-width="1.2" stroke-linejoin="round" />
                 </svg>
                 <span class="tja-ripple"></span>
+                <!-- 鍵帽跟隨假游標，讓「長按 Alt/Option」提示始終貼在動作發生處 -->
+                <span class="tja-key">{{ altKeyLabel }}</span>
               </span>
             </div>
           </div>
@@ -1561,11 +1562,12 @@ usePageLifecycle({
   z-index: 1001;
 }
 
-/* Alt/Option 鍵帽（左上角，點亮態） */
+/* Alt/Option 鍵帽（跟隨假游標，點亮態）：定位相對於 .tja-cursor，貼在箭頭右下 */
 .tja-key {
   position: absolute;
-  left: 8px;
-  top: 8px;
+  left: 18px;
+  top: 14px;
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: 4px;
