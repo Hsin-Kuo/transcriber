@@ -21,7 +21,13 @@ import { HEADER_TIPS } from '../../config/headerTips'
 
 const ROTATE_INTERVAL_MS = 12000
 
-export function useHeaderTips({ displayMode, hasSpeakerInfo, isContentReady }) {
+export function useHeaderTips({
+  displayMode,
+  hasSpeakerInfo,
+  isContentReady,
+  hasAudio = ref(false),
+  audioRetentionDays = ref(null),
+}) {
   const authStore = useAuthStore()
   const { t } = useI18n()
 
@@ -32,15 +38,23 @@ export function useHeaderTips({ displayMode, hasSpeakerInfo, isContentReady }) {
     return localStorage.getItem('tipsEnabled') !== 'false'
   })
 
+  // 方案是否支援手動釘選音檔（free 為 0 → 不可釘選）
+  const canPin = computed(() => (authStore.maxKeepAudio ?? 0) > 0)
+
   // 依任務屬性過濾出適用的 tips（gate 判定集中在此）
   const eligibleTips = computed(() => {
     const mode = displayMode.value
     const speaker = hasSpeakerInfo.value
     const ready = isContentReady.value
+    const audio = hasAudio.value
+    const pin = canPin.value
     return HEADER_TIPS.filter((tip) => {
       if (!tip.modes.includes(mode)) return false
       if (tip.requiresSpeaker && !speaker) return false
       if (tip.requiresCompleted && !ready) return false
+      if (tip.requiresAudio && !audio) return false
+      if (tip.requiresPin && !pin) return false
+      if (tip.requiresNoPin && pin) return false
       return true
     })
   })
@@ -99,10 +113,13 @@ export function useHeaderTips({ displayMode, hasSpeakerInfo, isContentReady }) {
   onMounted(startRotation)
   onUnmounted(stopRotation)
 
-  // 文案：{mod} 佔位帶入平台修飾鍵（Mac→Option、其他→Alt）
+  // 文案：{mod} 佔位帶入平台修飾鍵（Mac→Option、其他→Alt）；{days} 帶入音檔保留天數
   const currentTipText = computed(() => {
     if (!currentTip.value) return ''
-    return t(`transcriptDetail.tips.${currentTip.value.i18nKey}`, { mod: modifierKeyLabel })
+    return t(`transcriptDetail.tips.${currentTip.value.i18nKey}`, {
+      mod: modifierKeyLabel,
+      days: audioRetentionDays.value,
+    })
   })
 
   const showTips = computed(() => tipsEnabled.value && !!currentTip.value)

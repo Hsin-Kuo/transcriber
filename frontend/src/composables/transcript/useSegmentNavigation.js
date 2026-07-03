@@ -21,6 +21,8 @@ export function useSegmentNavigation({
   seekToTime,
   headerRef,
   isModifierPressed,
+  // 導覽用：為 true 時強制顯示 segment 高亮（不需真的按 Alt），且不受滑鼠/鍵盤事件關閉。
+  demoActive,
 }) {
   const isAltPressed = ref(false)
   const hoverChipVisible = ref(false)
@@ -40,8 +42,9 @@ export function useSegmentNavigation({
     if (!textareaRef.value) return
 
     // 編輯與非編輯模式共用同一套 segment 高亮（ranges 來源由 navSegOffsets facade 切換）
+    // 導覽 demo 期間 demoActive 亦視為「已按 Alt」，讓真實橘色高亮直接畫在真文字上。
     const shouldShow =
-      isAltPressed.value &&
+      (isAltPressed.value || demoActive?.value) &&
       displayMode.value === 'paragraph' &&
       segOffsets.editSegmentRanges.value.length > 0
     if (!shouldShow) {
@@ -266,12 +269,13 @@ export function useSegmentNavigation({
   watch(
     [
       isAltPressed,
+      () => demoActive?.value,
       () => isEditing.value,
       () => displayMode.value,
       () => segOffsets.editSegmentRanges.value,
     ],
     () => {
-      if (isAltPressed.value && displayMode.value === 'paragraph') {
+      if ((isAltPressed.value || demoActive?.value) && displayMode.value === 'paragraph') {
         scheduleSegmentHighlightRebuild()
       } else {
         clearSegmentHighlight()
@@ -279,6 +283,32 @@ export function useSegmentNavigation({
       }
     }
   )
+
+  // 導覽 demo 用：量測某個 segment 在 wrapper 內的座標（第一行 rect），
+  // 供假游標／時間標記定位在「真實句子」上。回傳 wrapper 相對座標或 null。
+  function measureSegmentRect(segmentIndex) {
+    const el = textareaRef.value
+    const wrapper = el?.parentElement
+    if (!el || !wrapper) return null
+    const ranges = segOffsets.editSegmentRanges.value
+    const r =
+      ranges.find((x) => x.segmentIndex === segmentIndex) || ranges[0]
+    if (!r) return null
+    const map = buildCharIndexMap(el)
+    const range = charOffsetToRange(map, r.charStart, r.charEnd)
+    if (!range) return null
+    const rects = Array.from(range.getClientRects())
+    if (rects.length === 0) return null
+    const first = rects[0]
+    const wrapperRect = wrapper.getBoundingClientRect()
+    return {
+      top: first.top - wrapperRect.top,
+      left: first.left - wrapperRect.left,
+      width: first.width,
+      height: first.height,
+      start: r.start,
+    }
+  }
 
   // --- Lifecycle ---
 
@@ -312,5 +342,6 @@ export function useSegmentNavigation({
     handleMarkerClick,
     showHoverChipAt,
     hideHoverChip,
+    measureSegmentRect,
   }
 }

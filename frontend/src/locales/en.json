@@ -344,12 +344,8 @@
     "taskType": "Task Type",
     "paragraph": "Document",
     "subtitle": "Subtitle",
-    "paragraphHint": "Merge text with punctuation, suitable for articles or notes",
-    "subtitleHint": "Preserve timeline information, auto-disable punctuation, suitable for subtitle production",
-    "fileInfo": "Information",
     "fileName": "File Name",
     "fileSize": "File Size",
-    "audioRetentionNote": "Audio retention rule: Audio files are automatically deleted after {days} days. Pin a file to keep it.",
     "speakerDiarization": "Speaker Diarization",
     "enable": "Enable",
     "maxSpeakers": "Number of Speakers (Optional)",
@@ -506,17 +502,21 @@
         "title": "⑦ Transcript & speakers",
         "desc": "This is the transcription. With speaker identification on, speakers are labelled automatically — rename them by editing or find-and-replace."
       },
+      "audio": {
+        "title": "⑧ Follow the audio",
+        "desc": "The built-in player lets you read while listening, so you can check the transcript against the audio."
+      },
+      "jump": {
+        "title": "⑨ Jump straight to the audio",
+        "desc": "Press and hold {key} to light up the text, then click to jump to the matching audio time — handy for proofreading by ear."
+      },
       "actions": {
-        "title": "⑧ Download & share",
+        "title": "⑩ Download & share",
         "desc": "From this menu you can download the transcript (TXT, PDF) or subtitles (SRT, VTT), or create a share link for others to view without signing in."
       },
       "summary": {
-        "title": "⑨ AI summary",
+        "title": "⑪ AI summary",
         "desc": "Generate an AI summary of the content in one click to grasp the key points without reading the whole transcript."
-      },
-      "audio": {
-        "title": "⑩ Follow the audio",
-        "desc": "The built-in player lets you read while listening — hold \"Alt\" and click any line to jump to its timestamp. Great for proofreading."
       }
     }
   },
@@ -691,7 +691,9 @@
       "downloadFormats": "Download in multiple formats (TXT / SRT / VTT) for subtitles or archiving",
       "aiSummary": "Generate a summary of this content with one click using AI",
       "shareLink": "Create a share link — others can view the transcript without signing in",
-      "darkMode": "Switch between dark and light mode in the left settings panel"
+      "darkMode": "Switch between dark and light mode in the left settings panel",
+      "audioRetentionPin": "Audio is auto-deleted after {days} days — pin it on the task list to keep it longer",
+      "audioRetentionFree": "Audio is auto-deleted after {days} days — upgrade your plan to keep it longer"
     },
     "edit": "Edit",
     "save": "Save",
