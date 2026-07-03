@@ -502,17 +502,21 @@
         "title": "⑦ Transcript & speakers",
         "desc": "This is the transcription. With speaker identification on, speakers are labelled automatically — rename them by editing or find-and-replace."
       },
+      "audio": {
+        "title": "⑧ Follow the audio",
+        "desc": "The built-in player lets you read while listening, so you can check the transcript against the audio."
+      },
+      "jump": {
+        "title": "⑨ Jump straight to the audio",
+        "desc": "Press and hold {key} to light up the text, then click to jump to the matching audio time — handy for proofreading by ear."
+      },
       "actions": {
-        "title": "⑧ Download & share",
+        "title": "⑩ Download & share",
         "desc": "From this menu you can download the transcript (TXT, PDF) or subtitles (SRT, VTT), or create a share link for others to view without signing in."
       },
       "summary": {
-        "title": "⑨ AI summary",
+        "title": "⑪ AI summary",
         "desc": "Generate an AI summary of the content in one click to grasp the key points without reading the whole transcript."
-      },
-      "audio": {
-        "title": "⑩ Follow the audio",
-        "desc": "The built-in player lets you read while listening — hold \"Alt\" and click any line to jump to its timestamp. Great for proofreading."
       }
     }
   },
