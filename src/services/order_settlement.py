@@ -6,6 +6,8 @@
 - `settle(notification)`：收一個 typed [[PaymentNotification]]，依
   `(order_type, is_first_payment, success)` 矩陣套用 Settlement effect
   （啟用訂閱 / 續訂展期 / 降為 free / 加值 / 拒絕重複完成），回 SettleResult。
+  排程降級（PeriodStartType=3）的「委託建立完成」Notify 會被擋下（回 SCHEDULED、
+  不套用），降級改由期末實際首扣 Notify（AlreadyTimes=1）觸發，維持舊方案到期末。
 
 Router 的殘留責任：checkout 組裝（算 amount、判 upgrade/downgrade/scheduled、用
 newebpay_service adapter 產 form）、webhook 解密、idempotency claim/release。
@@ -56,6 +58,7 @@ class PaymentNotification:
 class SettleOutcome(str, Enum):
     """settle() 對單一 notification 的結果（供 router 記 log / 測試斷言）。"""
     ACTIVATED = "activated"                 # 首期成功，啟用訂閱
+    SCHEDULED = "scheduled"                 # 排程降級委託建立完成，尚未生效（等期末首扣）
     RENEWED = "renewed"                     # 續扣成功，展期
     EXPIRED = "expired"                     # 續扣失敗，降為 free
     GRANTED = "granted"                     # extra_quota 加值成功
@@ -184,6 +187,20 @@ class OrderSettlement:
             return SettleResult(SettleOutcome.RENEWED, n.order_no)
 
         # 首期成功
+        # 排程降級（PeriodStartType=3）：藍新在「委託建立完成」當下即送一封 Notify
+        # （無 AlreadyTimes → auth_times is None），但實際首扣要等 PeriodFirstdate（期末）
+        # 才發生、屆時 Notify 帶 AlreadyTimes=1。這封建立完成 Notify 只記委託編號（上面已記）、
+        # 保留 pending_plan_change，不動 tier / quota，且 status 維持 pending——絕不可設 paid，
+        # 否則期末真正首扣會被 settle() 開頭的 already_paid 短路，降級永遠不生效。
+        # 讓降級維持舊方案直到期末首扣 Notify（auth_times==1）到達才真正生效。
+        if self._is_scheduled_downgrade_contract_created(order, n):
+            log.info(
+                "subscription.downgrade.scheduled_contract_created",
+                user_id=user_id, order_no=n.order_no,
+                scheduled_date=order.get("scheduled_date"), period_no=n.period_no,
+            )
+            return SettleResult(SettleOutcome.SCHEDULED, n.order_no)
+
         full_user = await self.user_repo.get_by_id(user_id)
         cur_sub = full_user.get("subscription", {}) if full_user else {}
         if self._is_duplicate_first_completion(cur_sub, order):
@@ -285,6 +302,21 @@ class OrderSettlement:
                 "subscription.prev_contract_terminate_failed",
                 type=order.get("type"), prev_period_no=prev_period_no, message=msg,
             )
+
+    @staticmethod
+    def _is_scheduled_downgrade_contract_created(order: dict, n: PaymentNotification) -> bool:
+        """排程降級（PeriodStartType=3）的『委託建立完成』Notify 判定。
+
+        藍新在委託建立當下即送一封 Notify（無 AlreadyTimes → auth_times is None）；
+        實際首扣要等 PeriodFirstdate（期末），屆時 Notify 帶 AlreadyTimes=1（auth_times==1）。
+        只有「委託建立完成」這封需被擋下不套用降級（讓降級期末才生效）；
+        立即降級分支（剩餘 <2 天，scheduled_date=None）與期末真正首扣皆不符合此條件。
+        """
+        return (
+            order.get("type") == "downgrade_subscription"
+            and bool(order.get("scheduled_date"))
+            and n.auth_times is None
+        )
 
     @staticmethod
     def _is_duplicate_first_completion(sub: dict, order: dict) -> bool:

@@ -163,6 +163,51 @@ class TestUpgradeDowngrade:
         user_repo.add_extra_quota.assert_not_awaited()
         newebpay.terminate_period_contract.assert_any_await("SLSUB0", "P0")
 
+    async def test_scheduled_downgrade_contract_created_does_not_apply(self):
+        # 排程降級：藍新「委託建立完成」Notify（auth_times is None）即時到達，
+        # 但降級應等期末首扣才生效——這封不可動 tier / quota，且 status 不可設 paid。
+        order = _order(
+            merchant_order_no="SLDWN1", type="downgrade_subscription", tier="basic",
+            prev_order_no="SLSUB0", prev_period_no="P0", scheduled_date="2026/07/01",
+        )
+        s, order_repo, user_repo, newebpay = _make(order=order)
+        r = await s.settle(PaymentNotification(
+            order_no="SLDWN1", success=True, is_first_payment=True,
+            period_no="P9", auth_times=None,  # 建立完成 Notify 無 AlreadyTimes
+        ))
+        assert r.outcome == SettleOutcome.SCHEDULED
+        # tier / quota / 用量全部不動，pending_plan_change 保留（未被 update_subscription 清掉）
+        user_repo.update_subscription.assert_not_awaited()
+        user_repo.update_quota.assert_not_awaited()
+        user_repo.reset_monthly_usage.assert_not_awaited()
+        # 舊委託此時不重複終止（checkout 已終止）；絕不可把 order 標成 paid
+        newebpay.terminate_period_contract.assert_not_awaited()
+        assert not any(
+            c.args[1].get("status") == "paid"
+            for c in order_repo.update_by_order_no.await_args_list
+        )
+        # 委託編號仍要記到 order 上（供期末對帳 / 追蹤）
+        assert any(
+            c.args[1].get("period_no") == "P9"
+            for c in order_repo.update_by_order_no.await_args_list
+        )
+
+    async def test_scheduled_downgrade_first_charge_applies(self):
+        # 期末真正首扣 Notify（AlreadyTimes=1 → auth_times==1）到達 → 此時才真正降級。
+        order = _order(
+            merchant_order_no="SLDWN1", type="downgrade_subscription", tier="basic",
+            prev_order_no="SLSUB0", prev_period_no="P0", scheduled_date="2026/07/01",
+        )
+        s, order_repo, user_repo, newebpay = _make(order=order)
+        r = await s.settle(PaymentNotification(
+            order_no="SLDWN1", success=True, is_first_payment=True,
+            period_no="P9", auth_times=1,  # 期末首扣，帶 AlreadyTimes=1
+        ))
+        assert r.outcome == SettleOutcome.ACTIVATED
+        sub = user_repo.update_subscription.await_args.args[1]
+        assert sub["tier"] == "basic" and sub["pending_plan_change"] is None
+        user_repo.update_quota.assert_awaited_once_with("u1", build_quota_from_tier("basic"))
+
 
 # ── settle: 重複完成防護 ─────────────────────────────────────────────────────
 
