@@ -67,3 +67,4 @@ backend.pid
 .agents/
 skills-lock.json
 .claude/settings.local.json
+.claude/docs/backups/

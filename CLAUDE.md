@@ -1,239 +1,103 @@
 # CLAUDE.md — Transcriber (SoundLite)
 
-## 專案簡介
+語音轉文字平台（多語言、說話者辨識、AI 標點強化）。https://soundlite.app
+後端 Python/FastAPI，前端 Vue 3 + Pinia，資料庫 MongoDB Atlas。
 
-語音轉文字平台，支援多語言、說話者辨識、AI 標點強化。
-- 網站：https://soundlite.app
-- 後端：Python / FastAPI
-- 前端：Vue 3 + Pinia
-- 資料庫：MongoDB Atlas
+## Session 紀律（每個 session 先讀這四條）
 
----
+1. **先路由再動手**：下方「路由表」列出各類任務該先讀哪個檔。委派 subagent、選 model、判斷完成與否，都有既定規則，不要憑感覺。
+2. **指揮官不下場**：掃 repo、讀 >3 個檔案、網頁研究 → 一律派 subagent，主對話只收結論；輸出可能很長的指令（測試/build/log）用 `| tail`/`grep` 收斂或背景執行。細節與門檻見 `.claude/docs/model-dispatch.md`。
+3. **Memory 先驗證再引用**：memory 提到的 branch / 檔案 / 資源，先用一條指令確認存在（`git branch -a | grep X`、`ls`）。驗不到就當歷史線索，不是現況。
+4. **收尾要落檔**：session 結束時有未完成的工作，照 `.claude/docs/judgment-rubrics.md` §8 寫 memory（階梯位置 + 分支/PR + 一條驗證指令）。
 
-## 目錄結構
+## 路由表（做 X 之前先讀 Y）
+
+| 情境 | 先讀 |
+|------|------|
+| 要派 subagent / 選 model / 升降級 / 驗收 | `.claude/docs/model-dispatch.md` |
+| 判斷「完成了沒」「該不該問使用者」「方向對不對」 | `.claude/docs/judgment-rubrics.md` |
+| 撰寫委派 prompt（搜尋/實作/重構/研究/審查） | `.claude/docs/delegation-templates.md` |
+| 想修改本檔（CLAUDE.md）或 `.claude/docs/` 底下任何制度檔 | `.claude/docs/maintenance-protocol.md` |
+| 新 session 第一次接手、或覺得環境狀態怪怪的 | `.claude/docs/letter-to-future-sessions.md` |
+| Persistent vs transient state 劃分、領域詞彙 | `CONTEXT.md` |
+| 部署細節 / staging 規劃 / 金流 API | `docs/DEPLOYMENT.md`、`docs/STAGING_PLAN.md`、`docs/NEWEBPAY_PERIOD_API.md` |
+
+## 目錄結構（節選；完整結構直接 `ls` 對應目錄）
 
 ```
-src/                  # 後端 (FastAPI)
-  main.py             # 應用入口（uvicorn）
-  worker.py           # GPU Worker 入口（薄殼，APP_ROLE=worker 時啟動）
-  worker_core/        # Worker 拆出的元件：sqs_consumer / transcription_job /
-                      # spot_monitor / heartbeat / model_cache
-  routers/            # API 路由
-    auth.py           # 認證（註冊/登入/email驗證/密碼重設）
-    oauth.py          # Google OAuth
-    tasks.py          # 任務狀態、SSE 進度推送
-    transcriptions.py # 上傳音檔、建立轉錄任務
-    uploads.py        # 批次上傳
-    audio.py          # 音檔下載
-    tags.py           # 標籤管理
-    summaries.py      # AI 摘要
-    shared.py         # 分享連結（無需登入可看）
-    subscriptions.py  # 藍新（Newebpay）訂閱付款 / webhook
-    email_webhooks.py # Resend bounce / complaint webhook（prefix=/webhooks）
-    admin.py          # 管理後台 API（prefix=/api/admin）
-  services/           # 業務邏輯
-    intake_service.py           # TranscriptionIntakeService（音檔→配額→task→dispatch 完整 workflow）
-    task_service.py             # 任務狀態管理 + soft_delete_full workflow
-    task_query_helpers.py       # 任務列表 enrichment / filter / audio expiration 純函數
-    task_dispatch.py            # Task dispatch seam（LocalDispatch adapter）
-    worker_dispatch.py          # AWS 模式下把 task 派發給 Worker（S3+HMAC+SQS）
-    progress_store.py           # transient progress state（task_progress collection）
-    tag_service.py / summary_service.py / audio_service.py
-    utils/            # 無狀態 processor
-      whisper_processor.py      # faster-whisper 轉錄
-      punctuation_processor.py  # Gemini 標點強化
-      diarization_processor.py  # pyannote 說話者辨識
-      audio_validator.py        # 上傳副檔名 / magic bytes 白名單
-  transcription/      # 轉錄 pipeline（Web Server 與 Worker 共用同一份）
-    orchestrator.py   # 單次 run 的 Phase 狀態機 + 取消 + 終態
-    audio_source.py   # AudioSource：LocalFileSource（本地）/ S3Source（Worker）
-  utils/              # 跨層共用工具
-    storage_service.py          # 檔案存取（local/S3 自動切換）
-    config_loader.py            # 密鑰讀取（SSM / .env fallback）
-    newebpay_service.py         # 藍新金流 AES 加解密
-    audit_logger.py             # 操作審計記錄
-    email_service.py            # Resend / SMTP / console
-    logger.py                   # structlog + RequestIdMiddleware
-    shared_state.py             # TaskStateStore（封裝後的記憶體狀態）
-  database/
-    repositories/     # MongoDB CRUD
-  auth/               # JWT、密碼、依賴注入
-  models/             # Pydantic 資料模型 + dataclass
-    worker_job.py     # TranscriptionJob（Task dispatch payload）
-    intake.py         # IntakeConfig / IntakeResult（intake service IO）
-frontend/             # 使用者前端 (Vue 3 + Vite, port 5173/3000)
-admin-frontend/       # 管理後台 (Vue 3 + Vite, port 5174/3003)
-deploy/               # AWS 部署腳本
-  nginx-ec2.conf            # Nginx 設定（生產用）
-  transcriber.service       # systemd unit canonical 檔；deploy 時 cp 到 EC2
-                            # /etc/systemd/system/，禁止直接 SSH 改該 EC2 檔
-  pre-start-cleanup.sh      # systemd ExecStartPre：清舊 multiprocessing 殘留
-                            # （獨立 script 避免 pkill -f 配 inline sh -c self-kill）
-  deploy-web.sh             # Web Server 初始部署腳本
-  deploy-gpu-worker.sh      # GPU Worker 初始部署腳本
-  apply-s3-lifecycle.sh     # 音檔 S3 Lifecycle 規則（free=3d/paid=7d，kept 不過期）
-                            # 的唯一真實來源；冪等，bash apply-s3-lifecycle.sh [prod|staging]
+src/                  # 後端 FastAPI
+  main.py             # Web 入口；worker.py = GPU Worker 入口（APP_ROLE=worker）
+  worker_core/        # sqs_consumer / transcription_job / spot_monitor / heartbeat / model_cache
+  routers/            # API 路由（auth, oauth, tasks, transcriptions, uploads, audio,
+                      #   tags, summaries, shared, subscriptions, email_webhooks, admin）
+  services/           # 業務邏輯（intake_service, task_service, task_dispatch,
+                      #   worker_dispatch, progress_store, …）
+  services/utils/     # 無狀態 processor（whisper / punctuation / diarization / audio_validator）
+  transcription/      # 轉錄 pipeline（orchestrator + audio_source；Web 與 Worker 共用）
+  utils/              # storage_service, config_loader, newebpay_service, email_service, logger…
+  database/repositories/  # MongoDB CRUD
+  auth/  models/
+frontend/             # 使用者前端 (Vue3+Vite, dev 5173 / docker 3000)
+admin-frontend/       # 管理後台 (dev 5174 / docker 3003)
+deploy/               # 部署腳本 + nginx / systemd canonical 檔（禁止 SSH 直接改 EC2 上的檔）
+docs/                 # 深度文件（部署、staging、金流、postmortem…）
 ```
-
----
 
 ## 啟動方式
 
-### Docker Compose（推薦）
 ```bash
-cp .env.example .env   # 填入 API keys
-docker-compose up -d
-# Frontend:       http://localhost:3000
-# Admin:          http://localhost:3003
-# Backend API:    http://localhost:8000
-# MongoDB:        localhost:27020
-```
+# Docker Compose（推薦）
+cp .env.example .env && docker-compose up -d
+# frontend:3000  admin:3003  api:8000  mongo:27020
 
-### 原生開發
-```bash
-# MongoDB（single-node replica set，支援 transaction）
-docker run -d --name mongo -p 27020:27017 mongo:7.0 \
-  mongod --replSet rs0 --bind_ip_all
-# 第一次啟動需 init replica set：
-docker exec mongo mongosh --quiet --eval \
-  "rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'localhost:27017'}]})"
+# 原生開發：MongoDB 要 single-node replica set（支援 transaction）
+docker run -d --name mongo -p 27020:27017 mongo:7.0 mongod --replSet rs0 --bind_ip_all
+docker exec mongo mongosh --quiet --eval "rs.initiate({_id:'rs0',members:[{_id:0,host:'localhost:27017'}]})"
 # 連線字串需含 ?replicaSet=rs0&directConnection=true
 
-# 後端
-pip install -r requirements.txt
-./start_backend_daemon.sh
-
-# 前端（各自開新 terminal）
-cd frontend && npm install && npm run dev
-cd admin-frontend && npm install && npm run dev
+pip install -r requirements.txt && ./start_backend_daemon.sh   # 後端 daemon
+npm run dev / npm run dev:admin / npm run dev:all              # 前端
+npm run backend:status / backend:restart                        # 後端管理
+tail -f backend.log                                             # 後端 log（大檔，用 grep/tail，別整檔讀）
 ```
 
-### 常用 npm scripts（根目錄）
-```bash
-npm run dev            # 使用者前端
-npm run dev:admin      # 管理後台
-npm run dev:all        # 兩個前端同時啟動
-npm run backend        # 啟動後端 daemon
-npm run backend:status # 查看後端狀態
-npm run backend:restart
-```
+API 文件：後端啟動後 http://localhost:8000/docs
 
-### 後端管理腳本
-```bash
-./start_backend_daemon.sh
-./status_backend.sh
-./stop_backend.sh
-./restart_backend.sh
-tail -f backend.log    # 即時 log
-```
+## 環境變數（完整見 `.env.example`）
 
----
-
-## 重要環境變數
-
-見 `.env.example`，關鍵項目：
-
-| 變數 | 說明 |
-|------|------|
-| `MONGODB_URL` | MongoDB 連線字串 |
-| `JWT_SECRET_KEY` | 最少 32 字元 |
-| `GOOGLE_API_KEY_1` | Gemini API（標點強化） |
-| `HF_TOKEN` | HuggingFace（speaker diarization） |
-| `GOOGLE_CLIENT_ID` | Google OAuth |
-| `DEPLOY_ENV` | `local` 或 `aws` |
-| `NEWEBPAY_MERCHANT_ID` / `NEWEBPAY_HASH_KEY` / `NEWEBPAY_HASH_IV` | 藍新金流（定期定額訂閱付款）|
-| `NEWEBPAY_ENV` | `sandbox` 或 `production` |
-| `EMAIL_PROVIDER` | `console` / `smtp` / `resend`（生產用 Resend，非 SES） |
-
-AWS 部署時額外需要：`S3_BUCKET`, `SQS_QUEUE_URL`, `WORKER_SECRET`, `APP_ROLE`
-
-AWS 生產環境實際值（ap-northeast-1）：
-- `S3_BUCKET` = `transcriber-files-696637902131`
-- `SQS_QUEUE_URL` = `https://sqs.ap-northeast-1.amazonaws.com/696637902131/transcriber-tasks`
-- Web Server EC2 Elastic IP = `3.112.209.96`
-- 敏感密鑰由 SSM Parameter Store 統一管理（`/transcriber/*`）
-
----
+關鍵：`MONGODB_URL`、`JWT_SECRET_KEY`（≥32字元）、`GOOGLE_API_KEY_1`（Gemini 標點）、
+`HF_TOKEN`（diarization）、`GOOGLE_CLIENT_ID`、`DEPLOY_ENV`（local|aws）、
+`NEWEBPAY_*`（藍新金流）、`EMAIL_PROVIDER`（生產用 resend，非 SES）。
+AWS 部署另需：`S3_BUCKET`、`SQS_QUEUE_URL`、`WORKER_SECRET`、`APP_ROLE`。
 
 ## 架構重點
 
-### 三層架構
-1. **Routers** — HTTP 請求、驗證、權限
-2. **Services** — 核心業務邏輯
-3. **Repositories** — MongoDB CRUD
+- **三層**：Routers（HTTP/驗證/權限）→ Services（業務邏輯）→ Repositories（MongoDB CRUD）。
+- **任務流**：上傳音檔 → 建 Task → Worker 處理 → SSE 推進度 → 完成。
+- **雙環境**：`DEPLOY_ENV=local` Whisper 同進程；`DEPLOY_ENV=aws` Web Server（APP_ROLE=server）發 SQS → GPU Worker（`src/worker.py`）long poll。**Lambda `transcriber-gpu-starter` 負責喚醒 GPU；worker 空閒 5 分鐘自行 shutdown（關機不經 Lambda）**。
+- **prod/staging 隔離**：`APP_ENV=staging` 讓 `config_loader` 改讀 SSM `/transcriber-staging/*`（單點路由）。staging 物理隔離（獨立 EC2/SQS/S3/Atlas），網址 staging.soundlite.app。
+- **CI/CD 三層分支**：`feature → main → staging → aws`。main 不部署；push staging/aws 各觸發對應 workflow；Promotion Guard 強制來源分支。**只用 merge commit（禁 squash/rebase）**。systemd/nginx/.env 全部 sync from repo，禁止 SSH 手改。
+- **SSE 進度**：local 同進程讀 `task_progress`；aws 下 Worker 寫、Web Server 每 2 秒 poll 同 collection。
+- **uvicorn --workers 2**：per-worker semaphore，全機並行上限 = 設定值 × 2。
 
-### 非同步任務流程
-```
-上傳音檔 → 建立 Task → 背景 Worker 處理 → SSE 推送進度 → 完成
-```
+### MongoDB collections（一行速查）
+`users`(帳號/配額/訂閱) `tasks`(persistent state) `task_progress`(transient, TTL 6h)
+`transcriptions` `segments` `tags` `summaries` `audit_logs` `orders`
+`processed_webhooks`(idempotency) `rate_limits` `reservations`(配額預留)
+`chunk_uploads`(分片上傳, 3h sweep) `worker_heartbeats`(GPU keep-alive)
 
-### AWS 雙環境
-```
-DEPLOY_ENV=local  → Whisper 在同一進程執行
-DEPLOY_ENV=aws    → Web Server (APP_ROLE=server) + GPU Worker (APP_ROLE=worker) 分離
-                    Web Server 發 SQS 訊息 → GPU Worker (src/worker.py) Long Poll 接收
-                    GPU Worker 空閒 5 分鐘後自行呼叫 shutdown（無 Lambda）
-```
+## AWS 生產環境速查（ap-northeast-1）
 
-### prod / staging 環境隔離（APP_ENV）
-- `APP_ENV=prod`（預設）/ `staging` → `config_loader.get_parameter` 把 SSM 前綴 `/transcriber/*`
-  改讀 `/transcriber-staging/*`，達成 secret / 資源隔離（**單點路由**）。
-- staging 與 prod **物理隔離**：獨立 Web EC2 + 獨立 on-demand GPU worker + 獨立 SQS / S3 /
-  Atlas（M0）/ SSM。網址 `staging.soundlite.app`（Cloudflare Access 鎖）。詳見 `docs/STAGING_PLAN.md`。
+- Web EC2：`3.112.209.96`（t3.small + Nginx；SSH：`ssh -i ~/.ssh/transcriber-key.pem ec2-user@3.112.209.96`）
+- S3：`transcriber-files-696637902131`；SQS：`transcriber-tasks`
+- GPU Worker：g4dn.xlarge（Spot `i-0d133cca8e6ce23c2`，On-Demand 備援 `i-058f381c59210c00a`）
+- 密鑰統一在 SSM Parameter Store `/transcriber/*`（staging 為 `/transcriber-staging/*`）
+- Staging Web EIP：`52.196.120.189`
+- GPU worker 佈建/重建：`bash deploy/deploy-gpu-worker.sh [prod|staging]`
 
-### AWS 生產部署架構
-- **Web Server**：EC2 t3.small + Nginx（反向代理 + 靜態檔案 serve）
-- **uvicorn `--workers 2`**：兩個 worker process（每個獨立 event loop），由 systemd 管理
-  - 每 worker 各自跑 `_loop_tick_monitor`，`/health` body 帶 `loop_stall_seconds` 偵測 event loop 卡頓
-  - Per-worker semaphores（`USER_CHUNK_CONCURRENCY`、`GLOBAL_CHUNK_CONCURRENCY`）— 全機並行上限 = 設定值 × workers
-- **前端**：build 後直接部署到 EC2 `/var/www/transcriber`（非 S3+CloudFront）
-- **GPU Worker**：EC2 g4dn.xlarge Spot，`src/worker.py` 作為 SQS consumer
-- **CI/CD**：GitHub Actions，**三層分支** `feature → main → staging → aws`（`main` 不部署；
-  push `staging`→`deploy-staging.yml`、push `aws`→`deploy-aws.yml`）。Promotion Guard workflow
-  強制來源分支（只有 main 能進 staging、只有 staging 能進 aws）。環境分支用 merge commit（非 squash）。
-  - systemd unit、nginx config、`.env` 都 sync from repo（不准 SSH 手改）
-  - `deploy-aws.yml` 含 `systemd-analyze verify` + `systemctl is-active --quiet` 雙保險
-  - GPU worker 佈建/重建：`bash deploy/deploy-gpu-worker.sh [prod|staging]`；依賴鎖在 `requirements-worker.lock`
+## 安全規範（修改相關程式時必須維持）
 
-### MongoDB Collections
-- `users` — 帳號、角色、使用配額、藍新訂閱 / merchant order 對照
-- `tasks` — 轉錄任務 **persistent state**（status / user / 結果引用）
-- `task_progress` — transient progress state（phase / phase_progress；TTL 6 小時自動清；ProgressStore 封裝）
-- `transcriptions` — 轉錄文字
-- `segments` — 轉錄時間軸片段
-- `tags` — 使用者標籤
-- `summaries` — AI 摘要
-- `audit_logs` — 操作審計記錄
-- `orders` — 藍新訂單與訂閱狀態
-- `processed_webhooks` — webhook idempotency（藍新等外部 callback 重發保護）
-- `rate_limits` — auth / upload rate limit 計數
-- `reservations` — 上傳前的配額預留
-- `chunk_uploads` — 分片上傳 metadata（streaming chunk staging；3h 無活動由 `periodic_chunk_upload_cleanup` sweep）
-- `worker_heartbeats` — GPU Worker 60 秒 keep-alive（B6 監控用）
-
-### SSE 進度推送（本地 vs AWS 行為不同）
-- `DEPLOY_ENV=local`：ProgressStore 直接更新 `task_progress`；同進程 SSE 讀同一份
-- `DEPLOY_ENV=aws`：GPU Worker 寫 `task_progress`，Web Server SSE endpoint 每 2 秒 poll 同一 collection
-
-> Persistent vs transient state 的劃分見 [`CONTEXT.md`](./CONTEXT.md)。
-
----
-
-## 安全規範
-
-已實施的安全措施（修改時需維持）：
-- JWT 密鑰強制 32 字元以上
-- SQS 訊息用 HMAC-SHA256 簽名
-- Path traversal 防護（UUID 驗證 + 目錄白名單）
-- CORS 在生產環境強制設定
-- 輸入驗證白名單（language、punct_provider 等）
-- Email enumeration 防護
-- S3 presigned URL 域名驗證
-
----
-
-## API 文件
-
-啟動後端後可瀏覽：
-- Swagger UI：http://localhost:8000/docs
-- ReDoc：http://localhost:8000/redoc
+JWT 密鑰 ≥32 字元；SQS 訊息 HMAC-SHA256 簽名；path traversal 防護（UUID 驗證 + 目錄白名單）；
+生產 CORS 強制設定；輸入白名單（language、punct_provider 等）；email enumeration 防護；
+S3 presigned URL 域名驗證。凡動到 auth / payment / IAM / webhook 的 diff，
+走 `judgment-rubrics.md` §5 的高風險驗收流程。
