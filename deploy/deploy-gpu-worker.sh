@@ -91,6 +91,9 @@ git reset --hard "origin/$DEPLOY_BRANCH"
 echo "code: $(git rev-parse --short HEAD) @ ${DEPLOY_BRANCH}"
 
 # --- 4. .env.worker（環境差異；密鑰走 SSM /transcriber{,-staging}/*，靠 APP_ENV 路由）---
+# WHISPER_MODEL=large-v3 + RESEG_MAX_SEGMENT_SEC=4：2026-06-17 staging 實測 medium/turbo/large-v3
+# × batched/sequential 矩陣後定案的 production 標準（v3+batched 不掉段、幻覺較少），
+# staging/prod 一致，不再各自漂移。
 cat > /opt/transcriber/.env.worker <<EOF
 DEPLOY_ENV=aws
 APP_ROLE=worker
@@ -102,6 +105,8 @@ SQS_QUEUE_URL=${SQS_QUEUE_URL}
 PRIORITY_SQS_QUEUE_URL=${PRIORITY_SQS_QUEUE_URL}
 SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT}
 AUTO_SHUTDOWN_IDLE_MINUTES=${IDLE_MIN}
+WHISPER_MODEL=large-v3
+RESEG_MAX_SEGMENT_SEC=4
 EOF
 
 # --- 5. 預裝 deps（暖快取）---
