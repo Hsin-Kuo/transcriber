@@ -367,7 +367,7 @@
     "errorUpload": "Upload failed",
     "language": "Language",
     "langChineseGeneric": "Chinese (generic)",
-    "langTaiwanese": "Taiwanese (output in Chinese characters)",
+    "langTaiwanese": "Taiwanese (translated to Chinese)",
     "mergeMode": "Merge Mode",
     "fileCount": "{count} file(s)",
     "taskName": "Task Name",
