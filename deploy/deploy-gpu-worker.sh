@@ -109,6 +109,25 @@ WHISPER_MODEL=large-v3
 RESEG_MAX_SEGMENT_SEC=4
 EOF
 
+# --- 4b. 台語模型 Breeze-ASR-26（CT2 轉檔版，S3 → 本地，idempotent）---
+# 模型檔 ~2.9GB，放各環境自己的 bucket（models/ prefix），沿用 instance role 唯讀。
+# S3 物件缺失時只警告不中斷佈建，且**不寫 env**——routing 程式碼對未設
+# WHISPER_MODEL_NAN_TW 的台語任務會安全退回 WHISPER_MODEL（docs/TAIWANESE_ASR_PLAN.md）。
+# 千萬別無條件寫 env：env 指向不存在的路徑會讓台語任務在載入模型時直接失敗。
+BREEZE_DIR=/opt/models/breeze-asr-26-ct2
+if [ ! -f "$BREEZE_DIR/model.bin" ]; then
+  echo "=== 下載台語模型 Breeze-ASR-26（s3://${S3_BUCKET}/models/breeze-asr-26-ct2/）==="
+  sudo mkdir -p /opt/models && sudo chown ec2-user:ec2-user /opt/models
+  aws s3 sync "s3://${S3_BUCKET}/models/breeze-asr-26-ct2/" "$BREEZE_DIR" \
+    --region "${S3_REGION}" --only-show-errors || true
+fi
+if [ -f "$BREEZE_DIR/model.bin" ]; then
+  echo "WHISPER_MODEL_NAN_TW=${BREEZE_DIR}" >> /opt/transcriber/.env.worker
+  echo "台語模型就緒：${BREEZE_DIR}"
+else
+  echo "⚠️  台語模型不存在（S3 尚未上傳？）——不寫 WHISPER_MODEL_NAN_TW，台語任務退回 WHISPER_MODEL"
+fi
+
 # --- 5. 預裝 deps（暖快取）---
 # 用 requirements-worker.lock（完整 closure 鎖定）確保重建 deterministic，不受未釘
 # transitive 漂移。unit 的 ExecStartPre 也會 pip install，但受 systemd TimeoutStartSec=90s
