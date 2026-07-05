@@ -252,6 +252,12 @@ export function useSegmentNavigation({
   }
 
   function handleKeyUp(e) {
+    if (e.key === 'Alt') {
+      // Windows 上單獨放開 Alt 會把 focus 交給瀏覽器功能列（Firefox menu bar /
+      // Chrome、Edge 三點選單），之後鍵盤輸入會落在瀏覽器 UI 上。本頁把 Alt 當
+      // app modifier（hover chip、Alt+click seek），一律攔截；鍵盤使用者仍可用 F10 開選單。
+      e.preventDefault()
+    }
     if (!e.altKey || e.key === 'Alt') {
       isAltPressed.value = false
     }
