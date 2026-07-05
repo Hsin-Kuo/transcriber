@@ -48,9 +48,12 @@ def _resolve_punct_language(
     """決定標點處理用的語言代碼。
 
     1. 使用者明確指定繁/簡 → 直接用
-    2. 偵測到 zh → 依 UI 語言決定繁/簡,其他預設繁體
-    3. 其他語言 → 用偵測到的語言或指定語言
+    2. 台語（nan-TW）→ 模型輸出為繁體漢字,標點/繁簡處理沿用 zh-TW 鏈
+    3. 偵測到 zh → 依 UI 語言決定繁/簡,其他預設繁體
+    4. 其他語言 → 用偵測到的語言或指定語言
     """
+    if language == "nan-TW":
+        return "zh-TW"
     if language in ("zh-TW", "zh-CN"):
         return language
     if detected_language == "zh":

@@ -38,3 +38,9 @@ class TestResolvePunctLanguage:
 
     def test_default_zh_when_all_none(self):
         assert _resolve_punct_language(None, None, None) == "zh"
+
+    def test_taiwanese_maps_to_zh_tw(self):
+        # 台語模型輸出繁體漢字,標點/繁簡處理沿用 zh-TW 鏈
+        assert _resolve_punct_language("nan-TW", None, None) == "zh-TW"
+        # 不受 detected/ui_language 影響:使用者明確選台語即定案
+        assert _resolve_punct_language("nan-TW", "zh", "zh-CN") == "zh-TW"

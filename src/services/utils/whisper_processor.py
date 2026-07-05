@@ -43,8 +43,13 @@ _USE_BATCHED = os.getenv("WHISPER_BATCHED", "true").strip().lower() not in ("fal
 
 
 def _normalize_language(language: Optional[str]) -> Optional[str]:
-    """Map zh-TW/zh-CN to zh for Whisper (which only supports 'zh')."""
-    if language in ("zh-TW", "zh-CN"):
+    """Map zh-TW/zh-CN to zh for Whisper (which only supports 'zh').
+
+    nan-TW（台語）同樣映到 zh：台語模型（Breeze-ASR-26）是 whisper-large-v2
+    微調，tokenizer 只有標準 Whisper 語言 token，台語音檔的漢字輸出走 zh token；
+    若 worker 未配置台語專用模型而 fallback 到預設模型，zh 也是最接近的退路。
+    """
+    if language in ("zh-TW", "zh-CN", "nan-TW"):
         return "zh"
     return language
 

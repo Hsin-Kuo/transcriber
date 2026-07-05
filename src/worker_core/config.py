@@ -18,6 +18,16 @@ MONGODB_URL: str = get_parameter(
 )
 MONGODB_DB_NAME: str = os.getenv("MONGODB_DB_NAME", "whisper_transcriber")
 DEFAULT_MODEL: str = os.getenv("WHISPER_MODEL", "large-v3-turbo")
+# 依語言路由的專用模型。key = 任務的 language 原始值；value = faster-whisper 可載入的
+# 模型名稱或本地 CTranslate2 目錄（例：台語 Breeze-ASR-26 轉檔後的路徑）。
+# 未設定 env var 的語言不進表，一律 fallback DEFAULT_MODEL。
+LANGUAGE_MODEL_OVERRIDES: dict[str, str] = {
+    lang: path
+    for lang, path in {
+        "nan-TW": os.getenv("WHISPER_MODEL_NAN_TW", ""),
+    }.items()
+    if path
+}
 WORKER_SECRET: str = get_parameter(
     "/transcriber/worker-secret",
     fallback_env="WORKER_SECRET",
