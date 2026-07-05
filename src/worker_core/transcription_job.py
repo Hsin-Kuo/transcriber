@@ -73,7 +73,7 @@ def process_task(message_body: dict, progress_store: ProgressStore) -> None:
             orchestrator = TranscriptionOrchestrator(
                 db=db,
                 progress_store=progress_store,
-                whisper=get_whisper_processor(),
+                whisper=get_whisper_processor(job.language),
                 punctuation=PunctuationProcessor(),
                 diarization=diarization,
             )

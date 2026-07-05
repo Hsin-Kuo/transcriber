@@ -186,7 +186,7 @@ def _validate_create_params(task_type, chunk_minutes, max_speakers, language, pu
         raise api_error("TRANSCRIPTION_INVALID_CHUNK_MINUTES", "Chunk length must be between 1 and 120 minutes", status.HTTP_400_BAD_REQUEST)
     if max_speakers is not None and (max_speakers < 2 or max_speakers > 10):
         raise api_error("TRANSCRIPTION_INVALID_MAX_SPEAKERS", "Max speakers must be between 2 and 10", status.HTTP_400_BAD_REQUEST)
-    ALLOWED_LANGUAGES = {"zh", "zh-TW", "zh-CN", "en", "ja", "ko", "auto"}
+    ALLOWED_LANGUAGES = {"zh", "zh-TW", "zh-CN", "nan-TW", "en", "ja", "ko", "auto"}
     if language not in ALLOWED_LANGUAGES:
         raise api_error("TRANSCRIPTION_UNSUPPORTED_LANGUAGE", "Unsupported language: {language}. Allowed: {allowed}", status.HTTP_400_BAD_REQUEST, language=language, allowed=', '.join(ALLOWED_LANGUAGES))
     ALLOWED_PUNCT = {"openai", "gemini", "none"}
