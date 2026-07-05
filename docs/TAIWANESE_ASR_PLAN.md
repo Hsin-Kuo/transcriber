@@ -1,8 +1,36 @@
 # 台語 ASR 模型（Breeze-ASR-26）加掛計畫
 
-> 狀態：程式碼已實作（feat/taiwanese-asr-routing，語言代碼定案 `nan-TW`）。
-> 待辦：模型檔部署路徑決策 + staging 端到端驗證（見「驗收方式」與「待決事項」）。
+> 狀態：**staging 端到端驗收通過（2026-07-05）**。程式碼在 staging 分支（#233/#235/#236），
+> 模型檔已上傳 staging/prod 兩個 bucket（`models/breeze-asr-26-ct2/`，各 3.09GB）。
+> 待辦：promote staging→aws + prod worker 重跑佈建（見「Prod 上線步驟」）+ 真實台語音檔品質聽測。
 > 模型：[MediaTek-Research/Breeze-ASR-26](https://huggingface.co/MediaTek-Research/Breeze-ASR-26)
+
+## Staging E2E 驗收結果（2026-07-05，全數通過）
+
+重跑 `deploy-gpu-worker.sh staging` 走完整真實部署路徑（S3 下載模型→寫 env→啟動），
+API 送 `nan-TW` 任務 + `zh-TW` 對照組（macOS TTS 合成中文語音；管線驗證用，非品質聽測）：
+
+1. ✅ 開機預熱只載 `large-v3`；Breeze 等首個 nan-TW 任務才 lazy load（`whisper.model.loading model=/opt/models/breeze-asr-26-ct2 language=nan-TW`，CT2 載入僅 3 秒）
+2. ✅ nan-TW 任務輸出非空繁體漢字 + 標點鏈正常
+3. ✅ zh-TW 對照組無任何新模型載入事件（沿用快取 large-v3），不受影響
+4. ✅ worker 閒置自動關機生命週期正常
+
+**驗收時發現的既有問題（非本次引入、不擋上線）**：`orchestrator.py` `_mark_completed`
+會把 whisper 正規化後的 `language`（`zh`）回寫 `config.language`，覆蓋使用者原始選擇
+（zh-TW 也一直如此，下游 `transcriptions.py` PDF 匯出有 `zh→zh-TW` 補償映射）。目前無
+retry/requeue 流程讀此欄位，影響僅限任務詳情的語言顯示；未來若做「重跑任務」功能，
+必須先修這裡，否則台語任務重跑會靜默失去 Breeze 路由。
+
+## Prod 上線步驟（promote staging→aws 之後）
+
+1. 兩台 prod worker（spot `i-0d133cca8e6ce23c2`、on-demand `i-058f381c59210c00a`）各重跑
+   `bash deploy/deploy-gpu-worker.sh prod`——會下載模型（prod bucket 已有）+ 重寫 `.env.worker`
+   （含 `WHISPER_MODEL=large-v3`，一併修掉 medium 降級問題）
+2. **殘留 `/opt/transcriber/.env` 處理**：刪掉其中 `WHISPER_MODEL=medium` 行（保險；#232 的
+   EnvironmentFile 已優先，但留著是漂移源）。**spot 機的 `SENTRY_DSN` 只在這個檔裡，整檔刪除
+   前要先遷移**（`.env.worker` 模板目前不含 DSN，手動加會在下次佈建被覆蓋——長期解是 DSN 進
+   SSM + config 讀取，短期先只刪 WHISPER_MODEL 行、保留檔案）
+3. 驗證：prod worker log `whisper.model.loaded model=large-v3`；送一筆 nan-TW 任務看 Breeze 載入
 
 ## 背景
 
