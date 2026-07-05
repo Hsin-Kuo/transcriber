@@ -367,6 +367,7 @@
     "errorUpload": "上傳失敗",
     "language": "語言",
     "langChineseGeneric": "中文（不指定）",
+    "langTaiwanese": "台語（輸出為漢字）",
     "mergeMode": "合併模式",
     "fileCount": "{count} 個檔案",
     "taskName": "任務名稱",
