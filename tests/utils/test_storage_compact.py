@@ -37,6 +37,41 @@ class TestKeyAndTier:
         assert compact.extract_tier_from_path(path) == expected
 
 
+class TestPresignedUrlResponseHeaders:
+    """AWS 模式下 presigned URL 必須覆寫 Response* 讓瀏覽器把回應當音檔處理，
+    不能讓未來混入 bucket 的非 audio content-type 被當 HTML inline 解析。"""
+
+    class _FakeS3:
+        def __init__(self):
+            self.last_params = None
+
+        def generate_presigned_url(self, operation, Params, ExpiresIn):
+            self.last_params = Params
+            return "https://bucket.s3.amazonaws.com/fake?signed=1"
+
+    def test_get_audio_presigned_url_overrides_response_headers(self, monkeypatch):
+        monkeypatch.setattr(compact, "is_aws", lambda: True)
+        fake_s3 = self._FakeS3()
+        monkeypatch.setattr(compact, "get_s3", lambda: fake_s3)
+
+        url = compact.get_audio_presigned_url(VALID_ID, tier="pro")
+
+        assert url == "https://bucket.s3.amazonaws.com/fake?signed=1"
+        assert fake_s3.last_params["ResponseContentType"] == "audio/mpeg"
+        assert fake_s3.last_params["ResponseContentDisposition"] == "inline; filename=audio.mp3"
+
+    def test_get_presigned_url_by_path_overrides_response_headers(self, monkeypatch):
+        monkeypatch.setattr(compact, "is_aws", lambda: True)
+        fake_s3 = self._FakeS3()
+        monkeypatch.setattr(compact, "get_s3", lambda: fake_s3)
+
+        url = compact.get_presigned_url_by_path(f"s3://bucket/uploads/free/{VALID_ID}.mp3")
+
+        assert url is not None
+        assert fake_s3.last_params["ResponseContentType"] == "audio/mpeg"
+        assert fake_s3.last_params["ResponseContentDisposition"] == "inline; filename=audio.mp3"
+
+
 class TestLocalModeRoundTrip:
     """is_aws() 預設 False（DEPLOY_ENV=local）→ 走真檔案系統。"""
 

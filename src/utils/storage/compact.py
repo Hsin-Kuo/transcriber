@@ -73,7 +73,16 @@ def get_audio_presigned_url(task_id: str, expires_in: int = 3600, tier: str = "f
     key = _audio_s3_key(task_id, tier)
     return get_s3().generate_presigned_url(
         "get_object",
-        Params={"Bucket": S3_BUCKET, "Key": key},
+        Params={
+            "Bucket": S3_BUCKET,
+            "Key": key,
+            # Compact audio 契約保證 container=mp3（見 CONTEXT.md）；固定覆寫回應
+            # header，避免未來若同 bucket 混入其他 content-type 就被瀏覽器當
+            # HTML inline 解析（stored XSS）。filename 用固定字串，不拼使用者
+            # 可控值，避免 header injection。
+            "ResponseContentType": "audio/mpeg",
+            "ResponseContentDisposition": "inline; filename=audio.mp3",
+        },
         ExpiresIn=expires_in,
     )
 
@@ -173,7 +182,13 @@ def get_presigned_url_by_path(audio_file_path: str, expires_in: int = 3600) -> O
     expires_in = min(expires_in, MAX_PRESIGNED_URL_TTL)
     return get_s3().generate_presigned_url(
         "get_object",
-        Params={"Bucket": S3_BUCKET, "Key": key},
+        Params={
+            "Bucket": S3_BUCKET,
+            "Key": key,
+            # 同上：Compact audio 契約保證 container=mp3，固定覆寫回應 header。
+            "ResponseContentType": "audio/mpeg",
+            "ResponseContentDisposition": "inline; filename=audio.mp3",
+        },
         ExpiresIn=expires_in,
     )
 
