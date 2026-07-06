@@ -42,11 +42,12 @@ export default [
       },
     },
     rules: {
+      // 安全規則：全站零 v-html 是 XSS 防線，禁止引入（要渲染 HTML 需先過 sanitizer 並經安全審查）
+      'vue/no-v-html': 'error',
       // 既有 codebase 不強制這些 style preference（避免大量 warning）
       'vue/multi-word-component-names': 'off',
       'vue/attribute-hyphenation': 'off',
       'vue/v-on-event-hyphenation': 'off',
-      'vue/no-v-html': 'off',
       'vue/html-self-closing': 'off',
       'vue/max-attributes-per-line': 'off',
       'vue/html-indent': 'off',
