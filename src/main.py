@@ -12,7 +12,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
@@ -148,6 +148,21 @@ app.add_middleware(
     expose_headers=["Content-Type", "Content-Disposition"],
     max_age=3600,
 )
+
+
+# 後端本身補一層安全 headers（defense-in-depth）：生產環境的 CSP/HSTS 等主力
+# 防線在 nginx（見 deploy/nginx-*.conf），但本地開發、未來容器化、或 SG 誤開
+# 8000 對外時，後端不能完全裸奔。用 setdefault 避免蓋掉 router 自己設的值；
+# CSP 刻意不在這裡下——後端只回 JSON，CSP 是「前端 HTML host 怎麼被瀏覽器
+# 執行」的政策，屬於 nginx（serve 前端靜態檔案那層）的責任。
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return response
+
 
 # ========== 註冊所有路由 ==========
 
