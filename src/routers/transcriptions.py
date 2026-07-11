@@ -23,6 +23,7 @@ from ..database.repositories.user_repo import UserRepository
 from ..dependencies import get_intake_service
 from ..models.intake import IntakeConfig
 from ..models.quota import has_feature
+from ..models.transcription import SpeakerNamesUpdate
 from ..services.intake_service import TranscriptionIntakeService
 from ..services.task_service import TaskService
 from ..services.utils.audio_validator import (
@@ -999,7 +1000,7 @@ async def update_metadata(
 @router.put("/{task_id}/speaker-names")
 async def update_speaker_names(
     task_id: str,
-    speaker_names: dict,
+    body: SpeakerNamesUpdate,
     current_user: dict = Depends(get_current_user),
     db = Depends(get_database)
 ):
@@ -1007,7 +1008,7 @@ async def update_speaker_names(
 
     Args:
         task_id: 任務 ID
-        speaker_names: 講者代碼與自定義名稱的對應字典 {"SPEAKER_00": "張三", "SPEAKER_01": "李四"}
+        body: 講者代碼與自定義名稱的對應字典 {"SPEAKER_00": "張三", "SPEAKER_01": "李四"}
         current_user: 當前用戶
         db: 資料庫實例
 
@@ -1017,6 +1018,8 @@ async def update_speaker_names(
     Raises:
         HTTPException: 任務不存在、無權訪問或更新失敗
     """
+    speaker_names = body.root
+
     # 從資料庫獲取任務
     task_repo = TaskRepository(db)
     task = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
