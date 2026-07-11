@@ -78,11 +78,15 @@ export const TokenManager = {
 
 ### 3.2 改動面
 
-**後端（集中、非分散——這是好消息）**：
-- `get_current_user`（`src/auth/dependencies.py:12-48`）目前唯一依賴 `HTTPBearer` 讀 header，要改成從 cookie 讀 token（或兩者都接受，過渡期用）。這是**單一 dependency**，FastAPI 全站的認證端點都透過它注入，改一處即全站生效，不用逐一改 router。
-- `get_current_user_sse`（同檔 :51-83）可以整個簡化：拿掉 `token: str = Query(...)`，改成直接讀 cookie——**同時把 token-in-URL 這個既有做法也一起移除**（附帶的安全改善：token 不再出現在 SSE 請求的 URL、不會被 server access log / Referer 記錄）。
-- `/auth/login`、`/auth/refresh` 兩個端點（`src/routers/auth.py:542-666`, `708-714`）：新增一行 `set_access_cookie(response, access_token)`（仿造 `set_refresh_cookie` 寫一個對應函式），並評估 `TokenResponse` 是否還要在 body 回傳 `access_token`（為了 backward compat 或除錯可以先兩者並存一段時間）。
-- `logout` 端點：cookie 清除要新增 access_token 那條（比照 `clear_refresh_cookie`）。
+**後端：實際是 3 個讀取點，不是 1 個——但範圍精確可控**（第一版評估說「單一 dependency」不夠精確，深挖後訂正）：
+
+| 位置 | 現況 | 需要的改動 |
+|---|---|---|
+| `get_current_user`（`src/auth/dependencies.py:12-48`） | 唯一依賴 `HTTPBearer` 讀 header | 改成從 cookie 讀（或兩者都接受，過渡期用）。**FastAPI 全站 81 個端點透過 `Depends(get_current_user)`（61 處）/`Depends(get_current_admin)`（20 處，後者本身依賴前者）間接注入**，全部走同一個函式，改一處即全站生效，不用逐一改 router |
+| `get_current_user_sse`（同檔 :51-83） | 從 query param 讀 token，只有 `tasks.py:306` 這 1 個 SSE 端點在用 | 拿掉 `token: str = Query(...)`，改直接讀 cookie——**同時把 token-in-URL 這個既有做法也一起移除**（附帶安全改善：token 不再出現在 SSE 請求的 URL、不會被 server access log / Referer 記錄） |
+| `download_audio`（`transcriptions.py:642-681`） | **沒有共用上面兩個函式，自己寫了一份雙模式驗證**（`HTTPBearer(auto_error=False)` header 優先，query token 其次） | 同樣改成讀 cookie；這是唯一一處需要**單獨**改的認證邏輯，因為它沒有走共用 dependency |
+
+加上簽發端：`/auth/login`、`/auth/refresh`（`src/routers/auth.py:542-666`, `708-714`）、`/auth/google`（`oauth.py:189-206`）三處要新增 `set_access_cookie(response, access_token)`（仿造 `set_refresh_cookie`）；`logout` 端點要新增對應的清除呼叫。**總計 7 個具體程式碼位置**，每一處都能列出檔名行號，不是模糊的「牽一髮動全身」。
 
 **前端**：
 - `TokenManager` 整組拿掉（不再需要 JS 保管 access token），`api.ts` 的 request 攔截器不用再手動加 `Authorization` header——**程式碼反而變簡單**。
@@ -93,26 +97,34 @@ export const TokenManager = {
   - (b) 乾脆固定每 N 分鐘（略短於 15 分鐘效期）主動 refresh 一次，不用算精確剩餘時間。
   這是方案 B 除了認證流程本身之外，**唯一需要新設計（不是照抄 refresh_token 現成模式）的地方**。
 
-**CSRF**：
-- refresh_token 現有的 `SameSite=strict` 已經證明這個架構下可行——三個網域（`my.soundlite.app`、`admin.soundlite.app`、後端 API）都是**同源反代**（nginx 把 `/auth`、`/api` 等路徑代理到同一台機器的 127.0.0.1:8000，見 `deploy/nginx-ec2.conf`），沒有真正跨站的合法使用情境，`SameSite=strict` 不會誤傷任何現有流程。
-- `SameSite=strict` 本身就會**擋掉幾乎所有經典 CSRF**（cookie 不會被夾帶到任何跨站請求，包含 top-level navigation），比 TODO 原文預期的「需要處理 CSRF（SameSite + CSRF token）」風險小很多——這不是「不用管 CSRF」，但額外的 CSRF token round-trip機制大概率不是必要投資，用 `Origin`/`Referer` header 白名單檢查（配置已有的 `CORS_ORIGINS`）作 defense-in-depth 即可，工程量遠小於完整 CSRF token 方案。
+**深挖後排除的疑慮**——追問「方案 B 各方面是否真的可行」後逐一查證：
+
+- **前端沒有其他隱藏繞道**：全專案 grep `Authorization`/`fetch(`/`XMLHttpRequest`，除了 axios 攔截器本身跟上面已知的 audio/SSE 兩處，**沒有任何地方手動組 header 或繞過 axios 實例**。PDF/TXT 匯出走 `api.post()` 拿 blob 後 `URL.createObjectURL()`（本地 blob URL），不是 token-in-URL 模式，不受影響。Google OAuth 走 GSI JS SDK + `POST /auth/google`（不是整頁重導向），不會撞到 `SameSite=Strict` 對「跨站頂層導覽」的限制。`scripts/`、`tests/` 全部搜過，沒有任何自動化腳本或第三方 API 消費者依賴 JSON body 裡的 `access_token`。
+- **Cookie 跨網域機制已被 `refresh_token` 驗證過，零新風險**：local dev 的 `CORS_ORIGINS`（`localhost:3000`/`5173`）跟 API 的 `:8000` 是不同 port 但同一個「site」（cookie 判斷不看 port），現有 `refresh_token` cookie 已在這個配置下正常運作；staging/prod 三個網域都是 nginx 同源反代；沒設 `Domain=` attribute，每個子網域各自獨立管理 cookie，跟現況一致——這些都是「借用已驗證過的既有機制」，不是新的未知數。
+- **CSRF 的邊界案例：金流 return**——NewebPay 用 top-level 導覽把使用者導回 `my.soundlite.app/payment/return`，是唯一「跨站導覽回來」的流程。但這是 SPA：回來後那次頁面載入本身只是抓 HTML/JS shell，真正的授權 API call 是頁面載入完成後由 JS 發起的**同站**請求（此時 top frame 已經是 `my.soundlite.app`），`SameSite=Strict` 不會擋這類後續請求。這個場景現在就已經在 `refresh_token` 上跑著，方案 B 不會引入新問題。
+- **測試套件遷移成本趨近於零**：全專案搜不到任何測試用真實 `Authorization: Bearer <token>` header 打 TestClient/HTTP 端點——幾乎所有認證相關測試都直接呼叫 router 函式、把 `current_user` dict 當參數注入（繞過 HTTP 層的 token 解析，見 `tests/routers/test_batch_gating.py`、`tests/routers/test_speaker_names_update.py` 的既有手法）。換掉 token 解析機制不會讓既有測試大量掛掉。
+- **Worker/SQS 認證完全獨立**：`WORKER_SECRET` + HMAC-SHA256（`src/worker_core/sqs_consumer.py`），跟 user JWT 系統零重疊，方案 B 不影響背景任務派工。
 
 ### 3.3 這個方案解決了什麼
 
 - ✅ **這是唯一能真正擋掉 active-XSS 偷 access token 的方案**——httpOnly cookie 對任何 JS（不管是不是惡意）都不可讀，`document.cookie` 看不到、`fetch`/`XMLHttpRequest` 也讀不到值本身。
 - ✅ 附帶簡化：拿掉 token-in-URL 這個既有的曝露面（SSE、audio player），程式碼量反而減少（前端不用管 header 注入）。
-- ⚠️ 唯一新增的風險面是 CSRF，但如上所述，這個架構的同源特性讓 `SameSite=strict` 幾乎打平這個風險，不需要重工程。
+- ⚠️ 曝露面「必然」比 `refresh_token` 大一點：`refresh_token` 用 `Path=/auth` 把自己縮到最小曝露面，但 `access_token` 天生要對每個 API 呼叫可用，只能設 `Path=/`。這不是「方案 B 帶來的新風險」——不管 access_token 存 `localStorage`、記憶體、還是 cookie，它本來就得對每個 API 呼叫可用；用 cookie 只是換個「誰負責夾帶」的角色（瀏覽器 vs JS），`httpOnly` 已經排除「JS 讀取」這個維度、`SameSite=Strict` 已經排除「跨站請求」這個維度，實際風險面沒有變大。
+- ⚠️ 剩下真正的新增風險面是 CSRF，但如上所述（含金流 return 邊界案例查證），這個架構的同源特性讓 `SameSite=strict` 幾乎打平這個風險，不需要重工程（額外的 `Origin`/`Referer` header 白名單檢查已有 `CORS_ORIGINS` 可重用，屬 defense-in-depth，不是必要投資）。
 
 ## 4. 建議
 
-**先做方案 A，把方案 B 排進下一個週期，不是「二選一」而是「先後順序」：**
+**先做方案 A，把方案 B 排進下一個週期，不是「二選一」而是「先後順序」：**（2026-07-11 追加深挖後：方案 B 比第一版評估想像的更可行，但排序建議不變——原因見下）
 
 1. **方案 A 立即做**：改動面小（前端 2 個檔案的儲存實作 + 1 個路由守衛判斷邏輯），後端零改動，沒有 CSRF 這類需要仔細驗證的新風險面，一天內可以完成並上線。它不能擋 active-XSS，但确实排除了「token 被動躺在 localStorage 被非執行期手段偷走」這個現實存在、方案 B 也不會額外處理得更好的風險（方案 B 換成 cookie 後，一樣要考慮瀏覽器/裝置層級的其他讀取手段，只是 cookie 天生比 localStorage 少一種「JS 可讀」的曝險）。
-2. **方案 B 列為下一個週期的架構任務**，理由：
-   - 後端改動集中（一個 dependency + 兩個 cookie 寫入點），比一開始想像的分散風險小。
-   - 這個架構的同源特性讓 CSRF 疑慮遠比典型「SPA + 獨立 API 網域」場景小，`SameSite=strict` 已有 refresh_token 這個先例證明可行。
-   - 唯一需要重新設計的是 `ensureFreshAccessToken` 的到期時間判斷（改讀後端回傳的 `expires_at` 而非解析 JWT payload），工程量可控。
+2. **方案 B 列為下一個週期的架構任務**，深挖後的具體理由（§3.2 已逐一查證，不是空泛樂觀）：
+   - 後端改動範圍精確可控且可窮舉：3 個讀取點（`get_current_user`、`get_current_user_sse`、`download_audio` 的 inline 驗證）+ 3 個簽發點（`login`/`refresh`/`google`）+ 1 個清除點（`logout`），共 7 個具體位置，都能列出檔名行號。
+   - CSRF 疑慮比典型「SPA + 獨立 API 網域」場景小很多：三網域同源反代、`SameSite=strict` 已有 `refresh_token` 這個生產先例、金流 return 的跨站導覽邊界案例也查證過不會有問題（SPA 架構下真正的 API call 是導覽完成後才發起的同站請求）。
+   - 前端沒有隱藏的複雜度：全專案 grep 過 `Authorization`/`fetch`/`XMLHttpRequest`，除了已知的 audio/SSE 兩處，沒有其他繞道；PDF 匯出、Google OAuth 都不受影響。
+   - 測試套件遷移成本趨近於零：既有測試幾乎都繞過 HTTP 層直接注入 `current_user`，不依賴真實 `Authorization` header。
+   - 唯一需要重新設計的是 `ensureFreshAccessToken` 的到期時間判斷（改讀後端回傳的 `expires_at` 而非解析 JWT payload），工程量可控且已有明確做法。
    - 這是全清單裡**唯一能真正防禦「active XSS 竊取 token」**的方案——如果之後真的要對 stored XSS 做到「就算中了也偷不到 token」的等級，只有這條路。
+   - **儘管可行性比預期高，仍建議排在方案 A 之後**，理由是流程風險而非架構風險：需要在 staging 仔細走一次 SSE、audio 播放器、金流 return 三個邊界情境（跟 TODO-3 CSP 那次「本地驗證方法跟真實環境不一致」的教訓一樣，這類「牽動全站認證」的改動經不起省略 staging 驗證），值得獨立排一個週期專心做，不跟其他修復擠在一起趕。
 
 **不建議的組合**：只做方案 A 就永久停在那——要對決策者說清楚方案 A 是暫時性的曝險降低，不是終局方案，避免「做了方案 A 就當作 TODO-8 完全解決」的誤解。
 
