@@ -44,12 +44,29 @@ interface RetryableRequest extends InternalAxiosRequestConfig {
   _retry?: boolean
 }
 
+// 這些端點的 401 不是 access token 過期——它們本來就不需要 token
+// （登入/註冊/refresh 自身）。若不排除，登入密碼打錯會誤觸 refresh
+// （沒有 refresh_token cookie，refresh 也 401），把「帳號或密碼錯誤」
+// 覆寫成 refresh 失敗的錯訊，見 frontend/src/utils/api.ts 同款既有修法
+// （commit a51bd1e）——那次只修了 frontend/，這裡補齊 admin-frontend。
+const AUTH_ENDPOINTS_NO_REFRESH = ['/auth/login', '/auth/register', '/auth/refresh']
+
+function shouldSkipRefresh(url: string | undefined): boolean {
+  if (!url) return false
+  return AUTH_ENDPOINTS_NO_REFRESH.some((path) => url.includes(path))
+}
+
 api.interceptors.response.use(
   (response: AxiosResponse) => response,
   async (error: AxiosError) => {
     const originalRequest = error.config as RetryableRequest | undefined
 
-    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+    if (
+      error.response?.status === 401
+      && originalRequest
+      && !originalRequest._retry
+      && !shouldSkipRefresh(originalRequest.url)
+    ) {
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           subscribeTokenRefresh((result) => {

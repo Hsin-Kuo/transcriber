@@ -640,19 +640,20 @@ async def export_transcription_pdf(
 @router.get("/{task_id}/audio")
 async def download_audio(
     task_id: str,
-    request: Request,
+    current_user: dict = Depends(get_current_user),
     db = Depends(get_database)
 ):
     """下載原始音檔
 
-    認證走 httpOnly access_token cookie（硬切換，不再接受 Authorization
-    header 或 ?token= 查詢參數——後者原本是給 <audio> 元素用的，因為它
-    不支援自訂 header；改用 cookie 後 <audio src> 的同源請求會自動帶
-    cookie，不再需要把 token 塞進 URL）。
+    認證跟其他端點一樣走共用的 get_current_user（httpOnly access_token
+    cookie）。這個端點以前因為 <audio src> 不支援自訂 header，自己另外寫
+    了一份「header 或 ?token= 查詢參數」的雙模式驗證；改用 cookie 後
+    <audio src> 的同源請求會自動帶 cookie，不再需要獨立的 token-in-URL
+    機制，因此收斂回共用的 get_current_user，不再自己重複認證邏輯。
 
     Args:
         task_id: 任務 ID
-        request: FastAPI Request，用來讀 cookie
+        current_user: 目前登入使用者
         db: 資料庫實例
 
     Returns:
@@ -661,25 +662,9 @@ async def download_audio(
     Raises:
         HTTPException: 任務不存在、無權訪問或音檔不存在
     """
-    from ..auth.cookies import ACCESS_COOKIE_NAME
-    from ..auth.jwt_handler import verify_token
-
-    access_token = request.cookies.get(ACCESS_COOKIE_NAME)
-    if not access_token:
-        raise api_error("TRANSCRIPTION_AUTH_REQUIRED", "Authentication required: missing access token cookie", status.HTTP_401_UNAUTHORIZED)
-
-    token_data = verify_token(access_token, "access")
-
-    if not token_data:
-        raise api_error("TRANSCRIPTION_INVALID_TOKEN", "Invalid authentication token", status.HTTP_401_UNAUTHORIZED)
-
-    user_id = token_data.user_id
-    if not user_id:
-        raise api_error("TRANSCRIPTION_INVALID_TOKEN", "Invalid authentication token", status.HTTP_401_UNAUTHORIZED)
-
     # 從資料庫獲取任務
     task_repo = TaskRepository(db)
-    task = await task_repo.get_by_id_and_user(task_id, user_id)
+    task = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
 
     if not task:
         raise api_error("TRANSCRIPTION_TASK_NOT_FOUND", "Task not found or access denied", status.HTTP_404_NOT_FOUND)

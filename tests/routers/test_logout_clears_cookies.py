@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT))
 from fastapi import Response  # noqa: E402
 
 from src.routers import auth  # noqa: E402
+from tests.response_helpers import get_set_cookie_headers  # noqa: E402
 
 CURRENT_USER = {"_id": "507f1f77bcf86cd799439011", "email": "susan@example.com"}
 
@@ -42,10 +43,6 @@ class _FakeAuditLogger:
         pass
 
 
-def _get_set_cookie_headers(response: Response) -> list[str]:
-    return [v.decode() for k, v in response.raw_headers if k.lower() == b"set-cookie"]
-
-
 @pytest.mark.asyncio
 async def test_logout_clears_both_access_and_refresh_cookies(monkeypatch):
     monkeypatch.setattr(auth, "UserRepository", _FakeUserRepo)
@@ -61,7 +58,7 @@ async def test_logout_clears_both_access_and_refresh_cookies(monkeypatch):
 
     assert result == {"message": "登出成功"}
 
-    set_cookie_headers = _get_set_cookie_headers(response)
+    set_cookie_headers = get_set_cookie_headers(response)
     cleared_names = set()
     for header in set_cookie_headers:
         # delete_cookie 會產生 "name=; Path=..." 這種 header，name 在第一個 = 前面

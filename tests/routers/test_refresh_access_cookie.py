@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.routers import auth  # noqa: E402
 from src.auth.jwt_handler import create_refresh_token  # noqa: E402
+from tests.response_helpers import get_set_cookie_headers  # noqa: E402
 
 _PAYLOAD = {"sub": "507f1f77bcf86cd799439011", "email": "susan@example.com", "role": "user"}
 
@@ -36,10 +37,6 @@ class _FakeUserRepoValid:
 
     async def verify_refresh_token(self, user_id, token):
         return True
-
-
-def _get_set_cookie_headers(response: Response) -> list[str]:
-    return [v.decode() for k, v in response.raw_headers if k.lower() == b"set-cookie"]
 
 
 @pytest.mark.asyncio
@@ -58,7 +55,7 @@ async def test_refresh_sets_new_access_cookie_and_expires_at(monkeypatch):
     assert result.access_token is None
 
     access_cookie = next(
-        (h for h in _get_set_cookie_headers(response) if h.startswith("access_token=")), None
+        (h for h in get_set_cookie_headers(response) if h.startswith("access_token=")), None
     )
     assert access_cookie is not None
     assert "HttpOnly" in access_cookie
