@@ -6,6 +6,8 @@ from ..auth.cookies import (
     REFRESH_COOKIE_NAME,
     set_refresh_cookie,
     clear_refresh_cookie,
+    set_access_cookie,
+    clear_access_cookie,
 )
 
 
@@ -634,7 +636,7 @@ async def login(
         )
 
     # 生成 Token
-    access_token = create_access_token({
+    access_token, expires_at = create_access_token({
         "sub": str(user["_id"]),
         "email": user["email"],
         "role": user["role"]
@@ -650,6 +652,8 @@ async def login(
 
     # httpOnly cookie 傳給 client；body 不再回 refresh_token
     set_refresh_cookie(response, refresh_token_value)
+    # access token 過渡期：cookie + body 雙軌並存（見 TokenResponse docstring）
+    set_access_cookie(response, access_token)
 
     # 登入成功：清除該 email 的失敗計數
     await rate_limit_repo.clear_records("login_email", normalized_email)
@@ -663,7 +667,7 @@ async def login(
         message="登入成功"
     )
 
-    return TokenResponse(access_token=access_token, token_type="bearer")
+    return TokenResponse(access_token=access_token, token_type="bearer", expires_at=expires_at)
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -705,13 +709,14 @@ async def refresh_token(
         )
 
     # 生成新 Access Token；refresh token 沿用不旋轉（簡化 client 同步）
-    access_token = create_access_token({
+    access_token, expires_at = create_access_token({
         "sub": token_data.user_id,
         "email": token_data.email,
         "role": token_data.role
     })
+    set_access_cookie(response, access_token)
 
-    return TokenResponse(access_token=access_token, token_type="bearer")
+    return TokenResponse(access_token=access_token, token_type="bearer", expires_at=expires_at)
 
 
 @router.post("/logout")
@@ -727,6 +732,7 @@ async def logout(
     if cookie_token:
         await user_repo.revoke_refresh_token(str(current_user["_id"]), cookie_token)
     clear_refresh_cookie(response)
+    clear_access_cookie(response)
 
     # 記錄登出
     audit_logger = get_audit_logger()
