@@ -1,6 +1,30 @@
 # Admin/User Access Token 儲存方式評估（XSS audit TODO-8）
 
-> 狀態：**評估文件，尚未動工**。決策後再拆 PR。
+> **狀態：已完成並合併（2026-07-12）。** 本文件下方內文是決策前的評估
+> 過程，保留原貌供參考；實際採用的方案與評估當時的建議不同，差異記在
+> 這裡：
+>
+> **最終決策：直接做方案 B，跳過方案 A。** §4「建議」原本寫「先做方案
+> A、方案 B 排下一週期」，但 A、B 是兩種互斥的實作（記憶體 state vs.
+> httpOnly cookie），不是同一個方向上的漸進步驟——做了 A 之後要再做 B，
+> A 的 `TokenManager` 替代程式碼會被整個拿掉重寫，等於白工一趟。深挖
+> §3.2 之後也發現方案 B 的可行性比最初評估樂觀（CSRF 風險因同源架構+
+> 既有 `refresh_token` 的 `SameSite=strict` 先例遠比預期小；後端改動雖
+> 是 3 個讀取點而非 1 個，但範圍精確可列舉），因此改為直接投入方案 B。
+>
+> **實作結果**：後端 `get_current_user`/`get_current_user_sse`/
+> `download_audio` 三個讀取點硬切換成只認 httpOnly cookie（不做過渡期
+> 雙讀，比照本 repo 既有的 `refresh_token` 遷移先例 commit `342af34`）；
+> 兩個前端拿掉 `TokenManager`，SSE/`<audio>` 拿掉 token-in-URL。詳見
+> PR #258（向下相容的 cookie 種植階段）、PR #260（硬切換 + 兩輪 8 角度
+> code review 揪出的 7 個修復，含一個真實的 race condition bug）。本地
+> 端到端驗證含真實瀏覽器測試（`document.cookie` 證實 httpOnly 真的生
+> 效、真實 `EventSource` 確認 SSE 走 cookie 自動認證、admin 帳號 vs 一
+> 般帳號的權限邊界也驗證過）。全專案 pytest 471 個測試全過。
+>
+> ---
+>
+> 原始狀態（決策前）：**評估文件，尚未動工**。決策後再拆 PR。
 > 範圍：`admin-frontend/`（風險較高，權限升級面）與 `frontend/`（同模式，一併盤點）。
 
 ## 1. 現況

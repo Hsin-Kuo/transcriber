@@ -173,7 +173,7 @@
 - **驗收條件**：既有寄信測試全過；本地實寄一封驗證信（或 dump HTML）目視版型不變。
 - **注意**：escape 後若版型跑掉，代表原本有變數刻意帶 HTML（如 `extra_html`）——那類「本來就是 HTML 的參數」不 escape，但要在函式 docstring 標注「此參數為 raw HTML，呼叫端禁止傳入使用者資料」。
 
-### TODO-8【P2】評估 admin token 從 `localStorage` 改 httpOnly cookie — ✅ 評估文件已產出，待決策（見 `docs/ADMIN_TOKEN_STORAGE_EVALUATION.md`），尚未動工
+### TODO-8【P2】評估 admin token 從 `localStorage` 改 httpOnly cookie — ✅ 方案 B 已完成並合併（PR #258、#260），2026-07-12
 
 - **風險**：`admin-frontend/utils/api.ts:20-26` 把 access_token 存 `localStorage`——XSS 得手即偷 token。這放大所有其他項目的後果（尤其 admin 是一般使用者資料的觀眾，stored XSS 打 admin = 權限升級）。refresh_token 已是 httpOnly cookie（`frontend/src/stores/auth.js:108` 的註解，admin 端同模式），只有 access_token 暴露。
 - **修法方向**（這項是評估 + 提案，不是直接動工）：
@@ -182,7 +182,8 @@
   - 使用者前端（`frontend/`）大概率同樣模式，一併盤點。
 - **驗收條件**：產出一頁評估文件（現況、兩方案改動面、建議），供決策；不改程式碼。
 - **注意**：這是架構層變更，**評估完先回報再動工**，不要直接改。
-- **評估結論摘要**：兩前端的 access_token 皆存 `localStorage`；`frontend/` 另外有 `<audio>` 播放器與 SSE 兩處把 token 塞進 URL query string（原生元件不支援自訂 header）。建議**先做方案 A**（改動小、後端零改動，但只降低曝露面、不擋 active-XSS），**方案 B 排下一週期**（後端改動集中在單一 dependency，CSRF 風險因同源架構+既有 `SameSite=strict` 先例而遠比預期小，唯一需要重新設計的是大檔上傳分片前的 token 到期時間判斷）。詳見評估文件。
+- **評估結論摘要**：兩前端的 access_token 皆存 `localStorage`；`frontend/` 另外有 `<audio>` 播放器與 SSE 兩處把 token 塞進 URL query string（原生元件不支援自訂 header）。評估文件原本建議「先做方案 A、方案 B 排下一週期」，但實際決策是**跳過方案 A、直接做方案 B**——深挖後發現可行性比預期高（CSRF 風險因同源架構+既有 `SameSite=strict` 先例遠比預期小；後端改動雖是 3 個讀取點而非 1 個，但範圍精確可列舉），且 A、B 是兩種互斥實作而非漸進步驟，做 A 再做 B 等於多繞一趟、A 的程式碼還會被 B 整個取代。
+- **實際完成內容**：後端 `get_current_user`/`get_current_user_sse`/`download_audio` 三個讀取點硬切換成只認 httpOnly cookie（比照本 repo 既有的 `refresh_token` 遷移先例，commit `342af34`，不做過渡期雙讀）；兩個前端拿掉 `TokenManager`，SSE/`<audio>` 拿掉 token-in-URL。詳見 `docs/ADMIN_TOKEN_STORAGE_EVALUATION.md`（含深挖查證細節與最終決策的完整推理）、PR #258（向下相容的 cookie 種植階段）、PR #260（硬切換 + 兩輪 code review 修復，原 PR #259 因分支刪除被 GitHub 誤關閉後在 #260 重開)。本地端到端驗證含真實瀏覽器測試（`document.cookie` 證實 httpOnly 生效、真實 `EventSource` 確認 SSE cookie 自動認證）。全專案 pytest 471 個測試全過。
 
 ### TODO-9【P3】確認藍新 `gateway_url` 信任邊界（open-redirect，非 XSS）
 
