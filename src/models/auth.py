@@ -25,10 +25,21 @@ class TokenResponse(BaseModel):
 
     refresh_token 已改用 httpOnly cookie 傳遞，不再放在 response body。
     保留欄位為 Optional 僅供舊客戶端解析時不會炸；新前端應只讀 access_token。
+
+    access_token 遷移中：這個階段 access_token 仍同時「種 cookie + 回
+    body」雙軌並存（body 供尚未切換的前端相容），下一階段前端全部改用
+    cookie 後，這裡會停止回傳有意義的 access_token 值（field 保留
+    Optional，理由同 refresh_token）。
+
+    expires_at：access token 的絕對過期時間（UTC epoch 毫秒）。前端用
+    這個時間戳判斷是否該主動 refresh（大檔上傳分片前），取代原本解析
+    JWT payload 的 exp claim 的做法——httpOnly cookie 下 JS 讀不到
+    token 內容，這個值不是機密，明文回傳無妨。
     """
     access_token: str
     refresh_token: Optional[str] = None
     token_type: str = "bearer"
+    expires_at: Optional[int] = None
 
 
 class RefreshTokenRequest(BaseModel):
