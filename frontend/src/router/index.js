@@ -143,8 +143,9 @@ const router = createRouter({
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
 
-  // 初始化認證狀態（如果有 Token）
-  if (!authStore.user && localStorage.getItem('access_token')) {
+  // 初始化認證狀態：access_token 是 httpOnly cookie，JS 讀不到，
+  // 靠 initialize() 內部的 initialized 旗標保證整個 session 只嘗試一次
+  if (!authStore.user) {
     await authStore.initialize()
   }
 

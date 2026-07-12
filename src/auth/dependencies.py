@@ -1,44 +1,13 @@
 """認證中介層（依賴注入）"""
-from fastapi import Depends, HTTPException, status, Query
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Depends, HTTPException, Request, status
+from .cookies import ACCESS_COOKIE_NAME
 from .jwt_handler import verify_token
 from ..database.mongodb import get_database
 from bson import ObjectId
 from typing import Optional
 
-security = HTTPBearer()
 
-
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db=Depends(get_database)
-):
-    """驗證 Access Token 並返回當前用戶
-
-    Args:
-        credentials: HTTP Bearer 憑證
-        db: 資料庫實例
-
-    Returns:
-        用戶資料
-
-    Raises:
-        HTTPException: Token 無效或用戶不存在
-    """
-    token = credentials.credentials
-    token_data = verify_token(token, "access")
-
-    if not token_data:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="無效或過期的 Token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    # 效能優化：信任 JWT token，不每次都查 DB
-    # JWT 本身已經過驗證且有過期時間，足以確保安全性
-    # 只在關鍵操作（登入、修改資料）時才查 DB 確認用戶狀態
-    # 這樣可以避免每次輪詢都查詢資料庫
+def _user_dict_from_token_data(token_data) -> dict:
     return {
         "_id": ObjectId(token_data.user_id),
         "email": token_data.email,
@@ -48,39 +17,81 @@ async def get_current_user(
     }
 
 
-async def get_current_user_sse(
-    token: str = Query(..., description="JWT access token"),
+async def get_current_user(
+    request: Request,
     db=Depends(get_database)
 ):
-    """驗證 Access Token（用於 SSE，從查詢參數讀取）
+    """驗證 Access Token 並返回當前用戶
 
-    EventSource API 不支持自定義 headers，所以需要從查詢參數讀取 token
+    Access token 走 httpOnly cookie（不再接受 Authorization header——
+    硬切換，比照 refresh_token 遷移的既有先例）。
 
     Args:
-        token: JWT access token (從查詢參數)
+        request: FastAPI Request，用來讀 cookie
         db: 資料庫實例
 
     Returns:
         用戶資料
 
     Raises:
-        HTTPException: Token 無效或用戶不存在
+        HTTPException: 缺少/無效/過期的 Token
     """
-    token_data = verify_token(token, "access")
+    token = request.cookies.get(ACCESS_COOKIE_NAME)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="缺少 access token cookie",
+        )
 
+    token_data = verify_token(token, "access")
+    if not token_data:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="無效或過期的 Token",
+        )
+
+    # 效能優化：信任 JWT token，不每次都查 DB
+    # JWT 本身已經過驗證且有過期時間，足以確保安全性
+    # 只在關鍵操作（登入、修改資料）時才查 DB 確認用戶狀態
+    # 這樣可以避免每次輪詢都查詢資料庫
+    return _user_dict_from_token_data(token_data)
+
+
+async def get_current_user_sse(
+    request: Request,
+    db=Depends(get_database)
+):
+    """驗證 Access Token（用於 SSE）
+
+    改讀 httpOnly cookie——EventSource 對同源請求會自動帶 cookie，不再
+    需要把 token 塞進 URL query string（原本這麼做是因為 EventSource
+    不支援自訂 header，改用 cookie 後這個曝露面直接關掉）。
+
+    Args:
+        request: FastAPI Request，用來讀 cookie
+        db: 資料庫實例
+
+    Returns:
+        用戶資料
+
+    Raises:
+        HTTPException: 缺少/無效/過期的 Token
+    """
+    token = request.cookies.get(ACCESS_COOKIE_NAME)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="缺少 access token cookie",
+        )
+
+    token_data = verify_token(token, "access")
     if not token_data:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="無效或過期的 Token"
         )
 
-    return {
-        "_id": ObjectId(token_data.user_id),
-        "email": token_data.email,
-        "role": token_data.role,
-        "username": token_data.email.split("@")[0],
-        "is_active": True
-    }
+    return _user_dict_from_token_data(token_data)
 
 
 async def get_current_admin(

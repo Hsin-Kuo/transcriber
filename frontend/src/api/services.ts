@@ -173,8 +173,10 @@ export const transcriptionService = {
     return response
   },
 
-  getAudioUrl(taskId: string, token: string): string {
-    return `${API_BASE}${NEW_ENDPOINTS.transcriptions.audio(taskId)}?token=${encodeURIComponent(token)}`
+  getAudioUrl(taskId: string): string {
+    // access_token 是 httpOnly cookie，同源請求會自動帶上，不再需要
+    // （也讀不到）把 token 塞進 URL query string。
+    return `${API_BASE}${NEW_ENDPOINTS.transcriptions.audio(taskId)}`
   },
 
   async getSegments(taskId: string): Promise<SegmentsResponse> {
@@ -288,8 +290,10 @@ export const taskService = {
     return response.data
   },
 
-  getEventsUrl(taskId: string, token: string): string {
-    return `${API_BASE}${NEW_ENDPOINTS.tasks.events(taskId)}?token=${token}`
+  getEventsUrl(taskId: string): string {
+    // access_token 是 httpOnly cookie，EventSource 的同源請求會自動帶上，
+    // 不再需要（也讀不到）把 token 塞進 URL query string。
+    return `${API_BASE}${NEW_ENDPOINTS.tasks.events(taskId)}`
   },
 
   async getAllTags(): Promise<{ tags: Array<{ name: string; color?: string; order?: number }> }> {

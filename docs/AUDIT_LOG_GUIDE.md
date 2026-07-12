@@ -139,7 +139,10 @@ async def login(
         raise HTTPException(status_code=401, detail="Email 或密碼錯誤")
 
     # 登入成功
-    access_token = create_access_token(user)
+    # create_access_token 回傳 (token, expires_at_ms) tuple，不是純字串
+    access_token, expires_at = create_access_token({
+        "sub": str(user["_id"]), "email": user["email"], "role": user["role"]
+    })
     await audit_logger.log_auth(
         request=request,
         action="login",
@@ -148,7 +151,9 @@ async def login(
         message="登入成功"
     )
 
-    return {"access_token": access_token}
+    # access_token 實務上會種進 httpOnly cookie（見 src/auth/cookies.py），
+    # 這裡簡化省略；body 只回 expires_at 供前端排程用
+    return {"expires_at": expires_at}
 ```
 
 ### 刪除任務

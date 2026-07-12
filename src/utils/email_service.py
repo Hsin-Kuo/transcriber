@@ -1,4 +1,5 @@
 """Email 發送服務"""
+import html
 import re
 import smtplib
 from email.mime.text import MIMEText
@@ -123,8 +124,20 @@ class EmailService:
         - logo 從 frontend_url serve 的 PNG 載入（避免內嵌 SVG 被 Gmail/Outlook 擋）
         - preheader 是收件匣預覽文字，視覺隱藏但會出現在主旨後面
         - 同時輸出 VML（Outlook）與 anchor（其他 client）的雙版本 CTA
+
+        escape 護欄：heading / cta_label / preheader 是純文字內容，cta_url 是
+        URL，皆在插入前 html.escape（目前所有呼叫端都只傳伺服器常數/token，
+        escape 後版型不變；只是為未來若不慎塞進使用者資料先擋一層）。
+
+        intro_html 與 extra_html 例外——這兩個參數**本來就是 raw HTML**（呼叫
+        端會傳 `<p>`/`<div>` 等標籤），刻意不 escape。呼叫端絕對不可把使用者
+        可控的字串（任務名、使用者名等）未經 escape 直接塞進這兩個參數。
         """
-        logo_url = f"{self.frontend_url.rstrip('/')}/web-app-manifest-192x192.png"
+        logo_url = html.escape(f"{self.frontend_url.rstrip('/')}/web-app-manifest-192x192.png", quote=True)
+        heading = html.escape(heading)
+        preheader = html.escape(preheader)
+        cta_label = html.escape(cta_label)
+        cta_url = html.escape(cta_url, quote=True)
         accent = "#dd8448"        # --palette-orange-primary
         accent_dark = "#b8762d"   # --palette-orange-dark
         return f"""<!DOCTYPE html>
@@ -342,17 +355,24 @@ class EmailService:
             action_label: 可讀文字，例如「密碼被重設」「帳號已停用」「方案變更」
             admin_email: 執行的 admin email（出現在內文供使用者確認）
             details_lines: 額外條列說明（每行一個 bullet）
+
+        escape 護欄：action_label / admin_email / details_lines 的每一行都會
+        html.escape 後才插入 HTML——目前呼叫端只傳固定字串常數/角色列舉值，
+        但這是全模組風險最高的參數：一旦未來有人把使用者輸入（如自訂任務名）
+        塞進 details_lines，escape 是唯一防線。
         """
         details_lines = details_lines or []
         details_html = "".join(
-            f"<li style='margin: 4px 0;'>{line}</li>" for line in details_lines
+            f"<li style='margin: 4px 0;'>{html.escape(str(line))}</li>" for line in details_lines
         )
         details_block = (
             f"<ul style='background: #fff; padding: 15px 30px; border-left: 4px solid #ffc107; margin: 20px 0;'>{details_html}</ul>"
             if details_lines else ""
         )
 
-        logo_url = f"{self.frontend_url.rstrip('/')}/web-app-manifest-192x192.png"
+        logo_url = html.escape(f"{self.frontend_url.rstrip('/')}/web-app-manifest-192x192.png", quote=True)
+        action_label_html = html.escape(action_label)
+        admin_email_html = html.escape(admin_email)
         html_content = f"""
         <!DOCTYPE html>
         <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
@@ -365,8 +385,8 @@ class EmailService:
                 </div>
                 <div style="background: #ffffff; padding: 30px; border-radius: 0 0 10px 10px; border: 1px solid #efe1c6; border-top: 0;">
                     <p>您好，</p>
-                    <p>您在 SoundLite 的帳號剛剛由管理員 <strong>{admin_email}</strong> 執行了以下操作：</p>
-                    <p style="font-size: 18px; font-weight: bold; color: #c9302c;">{action_label}</p>
+                    <p>您在 SoundLite 的帳號剛剛由管理員 <strong>{admin_email_html}</strong> 執行了以下操作：</p>
+                    <p style="font-size: 18px; font-weight: bold; color: #c9302c;">{action_label_html}</p>
                     {details_block}
                     <p>如果這是您預期或要求的操作（例如協助重設密碼），可忽略此信。</p>
                     <p>若您<strong>不認識此 admin</strong>或<strong>未授權此操作</strong>，請立即回信此地址，並考慮：</p>

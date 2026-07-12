@@ -1,5 +1,5 @@
 """轉錄內容資料模型"""
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, RootModel, field_validator
 from datetime import datetime
 from typing import Optional
 
@@ -26,3 +26,24 @@ class TranscriptionCreate(BaseModel):
 class TranscriptionUpdate(BaseModel):
     """更新轉錄內容的請求模型"""
     content: str
+
+
+class SpeakerNamesUpdate(RootModel[dict[str, str]]):
+    """更新講者名稱對應的請求模型。
+
+    PUT body 是扁平字典（{"SPEAKER_00": "張三", ...}），不包一層 key，故用
+    RootModel 直接驗證整個 body，維持既有 wire contract 不變。只限制長度/
+    數量/型別——講者名稱允許任意合法字元（含 `<` `>`），逃逸是輸出端責任，
+    這裡不做 HTML sanitize。
+    """
+    @field_validator("root")
+    @classmethod
+    def _validate_entries(cls, v: dict[str, str]) -> dict[str, str]:
+        if len(v) > 50:
+            raise ValueError("Too many speakers (max 50)")
+        for key, name in v.items():
+            if len(key) > 50:
+                raise ValueError("Speaker key too long (max 50 characters)")
+            if len(name) > 100:
+                raise ValueError("Speaker name too long (max 100 characters)")
+        return v
