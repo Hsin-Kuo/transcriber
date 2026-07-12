@@ -1,4 +1,4 @@
-"""refresh token cookie helper 測試（B3）。"""
+"""refresh/access token cookie helper 測試（B3 + access token httpOnly 遷移）。"""
 import os
 import sys
 from pathlib import Path
@@ -71,4 +71,46 @@ class TestClearRefreshCookie:
         assert "refresh_token=" in header
         assert "Path=/auth" in header
         # 過期時間應該是 1970 或 Max-Age=0
+        assert "Max-Age=0" in header or "expires=Thu, 01 Jan 1970" in header.lower()
+
+
+class TestSetAccessCookie:
+    def test_production_cookie_has_secure(self):
+        mod = _reload_cookies("aws")
+        response = Response()
+        mod.set_access_cookie(response, "fake.jwt.token")
+        header = _get_set_cookie_header(response)
+
+        assert "access_token=fake.jwt.token" in header
+        assert "HttpOnly" in header
+        assert "Secure" in header
+        assert "SameSite=strict" in header
+        # Path=/（不是 /auth）——access token 每個 API 呼叫都要帶，跟
+        # refresh token 刻意縮到 /auth 的曝露面不同，這個差異值得專門斷言，
+        # 避免未來重構時複製貼上錯成 /auth。
+        assert "Path=/" in header
+        assert "Path=/auth" not in header
+        assert "Max-Age=900" in header  # 15 分鐘 = ACCESS_TOKEN_EXPIRE_MINUTES 預設值
+
+    def test_local_cookie_omits_secure(self):
+        mod = _reload_cookies("local")
+        response = Response()
+        mod.set_access_cookie(response, "fake.jwt.token")
+        header = _get_set_cookie_header(response)
+
+        assert "HttpOnly" in header
+        assert "Secure" not in header
+        assert "SameSite=strict" in header
+        assert "Path=/" in header
+
+
+class TestClearAccessCookie:
+    def test_clear_sets_empty_value(self):
+        mod = _reload_cookies("aws")
+        response = Response()
+        mod.clear_access_cookie(response)
+        header = _get_set_cookie_header(response)
+
+        assert "access_token=" in header
+        assert "Path=/" in header
         assert "Max-Age=0" in header or "expires=Thu, 01 Jan 1970" in header.lower()
