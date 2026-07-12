@@ -550,7 +550,8 @@ async def login(
 ):
     """用戶登入。
 
-    Refresh token 以 httpOnly cookie 寫入；response body 只回 access_token。
+    access_token、refresh_token 皆以 httpOnly cookie 寫入；response body
+    不回傳有意義的 token 值，只回 expires_at 供前端排程用。
     """
     audit_logger = get_audit_logger()
     user_repo = UserRepository(db)
@@ -652,7 +653,6 @@ async def login(
 
     # httpOnly cookie 傳給 client；body 不再回 refresh_token
     set_refresh_cookie(response, refresh_token_value)
-    # access token 過渡期：cookie + body 雙軌並存（見 TokenResponse docstring）
     set_access_cookie(response, access_token)
 
     # 登入成功：清除該 email 的失敗計數
