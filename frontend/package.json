@@ -13,12 +13,12 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@sentry/vue": "^10.56.0",
-    "axios": "^1.17.0",
-    "driver.js": "^1.5.0",
-    "pdfmake": "^0.3.10",
+    "@sentry/vue": "^10.65.0",
+    "axios": "^1.18.1",
+    "driver.js": "^1.6.0",
+    "pdfmake": "^0.3.11",
     "pinia": "^3.0.4",
-    "vue": "^3.5.35",
+    "vue": "^3.5.39",
     "vue-draggable-next": "^2.3.0",
     "vue-i18n": "^9.14.5",
     "vue-router": "^5.1.0"
@@ -29,10 +29,10 @@
     "@vue/tsconfig": "^0.9.1",
     "eslint": "^9.39.4",
     "eslint-plugin-vue": "^9.33.0",
-    "globals": "^17.6.0",
+    "globals": "^17.7.0",
     "typescript": "^5.9.3",
-    "vite": "^8.0.16",
-    "vitest": "^4.1.8",
+    "vite": "^8.1.4",
+    "vitest": "^4.1.10",
     "vue-tsc": "^2.2.12"
   }
 }
