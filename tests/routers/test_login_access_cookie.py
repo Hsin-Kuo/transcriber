@@ -1,5 +1,6 @@
-"""驗證 /auth/login 真的把 access token 寫進 httpOnly cookie（PR1，向下相容
-階段）：body 仍回 access_token/expires_at，但 cookie 也要同時種下去。
+"""驗證 /auth/login 真的把 access token 寫進 httpOnly cookie：body 不再回傳
+有意義的 access_token（硬切換完成後的最終狀態），但 expires_at 要有值、
+cookie 要正確種下去。
 
 跟 tests/routers/test_batch_gating.py 同樣手法：monkeypatch router 模組內
 的 repo/audit logger 名稱，直接呼叫 router 函式，不起真的 Mongo。
@@ -21,6 +22,7 @@ from fastapi import Response  # noqa: E402
 
 from src.routers import auth  # noqa: E402
 from src.models.auth import UserLogin  # noqa: E402
+from tests.response_helpers import get_set_cookie_headers  # noqa: E402
 
 ACTIVE_VERIFIED_USER = {
     "_id": "507f1f77bcf86cd799439011",
@@ -67,10 +69,6 @@ class _FakeAuditLogger:
         pass
 
 
-def _get_set_cookie_headers(response: Response) -> list[str]:
-    return [v.decode() for k, v in response.raw_headers if k.lower() == b"set-cookie"]
-
-
 @pytest.mark.asyncio
 async def test_login_sets_access_cookie_and_returns_expires_at(monkeypatch):
     monkeypatch.setattr(auth, "RateLimitRepository", _FakeRateLimitRepo)
@@ -87,9 +85,10 @@ async def test_login_sets_access_cookie_and_returns_expires_at(monkeypatch):
     )
 
     assert result.expires_at is not None
-    assert result.access_token
+    # 硬切換後 body 不再回傳有意義的 access_token——cookie 才是唯一來源
+    assert result.access_token is None
 
-    set_cookie_headers = _get_set_cookie_headers(response)
+    set_cookie_headers = get_set_cookie_headers(response)
     access_cookie = next((h for h in set_cookie_headers if h.startswith("access_token=")), None)
     refresh_cookie = next((h for h in set_cookie_headers if h.startswith("refresh_token=")), None)
 

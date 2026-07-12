@@ -19,8 +19,9 @@ describe('services API base', () => {
     vi.stubGlobal('window', { location: { protocol: 'http:', hostname: 'example.test' } })
     vi.resetModules()
     const { taskService } = await import('./services')
-    expect(taskService.getEventsUrl('t1', 'tok')).toBe(
-      'http://example.test:8000/tasks/t1/events?token=tok'
+    // access_token 是 httpOnly cookie，不再帶 ?token= 查詢參數
+    expect(taskService.getEventsUrl('t1')).toBe(
+      'http://example.test:8000/tasks/t1/events'
     )
   })
 
@@ -28,7 +29,7 @@ describe('services API base', () => {
     vi.stubGlobal('window', { location: { protocol: 'http:', hostname: 'example.test' } })
     vi.resetModules()
     const { transcriptionService } = await import('./services')
-    expect(transcriptionService.getAudioUrl('t1', 'tok')).toMatch(
+    expect(transcriptionService.getAudioUrl('t1')).toMatch(
       /^http:\/\/example\.test:8000\//
     )
   })
