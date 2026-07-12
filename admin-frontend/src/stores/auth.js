@@ -3,13 +3,17 @@
  */
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
-import api, { TokenManager } from '../utils/api'
+import api from '../utils/api'
 
 export const useAuthStore = defineStore('auth', () => {
   // State
   const user = ref(null)
   const loading = ref(false)
   const error = ref(null)
+  // 這個 session 是否已經嘗試過 initialize()——access_token 是 httpOnly
+  // cookie，JS 讀不到「可能有登入過」這個線索了，用這個旗標避免 router
+  // guard 在每次導覽都重打一次 /auth/me（只在真正沒 user 時試「一次」）。
+  const initialized = ref(false)
 
   // Getters
   const isAuthenticated = computed(() => !!user.value)
@@ -67,10 +71,8 @@ export const useAuthStore = defineStore('auth', () => {
     error.value = null
 
     try {
-      const response = await api.post('/auth/login', { email, password })
-      const { access_token } = response.data
-      // refresh_token 由後端寫進 httpOnly cookie，前端不再保管
-      TokenManager.setAccessToken(access_token)
+      // access_token / refresh_token 都由後端寫進 httpOnly cookie，前端不再保管
+      await api.post('/auth/login', { email, password })
       await fetchCurrentUser()
 
       return { success: true }
@@ -87,12 +89,11 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function logout() {
     try {
-      // 後端會清 cookie + 撤銷 refresh token；瀏覽器自動帶 cookie 出去
+      // 後端會清 access_token/refresh_token 兩個 cookie；瀏覽器自動帶 cookie 出去
       await api.post('/auth/logout')
     } catch (err) {
       console.error('登出錯誤:', err)
     } finally {
-      TokenManager.clearTokens()
       user.value = null
     }
   }
@@ -103,16 +104,18 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = response.data
     } catch (err) {
       console.error('獲取用戶資訊失敗:', err)
-      TokenManager.clearTokens()
       user.value = null
     }
   }
 
-  // 初始化: 如果有 Token,嘗試獲取用戶資訊
+  // 初始化：沒有 localStorage 可以偷看「是否曾登入」了（access_token 是
+  // httpOnly cookie），直接嘗試打 /auth/me；沒有有效 session 就讓它自然
+  // 401，authStore.user 維持 null，router guard 導去登入頁。只做一次
+  // （initialized 旗標），不然每次導覽都會重打。
   async function initialize() {
-    if (TokenManager.getAccessToken()) {
-      await fetchCurrentUser()
-    }
+    if (initialized.value) return
+    initialized.value = true
+    await fetchCurrentUser()
   }
 
   return {
@@ -120,6 +123,7 @@ export const useAuthStore = defineStore('auth', () => {
     user,
     loading,
     error,
+    initialized,
     // Getters
     isAuthenticated,
     isAdmin,

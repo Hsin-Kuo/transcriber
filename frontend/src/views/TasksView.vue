@@ -46,7 +46,7 @@ v-if="!isRefreshing" class="ptr-arrow"
 
 <script setup>
 import { ref, onBeforeUnmount, onMounted, nextTick, inject, computed } from 'vue'
-import api, { TokenManager } from '../utils/api'
+import api from '../utils/api'
 import TaskList from '../components/task/TaskListContainer.vue'
 import RulerPagination from '../components/common/RulerPagination.vue'
 import DownloadDialog from '../components/transcript/DownloadDialog.vue'
@@ -400,15 +400,10 @@ function connectTaskSSE(taskId) {
     return
   }
 
-  const token = TokenManager.getAccessToken()
-  if (!token) {
-    console.error('Cannot establish SSE connection: Not logged in')
-    return
-  }
-
-  // 創建 SSE 連接（使用新 API 服務層）
-  const url = taskService.getEventsUrl(taskId, token)
-  const eventSource = new EventSource(url)
+  // 創建 SSE 連接（使用新 API 服務層）；access_token 是 httpOnly cookie，
+  // EventSource 的同源請求會自動帶上，不需要先檢查/組 token
+  const url = taskService.getEventsUrl(taskId)
+  const eventSource = new EventSource(url, { withCredentials: true })
 
   console.log(`🔌 Establishing SSE connection: ${taskId}`)
 

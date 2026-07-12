@@ -204,7 +204,7 @@ async def google_auth(
     set_refresh_cookie(response, refresh_token_value)
     set_access_cookie(response, access_token)
 
-    return TokenResponse(access_token=access_token, token_type="bearer", expires_at=expires_at)
+    return TokenResponse(token_type="bearer", expires_at=expires_at)
 
 
 @router.post("/google/bind")

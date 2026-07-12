@@ -1,6 +1,6 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { API_BASE, TokenManager } from '../../utils/api'
+import { API_BASE, setAccessTokenExpiry } from '../../utils/api'
 import { NEW_ENDPOINTS } from '../../api/endpoints'
 import { DEMO_ID, getDemoAudioUrl } from '../../utils/tourFixtures'
 
@@ -41,12 +41,9 @@ export function useAudioPlayer() {
     // 新手導覽 demo：回傳內建靜音 data URI，讓播放器有合法來源、不打 API、不報錯
     if (taskId === DEMO_ID) return getDemoAudioUrl()
 
-    const token = TokenManager.getAccessToken()
-    if (!token) {
-      console.warn(t('audioPlayer.cannotGetAccessToken'))
-      return ''
-    }
-    return `${API_BASE}${NEW_ENDPOINTS.transcriptions.audio(taskId)}?token=${encodeURIComponent(token)}&t=${Date.now()}`
+    // access_token 是 httpOnly cookie，<audio> 的同源請求會自動帶上，不再
+    // 需要（也讀不到）把 token 塞進 URL query string；t= 純粹用來破快取。
+    return `${API_BASE}${NEW_ENDPOINTS.transcriptions.audio(taskId)}?t=${Date.now()}`
   }
 
   function initAudioUrl(taskId) {
@@ -82,12 +79,13 @@ export function useAudioPlayer() {
         credentials: 'include',
       })
       if (response.ok) {
-        const data = await response.json()
-        TokenManager.setAccessToken(data.access_token)
-        // 僅刷新記憶體中的 access token（供後續 API 與 reloadAudio 取用）。
+        // 新 access_token 已由後端種進 httpOnly cookie，這裡只需要同步
+        // expires_at 給 ensureFreshAccessToken（大檔上傳）共用判斷。
         // 刻意不重設 audioUrl：更換 <audio> 的 src 會讓瀏覽器重新載入並把 currentTime 歸零，
         // 暫停中的播放位置會因此遺失。src 內嵌的 token 過期改由 handleAudioError 在實際
         // 發生 401（range 請求）時走 reloadAudio（保留位置 + 還原播放狀態）自癒。
+        const data = await response.json()
+        setAccessTokenExpiry(data.expires_at)
       }
     } catch (error) {
       console.warn('靜默刷新 token 失敗:', error)
@@ -108,8 +106,9 @@ export function useAudioPlayer() {
           credentials: 'include',
         })
         if (response.ok) {
+          // 新 access_token 已由後端種進 httpOnly cookie，不需要在這裡讀寫
           const data = await response.json()
-          TokenManager.setAccessToken(data.access_token)
+          setAccessTokenExpiry(data.expires_at)
         }
       } catch (refreshError) {
         console.warn(t('audioPlayer.tokenRefreshFailed'), refreshError)
@@ -216,16 +215,15 @@ export function useAudioPlayer() {
           audioError.value = t('audioPlayer.audioFormatNotSupported')
         }
       } catch (fetchError) {
-        const token = TokenManager.getAccessToken()
-        if (!token) {
-          if (retryCount < MAX_RETRY_COUNT && currentTaskId) {
-            retryCount++
-            await reloadAudio(currentTaskId)
-            return
-          }
-          audioError.value = t('audioPlayer.authTokenExpired')
-        } else if (code === ERR.MEDIA_ERR_NETWORK) {
+        // access_token 是 httpOnly cookie，這裡讀不到「有沒有 token」了——
+        // 不再用「有沒有 token」當判斷依據，改成：明確是網路錯誤就顯示網路
+        // 錯誤，否則當成可能是認證問題，先嘗試 reloadAudio（內含 refresh）
+        // 自癒，重試次數用完才顯示通用錯誤。
+        if (code === ERR.MEDIA_ERR_NETWORK) {
           audioError.value = t('audioPlayer.networkError')
+        } else if (retryCount < MAX_RETRY_COUNT && currentTaskId) {
+          retryCount++
+          await reloadAudio(currentTaskId)
         } else {
           audioError.value = t('audioPlayer.cannotAccessAudio')
         }

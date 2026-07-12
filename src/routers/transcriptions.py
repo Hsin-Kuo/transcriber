@@ -1,7 +1,6 @@
 """轉錄管理路由"""
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Request
 from fastapi.responses import FileResponse, StreamingResponse
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from typing import Optional, List, Literal
 from pathlib import Path
@@ -641,20 +640,19 @@ async def export_transcription_pdf(
 @router.get("/{task_id}/audio")
 async def download_audio(
     task_id: str,
-    token: Optional[str] = Query(None, description="JWT access token (查詢參數，用於 audio 元素)"),
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
+    request: Request,
     db = Depends(get_database)
 ):
     """下載原始音檔
 
-    支持兩種認證方式：
-    1. Authorization header (Bearer token) - 用於 API 調用
-    2. 查詢參數 token - 用於 HTML audio 元素（因為 audio 元素不支持自定義 headers）
+    認證走 httpOnly access_token cookie（硬切換，不再接受 Authorization
+    header 或 ?token= 查詢參數——後者原本是給 <audio> 元素用的，因為它
+    不支援自訂 header；改用 cookie 後 <audio src> 的同源請求會自動帶
+    cookie，不再需要把 token 塞進 URL）。
 
     Args:
         task_id: 任務 ID
-        token: JWT token (query parameter)
-        credentials: JWT token from Authorization header
+        request: FastAPI Request，用來讀 cookie
         db: 資料庫實例
 
     Returns:
@@ -663,17 +661,13 @@ async def download_audio(
     Raises:
         HTTPException: 任務不存在、無權訪問或音檔不存在
     """
-    # 優先使用 header 中的 token，其次使用查詢參數
-    access_token = None
-    if credentials:
-        access_token = credentials.credentials
-    elif token:
-        access_token = token
-    else:
-        raise api_error("TRANSCRIPTION_AUTH_REQUIRED", "Authentication required: provide Authorization header or token query parameter", status.HTTP_401_UNAUTHORIZED)
-
-    # 驗證 token 並獲取用戶資訊
+    from ..auth.cookies import ACCESS_COOKIE_NAME
     from ..auth.jwt_handler import verify_token
+
+    access_token = request.cookies.get(ACCESS_COOKIE_NAME)
+    if not access_token:
+        raise api_error("TRANSCRIPTION_AUTH_REQUIRED", "Authentication required: missing access token cookie", status.HTTP_401_UNAUTHORIZED)
+
     token_data = verify_token(access_token, "access")
 
     if not token_data:

@@ -667,7 +667,7 @@ async def login(
         message="登入成功"
     )
 
-    return TokenResponse(access_token=access_token, token_type="bearer", expires_at=expires_at)
+    return TokenResponse(token_type="bearer", expires_at=expires_at)
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -716,7 +716,7 @@ async def refresh_token(
     })
     set_access_cookie(response, access_token)
 
-    return TokenResponse(access_token=access_token, token_type="bearer", expires_at=expires_at)
+    return TokenResponse(token_type="bearer", expires_at=expires_at)
 
 
 @router.post("/logout")
