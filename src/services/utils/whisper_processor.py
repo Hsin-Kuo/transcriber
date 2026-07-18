@@ -230,6 +230,106 @@ def _apply_time_offset(seg: Dict, offset: float) -> Dict:
     return shifted
 
 
+def _pick_speaker_for_span(start: float, end: float, diar_turns: List[Dict]) -> Optional[str]:
+    """[start,end] 對 turns 取最大重疊；零重疊 → 以區間中點距 turn 最近者。turns 空 → None。"""
+    if not diar_turns:
+        return None
+
+    best_speaker = None
+    max_overlap = 0.0
+    for turn in diar_turns:
+        overlap = max(0.0, min(end, turn["end"]) - max(start, turn["start"]))
+        if overlap > max_overlap:
+            max_overlap = overlap
+            best_speaker = turn["speaker"]
+
+    if best_speaker is not None:
+        return best_speaker
+
+    # 零重疊（落在 turn 間隙）→ 依區間中點距最近的 turn 歸屬
+    midpoint = (start + end) / 2.0
+
+    def _distance(turn: Dict) -> float:
+        if midpoint < turn["start"]:
+            return turn["start"] - midpoint
+        if midpoint > turn["end"]:
+            return midpoint - turn["end"]
+        return 0.0
+
+    return min(diar_turns, key=_distance)["speaker"]
+
+
+def _smooth_isolated_word_speakers(speakers: List[str]) -> List[str]:
+    """孤立單字（run 長度 1 且前後 run 為同一 speaker）改判為鄰居 speaker。單向掃一遍。"""
+    n = len(speakers)
+    if n < 3:
+        return list(speakers)
+
+    smoothed = list(speakers)
+    for i in range(1, n - 1):
+        if (
+            speakers[i] != speakers[i - 1]
+            and speakers[i] != speakers[i + 1]
+            and speakers[i - 1] == speakers[i + 1]
+        ):
+            smoothed[i] = speakers[i - 1]
+    return smoothed
+
+
+def assign_speakers_word_level(
+    transcription_segments: List[Dict],
+    diar_turns: List[Dict],
+) -> List[Dict]:
+    """word 級語者指派 + smoothing + 語者變換點切段。
+
+    輸入：segments（可含 words: [{start,end,word}]）、diar turns [{start,end,speaker}]。
+    輸出：[{start,end,text,speaker}]，一律不含 words。
+    - 有 words：逐 word `_pick_speaker_for_span` → `_smooth_isolated_word_speakers`
+      → 依 speaker 變換點切開；子段 start=首字 start、end=末字 end、
+      text = "".join(w["word"]).strip()（沿用 `_resegment_by_words` 的拼接慣例，中英皆正確）。
+    - 無 words（passthrough/degenerate 段）：整段 `_pick_speaker_for_span(seg.start, seg.end)`。
+    - diar_turns 空：原樣回傳（僅剝 words、不加 speaker）。
+
+    Smoothing 只在 segment 內做（words 只存在於 segment 內，reseg 切點本身就是停頓處），
+    跨 segment 的孤立段不在本函數範圍。
+    """
+    if not diar_turns:
+        return [{k: v for k, v in seg.items() if k != "words"} for seg in transcription_segments]
+
+    out: List[Dict] = []
+    for seg in transcription_segments:
+        words = seg.get("words")
+        if not words:
+            speaker = _pick_speaker_for_span(seg.get("start", 0.0), seg.get("end", 0.0), diar_turns)
+            out.append({
+                "start": seg.get("start"),
+                "end": seg.get("end"),
+                "text": seg.get("text", ""),
+                "speaker": speaker,
+            })
+            continue
+
+        word_speakers = _smooth_isolated_word_speakers(
+            [_pick_speaker_for_span(w["start"], w["end"], diar_turns) for w in words]
+        )
+
+        run_start = 0
+        for i in range(1, len(words) + 1):
+            if i == len(words) or word_speakers[i] != word_speakers[run_start]:
+                run_words = words[run_start:i]
+                text = "".join(w["word"] for w in run_words).strip()
+                if text:
+                    out.append({
+                        "start": run_words[0]["start"],
+                        "end": run_words[-1]["end"],
+                        "text": text,
+                        "speaker": word_speakers[run_start],
+                    })
+                run_start = i
+
+    return out
+
+
 def transcribe_chunk_worker(
     chunk_path: str,
     model_name: str,
