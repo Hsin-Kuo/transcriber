@@ -255,6 +255,13 @@ SWITCH_GAP_RELIEF_SEC = 0.3
 # 停頓處換手成本的折扣係數（cost = SWITCH_PENALTY × 此值）。
 SWITCH_GAP_RELIEF_FACTOR = 0.3
 
+# Word 尾端錨定：word 評分只取尾端最後這段秒數（時長 ≤ 此值的 word 不受影響）。
+# ASR 的 word start 容易往前漂、吸入前導靜音或跨語者音段（end 相對可靠——它錨在
+# 下一字的起點）；batched pipeline（BatchedInferencePipeline 的 VAD 窗批次對齊）尤甚，
+# 實測案例（staging「我也」）起點漂 0.59s、時長 0.48s→1.06s，膨脹 span 稀釋了與
+# 插話 turn 的重疊比例（1.0→0.636），近平手變一面倒、proximity/DP 失去著力點。
+WORD_TAIL_ANCHOR_SEC = 0.6
+
 
 def _build_turn_index(diar_turns: List[Dict]) -> Tuple[List[Dict], List[float], List[float]]:
     """依 start 排序 diar turns + 建 prefix max-end 陣列，供 bisect 視窗查詢用。
@@ -315,12 +322,17 @@ def _word_speaker_candidates(
     starts: List[float],
     prefix_max_end: List[float],
     use_proximity: bool = True,
+    anchor_tail: bool = True,
 ) -> Dict[str, float]:
     """[start,end] 的候選 speaker 分數表 {speaker: score}，供 Viterbi 當 emission 用。
 
     score = `_turn_score`（score > 0 ⟺ overlap > 0，見該函數註解，不必另算 overlap）；
     同 speaker 有多個重疊 turn 時取分數最高者。use_proximity 直通 `_turn_score`
     （無 words 的長 segment 路徑要關掉 proximity）。
+    anchor_tail=True（word 路徑）：有效評分 span = (max(start, end − WORD_TAIL_ANCHOR_SEC),
+    end)——只影響時長 > WORD_TAIL_ANCHOR_SEC 的 word（起點前漂吸入的前導音段不參與
+    評分，overlap/proximity/零重疊 fallback 一律用有效 span）；無 words 的 segment
+    路徑傳 False（整段評分本來就該用完整範圍）。
     用 `_build_turn_index` 產出的排序+prefix-max-end 索引，只掃可能與 span 重疊的
     turns（bisect 找上界 + 往回掃到 prefix max-end ≤ span.start 為止），
     避免每個 word 都要 O(turns) 全掃。
@@ -329,6 +341,9 @@ def _word_speaker_candidates(
     """
     if not sorted_turns:
         return {}
+
+    if anchor_tail:
+        start = max(start, end - WORD_TAIL_ANCHOR_SEC)
 
     # start < end 的 turns 都在 starts[:idx] 內（bisect_left 找第一個 start >= end 的位置）
     idx = bisect.bisect_left(starts, end)
@@ -374,15 +389,17 @@ def _pick_speaker_indexed(
     starts: List[float],
     prefix_max_end: List[float],
     use_proximity: bool = True,
+    anchor_tail: bool = True,
 ) -> Optional[str]:
     """[start,end] 取 `_word_speaker_candidates` 分數最高的 speaker；turns 空 → None。
 
     單一 span 的判定（無 words 的 segment、`_pick_speaker_for_span` 薄包裝）走這裡，
-    不經 Viterbi（單點沒有前後文可用）。use_proximity 直通評分（無 words 的長
-    segment 要傳 False，見 `_turn_score` 註解）。
+    不經 Viterbi（單點沒有前後文可用）。use_proximity / anchor_tail 直通評分
+    （無 words 的長 segment 兩者皆傳 False，見 `_turn_score` 與
+    `_word_speaker_candidates` 註解）。
     """
     candidates = _word_speaker_candidates(
-        start, end, sorted_turns, starts, prefix_max_end, use_proximity
+        start, end, sorted_turns, starts, prefix_max_end, use_proximity, anchor_tail
     )
     if not candidates:
         return None
@@ -488,10 +505,10 @@ def assign_speakers_word_level(
         words = seg.get("words")
         if not words:
             # 無 words 的段沒有 reseg 6s 上限，span 可能很長 → 關掉 proximity
-            # （只比重疊比例），避免翻盤窗隨 span 長度放大（見 _turn_score 註解）
+            # （只比重疊比例，見 _turn_score 註解）與尾端錨定（整段評分該用完整範圍）
             speaker = _pick_speaker_indexed(
                 seg.get("start", 0.0), seg.get("end", 0.0), sorted_turns, starts, prefix_max_end,
-                use_proximity=False,
+                use_proximity=False, anchor_tail=False,
             )
             out.append({
                 "start": seg.get("start"),

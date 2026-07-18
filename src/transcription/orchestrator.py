@@ -9,6 +9,7 @@
 與 db 也是注入——orchestrator 不知道自己跑在 server 還是 worker。
 """
 import gc
+import os
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -257,6 +258,9 @@ class TranscriptionOrchestrator:
                 task = self._get_task(task_id)
                 task_type = task.get("task_type", "paragraph") if task else "paragraph"
                 num_speakers = len(set(s["speaker"] for s in diar_segments))
+                # merge 後 segments 可能被取代（subtitle）且 words 已剝——先留 pre-merge
+                # 參照供 debug dump 用（含 words 的對齊輸入）
+                pre_merge_segments = segments
                 if task_type == "subtitle":
                     segments = self.whisper._merge_speaker_to_segments(
                         segments, diar_segments
@@ -265,6 +269,7 @@ class TranscriptionOrchestrator:
                     full_text = self.whisper._merge_transcription_with_diarization(
                         segments, diar_segments
                     )
+                self._maybe_dump_diar_debug(task_id, diar_segments, pre_merge_segments)
                 self._update_task(task_id, {"stats.diarization.num_speakers": num_speakers})
                 self.complete_phase(
                     task_id, Phase.TRANSCRIPTION, "語者辨識完成",
@@ -287,6 +292,53 @@ class TranscriptionOrchestrator:
         # （覆蓋無 diar / diar 失敗降級 / 段落模式 / 字幕模式四條路；字幕模式核心已剝，此處 no-op）
         segments = [{k: v for k, v in s.items() if k != "words"} for s in segments]
         return full_text, segments, detected_language
+
+    def _maybe_dump_diar_debug(
+        self, task_id: str, diar_segments: list, segments_with_words: list
+    ) -> None:
+        """DIAR_DEBUG_DUMP 開啟時，把 word 級語者對齊的輸入/輸出組 JSON 存到 storage。
+
+        staging 驗證用（word timestamp 漂移 / 對齊行為除錯）：只在 diarization 啟用且
+        成功的任務觸發（呼叫點在 merge 成功分支內）、於 words 剝除前執行。
+        final_segments 統一用 assign_speakers_word_level 重算（純函數、毫秒級；
+        subtitle 模式與 merge 結果相同，paragraph 模式則是 merge 內部同一計算的輸出，
+        統一重算避免兩種 task_type 分岔）。上傳失敗只 log warning，不影響任務。
+        """
+        # 顯式白名單解析（比照 WHISPER_BATCHED 慣例），"0"/"false" 不會被誤當開啟
+        if os.getenv("DIAR_DEBUG_DUMP", "").strip().lower() not in ("1", "true", "yes"):
+            return
+        try:
+            from src.services.utils.whisper_processor import assign_speakers_word_level
+            from src.utils.storage.debug_dump import save_diar_debug_dump
+
+            final_segments = assign_speakers_word_level(segments_with_words, diar_segments)
+            payload = {
+                "task_id": task_id,
+                "diar_turns": [
+                    {"start": t["start"], "end": t["end"], "speaker": t["speaker"]}
+                    for t in diar_segments
+                ],
+                "segments_words": [
+                    {
+                        "start": s.get("start"),
+                        "end": s.get("end"),
+                        "words": [
+                            {"start": w["start"], "end": w["end"], "word": w["word"]}
+                            for w in (s.get("words") or [])
+                        ],
+                    }
+                    for s in segments_with_words
+                ],
+                "final_segments": [
+                    {"start": s.get("start"), "end": s.get("end"),
+                     "text": s.get("text"), "speaker": s.get("speaker")}
+                    for s in final_segments
+                ],
+            }
+            dump_ref = save_diar_debug_dump(task_id, payload)
+            log.info("diar.debug_dump.saved", task_id=task_id, key=dump_ref)
+        except Exception as e:
+            log.warning("diar.debug_dump.failed", task_id=task_id, error=str(e))
 
     def _run_transcription(
         self, task_id: str, mp3_path: Path, language: Optional[str], use_chunking: bool
