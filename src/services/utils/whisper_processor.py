@@ -5,6 +5,7 @@ WhisperProcessor - Whisper 轉錄處理器
 
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any, TYPE_CHECKING
+import bisect
 import subprocess
 import json
 import re
@@ -230,23 +231,94 @@ def _apply_time_offset(seg: Dict, offset: float) -> Dict:
     return shifted
 
 
-def _pick_speaker_for_span(start: float, end: float, diar_turns: List[Dict]) -> Optional[str]:
-    """[start,end] 對 turns 取最大重疊；零重疊 → 以區間中點距 turn 最近者。turns 空 → None。"""
-    if not diar_turns:
+# 重疊搶話區（兩個 diar turn 互相重疊、word 被雙方完整罩住）常出現「重疊秒數精確平手」——
+# 嚴格 `>` 比較只會判給先迭代到的 turn，等同偏袒固定順序、與實際插話證據無關。
+# PROXIMITY_WEIGHT 只在 overlap_fraction 近平手時才有感（見 _turn_score）：
+# word 落在「短 turn 的正中央」= 插話證據強（該 turn 幾乎就是為了涵蓋這個字才短）；
+# 落在「長 turn 的尾端」= 證據弱（掃到的只是長 turn 尾巴，中心離很遠）。
+# 權重刻意壓低——overlap_fraction 差距明顯時（見驗收 b）proximity 不該蓋過重疊本身的證據力。
+PROXIMITY_WEIGHT = 0.1
+
+
+def _build_turn_index(diar_turns: List[Dict]) -> Tuple[List[Dict], List[float], List[float]]:
+    """依 start 排序 diar turns + 建 prefix max-end 陣列，供 bisect 視窗查詢用。
+
+    回傳 (sorted_turns, starts, prefix_max_end)：
+    - starts[i] = sorted_turns[i]["start"]（給 bisect 用）
+    - prefix_max_end[i] = max(sorted_turns[0..i].end)（非遞減，用來判斷「再往回掃也不會
+      有重疊」的提前中止條件——重疊需要 turn.end > span.start，prefix max 提前變得
+      ≤ span.start 就代表 0..i 已無候選）
+    """
+    sorted_turns = sorted(diar_turns, key=lambda t: t["start"])
+    starts = [t["start"] for t in sorted_turns]
+    prefix_max_end: List[float] = []
+    running_max = float("-inf")
+    for t in sorted_turns:
+        running_max = max(running_max, t["end"])
+        prefix_max_end.append(running_max)
+    return sorted_turns, starts, prefix_max_end
+
+
+def _turn_score(start: float, end: float, turn: Dict) -> float:
+    """單一 turn 對 [start,end] 的評分：overlap_fraction + PROXIMITY_WEIGHT * proximity。
+
+    - overlap_fraction：重疊秒數 / span 長度（span 長度 0 時視為 1e-6 防除零）。
+    - proximity：1 - |span中點 - turn中點| / (turn長度/2)，下限 0；turn 長度 0 時為 0。
+    """
+    span_len = max(end - start, 1e-6)
+    overlap = max(0.0, min(end, turn["end"]) - max(start, turn["start"]))
+    overlap_fraction = overlap / span_len
+
+    turn_len = turn["end"] - turn["start"]
+    if turn_len <= 0:
+        proximity = 0.0
+    else:
+        span_mid = (start + end) / 2.0
+        turn_mid = (turn["start"] + turn["end"]) / 2.0
+        proximity = max(0.0, 1 - abs(span_mid - turn_mid) / (turn_len / 2.0))
+
+    return overlap_fraction + PROXIMITY_WEIGHT * proximity
+
+
+def _pick_speaker_indexed(
+    start: float,
+    end: float,
+    sorted_turns: List[Dict],
+    starts: List[float],
+    prefix_max_end: List[float],
+) -> Optional[str]:
+    """[start,end] 對 turns 取最高 `_turn_score` 者；零重疊 → 以區間中點距 turn 最近者。
+
+    用 `_build_turn_index` 產出的排序+prefix-max-end 索引，只掃可能與 span 重疊的
+    turns（bisect 找上界 + 往回掃到 prefix max-end ≤ span.start 為止），
+    避免每個 word 都要 O(turns) 全掃。turns 空 → None。
+    """
+    if not sorted_turns:
         return None
 
+    # start < end 的 turns 都在 starts[:idx] 內（bisect_left 找第一個 start >= end 的位置）
+    idx = bisect.bisect_left(starts, end)
+
     best_speaker = None
-    max_overlap = 0.0
-    for turn in diar_turns:
+    best_score = 0.0
+    i = idx - 1
+    while i >= 0:
+        if prefix_max_end[i] <= start:
+            # 0..i 的 turn.end 全都 <= start → 之後不可能再有重疊，提前中止
+            break
+        turn = sorted_turns[i]
         overlap = max(0.0, min(end, turn["end"]) - max(start, turn["start"]))
-        if overlap > max_overlap:
-            max_overlap = overlap
-            best_speaker = turn["speaker"]
+        if overlap > 0.0:
+            score = _turn_score(start, end, turn)
+            if score > best_score:
+                best_score = score
+                best_speaker = turn["speaker"]
+        i -= 1
 
     if best_speaker is not None:
         return best_speaker
 
-    # 零重疊（落在 turn 間隙）→ 依區間中點距最近的 turn 歸屬
+    # 零重疊（落在 turn 間隙）→ 依區間中點距最近的 turn 歸屬（rare path，全掃沒關係）
     midpoint = (start + end) / 2.0
 
     def _distance(turn: Dict) -> float:
@@ -256,7 +328,18 @@ def _pick_speaker_for_span(start: float, end: float, diar_turns: List[Dict]) -> 
             return midpoint - turn["end"]
         return 0.0
 
-    return min(diar_turns, key=_distance)["speaker"]
+    return min(sorted_turns, key=_distance)["speaker"]
+
+
+def _pick_speaker_for_span(start: float, end: float, diar_turns: List[Dict]) -> Optional[str]:
+    """[start,end] 對 turns 取最高重疊+貼近度評分者；零重疊 → 以區間中點距 turn 最近者。
+
+    模組層函數簽名維持不變（測試直接呼叫）；內部臨時建索引後委派給
+    `_pick_speaker_indexed`。效能敏感路徑（逐 word 迴圈）應改用
+    `assign_speakers_word_level` 內建的索引重用，不要在迴圈裡呼叫本函數。
+    """
+    sorted_turns, starts, prefix_max_end = _build_turn_index(diar_turns)
+    return _pick_speaker_indexed(start, end, sorted_turns, starts, prefix_max_end)
 
 
 def _smooth_isolated_word_speakers(speakers: List[str]) -> List[str]:
@@ -298,12 +381,17 @@ def assign_speakers_word_level(
 
     輸入：segments（可含 words: [{start,end,word}]）、diar turns [{start,end,speaker}]。
     輸出：[{start,end,text,speaker}]，不含 words。
-    - 有 words：逐 word `_pick_speaker_for_span` → `_smooth_isolated_word_speakers`
-      → 依 speaker 變換點切開；子段 start=首字 start、end=末字 end、
-      text = "".join(w["word"]).strip()（沿用 `_resegment_by_words` 的拼接慣例，中英皆正確）。
-    - 無 words（passthrough/degenerate 段）：整段 `_pick_speaker_for_span(seg.start, seg.end)`。
+    - 有 words：逐 word 用 `_pick_speaker_indexed`（重疊+貼近度評分，見 `_turn_score`）
+      → `_smooth_isolated_word_speakers` → 依 speaker 變換點切開；子段 start=首字 start、
+      end=末字 end、text = "".join(w["word"]).strip()（沿用 `_resegment_by_words` 的
+      拼接慣例，中英皆正確）。
+    - 無 words（passthrough/degenerate 段）：整段用同一份索引評分。
     - diar_turns 空：原樣回傳（不加 speaker、不剝 words——words 的剝除統一由
       orchestrator `_run_transcription_phase` 出口單點處理，此處不重複）。
+
+    效能：turns 只排序 + 建 prefix max-end 索引一次（`_build_turn_index`），
+    每個 word/segment 呼叫 `_pick_speaker_indexed` 重用同一份索引（bisect 找窗口，
+    不對全部 turns 掃描），把配對成本從 O(words×turns) 降到窗口內 turns 的量級。
 
     Smoothing 只在 segment 內做（words 只存在於 segment 內，reseg 切點本身就是停頓處），
     跨 segment 的孤立段不在本函數範圍。
@@ -311,11 +399,15 @@ def assign_speakers_word_level(
     if not diar_turns:
         return transcription_segments
 
+    sorted_turns, starts, prefix_max_end = _build_turn_index(diar_turns)
+
     out: List[Dict] = []
     for seg in transcription_segments:
         words = seg.get("words")
         if not words:
-            speaker = _pick_speaker_for_span(seg.get("start", 0.0), seg.get("end", 0.0), diar_turns)
+            speaker = _pick_speaker_indexed(
+                seg.get("start", 0.0), seg.get("end", 0.0), sorted_turns, starts, prefix_max_end
+            )
             out.append({
                 "start": seg.get("start"),
                 "end": seg.get("end"),
@@ -324,9 +416,10 @@ def assign_speakers_word_level(
             })
             continue
 
-        word_speakers = _smooth_isolated_word_speakers(
-            [_pick_speaker_for_span(w["start"], w["end"], diar_turns) for w in words]
-        )
+        word_speakers = _smooth_isolated_word_speakers([
+            _pick_speaker_indexed(w["start"], w["end"], sorted_turns, starts, prefix_max_end)
+            for w in words
+        ])
 
         run_start = 0
         for i in range(1, len(words) + 1):
