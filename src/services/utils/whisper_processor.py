@@ -260,20 +260,34 @@ def _pick_speaker_for_span(start: float, end: float, diar_turns: List[Dict]) -> 
 
 
 def _smooth_isolated_word_speakers(speakers: List[str]) -> List[str]:
-    """孤立單字（run 長度 1 且前後 run 為同一 speaker）改判為鄰居 speaker。單向掃一遍。"""
-    n = len(speakers)
-    if n < 3:
-        return list(speakers)
+    """孤立單字（run 長度 1 且前後 run 為同一 speaker）改判為鄰居 speaker。
 
-    smoothed = list(speakers)
-    for i in range(1, n - 1):
-        if (
-            speakers[i] != speakers[i - 1]
-            and speakers[i] != speakers[i + 1]
-            and speakers[i - 1] == speakers[i + 1]
+    以 run 為單位由左至右歸併：孤立 run 併入鄰居後視為同一 run 繼續判斷，
+    交替雜訊（A,B,A,B,A）收斂為單一語者，不會殘留新的孤立 run。
+    首尾 run 沒有雙側鄰居，一律不動。
+    """
+    runs: List[List] = []  # [speaker, 長度]
+    for spk in speakers:
+        if runs and runs[-1][0] == spk:
+            runs[-1][1] += 1
+        else:
+            runs.append([spk, 1])
+
+    merged: List[List] = []
+    for run in runs:
+        merged.append(run)
+        while (
+            len(merged) >= 3
+            and merged[-2][1] == 1
+            and merged[-3][0] == merged[-1][0]
         ):
-            smoothed[i] = speakers[i - 1]
-    return smoothed
+            absorbed = [merged[-3][0], merged[-3][1] + merged[-2][1] + merged[-1][1]]
+            merged[-3:] = [absorbed]
+
+    result: List[str] = []
+    for spk, count in merged:
+        result.extend([spk] * count)
+    return result
 
 
 def assign_speakers_word_level(

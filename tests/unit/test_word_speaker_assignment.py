@@ -56,6 +56,17 @@ def test_smoothing_leaves_run_of_two_untouched():
     assert _smooth_isolated_word_speakers(["A", "B", "B", "A"]) == ["A", "B", "B", "A"]
 
 
+def test_smoothing_alternating_pattern_converges():
+    # A B A B A → 孤立 run 逐一併入鄰居後收斂為單一語者，
+    # 不得出現「正確的字被改錯、孤立 run 仍殘留」的中間態（如 A A B A A）
+    assert _smooth_isolated_word_speakers(["A", "B", "A", "B", "A"]) == ["A"] * 5
+
+
+def test_smoothing_leaves_boundary_runs_untouched():
+    # 首尾孤立 run 沒有雙側鄰居 → 不動
+    assert _smooth_isolated_word_speakers(["B", "A", "A", "B"]) == ["B", "A", "A", "B"]
+
+
 def test_chinese_words_join_without_space():
     words = [_w(0, 1, "你"), _w(1, 2, "好")]
     turns = [_turn(0, 2, "SPEAKER_00")]
