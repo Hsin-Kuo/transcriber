@@ -290,6 +290,38 @@ class TestHappyPath:
         assert seg_doc is not None
         assert all("speaker" in s for s in seg_doc["segments"])
 
+    def test_no_diarization_segments_never_carry_words_into_db(self, db, tiny_audio):
+        """words 只供 transcription phase 內部用，orchestrator 單點剝除——無 diar 路徑。"""
+        task_id = _insert_task(db, task_type="subtitle")
+        segments = [
+            {"start": 0.0, "end": 0.5, "text": "hello",
+             "words": [{"start": 0.0, "end": 0.5, "word": "hello"}]},
+        ]
+        orc = _make_orchestrator(db, whisper=FakeWhisper(segments=segments))
+
+        _run(orc, task_id, FakeAudioSource(tiny_audio))
+
+        seg_doc = db.segments.find_one({"_id": task_id})
+        assert seg_doc is not None
+        assert all("words" not in s for s in seg_doc["segments"])
+
+    def test_diarization_paragraph_mode_segments_never_carry_words_into_db(self, db, tiny_audio):
+        """段落模式 diar 路徑不替換 segments，最容易漏剝 words——orchestrator 單點剝除。"""
+        task_id = _insert_task(db, task_type="paragraph")
+        segments = [
+            {"start": 0.0, "end": 0.5, "text": "hello",
+             "words": [{"start": 0.0, "end": 0.5, "word": "hello"}]},
+        ]
+        orc = _make_orchestrator(
+            db, whisper=FakeWhisper(segments=segments), diarization=FakeDiarization(),
+        )
+
+        _run(orc, task_id, FakeAudioSource(tiny_audio), use_diarization=True)
+
+        seg_doc = db.segments.find_one({"_id": task_id})
+        assert seg_doc is not None
+        assert all("words" not in s for s in seg_doc["segments"])
+
 
 class TestDiarization:
     def test_diarization_receives_wav_not_mp3(self, db, tiny_audio):
