@@ -1046,8 +1046,11 @@ class WhisperProcessor:
     ) -> str:
         """合併轉錄文字和說話者標記
 
+        內部改為 word 級語者指派（assign_speakers_word_level）：先切到語者變換點，
+        再把連續同語者子段組行——輸出格式與改動前完全一致。
+
         Args:
-            transcription_segments: Sound Lite 轉錄結果 (帶時間戳)
+            transcription_segments: Sound Lite 轉錄結果 (帶時間戳，可能含 words)
             diarization_segments: Speaker diarization 結果
 
         Returns:
@@ -1057,44 +1060,28 @@ class WhisperProcessor:
             # 沒有 diarization 結果，直接返回純文字
             return " ".join(seg.get("text", "") for seg in transcription_segments)
 
-        # 為每個轉錄片段分配說話者
+        assigned_segments = assign_speakers_word_level(transcription_segments, diarization_segments)
+
+        # 把連續同 speaker 子段組行
         result_lines = []
         current_speaker = None
         current_text = []
 
-        for trans_seg in transcription_segments:
-            trans_start = trans_seg.get("start", 0)
-            trans_end = trans_seg.get("end", 0)
-            trans_text = trans_seg.get("text", "")
-
-            if not trans_text.strip():
+        for seg in assigned_segments:
+            text = seg.get("text", "")
+            if not text.strip():
                 continue
 
-            # 找到與此轉錄片段重疊最多的說話者
-            best_speaker = None
-            max_overlap = 0
-
-            for dia_seg in diarization_segments:
-                dia_start = dia_seg["start"]
-                dia_end = dia_seg["end"]
-
-                # 計算重疊時間
-                overlap_start = max(trans_start, dia_start)
-                overlap_end = min(trans_end, dia_end)
-                overlap = max(0, overlap_end - overlap_start)
-
-                if overlap > max_overlap:
-                    max_overlap = overlap
-                    best_speaker = dia_seg["speaker"]
+            speaker = seg.get("speaker")
 
             # 如果說話者改變，輸出之前的內容
-            if best_speaker != current_speaker and current_text:
+            if speaker != current_speaker and current_text:
                 speaker_label = f"[{current_speaker}]" if current_speaker else ""
                 result_lines.append(f"{speaker_label} {''.join(current_text)}")
                 current_text = []
 
-            current_speaker = best_speaker
-            current_text.append(trans_text)
+            current_speaker = speaker
+            current_text.append(text)
 
         # 輸出最後一段
         if current_text:
@@ -1110,45 +1097,23 @@ class WhisperProcessor:
     ) -> List[Dict]:
         """將說話者資訊整合到轉錄 segments 中
 
-        用於字幕模式：不改變文字內容，而是在 segments 中添加 speaker 欄位
+        用於字幕模式：word 級語者指派 + 語者變換點切段（assign_speakers_word_level），
+        輸出 segments 依語者變換點切開，不再是原 segment 逐段複製。
 
         Args:
-            transcription_segments: Sound Lite 轉錄結果 (帶時間戳)
+            transcription_segments: Sound Lite 轉錄結果 (帶時間戳，可能含 words)
             diarization_segments: Speaker diarization 結果
 
         Returns:
-            帶 speaker 欄位的 segments 列表
+            帶 speaker 欄位的 segments 列表（依語者變換點切分）
         """
         if not diarization_segments:
             # 沒有 diarization 結果，返回原 segments
             return transcription_segments
 
-        enriched_segments = []
-
-        for trans_seg in transcription_segments:
-            trans_start = trans_seg.get("start", 0)
-            trans_end = trans_seg.get("end", 0)
-
-            # 找到與此轉錄片段重疊最多的說話者
-            best_speaker = None
-            max_overlap = 0
-
-            for dia_seg in diarization_segments:
-                dia_start = dia_seg["start"]
-                dia_end = dia_seg["end"]
-
-                # 計算重疊時間
-                overlap_start = max(trans_start, dia_start)
-                overlap_end = min(trans_end, dia_end)
-                overlap = max(0, overlap_end - overlap_start)
-
-                if overlap > max_overlap:
-                    max_overlap = overlap
-                    best_speaker = dia_seg["speaker"]
-
-            # 複製 segment 並添加 speaker 欄位
-            enriched_seg = trans_seg.copy()
-            enriched_seg["speaker"] = best_speaker if best_speaker else "UNKNOWN"
-            enriched_segments.append(enriched_seg)
+        enriched_segments = assign_speakers_word_level(transcription_segments, diarization_segments)
+        for seg in enriched_segments:
+            if seg.get("speaker") is None:
+                seg["speaker"] = "UNKNOWN"
 
         return enriched_segments

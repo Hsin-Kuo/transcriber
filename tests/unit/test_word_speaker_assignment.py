@@ -5,6 +5,7 @@ assign_speakers_word_level。
 （{start, end, word}，即 _resegment_by_words 的輸出格式）。
 """
 from src.services.utils.whisper_processor import (
+    WhisperProcessor,
     _pick_speaker_for_span,
     _smooth_isolated_word_speakers,
     assign_speakers_word_level,
@@ -97,3 +98,27 @@ def test_empty_diar_turns_returns_segments_unchanged_without_speaker_key():
     assert out == [{"start": 0, "end": 1, "text": "hi"}]
     assert "speaker" not in out[0]
     assert "words" not in out[0]
+
+
+# ── 段落模式 merge（_merge_transcription_with_diarization）─────────────────
+# model=None：這兩個方法不碰 self.model，無需真的載入 Whisper。
+
+def test_paragraph_mode_empty_diar_returns_plain_text():
+    processor = WhisperProcessor(None)
+    segments = [{"start": 0, "end": 1, "text": "hello"}, {"start": 1, "end": 2, "text": "world"}]
+
+    result = processor._merge_transcription_with_diarization(segments, [])
+
+    assert result == "hello world"
+
+
+def test_paragraph_mode_output_format_matches_existing_convention():
+    # [SPEAKER_XX] 前綴 + \n\n 分行、同語者連續合併——格式與改動前完全一致
+    processor = WhisperProcessor(None)
+    words = [_w(0, 1, "Hi"), _w(1, 2, " there"), _w(2, 3, " bye"), _w(3, 4, " now")]
+    turns = [_turn(0, 2, "SPEAKER_00"), _turn(2, 4, "SPEAKER_01")]
+    segments = [{"start": 0, "end": 4, "text": "Hi there bye now", "words": words}]
+
+    result = processor._merge_transcription_with_diarization(segments, turns)
+
+    assert result == "[SPEAKER_00] Hi there\n\n[SPEAKER_01] bye now"

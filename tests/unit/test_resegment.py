@@ -7,6 +7,7 @@ from collections import namedtuple
 
 from src.services.utils.whisper_processor import (
     _resegment_by_words,
+    _apply_time_offset,
     RESEG_MAX_SEGMENT_SEC,
     RESEG_GAP_THRESHOLD_SEC,
     RESEG_MIN_SEGMENT_SEC,
@@ -97,3 +98,24 @@ def test_normal_words_not_treated_as_degenerate():
 
 def test_constants_are_sane():
     assert 0 < RESEG_GAP_THRESHOLD_SEC < RESEG_MIN_SEGMENT_SEC < RESEG_MAX_SEGMENT_SEC
+
+
+# ── _apply_time_offset（chunk offset 校正，供 word 時間戳同步平移）────────────
+
+def test_apply_time_offset_without_words():
+    seg = {"start": 1.0, "end": 2.0, "text": "x"}
+    out = _apply_time_offset(seg, 10.0)
+    assert out == {"start": 11.0, "end": 12.0, "text": "x"}
+
+
+def test_apply_time_offset_shifts_words_too():
+    seg = {
+        "start": 1.0, "end": 2.0, "text": "ab",
+        "words": [{"start": 1.0, "end": 1.5, "word": "a"}, {"start": 1.5, "end": 2.0, "word": "b"}],
+    }
+    out = _apply_time_offset(seg, 10.0)
+    assert out["start"] == 11.0 and out["end"] == 12.0
+    assert out["words"] == [
+        {"start": 11.0, "end": 11.5, "word": "a"},
+        {"start": 11.5, "end": 12.0, "word": "b"},
+    ]

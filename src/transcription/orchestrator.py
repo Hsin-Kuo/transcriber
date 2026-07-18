@@ -283,6 +283,9 @@ class TranscriptionOrchestrator:
         if full_text is None:
             self.check_cancelled(task_id)  # 取消造成的 None 會在這裡 raise
             raise ValueError("轉錄結果為空")
+        # words 只供 transcription phase 內部 word 級語者對齊使用，單點剝除、絕不外流
+        # （覆蓋無 diar / diar 失敗降級 / 段落模式 / 字幕模式四條路；字幕模式核心已剝，此處 no-op）
+        segments = [{k: v for k, v in s.items() if k != "words"} for s in segments]
         return full_text, segments, detected_language
 
     def _run_transcription(
