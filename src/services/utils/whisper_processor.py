@@ -297,18 +297,19 @@ def assign_speakers_word_level(
     """word 級語者指派 + smoothing + 語者變換點切段。
 
     輸入：segments（可含 words: [{start,end,word}]）、diar turns [{start,end,speaker}]。
-    輸出：[{start,end,text,speaker}]，一律不含 words。
+    輸出：[{start,end,text,speaker}]，不含 words。
     - 有 words：逐 word `_pick_speaker_for_span` → `_smooth_isolated_word_speakers`
       → 依 speaker 變換點切開；子段 start=首字 start、end=末字 end、
       text = "".join(w["word"]).strip()（沿用 `_resegment_by_words` 的拼接慣例，中英皆正確）。
     - 無 words（passthrough/degenerate 段）：整段 `_pick_speaker_for_span(seg.start, seg.end)`。
-    - diar_turns 空：原樣回傳（僅剝 words、不加 speaker）。
+    - diar_turns 空：原樣回傳（不加 speaker、不剝 words——words 的剝除統一由
+      orchestrator `_run_transcription_phase` 出口單點處理，此處不重複）。
 
     Smoothing 只在 segment 內做（words 只存在於 segment 內，reseg 切點本身就是停頓處），
     跨 segment 的孤立段不在本函數範圍。
     """
     if not diar_turns:
-        return [{k: v for k, v in seg.items() if k != "words"} for seg in transcription_segments]
+        return transcription_segments
 
     out: List[Dict] = []
     for seg in transcription_segments:
@@ -710,32 +711,6 @@ class WhisperProcessor:
         )
         return full_text, all_segments, detected_language
 
-    def transcribe_with_diarization(
-        self,
-        audio_path: Path,
-        diarization_segments: List[Dict],
-        language: Optional[str] = None
-    ) -> Tuple[str, List[Dict], str]:
-        """轉錄音檔並合併說話者辨識結果
-
-        Args:
-            audio_path: 音檔路徑
-            diarization_segments: 說話者辨識結果
-            language: 語言代碼
-
-        Returns:
-            (帶說話者標記的文字, segments 列表, 偵測到的語言)
-        """
-        # 先轉錄
-        _, segments_list, detected_language = self.transcribe(audio_path, language)
-
-        # 合併 diarization 結果
-        merged_text = self._merge_transcription_with_diarization(
-            segments_list, diarization_segments
-        )
-
-        return merged_text, segments_list, detected_language
-
     # ========== 私有輔助方法 ==========
 
     def _ensure_valid_audio(self, audio_path: Path) -> Path:
@@ -1125,9 +1100,6 @@ class WhisperProcessor:
             # 沒有 diarization 結果，返回原 segments
             return transcription_segments
 
-        enriched_segments = assign_speakers_word_level(transcription_segments, diarization_segments)
-        for seg in enriched_segments:
-            if seg.get("speaker") is None:
-                seg["speaker"] = "UNKNOWN"
-
-        return enriched_segments
+        # diar 非空時 assign_speakers_word_level 保證每段都有非 None speaker
+        # （零重疊也會 fallback 到最近 turn），無需 UNKNOWN 保底。
+        return assign_speakers_word_level(transcription_segments, diarization_segments)

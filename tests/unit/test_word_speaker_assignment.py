@@ -100,15 +100,15 @@ def test_segment_without_words_falls_back_to_segment_level_overlap():
     assert out == [{"start": 0, "end": 2, "text": "hi", "speaker": "B"}]
 
 
-def test_empty_diar_turns_returns_segments_unchanged_without_speaker_key():
+def test_empty_diar_turns_returns_segments_as_is():
+    # 空 diar → 原樣回傳（不加 speaker）；words 的剝除由 orchestrator 出口單點處理
     words = [_w(0, 1, "hi")]
     segs = [{"start": 0, "end": 1, "text": "hi", "words": words}]
 
     out = assign_speakers_word_level(segs, [])
 
-    assert out == [{"start": 0, "end": 1, "text": "hi"}]
+    assert out == segs
     assert "speaker" not in out[0]
-    assert "words" not in out[0]
 
 
 # ── 段落模式 merge（_merge_transcription_with_diarization）─────────────────
