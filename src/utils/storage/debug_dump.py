@@ -28,6 +28,7 @@ def save_diar_debug_dump(task_id: str, payload: dict) -> str:
     呼叫端（orchestrator）自行 try/except——dump 失敗只該 log warning，
     絕不影響任務本體。
     """
+    validate_task_id(task_id)  # 入口守門，比照 compact/handoff 公開儲存函數慣例
     key = _debug_diar_key(task_id)
     body = json.dumps(payload, ensure_ascii=False)
     if is_aws():

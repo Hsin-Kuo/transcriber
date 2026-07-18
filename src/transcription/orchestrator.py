@@ -304,7 +304,8 @@ class TranscriptionOrchestrator:
         subtitle 模式與 merge 結果相同，paragraph 模式則是 merge 內部同一計算的輸出，
         統一重算避免兩種 task_type 分岔）。上傳失敗只 log warning，不影響任務。
         """
-        if not os.getenv("DIAR_DEBUG_DUMP"):
+        # 顯式白名單解析（比照 WHISPER_BATCHED 慣例），"0"/"false" 不會被誤當開啟
+        if os.getenv("DIAR_DEBUG_DUMP", "").strip().lower() not in ("1", "true", "yes"):
             return
         try:
             from src.services.utils.whisper_processor import assign_speakers_word_level
