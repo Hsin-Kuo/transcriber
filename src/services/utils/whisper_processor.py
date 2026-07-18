@@ -148,7 +148,9 @@ def _resegment_by_words(segments: List[Dict]) -> List[Dict]:
     """把(可能很長的) whisper segments 依字間停頓 / 長度切成較短碎片。
 
     輸入：含 `words`（faster-whisper Word list，或 None）的 segment dict。
-    輸出：純 {start, end, text} 的 segment dict（words 用完即丟，不外流）。
+    輸出：{start, end, text, words} 的 segment dict——words 轉成 plain dict
+    列表 [{start, end, word}, ...] 供下游 word 級語者對齊使用；passthrough/
+    degenerate 分支不帶 words（下游以「缺 words」為 fallback 訊號）。
 
     切點：逐字累積，遇到任一即斷段——
       - 累積長度 ≥ RESEG_MAX_SEGMENT_SEC（硬上限），或
@@ -160,7 +162,15 @@ def _resegment_by_words(segments: List[Dict]) -> List[Dict]:
     def _flush(words_run: list, end: float) -> None:
         text = "".join(w.word for w in words_run).strip()
         if text:
-            out.append({"start": round(words_run[0].start, 3), "end": round(end, 3), "text": text})
+            out.append({
+                "start": round(words_run[0].start, 3),
+                "end": round(end, 3),
+                "text": text,
+                "words": [
+                    {"start": round(w.start, 3), "end": round(w.end, 3), "word": w.word}
+                    for w in words_run
+                ],
+            })
 
     for seg in segments:
         words = seg.get("words")
@@ -200,6 +210,137 @@ def _resegment_by_words(segments: List[Dict]) -> List[Dict]:
                 cur = []
         if cur:
             _flush(cur, cur[-1].end)
+
+    return out
+
+
+def _apply_time_offset(seg: Dict, offset: float) -> Dict:
+    """回傳平移後的 segment；若含 words，每個 word 的 start/end 同步 +offset。"""
+    shifted = {
+        "start": seg["start"] + offset,
+        "end": seg["end"] + offset,
+        "text": seg["text"],
+    }
+    words = seg.get("words")
+    if words:
+        shifted["words"] = [
+            {**w, "start": w["start"] + offset, "end": w["end"] + offset}
+            for w in words
+        ]
+    return shifted
+
+
+def _pick_speaker_for_span(start: float, end: float, diar_turns: List[Dict]) -> Optional[str]:
+    """[start,end] 對 turns 取最大重疊；零重疊 → 以區間中點距 turn 最近者。turns 空 → None。"""
+    if not diar_turns:
+        return None
+
+    best_speaker = None
+    max_overlap = 0.0
+    for turn in diar_turns:
+        overlap = max(0.0, min(end, turn["end"]) - max(start, turn["start"]))
+        if overlap > max_overlap:
+            max_overlap = overlap
+            best_speaker = turn["speaker"]
+
+    if best_speaker is not None:
+        return best_speaker
+
+    # 零重疊（落在 turn 間隙）→ 依區間中點距最近的 turn 歸屬
+    midpoint = (start + end) / 2.0
+
+    def _distance(turn: Dict) -> float:
+        if midpoint < turn["start"]:
+            return turn["start"] - midpoint
+        if midpoint > turn["end"]:
+            return midpoint - turn["end"]
+        return 0.0
+
+    return min(diar_turns, key=_distance)["speaker"]
+
+
+def _smooth_isolated_word_speakers(speakers: List[str]) -> List[str]:
+    """孤立單字（run 長度 1 且前後 run 為同一 speaker）改判為鄰居 speaker。
+
+    以 run 為單位由左至右歸併：孤立 run 併入鄰居後視為同一 run 繼續判斷，
+    交替雜訊（A,B,A,B,A）收斂為單一語者，不會殘留新的孤立 run。
+    首尾 run 沒有雙側鄰居，一律不動。
+    """
+    runs: List[List] = []  # [speaker, 長度]
+    for spk in speakers:
+        if runs and runs[-1][0] == spk:
+            runs[-1][1] += 1
+        else:
+            runs.append([spk, 1])
+
+    merged: List[List] = []
+    for run in runs:
+        merged.append(run)
+        while (
+            len(merged) >= 3
+            and merged[-2][1] == 1
+            and merged[-3][0] == merged[-1][0]
+        ):
+            absorbed = [merged[-3][0], merged[-3][1] + merged[-2][1] + merged[-1][1]]
+            merged[-3:] = [absorbed]
+
+    result: List[str] = []
+    for spk, count in merged:
+        result.extend([spk] * count)
+    return result
+
+
+def assign_speakers_word_level(
+    transcription_segments: List[Dict],
+    diar_turns: List[Dict],
+) -> List[Dict]:
+    """word 級語者指派 + smoothing + 語者變換點切段。
+
+    輸入：segments（可含 words: [{start,end,word}]）、diar turns [{start,end,speaker}]。
+    輸出：[{start,end,text,speaker}]，不含 words。
+    - 有 words：逐 word `_pick_speaker_for_span` → `_smooth_isolated_word_speakers`
+      → 依 speaker 變換點切開；子段 start=首字 start、end=末字 end、
+      text = "".join(w["word"]).strip()（沿用 `_resegment_by_words` 的拼接慣例，中英皆正確）。
+    - 無 words（passthrough/degenerate 段）：整段 `_pick_speaker_for_span(seg.start, seg.end)`。
+    - diar_turns 空：原樣回傳（不加 speaker、不剝 words——words 的剝除統一由
+      orchestrator `_run_transcription_phase` 出口單點處理，此處不重複）。
+
+    Smoothing 只在 segment 內做（words 只存在於 segment 內，reseg 切點本身就是停頓處），
+    跨 segment 的孤立段不在本函數範圍。
+    """
+    if not diar_turns:
+        return transcription_segments
+
+    out: List[Dict] = []
+    for seg in transcription_segments:
+        words = seg.get("words")
+        if not words:
+            speaker = _pick_speaker_for_span(seg.get("start", 0.0), seg.get("end", 0.0), diar_turns)
+            out.append({
+                "start": seg.get("start"),
+                "end": seg.get("end"),
+                "text": seg.get("text", ""),
+                "speaker": speaker,
+            })
+            continue
+
+        word_speakers = _smooth_isolated_word_speakers(
+            [_pick_speaker_for_span(w["start"], w["end"], diar_turns) for w in words]
+        )
+
+        run_start = 0
+        for i in range(1, len(words) + 1):
+            if i == len(words) or word_speakers[i] != word_speakers[run_start]:
+                run_words = words[run_start:i]
+                text = "".join(w["word"] for w in run_words).strip()
+                if text:
+                    out.append({
+                        "start": run_words[0]["start"],
+                        "end": run_words[-1]["end"],
+                        "text": text,
+                        "speaker": word_speakers[run_start],
+                    })
+                run_start = i
 
     return out
 
@@ -556,14 +697,9 @@ class WhisperProcessor:
         for chunk_idx, (_text, segments, _lang) in enumerate(sorted_results, start=1):
             time_offset = chunk_offsets[chunk_idx]
 
-            # 調整每個 segment 的時間戳
+            # 調整每個 segment 的時間戳（含 words，供下游 word 級語者對齊使用）
             for seg in segments:
-                adjusted_segment = {
-                    "start": seg["start"] + time_offset,
-                    "end": seg["end"] + time_offset,
-                    "text": seg["text"]
-                }
-                all_segments.append(adjusted_segment)
+                all_segments.append(_apply_time_offset(seg, time_offset))
 
         full_text = " ".join(all_text_parts)
         detected_language = sorted_results[0][2] if sorted_results else None
@@ -574,32 +710,6 @@ class WhisperProcessor:
             segment_count=len(all_segments),
         )
         return full_text, all_segments, detected_language
-
-    def transcribe_with_diarization(
-        self,
-        audio_path: Path,
-        diarization_segments: List[Dict],
-        language: Optional[str] = None
-    ) -> Tuple[str, List[Dict], str]:
-        """轉錄音檔並合併說話者辨識結果
-
-        Args:
-            audio_path: 音檔路徑
-            diarization_segments: 說話者辨識結果
-            language: 語言代碼
-
-        Returns:
-            (帶說話者標記的文字, segments 列表, 偵測到的語言)
-        """
-        # 先轉錄
-        _, segments_list, detected_language = self.transcribe(audio_path, language)
-
-        # 合併 diarization 結果
-        merged_text = self._merge_transcription_with_diarization(
-            segments_list, diarization_segments
-        )
-
-        return merged_text, segments_list, detected_language
 
     # ========== 私有輔助方法 ==========
 
@@ -925,8 +1035,11 @@ class WhisperProcessor:
     ) -> str:
         """合併轉錄文字和說話者標記
 
+        內部改為 word 級語者指派（assign_speakers_word_level）：先切到語者變換點，
+        再把連續同語者子段組行——輸出格式與改動前完全一致。
+
         Args:
-            transcription_segments: Sound Lite 轉錄結果 (帶時間戳)
+            transcription_segments: Sound Lite 轉錄結果 (帶時間戳，可能含 words)
             diarization_segments: Speaker diarization 結果
 
         Returns:
@@ -936,44 +1049,28 @@ class WhisperProcessor:
             # 沒有 diarization 結果，直接返回純文字
             return " ".join(seg.get("text", "") for seg in transcription_segments)
 
-        # 為每個轉錄片段分配說話者
+        assigned_segments = assign_speakers_word_level(transcription_segments, diarization_segments)
+
+        # 把連續同 speaker 子段組行
         result_lines = []
         current_speaker = None
         current_text = []
 
-        for trans_seg in transcription_segments:
-            trans_start = trans_seg.get("start", 0)
-            trans_end = trans_seg.get("end", 0)
-            trans_text = trans_seg.get("text", "")
-
-            if not trans_text.strip():
+        for seg in assigned_segments:
+            text = seg.get("text", "")
+            if not text.strip():
                 continue
 
-            # 找到與此轉錄片段重疊最多的說話者
-            best_speaker = None
-            max_overlap = 0
-
-            for dia_seg in diarization_segments:
-                dia_start = dia_seg["start"]
-                dia_end = dia_seg["end"]
-
-                # 計算重疊時間
-                overlap_start = max(trans_start, dia_start)
-                overlap_end = min(trans_end, dia_end)
-                overlap = max(0, overlap_end - overlap_start)
-
-                if overlap > max_overlap:
-                    max_overlap = overlap
-                    best_speaker = dia_seg["speaker"]
+            speaker = seg.get("speaker")
 
             # 如果說話者改變，輸出之前的內容
-            if best_speaker != current_speaker and current_text:
+            if speaker != current_speaker and current_text:
                 speaker_label = f"[{current_speaker}]" if current_speaker else ""
                 result_lines.append(f"{speaker_label} {''.join(current_text)}")
                 current_text = []
 
-            current_speaker = best_speaker
-            current_text.append(trans_text)
+            current_speaker = speaker
+            current_text.append(text)
 
         # 輸出最後一段
         if current_text:
@@ -989,45 +1086,20 @@ class WhisperProcessor:
     ) -> List[Dict]:
         """將說話者資訊整合到轉錄 segments 中
 
-        用於字幕模式：不改變文字內容，而是在 segments 中添加 speaker 欄位
+        用於字幕模式：word 級語者指派 + 語者變換點切段（assign_speakers_word_level），
+        輸出 segments 依語者變換點切開，不再是原 segment 逐段複製。
 
         Args:
-            transcription_segments: Sound Lite 轉錄結果 (帶時間戳)
+            transcription_segments: Sound Lite 轉錄結果 (帶時間戳，可能含 words)
             diarization_segments: Speaker diarization 結果
 
         Returns:
-            帶 speaker 欄位的 segments 列表
+            帶 speaker 欄位的 segments 列表（依語者變換點切分）
         """
         if not diarization_segments:
             # 沒有 diarization 結果，返回原 segments
             return transcription_segments
 
-        enriched_segments = []
-
-        for trans_seg in transcription_segments:
-            trans_start = trans_seg.get("start", 0)
-            trans_end = trans_seg.get("end", 0)
-
-            # 找到與此轉錄片段重疊最多的說話者
-            best_speaker = None
-            max_overlap = 0
-
-            for dia_seg in diarization_segments:
-                dia_start = dia_seg["start"]
-                dia_end = dia_seg["end"]
-
-                # 計算重疊時間
-                overlap_start = max(trans_start, dia_start)
-                overlap_end = min(trans_end, dia_end)
-                overlap = max(0, overlap_end - overlap_start)
-
-                if overlap > max_overlap:
-                    max_overlap = overlap
-                    best_speaker = dia_seg["speaker"]
-
-            # 複製 segment 並添加 speaker 欄位
-            enriched_seg = trans_seg.copy()
-            enriched_seg["speaker"] = best_speaker if best_speaker else "UNKNOWN"
-            enriched_segments.append(enriched_seg)
-
-        return enriched_segments
+        # diar 非空時 assign_speakers_word_level 保證每段都有非 None speaker
+        # （零重疊也會 fallback 到最近 turn），無需 UNKNOWN 保底。
+        return assign_speakers_word_level(transcription_segments, diarization_segments)
