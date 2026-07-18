@@ -345,6 +345,93 @@ class TestDiarization:
         assert db.transcriptions.find_one({"_id": task_id}) is not None
 
 
+class TestDiarDebugDump:
+    """DIAR_DEBUG_DUMP：預設關閉零行為變化；開啟時 dump 對齊輸入/輸出 JSON。"""
+
+    def test_disabled_by_default_never_calls_storage(self, db, tiny_audio, monkeypatch):
+        """未設 DIAR_DEBUG_DUMP（預設）→ 完全不呼叫 storage 上傳。"""
+        monkeypatch.delenv("DIAR_DEBUG_DUMP", raising=False)
+        calls = []
+        import src.utils.storage.debug_dump as debug_dump_mod
+        monkeypatch.setattr(
+            debug_dump_mod, "save_diar_debug_dump",
+            lambda task_id, payload: calls.append(task_id),
+        )
+        task_id = _insert_task(db)
+        orc = _make_orchestrator(db, diarization=FakeDiarization())
+
+        _run(orc, task_id, FakeAudioSource(tiny_audio), use_diarization=True)
+
+        assert db.tasks.find_one({"_id": task_id})["status"] == "completed"
+        assert calls == []
+
+    def test_enabled_dumps_alignment_json_structure(self, db, tiny_audio, monkeypatch):
+        """開啟時（mock storage）→ payload 含 task_id/diar_turns/segments_words/final_segments。"""
+        monkeypatch.setenv("DIAR_DEBUG_DUMP", "1")
+        captured = {}
+
+        def fake_save(task_id, payload):
+            captured["task_id"] = task_id
+            captured["payload"] = payload
+            return f"uploads/debug/diar/{task_id}.json"
+
+        import src.utils.storage.debug_dump as debug_dump_mod
+        monkeypatch.setattr(debug_dump_mod, "save_diar_debug_dump", fake_save)
+
+        task_id = _insert_task(db, task_type="paragraph")
+        segments = [
+            {"start": 0.0, "end": 1.0, "text": "hello world",
+             "words": [
+                 {"start": 0.0, "end": 0.5, "word": "hello"},
+                 {"start": 0.5, "end": 1.0, "word": " world"},
+             ]},
+        ]
+        diar_turns = [{"speaker": "SPEAKER_00", "start": 0.0, "end": 1.0}]
+        orc = _make_orchestrator(
+            db, whisper=FakeWhisper(segments=segments),
+            diarization=FakeDiarization(segments=diar_turns),
+        )
+
+        _run(orc, task_id, FakeAudioSource(tiny_audio), use_diarization=True)
+
+        assert db.tasks.find_one({"_id": task_id})["status"] == "completed"
+        assert captured["task_id"] == task_id
+        payload = captured["payload"]
+        assert payload["task_id"] == task_id
+        assert payload["diar_turns"] == [
+            {"start": 0.0, "end": 1.0, "speaker": "SPEAKER_00"}
+        ]
+        # 每個 segment 的 words（start/end/word）——words 剝除前的對齊輸入
+        assert payload["segments_words"] == [
+            {"start": 0.0, "end": 1.0, "words": [
+                {"start": 0.0, "end": 0.5, "word": "hello"},
+                {"start": 0.5, "end": 1.0, "word": " world"},
+            ]},
+        ]
+        # 最終 segments：start/end/text/speaker 四欄
+        assert len(payload["final_segments"]) >= 1
+        for seg in payload["final_segments"]:
+            assert set(seg.keys()) == {"start", "end", "text", "speaker"}
+        assert payload["final_segments"][0]["speaker"] == "SPEAKER_00"
+
+    def test_dump_failure_does_not_fail_task(self, db, tiny_audio, monkeypatch):
+        """上傳失敗只 log warning——任務仍 completed。"""
+        monkeypatch.setenv("DIAR_DEBUG_DUMP", "1")
+
+        def boom(task_id, payload):
+            raise RuntimeError("s3 boom")
+
+        import src.utils.storage.debug_dump as debug_dump_mod
+        monkeypatch.setattr(debug_dump_mod, "save_diar_debug_dump", boom)
+
+        task_id = _insert_task(db)
+        orc = _make_orchestrator(db, diarization=FakeDiarization())
+
+        _run(orc, task_id, FakeAudioSource(tiny_audio), use_diarization=True)
+
+        assert db.tasks.find_one({"_id": task_id})["status"] == "completed"
+
+
 class TestPunctuationFallback:
     def test_punctuation_failure_keeps_original_text(self, db, tiny_audio):
         """標點失敗 → 用原文完成,不標 failed。"""
