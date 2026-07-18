@@ -8,6 +8,8 @@ from src.services.utils.whisper_processor import (
     _pick_speaker_for_span,
     _pick_speaker_indexed,
     _build_turn_index,
+    _turn_score,
+    _word_speaker_candidates,
     assign_speakers_word_level,
 )
 
@@ -85,6 +87,57 @@ def test_no_words_long_segment_ignores_proximity_more_overlap_wins():
     assert out == [{"start": 0.0, "end": 6.0, "text": "long passthrough", "speaker": "X"}]
 
 
+# ── Word 尾端錨定（batched pipeline word start 前漂，staging「我也」實測數字）──
+
+def test_word_tail_anchor_recovers_batched_drifted_word():
+    # batched pipeline 實測：「我也」起點前漂 0.59s（83.800→83.210）、時長 0.48→1.06s，
+    # 膨脹 span 稀釋與插話 turn 的重疊比例（1.0→0.636），近平手變一面倒 → 誤判前語者。
+    # 尾端錨定只取 (end-0.6, end) 評分 → 恢復近平手，proximity+DP 判給後語者。
+    turns = [
+        _turn(79.225, 84.423, "SPEAKER_02"),  # 前語者長 turn
+        _turn(83.596, 84.406, "SPEAKER_03"),  # 插話短 turn
+        _turn(84.423, 90.278, "SPEAKER_03"),  # 後語者主 turn
+    ]
+    drifted = _w(83.210, 84.270, "我也")  # 起點前漂的 batched word（1.06s）
+    words = [
+        _w(82.930, 83.210, "臉"),   # 前文：02 獨占
+        drifted,
+        _w(84.270, 84.630, "常"),   # 後文起：03 較優
+        _w(84.730, 84.850, "會"),   # 後文：03 主 turn 內
+    ]
+    segs = [{"start": 82.930, "end": 84.850, "text": "臉我也常會", "words": words}]
+
+    # 對照斷言：不套尾端錨定的「原始膨脹 span」分數一面倒偏前語者
+    # （前導音段稀釋插話 turn 重疊：1.0+prox vs ~0.64+prox），proximity/DP 無從翻盤
+    raw_02 = _turn_score(drifted["start"], drifted["end"], turns[0])
+    raw_03 = _turn_score(drifted["start"], drifted["end"], turns[1])
+    assert raw_02 > raw_03 + 0.2
+
+    out = assign_speakers_word_level(segs, turns)
+
+    my_ye = next(s for s in out if "我也" in s["text"])
+    assert my_ye["speaker"] == "SPEAKER_03"
+
+
+def test_word_tail_anchor_leaves_short_words_untouched():
+    # 時長 ≤ WORD_TAIL_ANCHOR_SEC 的正常短字：有效 span = 原始 span，行為完全不變
+    # ——錨定開關開/關的候選分數表完全相同。
+    turns = [
+        _turn(79.230, 84.427, "SPEAKER_00"),
+        _turn(83.583, 84.393, "SPEAKER_02"),
+    ]
+    sorted_turns, starts, prefix_max_end = _build_turn_index(turns)
+
+    # 真實案例的非 batched「我也」（0.48s < 0.6s）
+    with_anchor = _word_speaker_candidates(
+        83.800, 84.280, sorted_turns, starts, prefix_max_end, anchor_tail=True
+    )
+    without_anchor = _word_speaker_candidates(
+        83.800, 84.280, sorted_turns, starts, prefix_max_end, anchor_tail=False
+    )
+    assert with_anchor == without_anchor
+
+
 # ── Viterbi DP 行為（取代舊的孤立單字 smoothing）────────────────────────────
 
 def test_viterbi_flips_tie_at_speaker_handover_point():
@@ -136,15 +189,19 @@ def test_viterbi_keeps_context_speaker_for_mid_run_backchannel_tie():
 def test_viterbi_suppresses_isolated_weak_flip():
     # 原 smoothing 功能：A A B A A 型孤立單字雜訊（B 靠弱優勢贏 per-word，非強證據）
     # → 兩次換手成本 0.6 遠大於 emission 差 → DP 全判 A。
+    # words 用 0.5s（< WORD_TAIL_ANCHOR_SEC），不受尾端錨定影響。
     turns = [
         _turn(0.0, 10.0, "A"),
-        _turn(2.9, 4.1, "B"),   # nested，讓中間 word 的 per-word 分數以微小差距偏 B
+        _turn(2.9, 3.6, "B"),   # nested、以 w3 為中心，讓 w3 的 per-word 分數以微小差距偏 B
     ]
-    words = [_w(1, 2, "u"), _w(2, 3, "v"), _w(3, 4, "x"), _w(4, 5, "y"), _w(5, 6, "z")]
-    segs = [{"start": 1, "end": 6, "text": "uvxyz", "words": words}]
+    words = [
+        _w(1.0, 1.5, "u"), _w(2.0, 2.5, "v"), _w(3.0, 3.5, "x"),
+        _w(4.0, 4.5, "y"), _w(5.0, 5.5, "z"),
+    ]
+    segs = [{"start": 1.0, "end": 5.5, "text": "uvxyz", "words": words}]
 
     # 前置確認：中間 word 單獨判會給 B（弱優勢），DP 才有東西可壓
-    assert _pick_speaker_for_span(3, 4, turns) == "B"
+    assert _pick_speaker_for_span(3.0, 3.5, turns) == "B"
 
     out = assign_speakers_word_level(segs, turns)
 
@@ -227,14 +284,18 @@ def test_gap_word_fallback_does_not_drag_weak_real_overlap():
 def test_viterbi_converges_weak_alternating_pattern():
     # 43f829f 修過的迴歸點：per-word 弱證據交替（A B A B A 型）不得殘留交替雜訊。
     # 用兩個 nested 短 turn 讓 w2/w4 的 per-word 分數以微小差距偏 B → DP 收斂單一語者 A
-    # （翻兩字要 4 次換手成本 1.2 ≫ emission 差 ~0.06）。
+    # （翻兩字要 4 次換手成本 ≫ emission 差 ~0.07）。
+    # words 用 0.5s（< WORD_TAIL_ANCHOR_SEC），不受尾端錨定影響。
     turns = [
         _turn(0.0, 10.0, "A"),
-        _turn(1.9, 3.1, "B"),   # 以 w2 為中心的 nested 短 turn
-        _turn(3.9, 5.1, "B"),   # 以 w4 為中心的 nested 短 turn
+        _turn(1.95, 2.55, "B"),   # 以 w2 為中心的 nested 短 turn
+        _turn(3.95, 4.55, "B"),   # 以 w4 為中心的 nested 短 turn
     ]
-    words = [_w(1, 2, "u"), _w(2, 3, "v"), _w(3, 4, "x"), _w(4, 5, "y"), _w(5, 6, "z")]
-    segs = [{"start": 1, "end": 6, "text": "uvxyz", "words": words}]
+    words = [
+        _w(1.0, 1.5, "u"), _w(2.0, 2.5, "v"), _w(3.0, 3.5, "x"),
+        _w(4.0, 4.5, "y"), _w(5.0, 5.5, "z"),
+    ]
+    segs = [{"start": 1.0, "end": 5.5, "text": "uvxyz", "words": words}]
 
     # 前置確認：per-word 確實是 A B A B A（w2/w4 靠 proximity 弱優勢偏 B）
     assert [_pick_speaker_for_span(w["start"], w["end"], turns) for w in words] == \
@@ -320,11 +381,15 @@ def test_paragraph_mode_output_format_matches_existing_convention():
 
 def _brute_force_pick_speaker(start, end, turns):
     """暴力對照版：對「全部」turns 評分，不做 bisect 窗口裁剪（獨立重寫評分公式，
-    不 import 生產的 PROXIMITY_WEIGHT / _turn_score，避免和被測程式碼共用同一段邏輯）。
-    平手語意與生產 `_argmax_speaker` 一致：精確平分時取字典序最小的 speaker。
+    不 import 生產的 PROXIMITY_WEIGHT / _turn_score / WORD_TAIL_ANCHOR_SEC，
+    避免和被測程式碼共用同一段邏輯）。
+    平手語意與生產 `_argmax_speaker` 一致：精確平分時取字典序最小的 speaker；
+    尾端錨定語意與生產 word 路徑一致：有效 span = (max(start, end-0.6), end)。
     """
     if not turns:
         return None
+
+    start = max(start, end - 0.6)  # word 尾端錨定（獨立重寫，同生產規格）
 
     best_speaker = None
     best_score = 0.0
