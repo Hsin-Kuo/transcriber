@@ -148,7 +148,9 @@ def _resegment_by_words(segments: List[Dict]) -> List[Dict]:
     """把(可能很長的) whisper segments 依字間停頓 / 長度切成較短碎片。
 
     輸入：含 `words`（faster-whisper Word list，或 None）的 segment dict。
-    輸出：純 {start, end, text} 的 segment dict（words 用完即丟，不外流）。
+    輸出：{start, end, text, words} 的 segment dict——words 轉成 plain dict
+    列表 [{start, end, word}, ...] 供下游 word 級語者對齊使用；passthrough/
+    degenerate 分支不帶 words（下游以「缺 words」為 fallback 訊號）。
 
     切點：逐字累積，遇到任一即斷段——
       - 累積長度 ≥ RESEG_MAX_SEGMENT_SEC（硬上限），或
@@ -160,7 +162,15 @@ def _resegment_by_words(segments: List[Dict]) -> List[Dict]:
     def _flush(words_run: list, end: float) -> None:
         text = "".join(w.word for w in words_run).strip()
         if text:
-            out.append({"start": round(words_run[0].start, 3), "end": round(end, 3), "text": text})
+            out.append({
+                "start": round(words_run[0].start, 3),
+                "end": round(end, 3),
+                "text": text,
+                "words": [
+                    {"start": round(w.start, 3), "end": round(w.end, 3), "word": w.word}
+                    for w in words_run
+                ],
+            })
 
     for seg in segments:
         words = seg.get("words")
@@ -202,6 +212,22 @@ def _resegment_by_words(segments: List[Dict]) -> List[Dict]:
             _flush(cur, cur[-1].end)
 
     return out
+
+
+def _apply_time_offset(seg: Dict, offset: float) -> Dict:
+    """回傳平移後的 segment；若含 words，每個 word 的 start/end 同步 +offset。"""
+    shifted = {
+        "start": seg["start"] + offset,
+        "end": seg["end"] + offset,
+        "text": seg["text"],
+    }
+    words = seg.get("words")
+    if words:
+        shifted["words"] = [
+            {**w, "start": w["start"] + offset, "end": w["end"] + offset}
+            for w in words
+        ]
+    return shifted
 
 
 def transcribe_chunk_worker(
@@ -556,14 +582,9 @@ class WhisperProcessor:
         for chunk_idx, (_text, segments, _lang) in enumerate(sorted_results, start=1):
             time_offset = chunk_offsets[chunk_idx]
 
-            # 調整每個 segment 的時間戳
+            # 調整每個 segment 的時間戳（含 words，供下游 word 級語者對齊使用）
             for seg in segments:
-                adjusted_segment = {
-                    "start": seg["start"] + time_offset,
-                    "end": seg["end"] + time_offset,
-                    "text": seg["text"]
-                }
-                all_segments.append(adjusted_segment)
+                all_segments.append(_apply_time_offset(seg, time_offset))
 
         full_text = " ".join(all_text_parts)
         detected_language = sorted_results[0][2] if sorted_results else None

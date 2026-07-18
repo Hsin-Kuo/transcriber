@@ -45,6 +45,13 @@ def test_split_at_pause():
     out = _resegment_by_words([{"start": 0, "end": 5, "text": "x", "words": left + right}])
     assert len(out) == 2
     assert out[0]["end"] <= 2.01 and out[1]["start"] >= 2.99
+    # 切分輸出帶 words，且與輸入的 word 逐一對得上（供下游 word 級語者對齊使用）
+    assert out[0]["words"] == [
+        {"start": round(w.start, 3), "end": round(w.end, 3), "word": w.word} for w in left
+    ]
+    assert out[1]["words"] == [
+        {"start": round(w.start, 3), "end": round(w.end, 3), "word": w.word} for w in right
+    ]
 
 
 def test_small_gap_below_min_not_split():
@@ -76,6 +83,7 @@ def test_degenerate_words_fallback_to_segment_timing():
     assert len(out) == 1
     assert out[0]["start"] == 433.6 and out[0]["end"] == 440.0  # 用 segment 真實時間
     assert out[0]["text"] == "一整段正常長度的話"
+    assert "words" not in out[0]  # degenerate fallback：下游以缺 words 為訊號
 
 
 def test_normal_words_not_treated_as_degenerate():
