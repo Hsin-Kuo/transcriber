@@ -239,6 +239,20 @@ def _apply_time_offset(seg: Dict, offset: float) -> Dict:
 # 權重刻意壓低——overlap_fraction 差距明顯時（見驗收 b）proximity 不該蓋過重疊本身的證據力。
 PROXIMITY_WEIGHT = 0.1
 
+# 零重疊 word（落在 turn 間隙）時 nearest-turn speaker 的 emission 分數——刻意壓低（弱證據），
+# 讓 Viterbi 的前後文（換手成本）容易蓋過它。
+NEAREST_FALLBACK_SCORE = 0.2
+
+# Viterbi：相鄰 word 換 speaker 的 transition cost——壓掉孤立單字雜訊與搭腔（backchannel）
+# nested turn 造成的近平手翻盤；真正的換手（emission 差夠大或發生在停頓處）仍會保留。
+SWITCH_PENALTY = 0.3
+
+# 兩 word 間停頓 ≥ 此秒數時換手成本打折（語者換手常發生在停頓處，不該被全額懲罰）。
+SWITCH_GAP_RELIEF_SEC = 0.3
+
+# 停頓處換手成本的折扣係數（cost = SWITCH_PENALTY × 此值）。
+SWITCH_GAP_RELIEF_FACTOR = 0.3
+
 
 def _build_turn_index(diar_turns: List[Dict]) -> Tuple[List[Dict], List[float], List[float]]:
     """依 start 排序 diar turns + 建 prefix max-end 陣列，供 bisect 視窗查詢用。
@@ -280,27 +294,29 @@ def _turn_score(start: float, end: float, turn: Dict) -> float:
     return overlap_fraction + PROXIMITY_WEIGHT * proximity
 
 
-def _pick_speaker_indexed(
+def _word_speaker_candidates(
     start: float,
     end: float,
     sorted_turns: List[Dict],
     starts: List[float],
     prefix_max_end: List[float],
-) -> Optional[str]:
-    """[start,end] 對 turns 取最高 `_turn_score` 者；零重疊 → 以區間中點距 turn 最近者。
+) -> Dict[str, float]:
+    """[start,end] 的候選 speaker 分數表 {speaker: score}，供 Viterbi 當 emission 用。
 
+    score = `_turn_score`；同 speaker 有多個重疊 turn 時取分數最高者。
     用 `_build_turn_index` 產出的排序+prefix-max-end 索引，只掃可能與 span 重疊的
     turns（bisect 找上界 + 往回掃到 prefix max-end ≤ span.start 為止），
-    避免每個 word 都要 O(turns) 全掃。turns 空 → None。
+    避免每個 word 都要 O(turns) 全掃。
+    零重疊（落在 turn 間隙）→ 以區間中點距最近的 turn 的 speaker 得
+    NEAREST_FALLBACK_SCORE（rare path，全掃沒關係）。turns 空 → 空 dict。
     """
     if not sorted_turns:
-        return None
+        return {}
 
     # start < end 的 turns 都在 starts[:idx] 內（bisect_left 找第一個 start >= end 的位置）
     idx = bisect.bisect_left(starts, end)
 
-    best_speaker = None
-    best_score = 0.0
+    candidates: Dict[str, float] = {}
     i = idx - 1
     while i >= 0:
         if prefix_max_end[i] <= start:
@@ -310,13 +326,13 @@ def _pick_speaker_indexed(
         overlap = max(0.0, min(end, turn["end"]) - max(start, turn["start"]))
         if overlap > 0.0:
             score = _turn_score(start, end, turn)
-            if score > best_score:
-                best_score = score
-                best_speaker = turn["speaker"]
+            spk = turn["speaker"]
+            if score > candidates.get(spk, 0.0):
+                candidates[spk] = score
         i -= 1
 
-    if best_speaker is not None:
-        return best_speaker
+    if candidates:
+        return candidates
 
     # 零重疊（落在 turn 間隙）→ 依區間中點距最近的 turn 歸屬（rare path，全掃沒關係）
     midpoint = (start + end) / 2.0
@@ -328,7 +344,27 @@ def _pick_speaker_indexed(
             return midpoint - turn["end"]
         return 0.0
 
-    return min(sorted_turns, key=_distance)["speaker"]
+    nearest = min(sorted_turns, key=_distance)["speaker"]
+    return {nearest: NEAREST_FALLBACK_SCORE}
+
+
+def _pick_speaker_indexed(
+    start: float,
+    end: float,
+    sorted_turns: List[Dict],
+    starts: List[float],
+    prefix_max_end: List[float],
+) -> Optional[str]:
+    """[start,end] 取 `_word_speaker_candidates` 分數最高的 speaker；turns 空 → None。
+
+    單一 span 的判定（無 words 的 segment、`_pick_speaker_for_span` 薄包裝）走這裡，
+    不經 Viterbi（單點沒有前後文可用）。
+    """
+    candidates = _word_speaker_candidates(start, end, sorted_turns, starts, prefix_max_end)
+    if not candidates:
+        return None
+    # sorted 讓精確平分時的選擇不依賴掃描順序（決定性）
+    return max(sorted(candidates.items()), key=lambda kv: kv[1])[0]
 
 
 def _pick_speaker_for_span(start: float, end: float, diar_turns: List[Dict]) -> Optional[str]:
@@ -342,59 +378,83 @@ def _pick_speaker_for_span(start: float, end: float, diar_turns: List[Dict]) -> 
     return _pick_speaker_indexed(start, end, sorted_turns, starts, prefix_max_end)
 
 
-def _smooth_isolated_word_speakers(speakers: List[str]) -> List[str]:
-    """孤立單字（run 長度 1 且前後 run 為同一 speaker）改判為鄰居 speaker。
+def _viterbi_word_speakers(
+    words: List[Dict],
+    candidates_list: List[Dict[str, float]],
+) -> List[str]:
+    """segment 內逐 word 的 Viterbi 語者路徑：最大化 total emission − total switch cost。
 
-    以 run 為單位由左至右歸併：孤立 run 併入鄰居後視為同一 run 繼續判斷，
-    交替雜訊（A,B,A,B,A）收斂為單一語者，不會殘留新的孤立 run。
-    首尾 run 沒有雙側鄰居，一律不動。
+    - 狀態：該 segment 所有 word candidates 的 speaker 聯集（sorted，平分時選擇有決定性）。
+    - emission：`_word_speaker_candidates` 的分數表；不在 candidate 的 speaker 為 0.0。
+    - transition：相鄰 word 換 speaker 扣 SWITCH_PENALTY；兩 word 間 gap ≥
+      SWITCH_GAP_RELIEF_SEC 時扣 SWITCH_PENALTY × SWITCH_GAP_RELIEF_FACTOR
+      （換手常發生在停頓處）。同 speaker 不扣。
+    - segment 首尾不設額外成本（per-segment 獨立）。
+
+    取代舊的孤立單字 smoothing：孤立雜訊（弱 emission 差）被換手成本壓掉，
+    強證據插話（emission 差 > 兩次換手成本）與換手點（後文 emission 持續支持新語者，
+    只需一次換手）仍會保留——搭腔 nested turn 造成的近平手翻盤不再誤傷。
     """
-    runs: List[List] = []  # [speaker, 長度]
-    for spk in speakers:
-        if runs and runs[-1][0] == spk:
-            runs[-1][1] += 1
-        else:
-            runs.append([spk, 1])
+    speakers = sorted({spk for cand in candidates_list for spk in cand})
+    if len(speakers) <= 1:
+        # 單一（或零）候選語者：路徑唯一，不用跑 DP
+        return [speakers[0] if speakers else None] * len(words)
 
-    merged: List[List] = []
-    for run in runs:
-        merged.append(run)
-        while (
-            len(merged) >= 3
-            and merged[-2][1] == 1
-            and merged[-3][0] == merged[-1][0]
-        ):
-            absorbed = [merged[-3][0], merged[-3][1] + merged[-2][1] + merged[-1][1]]
-            merged[-3:] = [absorbed]
+    # prev_best[s] = 到前一個 word 為止、以 s 結尾的最佳累計分數
+    prev_best = {spk: candidates_list[0].get(spk, 0.0) for spk in speakers}
+    backptrs: List[Dict[str, str]] = []
 
-    result: List[str] = []
-    for spk, count in merged:
-        result.extend([spk] * count)
-    return result
+    for i in range(1, len(words)):
+        gap = words[i]["start"] - words[i - 1]["end"]
+        switch_cost = SWITCH_PENALTY * (
+            SWITCH_GAP_RELIEF_FACTOR if gap >= SWITCH_GAP_RELIEF_SEC else 1.0
+        )
+        cur_best: Dict[str, float] = {}
+        bp: Dict[str, str] = {}
+        for spk in speakers:
+            best_prev = None
+            best_val = float("-inf")
+            for prev_spk in speakers:
+                val = prev_best[prev_spk] - (0.0 if prev_spk == spk else switch_cost)
+                if val > best_val:
+                    best_val = val
+                    best_prev = prev_spk
+            cur_best[spk] = best_val + candidates_list[i].get(spk, 0.0)
+            bp[spk] = best_prev
+        backptrs.append(bp)
+        prev_best = cur_best
+
+    # 回溯（末端取最高累計分；speakers 已 sorted，平分時決定性地取字典序最小者）
+    last = max(speakers, key=lambda spk: prev_best[spk])
+    path = [last]
+    for bp in reversed(backptrs):
+        path.append(bp[path[-1]])
+    path.reverse()
+    return path
 
 
 def assign_speakers_word_level(
     transcription_segments: List[Dict],
     diar_turns: List[Dict],
 ) -> List[Dict]:
-    """word 級語者指派 + smoothing + 語者變換點切段。
+    """word 級語者指派（Viterbi DP）+ 語者變換點切段。
 
     輸入：segments（可含 words: [{start,end,word}]）、diar turns [{start,end,speaker}]。
     輸出：[{start,end,text,speaker}]，不含 words。
-    - 有 words：逐 word 用 `_pick_speaker_indexed`（重疊+貼近度評分，見 `_turn_score`）
-      → `_smooth_isolated_word_speakers` → 依 speaker 變換點切開；子段 start=首字 start、
-      end=末字 end、text = "".join(w["word"]).strip()（沿用 `_resegment_by_words` 的
-      拼接慣例，中英皆正確）。
-    - 無 words（passthrough/degenerate 段）：整段用同一份索引評分。
+    - 有 words：逐 word 算候選分數表（`_word_speaker_candidates`，重疊+貼近度評分）
+      → segment 內 `_viterbi_word_speakers`（前後文一致性，取代舊的孤立單字 smoothing）
+      → 依 speaker 變換點切開；子段 start=首字 start、end=末字 end、
+      text = "".join(w["word"]).strip()（沿用 `_resegment_by_words` 的拼接慣例，中英皆正確）。
+    - 無 words（passthrough/degenerate 段）：整段 `_pick_speaker_indexed`（不經 DP）。
     - diar_turns 空：原樣回傳（不加 speaker、不剝 words——words 的剝除統一由
       orchestrator `_run_transcription_phase` 出口單點處理，此處不重複）。
 
     效能：turns 只排序 + 建 prefix max-end 索引一次（`_build_turn_index`），
-    每個 word/segment 呼叫 `_pick_speaker_indexed` 重用同一份索引（bisect 找窗口，
-    不對全部 turns 掃描），把配對成本從 O(words×turns) 降到窗口內 turns 的量級。
+    每個 word/segment 重用同一份索引（bisect 找窗口，不對全部 turns 掃描），
+    把配對成本從 O(words×turns) 降到窗口內 turns 的量級。
 
-    Smoothing 只在 segment 內做（words 只存在於 segment 內，reseg 切點本身就是停頓處），
-    跨 segment 的孤立段不在本函數範圍。
+    DP 只在 segment 內做（words 只存在於 segment 內，reseg 切點本身就是停頓處），
+    跨 segment 的一致性不在本函數範圍。
     """
     if not diar_turns:
         return transcription_segments
@@ -416,10 +476,11 @@ def assign_speakers_word_level(
             })
             continue
 
-        word_speakers = _smooth_isolated_word_speakers([
-            _pick_speaker_indexed(w["start"], w["end"], sorted_turns, starts, prefix_max_end)
+        candidates_list = [
+            _word_speaker_candidates(w["start"], w["end"], sorted_turns, starts, prefix_max_end)
             for w in words
-        ])
+        ]
+        word_speakers = _viterbi_word_speakers(words, candidates_list)
 
         run_start = 0
         for i in range(1, len(words) + 1):

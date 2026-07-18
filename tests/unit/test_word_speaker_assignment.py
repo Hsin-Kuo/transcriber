@@ -1,5 +1,4 @@
-"""word 級語者對齊核心的測試：_pick_speaker_for_span / _smooth_isolated_word_speakers /
-assign_speakers_word_level。
+"""word 級語者對齊核心的測試：_pick_speaker_for_span / Viterbi DP / assign_speakers_word_level。
 
 比照 tests/unit/test_resegment.py 的假資料風格：不依賴模型，words 用 plain dict
 （{start, end, word}，即 _resegment_by_words 的輸出格式）。
@@ -9,7 +8,6 @@ from src.services.utils.whisper_processor import (
     _pick_speaker_for_span,
     _pick_speaker_indexed,
     _build_turn_index,
-    _smooth_isolated_word_speakers,
     assign_speakers_word_level,
 )
 
@@ -71,25 +69,119 @@ def test_proximity_does_not_flip_clear_overlap_fraction_difference():
     assert _pick_speaker_for_span(*span, [turn_x, turn_y]) == "X"
 
 
-def test_smoothing_merges_isolated_single_word_run():
-    # A A B A A → 孤立單字 B 前後皆為 A → 歸併成 A
-    assert _smooth_isolated_word_speakers(["A", "A", "B", "A", "A"]) == ["A", "A", "A", "A", "A"]
+# ── Viterbi DP 行為（取代舊的孤立單字 smoothing）────────────────────────────
+
+def test_viterbi_flips_tie_at_speaker_handover_point():
+    # 真實案例數字（staging 音檔 83.8s「我也」）：前文 word 屬 00、
+    # 「我也」重疊精確平手但 proximity 偏 02、後文 words 屬 02（換手點）。
+    # DP 只需一次換手（且發生在 0.56s 停頓處、成本打折）→ 我也判給 02。
+    turns = [
+        _turn(79.230, 84.427, "SPEAKER_00"),  # 前語者長 turn
+        _turn(83.583, 84.393, "SPEAKER_02"),  # 插話短 turn（以「我也」為中心）
+        _turn(84.427, 90.266, "SPEAKER_02"),  # 後語者主 turn
+    ]
+    words = [
+        _w(82.960, 83.240, "臉"),    # 00 獨占
+        _w(83.800, 84.280, "我也"),  # 平手（0.480 vs 0.480），proximity 偏 02
+        _w(84.280, 84.580, "常"),
+        _w(84.580, 84.780, "會"),    # 02 主 turn 內
+    ]
+    segs = [{"start": 82.960, "end": 84.780, "text": "臉我也常會", "words": words}]
+
+    out = assign_speakers_word_level(segs, turns)
+
+    assert [(s["speaker"], s["text"]) for s in out] == [
+        ("SPEAKER_00", "臉"),
+        ("SPEAKER_02", "我也常會"),
+    ]
 
 
-def test_smoothing_leaves_run_of_two_untouched():
-    # A B B A → B 的 run 長度為 2，不是孤立單字 → 不動
-    assert _smooth_isolated_word_speakers(["A", "B", "B", "A"]) == ["A", "B", "B", "A"]
+def test_viterbi_keeps_context_speaker_for_mid_run_backchannel_tie():
+    # 中段搭腔：前後文皆屬 A（長 turn），中間 word 被 nested 短 turn B 同時罩住、
+    # 重疊平手且 proximity 偏 B——但 B 只是搭腔證據，前後文一致性（兩次換手成本）
+    # 應讓該字留給 A，不得翻盤。
+    turns = [
+        _turn(0.0, 10.0, "A"),   # 主 turn
+        _turn(4.0, 5.0, "B"),    # nested 搭腔短 turn
+    ]
+    words = [
+        _w(1.0, 1.4, "w1"),   # A 獨占
+        _w(4.2, 4.8, "w2"),   # A/B 皆完整罩住（平手），proximity 偏 B（B 中心 4.5 = word 中心）
+        _w(6.0, 6.5, "w3"),   # A 獨占
+    ]
+    segs = [{"start": 1.0, "end": 6.5, "text": "w1w2w3", "words": words}]
+
+    out = assign_speakers_word_level(segs, turns)
+
+    assert len(out) == 1
+    assert out[0]["speaker"] == "A"
 
 
-def test_smoothing_alternating_pattern_converges():
-    # A B A B A → 孤立 run 逐一併入鄰居後收斂為單一語者，
-    # 不得出現「正確的字被改錯、孤立 run 仍殘留」的中間態（如 A A B A A）
-    assert _smooth_isolated_word_speakers(["A", "B", "A", "B", "A"]) == ["A"] * 5
+def test_viterbi_suppresses_isolated_weak_flip():
+    # 原 smoothing 功能：A A B A A 型孤立單字雜訊（B 靠弱優勢贏 per-word，非強證據）
+    # → 兩次換手成本 0.6 遠大於 emission 差 → DP 全判 A。
+    turns = [
+        _turn(0.0, 10.0, "A"),
+        _turn(2.9, 4.1, "B"),   # nested，讓中間 word 的 per-word 分數以微小差距偏 B
+    ]
+    words = [_w(1, 2, "u"), _w(2, 3, "v"), _w(3, 4, "x"), _w(4, 5, "y"), _w(5, 6, "z")]
+    segs = [{"start": 1, "end": 6, "text": "uvxyz", "words": words}]
+
+    # 前置確認：中間 word 單獨判會給 B（弱優勢），DP 才有東西可壓
+    assert _pick_speaker_for_span(3, 4, turns) == "B"
+
+    out = assign_speakers_word_level(segs, turns)
+
+    assert len(out) == 1
+    assert out[0]["speaker"] == "A"
 
 
-def test_smoothing_leaves_boundary_runs_untouched():
-    # 首尾孤立 run 沒有雙側鄰居 → 不動
-    assert _smooth_isolated_word_speakers(["B", "A", "A", "B"]) == ["B", "A", "A", "B"]
+def test_viterbi_preserves_strong_evidence_interjection():
+    # 強證據插話：中間 word 完全落在 B turn 內、A 零重疊（emission 差 ≈1.1 > 2×SWITCH_PENALTY）
+    # → 即使 words 幾乎連續（無停頓折扣），DP 仍保留 A→B→A 換手。
+    turns = [
+        _turn(0.0, 3.0, "A"),
+        _turn(3.0, 4.0, "B"),
+        _turn(4.0, 7.0, "A"),
+    ]
+    words = [
+        _w(2.5, 3.0, "w1"),   # A 獨占
+        _w(3.1, 3.9, "w2"),   # B 獨占（A 兩個 turn 皆零重疊）
+        _w(4.0, 4.5, "w3"),   # A 獨占
+    ]
+    segs = [{"start": 2.5, "end": 4.5, "text": "w1w2w3", "words": words}]
+
+    out = assign_speakers_word_level(segs, turns)
+
+    assert [(s["speaker"], s["text"]) for s in out] == [
+        ("A", "w1"), ("B", "w2"), ("A", "w3"),
+    ]
+
+
+def test_viterbi_prefers_switching_at_pause():
+    # 邊界近平手（w2 被 A/B 皆罩住、emission 微偏 B）：
+    # - w2→w3 有 ≥0.3s 停頓 → 換手成本打折，DP 把換手推遲到停頓處（w2 留給 A）
+    # - 對照組：w3 貼緊 w2（無停頓）→ 兩個換手點成本相同，emission 決定，換手提前到 w2
+    turns = [
+        _turn(0.0, 4.0, "A"),
+        _turn(3.4, 4.4, "B"),
+    ]
+    w1 = _w(3.0, 3.3, "w1")    # A 獨占
+    w2 = _w(3.55, 3.85, "w2")  # A/B 皆完整罩住，emission 微偏 B（B 中心 3.9 較近）
+
+    # 有停頓：w2→w3 gap 0.35 ≥ SWITCH_GAP_RELIEF_SEC → 換手發生在 gap 處
+    w3_gapped = _w(4.2, 4.5, "w3")
+    out = assign_speakers_word_level(
+        [{"start": 3.0, "end": 4.5, "text": "w1w2w3", "words": [w1, w2, w3_gapped]}], turns
+    )
+    assert [(s["speaker"], s["text"]) for s in out] == [("A", "w1w2"), ("B", "w3")]
+
+    # 無停頓（對照組）：w2→w3 gap 0.1 → 全額成本，換手提前到 emission 較高的 w2
+    w3_contig = _w(3.95, 4.25, "w3")
+    out = assign_speakers_word_level(
+        [{"start": 3.0, "end": 4.25, "text": "w1w2w3", "words": [w1, w2, w3_contig]}], turns
+    )
+    assert [(s["speaker"], s["text"]) for s in out] == [("A", "w1"), ("B", "w2w3")]
 
 
 def test_chinese_words_join_without_space():
