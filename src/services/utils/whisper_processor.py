@@ -233,14 +233,16 @@ def _apply_time_offset(seg: Dict, offset: float) -> Dict:
 
 # 重疊搶話區（兩個 diar turn 互相重疊、word 被雙方完整罩住）常出現「重疊秒數精確平手」——
 # 嚴格 `>` 比較只會判給先迭代到的 turn，等同偏袒固定順序、與實際插話證據無關。
-# PROXIMITY_WEIGHT 是 tie-break 項（proximity 或 affinity，見 _word_speaker_candidates）
+# TIEBREAK_WEIGHT 是 tie-break 項（proximity 或 affinity，見 _word_speaker_candidates）
 # 的權重，刻意壓低——overlap_fraction 差距明顯時 tie-break 不該蓋過重疊本身的證據力。
-PROXIMITY_WEIGHT = 0.1
+TIEBREAK_WEIGHT = 0.1
 
-# 近平手判定：word 被 ≥2 個 turn 覆蓋、且 overlap_fraction 最高兩者差 < 此值 → tie-break
-# 改用 turn-start affinity（否則用 proximity）。staging 合併幾何實證 proximity 在近平手
-# 時有反效果（dump 70cba0b5「我也」）：互相重疊的 turns 幾何上常一長一短疊在一起，
-# word 距長 turn 中心的貼近度與「誰在講話」無關。
+# 近平手判定：word 被 ≥2 個「不同 speaker」覆蓋、且 per-speaker 最佳 overlap_fraction
+# 前兩名差 < 此值 → tie-break 改用 turn-start affinity（否則用 proximity）。只看不同
+# speaker——同語者多個重疊 turn 的 fraction 相近不構成競爭，不觸發近平手。
+# staging 合併幾何實證 proximity 在近平手時有反效果（dump 70cba0b5「我也」）：
+# 互相重疊的 turns 幾何上常一長一短疊在一起，word 距長 turn 中心的貼近度與
+# 「誰在講話」無關。
 NEAR_TIE_EPSILON = 0.05
 
 # turn-start affinity 距離尺度（秒）：affinity = max(0, 1 − |word有效起點 − turn.start| / 此值)。
@@ -298,20 +300,25 @@ def _word_speaker_candidates(
     prefix_max_end: List[float],
     use_proximity: bool = True,
     anchor_tail: bool = True,
+    anchor_budget: float = WORD_TAIL_ANCHOR_SEC,
 ) -> Dict[str, float]:
     """[start,end] 的候選 speaker 分數表 {speaker: score}，供 Viterbi 當 emission 用。
 
-    score = overlap_fraction + PROXIMITY_WEIGHT × tie-break；tie-break 依近平手與否切換：
-    - 近平手（≥2 個重疊 turn 且 overlap_fraction 最高兩者差 < NEAR_TIE_EPSILON）→
-      turn-start affinity = max(0, 1 − |有效起點 − turn.start| / AFFINITY_SCALE_SEC)，
-      「剛開口的 turn」證據較強；近平手時「全部」候選都改用 affinity（同一把尺才可比）。
+    score = overlap_fraction + TIEBREAK_WEIGHT × tie-break；tie-break 依近平手與否切換：
+    - 近平手（≥2 個不同 speaker，且 per-speaker 最佳 overlap_fraction 前兩名差 <
+      NEAR_TIE_EPSILON；同語者多個重疊 turn 不構成競爭）→ turn-start affinity =
+      max(0, 1 − |有效起點 − turn.start| / AFFINITY_SCALE_SEC)，「剛開口的 turn」
+      證據較強；近平手時「全部」候選都改用 affinity（同一把尺才可比）。
     - 其餘 → proximity = max(0, 1 − |span中點 − turn中點| / (turn長度/2))（turn 長度 0 → 0）。
     同 speaker 有多個重疊 turn 時取分數最高者。
     use_proximity=False（無 words 的長 segment 路徑）：只算 overlap_fraction——該路徑
     沒有 reseg 6s 上限，span 越長 tie-break 能翻盤的絕對重疊差越大，必須關掉。
-    anchor_tail=True（word 路徑）：有效評分 span = (max(start, end − WORD_TAIL_ANCHOR_SEC),
-    end)——只影響時長 > WORD_TAIL_ANCHOR_SEC 的 word（起點前漂吸入的前導音段不參與
-    評分，overlap/tie-break/零重疊 fallback 一律用有效 span）；無 words 路徑傳 False。
+    anchor_tail=True（word 路徑）：有效評分 span = (max(start, end − anchor_budget), end)
+    ——起點前漂吸入的前導音段不參與評分，overlap/tie-break/零重疊 fallback 一律用
+    有效 span；無 words 路徑傳 False。anchor_budget 預設 WORD_TAIL_ANCHOR_SEC（單一
+    word），黏合單位（`_build_units`）應傳 WORD_TAIL_ANCHOR_SEC × 單位 word 數——
+    多 token 英文字的 span 由多個真實 token 組成，錨定預算隨之放大，
+    否則會把前導 sub-word 的真證據裁掉。
     用 `_build_turn_index` 產出的排序+prefix-max-end 索引，只掃可能與 span 重疊的
     turns（bisect 找上界 + 往回掃到 prefix max-end ≤ span.start 為止），
     避免每個 word 都要 O(turns) 全掃。
@@ -322,7 +329,7 @@ def _word_speaker_candidates(
         return {}
 
     if anchor_tail:
-        start = max(start, end - WORD_TAIL_ANCHOR_SEC)
+        start = max(start, end - anchor_budget)
 
     # start < end 的 turns 都在 starts[:idx] 內（bisect_left 找第一個 start >= end 的位置）
     idx = bisect.bisect_left(starts, end)
@@ -362,8 +369,14 @@ def _word_speaker_candidates(
                 candidates[turn["speaker"]] = fraction
         return candidates
 
-    fracs = sorted((fraction for _, fraction in overlapping), reverse=True)
-    near_tie = len(overlapping) >= 2 and (fracs[0] - fracs[1] < NEAR_TIE_EPSILON)
+    # near-tie 看「不同 speaker」的競爭：per-speaker 先取最佳 fraction，再比前兩名——
+    # 同語者多個重疊 turn（fraction 相近）不構成競爭，不觸發近平手
+    best_frac_by_speaker: Dict[str, float] = {}
+    for turn, fraction in overlapping:
+        if fraction > best_frac_by_speaker.get(turn["speaker"], 0.0):
+            best_frac_by_speaker[turn["speaker"]] = fraction
+    speaker_fracs = sorted(best_frac_by_speaker.values(), reverse=True)
+    near_tie = len(speaker_fracs) >= 2 and (speaker_fracs[0] - speaker_fracs[1] < NEAR_TIE_EPSILON)
 
     for turn, fraction in overlapping:
         if near_tie:
@@ -376,7 +389,7 @@ def _word_speaker_candidates(
                 span_mid = (start + end) / 2.0
                 turn_mid = (turn["start"] + turn["end"]) / 2.0
                 tiebreak = max(0.0, 1 - abs(span_mid - turn_mid) / (turn_len / 2.0))
-        score = fraction + PROXIMITY_WEIGHT * tiebreak
+        score = fraction + TIEBREAK_WEIGHT * tiebreak
         if score > candidates.get(turn["speaker"], 0.0):
             candidates[turn["speaker"]] = score
     return candidates
@@ -563,8 +576,13 @@ def assign_speakers_word_level(
     units = _build_units(stream)
 
     # ── 2. 逐單位 emission + 跨段 Viterbi → 攤平回逐 word speaker ──
+    # 錨定預算隨單位 token 數放大：多 token 英文字（黏合單位）的 span 由多個真實
+    # token 組成，不該被裁到只剩尾端 0.6s（單 word 單位 = 1 × 0.6，行為不變）
     candidates_list = [
-        _word_speaker_candidates(u["start"], u["end"], sorted_turns, starts, prefix_max_end)
+        _word_speaker_candidates(
+            u["start"], u["end"], sorted_turns, starts, prefix_max_end,
+            anchor_budget=WORD_TAIL_ANCHOR_SEC * len(u["words"]),
+        )
         for u in units
     ]
     unit_speakers = _viterbi_word_speakers(units, candidates_list)

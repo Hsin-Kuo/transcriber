@@ -384,6 +384,44 @@ def test_latin_unit_grouping_assigns_whole_word_one_speaker():
     assert emily_seg["speaker"] == "SPEAKER_02"   # 整字同一語者，不再 Em|ily 切開
 
 
+def test_near_tie_requires_two_distinct_speakers():
+    # near-tie 判定必須看「不同 speaker」的競爭：A 有兩個重疊 turn（fraction 0.75/0.74，
+    # 差 0.01）、競爭者 B 只有 0.68——若拿全體 turn 排序前兩名（0.75 vs 0.74，皆 A）會
+    # 誤觸近平手、改用 affinity（B 起點緊貼 word → affinity 0.96 → B 翻盤）。
+    # per-speaker 規則下 A(0.75) vs B(0.68) 差 0.07 > ε → 走 proximity，A 勝。
+    turns = [
+        _turn(9.0, 10.375, "A"),   # A turn 1：overlap 0.375 → fraction 0.75
+        _turn(9.0, 10.37, "A"),    # A turn 2：overlap 0.370 → fraction 0.74（同語者，非競爭）
+        _turn(9.96, 10.34, "B"),   # B：overlap 0.340 → fraction 0.68，但起點緊貼 word
+    ]
+    assert _pick_speaker_for_span(10.0, 10.5, turns) == "A"
+
+
+def test_unit_anchor_budget_scales_with_token_count():
+    # 黏合單位的錨定預算 = WORD_TAIL_ANCHOR_SEC × 單位 word 數：3-token 英文字
+    # span 0.9s、預算 1.8s → 完整 span 評分（A 重疊 0.55s=61% > B 0.45s=50% → A）。
+    # 對照：舊行為固定裁到尾端 0.6s 會把前導 sub-word 'Ha' 的證據裁掉
+    # （裁後 A 0.25s/0.6=42% < B 0.45s/0.6=75% → 誤判 B）。
+    turns = [
+        _turn(8.0, 10.55, "A"),    # 覆蓋單位前 61%
+        _turn(10.45, 12.0, "B"),   # 覆蓋單位尾 50%
+    ]
+    words = [_w(10.0, 10.3, "Ha"), _w(10.3, 10.6, "pp"), _w(10.6, 10.9, "y")]
+    segs = [{"start": 10.0, "end": 10.9, "text": "Happy", "words": words}]
+
+    # 前置確認：三個 token 黏成一個 0.9s 單位
+    stream = [
+        {"seg_idx": 0, "word_idx": i, "start": w["start"], "end": w["end"], "word": w["word"]}
+        for i, w in enumerate(words)
+    ]
+    units = _build_units(stream)
+    assert len(units) == 1 and (units[0]["start"], units[0]["end"]) == (10.0, 10.9)
+
+    out = assign_speakers_word_level(segs, turns)
+
+    assert out == [{"start": 10.0, "end": 10.9, "text": "Happy", "speaker": "A"}]
+
+
 def test_is_latin_glue_rules():
     # 黏：拉丁接拉丁（無前導空格）、數字接在字母後、連字號
     assert _is_latin_glue("Em", "ily") is True
