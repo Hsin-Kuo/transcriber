@@ -387,6 +387,50 @@ def _argmax_speaker(scores: Dict[str, float]) -> str:
     return min(scores, key=lambda spk: (-scores[spk], spk))
 
 
+# 拉丁 token（字母/數字/連字號，無空白）——whisper 對英文字常切出 sub-word token
+# （'Em'+'ily'、'D'+'em'+'ocracy'），無前導空格即代表與前一 token 同屬一個英文字
+_LATIN_TOKEN_RE = re.compile(r"^[A-Za-z0-9\-]+$")
+
+
+def _is_latin_glue(prev_token: str, token: str) -> bool:
+    """拉丁 sub-word 黏合規則：token 全為拉丁字母/數字/'-'（regex 已排除前導空格，
+    faster-whisper 的新英文字自帶前導空格）、且前一 token 以拉丁字母結尾 → 黏合。
+
+    同一個英文字被切成多個 token 時各 token span 極短，逐 token 指派容易被
+    語者交界切開（staging 實測 'Em'(02)|'ily'(03)）；黏成原子單位、以單位 span
+    評分，整個字共用一個 speaker。
+    """
+    if not _LATIN_TOKEN_RE.fullmatch(token):
+        return False
+    if not prev_token:
+        return False
+    last = prev_token[-1]
+    return last.isascii() and last.isalpha()
+
+
+def _build_units(stream: List[Dict]) -> List[Dict]:
+    """把全域 word 流黏成原子單位（拉丁 sub-word grouping）。
+
+    stream: [{seg_idx, word_idx, start, end, word}]（時間序）。
+    依 `_is_latin_glue` 把 sub-word token 黏進前一單位——只在同一 segment 內黏
+    （reseg 切點本身就是停頓，跨段不黏）；其餘每個 word 自成一單位。
+    回傳 [{start, end, words: [stream entries]}]，單位內 words 共用一個 speaker
+    （由呼叫端以單位 span 評分 + Viterbi 指派）。
+    """
+    units: List[Dict] = []
+    for entry in stream:
+        if (
+            units
+            and units[-1]["words"][-1]["seg_idx"] == entry["seg_idx"]
+            and _is_latin_glue(units[-1]["words"][-1]["word"], entry["word"])
+        ):
+            units[-1]["words"].append(entry)
+            units[-1]["end"] = entry["end"]
+        else:
+            units.append({"start": entry["start"], "end": entry["end"], "words": [entry]})
+    return units
+
+
 def _pick_speaker_indexed(
     start: float,
     end: float,
@@ -423,17 +467,18 @@ def _pick_speaker_for_span(start: float, end: float, diar_turns: List[Dict]) -> 
 
 
 def _viterbi_word_speakers(
-    words: List[Dict],
+    items: List[Dict],
     candidates_list: List[Dict[str, float]],
 ) -> List[str]:
-    """segment 內逐 word 的 Viterbi 語者路徑：最大化 total emission − total switch cost。
+    """時間序列（word/unit 流）的 Viterbi 語者路徑：最大化 total emission − switch cost。
 
-    - 狀態：該 segment 所有 word candidates 的 speaker 聯集（sorted，平分時選擇有決定性）。
+    items 只需有 start/end（word 或 `_build_units` 的單位皆可）；序列跨全部
+    segments（全域 DP）——segment 邊界不再免費換手，跨段 gap 照常適用停頓折扣。
+    - 狀態：整條序列 candidates 的 speaker 聯集（sorted，平分時選擇有決定性）。
     - emission：`_word_speaker_candidates` 的分數表；不在 candidate 的 speaker 為 0.0。
-    - transition：相鄰 word 換 speaker 扣 SWITCH_PENALTY；兩 word 間 gap ≥
-      SWITCH_GAP_RELIEF_SEC 時扣 SWITCH_PENALTY × SWITCH_GAP_RELIEF_FACTOR
-      （換手常發生在停頓處）。同 speaker 不扣。
-    - segment 首尾不設額外成本（per-segment 獨立）。
+    - transition：相鄰項換 speaker 扣 SWITCH_PENALTY；gap ≥ SWITCH_GAP_RELIEF_SEC
+      時扣 SWITCH_PENALTY × SWITCH_GAP_RELIEF_FACTOR（換手常發生在停頓處，
+      reseg 切點/segment 邊界通常就是停頓 → 自然享折扣）。同 speaker 不扣。
 
     取代舊的孤立單字 smoothing：孤立雜訊（弱 emission 差）被換手成本壓掉，
     強證據插話（emission 差 > 兩次換手成本）與換手點（後文 emission 持續支持新語者，
@@ -442,14 +487,14 @@ def _viterbi_word_speakers(
     speakers = sorted({spk for cand in candidates_list for spk in cand})
     if len(speakers) <= 1:
         # 單一（或零）候選語者：路徑唯一，不用跑 DP
-        return [speakers[0] if speakers else None] * len(words)
+        return [speakers[0] if speakers else None] * len(items)
 
-    # prev_best[s] = 到前一個 word 為止、以 s 結尾的最佳累計分數
+    # prev_best[s] = 到前一項為止、以 s 結尾的最佳累計分數
     prev_best = {spk: candidates_list[0].get(spk, 0.0) for spk in speakers}
     backptrs: List[Dict[str, str]] = []
 
-    for i in range(1, len(words)):
-        gap = words[i]["start"] - words[i - 1]["end"]
+    for i in range(1, len(items)):
+        gap = items[i]["start"] - items[i - 1]["end"]
         switch_cost = SWITCH_PENALTY * (
             SWITCH_GAP_RELIEF_FACTOR if gap >= SWITCH_GAP_RELIEF_SEC else 1.0
         )
@@ -481,36 +526,60 @@ def assign_speakers_word_level(
     transcription_segments: List[Dict],
     diar_turns: List[Dict],
 ) -> List[Dict]:
-    """word 級語者指派（Viterbi DP）+ 語者變換點切段。
+    """word 級語者指派（全域 Viterbi DP + 拉丁 unit grouping）+ 語者變換點切段。
 
     輸入：segments（可含 words: [{start,end,word}]）、diar turns [{start,end,speaker}]。
     輸出：[{start,end,text,speaker}]，不含 words。
-    - 有 words：逐 word 算候選分數表（`_word_speaker_candidates`，重疊+貼近度評分）
-      → segment 內 `_viterbi_word_speakers`（前後文一致性，取代舊的孤立單字 smoothing）
-      → 依 speaker 變換點切開；子段 start=首字 start、end=末字 end、
-      text = "".join(w["word"]).strip()（沿用 `_resegment_by_words` 的拼接慣例，中英皆正確）。
-    - 無 words（passthrough/degenerate 段）：整段 `_pick_speaker_indexed`（不經 DP）。
+    - 有 words：全部 segments 的 words 攤成一條時間序 stream → `_build_units` 黏合
+      拉丁 sub-word（'Em'+'ily' 等，單位內共用 speaker）→ 逐單位算候選分數表
+      （`_word_speaker_candidates`，以單位 span 評分）→ 跨 segment 的
+      `_viterbi_word_speakers`（segment 邊界不再免費換手——換手點恰在 reseg 切點
+      時，前後文證據仍會接住交界字；跨段 gap 照常享停頓折扣）→ 攤回逐 word speaker。
+    - 輸出結構維持在原 segment 邊界 + 語者變換點切開（與逐段版相同，只有 speaker
+      判定跨段）；子段 start=首字 start、end=末字 end、text = "".join(w["word"]).strip()
+      （沿用 `_resegment_by_words` 的拼接慣例，中英皆正確）。
+    - 無 words（passthrough/degenerate 段）：整段 `_pick_speaker_indexed`（不經 DP；
+      其時間間隔自然反映在前後 word 的 gap）。
     - diar_turns 空：原樣回傳（不加 speaker、不剝 words——words 的剝除統一由
       orchestrator `_run_transcription_phase` 出口單點處理，此處不重複）。
 
     效能：turns 只排序 + 建 prefix max-end 索引一次（`_build_turn_index`），
-    每個 word/segment 重用同一份索引（bisect 找窗口，不對全部 turns 掃描），
-    把配對成本從 O(words×turns) 降到窗口內 turns 的量級。
-
-    DP 只在 segment 內做（words 只存在於 segment 內，reseg 切點本身就是停頓處），
-    跨 segment 的一致性不在本函數範圍。
+    每個單位重用同一份索引（bisect 找窗口）；全域 DP 狀態 = 全檔 speaker 聯集
+    （實務上個位數），O(units × speakers²)。
     """
     if not diar_turns:
         return transcription_segments
 
     sorted_turns, starts, prefix_max_end = _build_turn_index(diar_turns)
 
+    # ── 1. 全域 word 流（segments 本身時間序）→ 黏合成單位 ──
+    stream: List[Dict] = []
+    for seg_idx, seg in enumerate(transcription_segments):
+        for word_idx, w in enumerate(seg.get("words") or []):
+            stream.append({
+                "seg_idx": seg_idx, "word_idx": word_idx,
+                "start": w["start"], "end": w["end"], "word": w["word"],
+            })
+    units = _build_units(stream)
+
+    # ── 2. 逐單位 emission + 跨段 Viterbi → 攤平回逐 word speaker ──
+    candidates_list = [
+        _word_speaker_candidates(u["start"], u["end"], sorted_turns, starts, prefix_max_end)
+        for u in units
+    ]
+    unit_speakers = _viterbi_word_speakers(units, candidates_list)
+    word_speaker: Dict[Tuple[int, int], str] = {}
+    for u, spk in zip(units, unit_speakers):
+        for entry in u["words"]:
+            word_speaker[(entry["seg_idx"], entry["word_idx"])] = spk
+
+    # ── 3. 輸出（照原 segment 結構；segment 內依 speaker 變換點切）──
     out: List[Dict] = []
-    for seg in transcription_segments:
+    for seg_idx, seg in enumerate(transcription_segments):
         words = seg.get("words")
         if not words:
             # 無 words 的段沒有 reseg 6s 上限，span 可能很長 → 關掉 proximity
-            # （只比重疊比例，見 _turn_score 註解）與尾端錨定（整段評分該用完整範圍）
+            # （只比重疊比例）與尾端錨定（整段評分該用完整範圍），不經 DP
             speaker = _pick_speaker_indexed(
                 seg.get("start", 0.0), seg.get("end", 0.0), sorted_turns, starts, prefix_max_end,
                 use_proximity=False, anchor_tail=False,
@@ -523,11 +592,7 @@ def assign_speakers_word_level(
             })
             continue
 
-        candidates_list = [
-            _word_speaker_candidates(w["start"], w["end"], sorted_turns, starts, prefix_max_end)
-            for w in words
-        ]
-        word_speakers = _viterbi_word_speakers(words, candidates_list)
+        word_speakers = [word_speaker[(seg_idx, i)] for i in range(len(words))]
 
         run_start = 0
         for i in range(1, len(words) + 1):

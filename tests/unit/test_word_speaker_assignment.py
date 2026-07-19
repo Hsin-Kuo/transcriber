@@ -5,9 +5,11 @@
 """
 from src.services.utils.whisper_processor import (
     WhisperProcessor,
+    _build_turn_index,
+    _build_units,
+    _is_latin_glue,
     _pick_speaker_for_span,
     _pick_speaker_indexed,
-    _build_turn_index,
     _word_speaker_candidates,
     assign_speakers_word_level,
 )
@@ -22,16 +24,18 @@ def _turn(start, end, speaker):
 
 
 def test_cross_speaker_split_at_word_boundary():
-    # 單 segment 4 個字，turns A[0,2]/B[2,4] → 依語者變換點切成兩子段
-    words = [_w(0, 1, "A"), _w(1, 2, "B"), _w(2, 3, "C"), _w(3, 4, "D")]
+    # 單 segment 4 個字，turns A[0,2]/B[2,4] → 依語者變換點切成兩子段。
+    # 注意：token 用 CJK——連續無空格的拉丁 token 在新語意下屬同一英文字
+    # （會被 _build_units 黏成一單位共用 speaker），不適合當跨語者切分素材。
+    words = [_w(0, 1, "甲"), _w(1, 2, "乙"), _w(2, 3, "丙"), _w(3, 4, "丁")]
     turns = [_turn(0, 2, "SPEAKER_00"), _turn(2, 4, "SPEAKER_01")]
-    segs = [{"start": 0, "end": 4, "text": "ABCD", "words": words}]
+    segs = [{"start": 0, "end": 4, "text": "甲乙丙丁", "words": words}]
 
     out = assign_speakers_word_level(segs, turns)
 
     assert len(out) == 2
-    assert out[0] == {"start": 0, "end": 2, "text": "AB", "speaker": "SPEAKER_00"}
-    assert out[1] == {"start": 2, "end": 4, "text": "CD", "speaker": "SPEAKER_01"}
+    assert out[0] == {"start": 0, "end": 2, "text": "甲乙", "speaker": "SPEAKER_00"}
+    assert out[1] == {"start": 2, "end": 4, "text": "丙丁", "speaker": "SPEAKER_01"}
 
 
 def test_pick_speaker_no_overlap_falls_back_to_nearest_turn():
@@ -197,11 +201,12 @@ def test_viterbi_suppresses_isolated_weak_flip():
         _turn(0.0, 10.0, "A"),
         _turn(2.9, 3.6, "B"),   # nested、以 w3 為中心，讓 w3 的 per-word 分數以微小差距偏 B
     ]
+    # token 用 CJK——連續拉丁 token 會被 _build_units 黏成一單位，測不到逐字 DP
     words = [
-        _w(1.0, 1.5, "u"), _w(2.0, 2.5, "v"), _w(3.0, 3.5, "x"),
-        _w(4.0, 4.5, "y"), _w(5.0, 5.5, "z"),
+        _w(1.0, 1.5, "一"), _w(2.0, 2.5, "二"), _w(3.0, 3.5, "三"),
+        _w(4.0, 4.5, "四"), _w(5.0, 5.5, "五"),
     ]
-    segs = [{"start": 1.0, "end": 5.5, "text": "uvxyz", "words": words}]
+    segs = [{"start": 1.0, "end": 5.5, "text": "一二三四五", "words": words}]
 
     # 前置確認：中間 word 單獨判會給 B（弱優勢），DP 才有東西可壓
     assert _pick_speaker_for_span(3.0, 3.5, turns) == "B"
@@ -294,11 +299,12 @@ def test_viterbi_converges_weak_alternating_pattern():
         _turn(1.95, 2.55, "B"),   # 以 w2 為中心的 nested 短 turn
         _turn(3.95, 4.55, "B"),   # 以 w4 為中心的 nested 短 turn
     ]
+    # token 用 CJK——連續拉丁 token 會被 _build_units 黏成一單位，測不到逐字 DP
     words = [
-        _w(1.0, 1.5, "u"), _w(2.0, 2.5, "v"), _w(3.0, 3.5, "x"),
-        _w(4.0, 4.5, "y"), _w(5.0, 5.5, "z"),
+        _w(1.0, 1.5, "一"), _w(2.0, 2.5, "二"), _w(3.0, 3.5, "三"),
+        _w(4.0, 4.5, "四"), _w(5.0, 5.5, "五"),
     ]
-    segs = [{"start": 1.0, "end": 5.5, "text": "uvxyz", "words": words}]
+    segs = [{"start": 1.0, "end": 5.5, "text": "一二三四五", "words": words}]
 
     # 前置確認：per-word 確實是 A B A B A（w2/w4 靠近平手 affinity 弱優勢偏 B）
     assert [_pick_speaker_for_span(w["start"], w["end"], turns) for w in words] == \
@@ -308,6 +314,120 @@ def test_viterbi_converges_weak_alternating_pattern():
 
     assert len(out) == 1
     assert out[0]["speaker"] == "A"
+
+
+# ── 跨段 Viterbi + 拉丁 unit grouping（staging dump 實測數字）──────────────
+
+def test_global_viterbi_flips_segment_final_tie_word_across_boundary():
+    # staging 實測數字（dump 70cba0b5「我也」）：「我也」是前段最後一個 word、與前一字
+    # 零間隙、重疊精確近平手（affinity 偏剛開口的 03，優勢 ~0.1 < 換手成本 0.3）。
+    # per-segment DP 下它是序列末端，換手只虧不賺 → 誤判前語者 02（replay_eval.md
+    # 第一輪的 0.2 < 0.3 硬上限）。跨段 DP 讓它不再是末端：後段整串 words 押 03，
+    # 換手橫豎要發生、成本兩條路徑抵銷 → 「我也」的 affinity 優勢決勝，翻給 03。
+    turns = [
+        _turn(79.2253, 84.4060, "SPEAKER_02"),  # 前語者長 turn
+        _turn(83.5960, 90.2785, "SPEAKER_03"),  # 後語者主 turn（83.6 剛開口）
+        _turn(85.0303, 85.8741, "SPEAKER_02"),  # 後段內的搭腔短 turn
+    ]
+    seg1_words = [
+        _w(82.62, 82.78, "看"), _w(82.78, 82.92, "你的"),
+        _w(82.92, 83.22, "臀"), _w(83.22, 84.20, "我也"),  # 段尾近平手字
+    ]
+    seg2_words = [
+        _w(84.20, 84.62, "常"), _w(84.62, 84.72, "常"), _w(84.72, 84.84, "會"),
+        _w(84.84, 85.02, "忘"), _w(85.02, 85.24, "記"),
+    ]
+    segs = [
+        {"start": 82.62, "end": 84.20, "text": "看你的臀我也", "words": seg1_words},
+        {"start": 84.20, "end": 85.24, "text": "常常會忘記", "words": seg2_words},
+    ]
+
+    out = assign_speakers_word_level(segs, turns)
+
+    my_ye = next(s for s in out if "我也" in s["text"])
+    assert my_ye["speaker"] == "SPEAKER_03"
+    # 前文（看你的臀）仍屬 02——只有交界字被後段證據接走
+    assert out[0]["speaker"] == "SPEAKER_02"
+    assert "看" in out[0]["text"]
+
+
+def test_latin_unit_grouping_assigns_whole_word_one_speaker():
+    # staging 實測數字（Emily 案）：whisper 把 Emily 切成 'Em'+'ily' 兩個 sub-word
+    # token，語者交界恰在中間（02 turn 到 162.031 結束、03 接手）→ 逐字指派會把
+    # 一個英文字切給兩個語者。黏成單位後以單位 span [161.75,162.27] 評分
+    # （02 重疊 0.281s=54% > 03 0.239s=46%）→ 整字判 02。
+    turns = [
+        _turn(160.0903, 162.0310, "SPEAKER_02"),
+        _turn(162.0310, 162.6553, "SPEAKER_03"),
+        _turn(162.9085, 179.1591, "SPEAKER_03"),
+    ]
+    words = [
+        _w(160.81, 161.27, "那就"), _w(161.27, 161.51, "想"), _w(161.51, 161.75, "到"),
+        _w(161.75, 162.11, "Em"), _w(162.11, 162.27, "ily"),   # 同一英文字的 sub-word
+        _w(162.27, 163.33, "謝謝"),
+    ]
+    segs = [{"start": 160.81, "end": 163.33, "text": "那就想到Emily謝謝", "words": words}]
+
+    # 單位黏合本身：Em+ily 進同一單位
+    stream = [
+        {"seg_idx": 0, "word_idx": i, "start": w["start"], "end": w["end"], "word": w["word"]}
+        for i, w in enumerate(words)
+    ]
+    units = _build_units(stream)
+    emily_unit = next(u for u in units if u["words"][0]["word"] == "Em")
+    assert [e["word"] for e in emily_unit["words"]] == ["Em", "ily"]
+    assert (emily_unit["start"], emily_unit["end"]) == (161.75, 162.27)
+
+    out = assign_speakers_word_level(segs, turns)
+
+    emily_seg = next(s for s in out if "Emily" in s["text"])
+    assert emily_seg["speaker"] == "SPEAKER_02"   # 整字同一語者，不再 Em|ily 切開
+
+
+def test_is_latin_glue_rules():
+    # 黏：拉丁接拉丁（無前導空格）、數字接在字母後、連字號
+    assert _is_latin_glue("Em", "ily") is True
+    assert _is_latin_glue("Em", "42") is True
+    assert _is_latin_glue("co", "-op") is True
+    # 不黏：CJK（不符拉丁 regex / 前一 token 非拉丁字母結尾）
+    assert _is_latin_glue("我", "也") is False
+    assert _is_latin_glue("我", "ily") is False
+    # 不黏：有前導空格（faster-whisper 新英文字的訊號）
+    assert _is_latin_glue("Hello", " world") is False
+    # 不黏：前一 token 以數字結尾（"A1"+"B2" 不是同一個字的自然切分）
+    assert _is_latin_glue("A1", "B2") is False
+    # 不黏：前一 token 空字串
+    assert _is_latin_glue("", "ily") is False
+
+
+def test_cross_segment_gap_relief_applies_at_boundary():
+    # 跨段 gap 折扣：交界字近平手（affinity 微偏 B 0.085 < 全額換手成本 0.3），
+    # 換手橫豎要發生——
+    # - 後段延遲 0.35s 開始（≥ SWITCH_GAP_RELIEF_SEC）→ 邊界換手打折(0.09)，
+    #   DP 把換手推遲到便宜的邊界 → 交界字留 A
+    # - 對照組：後段緊貼（gap 0.1）→ 兩個換手點同價，emission 決定 → 交界字翻 B
+    turns = [
+        _turn(0.0, 4.0, "A"),
+        _turn(3.4, 4.4, "B"),
+    ]
+    w1 = _w(3.0, 3.3, "w1")    # A 獨占
+    w2 = _w(3.55, 3.85, "w2")  # 段尾近平手字（A/B 皆罩住，affinity 微偏剛開口的 B）
+
+    # 跨段 gap 0.35 ≥ 0.3 → 折扣生效，換手發生在段邊界
+    out = assign_speakers_word_level([
+        {"start": 3.0, "end": 3.85, "text": "w1w2", "words": [w1, w2]},
+        {"start": 4.2, "end": 4.5, "text": "w3", "words": [_w(4.2, 4.5, "w3")]},
+    ], turns)
+    assert [(s["speaker"], s["text"]) for s in out] == [("A", "w1w2"), ("B", "w3")]
+
+    # 對照組：跨段 gap 0.1 → 全額成本，換手提前到 emission 較高的 w2
+    out = assign_speakers_word_level([
+        {"start": 3.0, "end": 3.85, "text": "w1w2", "words": [w1, w2]},
+        {"start": 3.95, "end": 4.25, "text": "w3", "words": [_w(3.95, 4.25, "w3")]},
+    ], turns)
+    assert [(s["speaker"], s["text"]) for s in out] == [
+        ("A", "w1"), ("B", "w2"), ("B", "w3"),
+    ]
 
 
 def test_chinese_words_join_without_space():
