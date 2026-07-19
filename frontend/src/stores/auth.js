@@ -129,6 +129,11 @@ export const useAuthStore = defineStore('auth', () => {
     } finally {
       setAccessTokenExpiry(null)
       user.value = null
+      // 廣播 session 結束訊號：讓各處主動拆除跨 session 殘留狀態
+      //（TasksView 的 SSE/輪詢、App 層的 toast 佇列與上傳浮層）。
+      // 同步 dispatch，確保在呼叫端 router.push('/login') 之前就完成拆除，
+      // 關掉「登出後、TasksView 尚未卸載」這段空窗內 A 的完成事件仍觸發 toast 的漏洞。
+      window.dispatchEvent(new CustomEvent('auth:logout'))
     }
   }
 

@@ -612,13 +612,25 @@ async function maybeRunListTour() {
   })
 }
 
+// 登出即拆除本頁的 session 級狀態：斷所有 SSE、停輪詢、清空任務清單。
+// SSE 認證在連線建立當下凍結身分（後端不會逐事件重驗），既有串流會持續吐
+// 前一位使用者的完成事件；不主動 close 就會在帳號切換後仍觸發「轉錄完成」toast。
+// 綁 auth session 而非只綁元件卸載，避免依賴 router.push 卸載時機的空窗。
+function handleAuthLogout() {
+  disconnectAllSSE()
+  stopPollTimer()
+  tasks.value = []
+}
+
 onMounted(() => {
+  window.addEventListener('auth:logout', handleAuthLogout)
   maybeRunListTour()
 })
 
 // 組件卸載前斷開所有連接
 onBeforeUnmount(() => {
   console.log('🔌 組件即將卸載，關閉所有 SSE 連接')
+  window.removeEventListener('auth:logout', handleAuthLogout)
   disconnectAllSSE()
   stopPollTimer()
   clearDemoTimers()
