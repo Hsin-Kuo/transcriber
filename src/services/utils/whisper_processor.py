@@ -587,9 +587,12 @@ def assign_speakers_word_level(
     ]
     unit_speakers = _viterbi_word_speakers(units, candidates_list)
     word_speaker: Dict[Tuple[int, int], str] = {}
-    for u, spk in zip(units, unit_speakers):
+    # 不用 zip(strict=)：本地 dev venv 仍是 3.9（strict= 需 3.10+）；enumerate 等價且通吃
+    if len(unit_speakers) != len(units):
+        raise ValueError(f"Viterbi 輸出長度 {len(unit_speakers)} != units {len(units)}")
+    for idx, u in enumerate(units):
         for entry in u["words"]:
-            word_speaker[(entry["seg_idx"], entry["word_idx"])] = spk
+            word_speaker[(entry["seg_idx"], entry["word_idx"])] = unit_speakers[idx]
 
     # ── 3. 輸出（照原 segment 結構；segment 內依 speaker 變換點切）──
     out: List[Dict] = []
