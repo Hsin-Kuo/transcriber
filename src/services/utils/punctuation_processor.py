@@ -12,6 +12,28 @@ from src.utils.logger import get_logger
 log = get_logger(__name__)
 
 
+# ── LLM 前言/結尾註記偵測（_strip_llm_preamble 用）────────────────────────
+# 雙關鍵詞規則：一行要同時含「前言動詞」與「領域詞」才視為 LLM 客套話，缺一不剝——
+# 避免誤傷正文（例：「以下是今天的重點：」有動詞無領域詞，屬真實內容，必須保留）。
+_PREAMBLE_VERB_RE = re.compile(
+    r"好的|這是|这是|以下是|以下為|以下为|以上是|以上為|以上为|以上就是"
+    r"|為您|为您|已完成|已為|已为|幫您|帮您"
+    r"|\bHere is\b|\bHere's\b|\bSure\b|\bCertainly\b|\bBelow is\b|\bAbove is\b"
+    r"|以下が|こちらが|以上が|次のとおり"
+    r"|다음은|여기에|이상이",
+    re.IGNORECASE,
+)
+_PREAMBLE_DOMAIN_RE = re.compile(
+    r"逐字稿|文字稿|潤飾|润饰|標點|标点|分段|轉錄|转录"
+    r"|transcript|punctuat|paragraph"
+    r"|文字起こし|句読点|段落"
+    r"|전사|구두점|단락",
+    re.IGNORECASE,
+)
+# markdown 圍欄開頭（``` 或 ```text 等變體）
+_FENCE_OPEN_RE = re.compile(r"^```[A-Za-z0-9_\-]*$")
+
+
 class PunctuationProcessor:
     """標點符號處理器
 
@@ -96,6 +118,68 @@ class PunctuationProcessor:
             return False
         return len(output_text) > len(input_text) * 1.5
 
+    def _strip_llm_preamble(self, text: str) -> str:
+        """剝除 LLM 回應的開場白/結尾註記/markdown 圍欄（保守規則，防誤傷正文）。
+
+        實例（使用者回報）：「好的，這是為您潤飾後的逐字稿，已完成中文標點補全與
+        合理分段，並保留了所有原文內容：」——prompt 已明令禁止，此處是後處理守門。
+
+        規則：
+        - markdown 圍欄：開頭 ```（含 ```text 等變體）與結尾 ``` 「成對」才剝。
+        - 前言行：僅當「第一個非空行」同時滿足 (a) 以全形/半形冒號結尾
+          (b) 含前言動詞 (c) 含領域詞 (d) 不含 "[SPEAKER_" → 移除該行與其後連續空行。
+        - 結尾註記：「最後一個非空行」同時滿足 (b)+(c)+(d) 且以標點結尾
+          （「以上是……」變體多以句號/冒號收尾）→ 移除該行與其前連續空行。
+        雙關鍵詞（動詞+領域詞）缺一不剝——「以下是今天的重點：」這類真實內容不受影響。
+        """
+        if not text:
+            return text
+
+        lines = text.split("\n")
+
+        def _first_nonempty() -> int:
+            for i, line in enumerate(lines):
+                if line.strip():
+                    return i
+            return -1
+
+        def _last_nonempty() -> int:
+            for i in range(len(lines) - 1, -1, -1):
+                if lines[i].strip():
+                    return i
+            return -1
+
+        # 1. markdown 圍欄（成對才剝）
+        fi, li = _first_nonempty(), _last_nonempty()
+        if (
+            fi != -1 and li != -1 and fi < li
+            and _FENCE_OPEN_RE.match(lines[fi].strip())
+            and lines[li].strip() == "```"
+        ):
+            del lines[li]
+            del lines[fi]
+
+        # 2. 前言行（第一個非空行，四條件全中才剝）
+        fi = _first_nonempty()
+        if fi != -1:
+            line = lines[fi].strip()
+            if (
+                line.endswith((":", "："))
+                and "[SPEAKER_" not in line
+                and _PREAMBLE_VERB_RE.search(line)
+                and _PREAMBLE_DOMAIN_RE.search(line)
+            ):
+                j = fi + 1
+                while j < len(lines) and not lines[j].strip():
+                    j += 1
+                lines = lines[:fi] + lines[j:]
+
+        # 不剝結尾註記：正文最後一句幾乎都以句號收尾，且「以上就是我們整理
+        # 逐字稿的方法。」這類真實內容與 LLM 結尾註記在規則層面無法可靠區分
+        # ——誤刪正文的代價高於留下罕見註記。結尾行為只靠 prompt 禁令約束；
+        # 若日後有實證案例再依樣本設計規則。
+        return "\n".join(lines).strip()
+
     def _remove_cjk_latin_spaces(self, text: str) -> str:
         """移除中英文、全形標點與英文之間被 AI 擅自插入的空白"""
         # 中文字與英文/數字之間的空白
@@ -137,6 +221,7 @@ class PunctuationProcessor:
         )
 
         result = resp.choices[0].message.content.strip()
+        result = self._strip_llm_preamble(result)
         if language in ("zh", "zh-TW", "zh-CN"):
             result = self._remove_cjk_latin_spaces(result)
 
@@ -193,6 +278,7 @@ class PunctuationProcessor:
             result, model_used, token_usage = self._call_gemini_with_retry(
                 prompt, max_output_tokens=max_out
             )
+            result = self._strip_llm_preamble(result)
             if self._is_output_exploded(text, result):
                 log.warning(
                     "punctuation.output_exploded",
@@ -237,6 +323,7 @@ class PunctuationProcessor:
             result, chunk_model, chunk_token_usage = self._call_gemini_with_retry(
                 prompt, max_output_tokens=max_out
             )
+            result = self._strip_llm_preamble(result)
             if self._is_output_exploded(chunk_text, result):
                 log.warning(
                     "punctuation.output_exploded",
@@ -433,10 +520,14 @@ class PunctuationProcessor:
                 "不要省略或添加內容，不要意譯，保留固有名詞與數字。"
                 "不要在中英文之間插入空白，保持原文的空白狀態。"
                 "**重要：如果文字中有說話者標籤（例如 [SPEAKER_00]），請完整保留這些標籤，不要修改或刪除。**"
+                "直接輸出處理後的逐字稿本文，回覆的第一個字元就必須是逐字稿內容；禁止任何前言、開場白、說明、標題或結尾註記，禁止使用 markdown 程式碼圍欄。"
                 f"輸出純文字即可：\n\n{text}"
             )
         elif language == "en":
-            system_msg = "You are a precise transcript editor. Only add punctuation and paragraphing."
+            system_msg = (
+                "You are a precise transcript editor. Only add punctuation and paragraphing. "
+                "Output the processed transcript directly; the very first character of your reply must be transcript content. Do not include any preamble, introduction, explanation, heading, or closing remark. Do not use markdown code fences."
+            )
             user_msg = (
                 "Please add appropriate punctuation and paragraphing to the following English transcript. "
                 "Do not omit or add content, do not paraphrase, preserve proper nouns and numbers. "
@@ -444,7 +535,10 @@ class PunctuationProcessor:
                 f"Output plain text only:\n\n{text}"
             )
         elif language == "ja":
-            system_msg = "あなたは正確な文字起こし編集者です。句読点と段落分けのみを行います。"
+            system_msg = (
+                "あなたは正確な文字起こし編集者です。句読点と段落分けのみを行います。"
+                "処理後の文字起こし本文を直接出力し、返答の最初の文字は必ず本文でなければなりません。前置き・説明・見出し・結びの注記は一切禁止です。markdownのコードフェンスも使用しないでください。"
+            )
             user_msg = (
                 "以下の日本語文字起こしに適切な句読点と段落を追加してください。"
                 "内容の省略や追加はせず、意訳せず、固有名詞と数字はそのまま保持してください。"
@@ -452,7 +546,10 @@ class PunctuationProcessor:
                 f"プレーンテキストのみ出力してください：\n\n{text}"
             )
         elif language == "ko":
-            system_msg = "당신은 정확한 전사 편집자입니다. 구두점과 단락 나누기만 수행합니다."
+            system_msg = (
+                "당신은 정확한 전사 편집자입니다. 구두점과 단락 나누기만 수행합니다. "
+                "처리된 전사 본문을 바로 출력하고, 응답의 첫 글자는 반드시 전사 내용이어야 합니다. 서문, 도입부, 설명, 제목, 맺음말을 일절 금지합니다. markdown 코드 펜스도 사용하지 마세요."
+            )
             user_msg = (
                 "다음 한국어 전사에 적절한 구두점과 단락을 추가해주세요. "
                 "내용을 생략하거나 추가하지 말고, 의역하지 말고, 고유명사와 숫자는 그대로 유지하세요. "
@@ -461,7 +558,10 @@ class PunctuationProcessor:
             )
         else:
             # 其他語言使用英文提示
-            system_msg = "You are a precise transcript editor. Only add punctuation and paragraphing."
+            system_msg = (
+                "You are a precise transcript editor. Only add punctuation and paragraphing. "
+                "Output the processed transcript directly; the very first character of your reply must be transcript content. Do not include any preamble, introduction, explanation, heading, or closing remark. Do not use markdown code fences."
+            )
             user_msg = (
                 f"Please add appropriate punctuation and paragraphing to the following transcript. "
                 "Do not omit or add content, do not paraphrase, preserve proper nouns and numbers. "
@@ -501,6 +601,7 @@ class PunctuationProcessor:
                 "不要省略或添加內容，不要意譯，非必要不要用刪節號，保留固有名詞與數字。"
                 "不要在中英文之間插入空白，保持原文的空白狀態。"
                 "**重要：如果文字中有說話者標籤（例如 [SPEAKER_00]），請完整保留這些標籤。**"
+                "直接輸出處理後的逐字稿本文，回覆的第一個字元就必須是逐字稿內容；禁止任何前言、開場白、說明、標題或結尾註記，禁止使用 markdown 程式碼圍欄。"
             )
             if chunk_idx == 1:
                 user_msg = f"請為以下中文逐字稿加上適當標點並分段（這是第 1 部分）：\n\n{chunk_text}"
@@ -513,6 +614,7 @@ class PunctuationProcessor:
                 "You are a precise transcript editor. Only add punctuation and paragraphing. "
                 "Do not omit or add content, do not paraphrase, preserve proper nouns and numbers. "
                 "**Important: Preserve all speaker labels (e.g., [SPEAKER_00]) completely.**"
+                "Output the processed transcript directly; the very first character of your reply must be transcript content. Do not include any preamble, introduction, explanation, heading, or closing remark. Do not use markdown code fences."
             )
             if chunk_idx == 1:
                 user_msg = f"Add punctuation and paragraphing to this English transcript (part 1):\n\n{chunk_text}"
@@ -525,6 +627,7 @@ class PunctuationProcessor:
                 "あなたは正確な文字起こし編集者です。句読点と段落分けのみを行います。"
                 "内容の省略や追加はせず、意訳せず、固有名詞と数字はそのまま保持してください。"
                 "**重要：話者ラベル（例：[SPEAKER_00]）を完全に保持してください。**"
+                "処理後の文字起こし本文を直接出力し、返答の最初の文字は必ず本文でなければなりません。前置き・説明・見出し・結びの注記は一切禁止です。markdownのコードフェンスも使用しないでください。"
             )
             if chunk_idx == 1:
                 user_msg = f"以下の日本語文字起こしに句読点と段落を追加してください（第1部分）：\n\n{chunk_text}"
@@ -537,6 +640,7 @@ class PunctuationProcessor:
                 "당신은 정확한 전사 편집자입니다. 구두점과 단락 나누기만 수행합니다. "
                 "내용을 생략하거나 추가하지 말고, 의역하지 말고, 고유명사와 숫자는 그대로 유지하세요. "
                 "**중요: 화자 레이블(예: [SPEAKER_00])을 완전히 보존하세요.**"
+                "처리된 전사 본문을 바로 출력하고, 응답의 첫 글자는 반드시 전사 내용이어야 합니다. 서문, 도입부, 설명, 제목, 맺음말을 일절 금지합니다. markdown 코드 펜스도 사용하지 마세요."
             )
             if chunk_idx == 1:
                 user_msg = f"다음 한국어 전사에 구두점과 단락을 추가해주세요 (1부):\n\n{chunk_text}"
@@ -548,7 +652,8 @@ class PunctuationProcessor:
             # 其他語言使用英文提示
             system_msg = (
                 "You are a precise transcript editor. Only add punctuation and paragraphing. "
-                "Do not omit or add content, do not paraphrase, preserve proper nouns and numbers."
+                "Do not omit or add content, do not paraphrase, preserve proper nouns and numbers. "
+                "Output the processed transcript directly; the very first character of your reply must be transcript content. Do not include any preamble, introduction, explanation, heading, or closing remark. Do not use markdown code fences."
             )
             if chunk_idx == 1:
                 user_msg = f"Add punctuation and paragraphing to this transcript (part 1):\n\n{chunk_text}"
