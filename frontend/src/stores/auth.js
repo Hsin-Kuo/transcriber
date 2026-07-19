@@ -3,7 +3,7 @@
  */
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
-import api, { TokenManager } from '../utils/api'
+import api, { setAccessTokenExpiry } from '../utils/api'
 import i18n from '../i18n'
 import { errorI18n } from '../utils/apiError'
 
@@ -103,10 +103,9 @@ export const useAuthStore = defineStore('auth', () => {
     error.value = null
 
     try {
+      // access_token / refresh_token 都由後端寫進 httpOnly cookie，前端不再保管
       const response = await api.post('/auth/login', { email, password })
-      const { access_token } = response.data
-      // refresh_token 由後端寫進 httpOnly cookie，前端不再保管
-      TokenManager.setAccessToken(access_token)
+      setAccessTokenExpiry(response.data.expires_at)
       await fetchCurrentUser()
 
       return { success: true }
@@ -123,12 +122,12 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function logout() {
     try {
-      // 後端會清 cookie + 撤銷 refresh token；瀏覽器自動帶 cookie 出去
+      // 後端會清 access_token/refresh_token 兩個 cookie；瀏覽器自動帶 cookie 出去
       await api.post('/auth/logout')
     } catch (err) {
       console.error('登出錯誤:', err)
     } finally {
-      TokenManager.clearTokens()
+      setAccessTokenExpiry(null)
       user.value = null
     }
   }
@@ -167,11 +166,27 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  // 初始化: 如果有 Token,嘗試獲取用戶資訊
+  // 初始化：沒有 localStorage 可以偷看「是否曾登入」了（access_token 是
+  // httpOnly cookie），直接嘗試打 /auth/me；沒有有效 session 就讓它自然
+  // 401，user 維持 null，router guard 導去登入頁。
+  //
+  // 用「記住進行中的 promise」而非布林旗標去重——布林旗標在 fetchCurrentUser()
+  // resolve 前就先設成 true，若兩個導覽的 router guard 幾乎同時觸發
+  // （Vue Router 的 beforeEach 不會把後一個導覽的 guard 排隊等前一個結束），
+  // 第二個 guard 會看到旗標已經是 true 就直接放行，但這時 user 還是 null，
+  // 導致已登入的使用者被誤導向 /login。記住 promise 才能讓並發呼叫真的等
+  // 同一次請求 resolve。呼叫結束後把 promise 清掉（不管成功或失敗）：
+  // fetchCurrentUser() 內部會吞掉例外，所以這裡不會拋出，但暫時性網路失敗
+  // 不該让後面所有導覽永遠不重試——跟舊版「靠 localStorage 每次導覽都重新
+  // 判斷」的精神一致，只是現在沒有本地訊號了，只能靠這次呼叫本身的結果。
+  let initializePromise = null
   async function initialize() {
-    if (TokenManager.getAccessToken()) {
-      await fetchCurrentUser()
+    if (!initializePromise) {
+      initializePromise = fetchCurrentUser().finally(() => {
+        initializePromise = null
+      })
     }
+    await initializePromise
   }
 
   async function forgotPassword(email) {
@@ -225,8 +240,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     try {
       const response = await api.post('/auth/google', { credential })
-      const { access_token } = response.data
-      TokenManager.setAccessToken(access_token)
+      setAccessTokenExpiry(response.data.expires_at)
       await fetchCurrentUser()
 
       return { success: true }
@@ -385,7 +399,7 @@ export const useAuthStore = defineStore('auth', () => {
       await api.delete('/auth/account', {
         data: { password, confirmation }
       })
-      TokenManager.clearTokens()
+      setAccessTokenExpiry(null)
       user.value = null
       return { success: true }
     } catch (err) {

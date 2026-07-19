@@ -7,6 +7,7 @@ from collections import namedtuple
 
 from src.services.utils.whisper_processor import (
     _resegment_by_words,
+    _apply_time_offset,
     RESEG_MAX_SEGMENT_SEC,
     RESEG_GAP_THRESHOLD_SEC,
     RESEG_MIN_SEGMENT_SEC,
@@ -45,6 +46,13 @@ def test_split_at_pause():
     out = _resegment_by_words([{"start": 0, "end": 5, "text": "x", "words": left + right}])
     assert len(out) == 2
     assert out[0]["end"] <= 2.01 and out[1]["start"] >= 2.99
+    # 切分輸出帶 words，且與輸入的 word 逐一對得上（供下游 word 級語者對齊使用）
+    assert out[0]["words"] == [
+        {"start": round(w.start, 3), "end": round(w.end, 3), "word": w.word} for w in left
+    ]
+    assert out[1]["words"] == [
+        {"start": round(w.start, 3), "end": round(w.end, 3), "word": w.word} for w in right
+    ]
 
 
 def test_small_gap_below_min_not_split():
@@ -76,6 +84,7 @@ def test_degenerate_words_fallback_to_segment_timing():
     assert len(out) == 1
     assert out[0]["start"] == 433.6 and out[0]["end"] == 440.0  # 用 segment 真實時間
     assert out[0]["text"] == "一整段正常長度的話"
+    assert "words" not in out[0]  # degenerate fallback：下游以缺 words 為訊號
 
 
 def test_normal_words_not_treated_as_degenerate():
@@ -89,3 +98,24 @@ def test_normal_words_not_treated_as_degenerate():
 
 def test_constants_are_sane():
     assert 0 < RESEG_GAP_THRESHOLD_SEC < RESEG_MIN_SEGMENT_SEC < RESEG_MAX_SEGMENT_SEC
+
+
+# ── _apply_time_offset（chunk offset 校正，供 word 時間戳同步平移）────────────
+
+def test_apply_time_offset_without_words():
+    seg = {"start": 1.0, "end": 2.0, "text": "x"}
+    out = _apply_time_offset(seg, 10.0)
+    assert out == {"start": 11.0, "end": 12.0, "text": "x"}
+
+
+def test_apply_time_offset_shifts_words_too():
+    seg = {
+        "start": 1.0, "end": 2.0, "text": "ab",
+        "words": [{"start": 1.0, "end": 1.5, "word": "a"}, {"start": 1.5, "end": 2.0, "word": "b"}],
+    }
+    out = _apply_time_offset(seg, 10.0)
+    assert out["start"] == 11.0 and out["end"] == 12.0
+    assert out["words"] == [
+        {"start": 11.0, "end": 11.5, "word": "a"},
+        {"start": 11.5, "end": 12.0, "word": "b"},
+    ]

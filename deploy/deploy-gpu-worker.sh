@@ -107,7 +107,11 @@ SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT}
 AUTO_SHUTDOWN_IDLE_MINUTES=${IDLE_MIN}
 WHISPER_MODEL=large-v3
 RESEG_MAX_SEGMENT_SEC=4
+DIAR_DEBUG_DUMP=${DIAR_DEBUG_DUMP:-}
 EOF
+# DIAR_DEBUG_DUMP：語者對齊除錯 dump（預設空=關）。開啟方式：
+#   DIAR_DEBUG_DUMP=1 bash deploy-gpu-worker.sh staging
+# 或手改 .env.worker 後 systemctl restart transcriber-worker（下次佈建會被覆蓋回預設）。
 
 # --- 4b. 台語模型 Breeze-ASR-26（CT2 轉檔版，S3 → 本地，idempotent）---
 # 模型檔 ~2.9GB，放各環境自己的 bucket（models/ prefix），沿用 instance role 唯讀。
@@ -139,7 +143,9 @@ python3.12 -m pip install -r requirements-worker.lock -q
 sudo cp /opt/transcriber/deploy/transcriber-worker.service /etc/systemd/system/transcriber-worker.service
 sudo systemctl daemon-reload
 sudo systemctl enable transcriber-worker
-sudo systemctl start transcriber-worker
+# restart 而非 start：服務已在跑時 start 是 no-op，.env.worker/unit 的變更不會生效
+# （2026-07-19 staging 驗證 DIAR_DEBUG_DUMP 時踩到：檔案更新了、跑的還是舊 env 進程）
+sudo systemctl restart transcriber-worker
 
 echo "=== 佈建完成（${APP_ENV}）==="
 echo "GPU Worker 已啟動，poll ${SQS_NAME}；閒置 ${IDLE_MIN} 分鐘後自動關機。"

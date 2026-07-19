@@ -28,7 +28,7 @@ from ..models.auth import (
 )
 from ..auth.password import hash_password
 from ..auth.jwt_handler import create_access_token, create_refresh_token
-from ..auth.cookies import set_refresh_cookie
+from ..auth.cookies import set_refresh_cookie, set_access_cookie
 from ..auth.dependencies import get_current_user
 from ..database.mongodb import get_database
 from ..database.repositories.user_repo import UserRepository
@@ -186,7 +186,7 @@ async def google_auth(
         })
 
     # 生成 Token
-    access_token = create_access_token({
+    access_token, expires_at = create_access_token({
         "sub": str(user["_id"]),
         "email": user["email"],
         "role": user["role"]
@@ -202,8 +202,9 @@ async def google_auth(
 
     # httpOnly cookie 傳給 client；body 不再回 refresh_token
     set_refresh_cookie(response, refresh_token_value)
+    set_access_cookie(response, access_token)
 
-    return TokenResponse(access_token=access_token, token_type="bearer")
+    return TokenResponse(token_type="bearer", expires_at=expires_at)
 
 
 @router.post("/google/bind")
