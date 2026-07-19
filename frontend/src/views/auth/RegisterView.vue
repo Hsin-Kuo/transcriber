@@ -8,15 +8,38 @@
           </div>
           <p class="auth-tagline">{{ $t('auth.registerTagline') }}</p>
 
+          <!-- 同意條款（Email 與第三方註冊共用的前置條件） -->
+          <label class="consent-checkbox" :class="{ disabled: loading }">
+            <input type="checkbox" v-model="agreed" :disabled="loading" />
+            <i18n-t keypath="auth.agreeCheckbox" tag="span" scope="global">
+              <template #terms>
+                <a href="https://soundlite.app/terms" target="_blank" rel="noopener noreferrer" @click.stop>{{ $t('auth.termsLink') }}</a>
+              </template>
+              <template #privacy>
+                <a href="https://soundlite.app/privacy" target="_blank" rel="noopener noreferrer" @click.stop>{{ $t('auth.privacyLink') }}</a>
+              </template>
+            </i18n-t>
+          </label>
+
           <!-- 主要註冊方式：第三方 OAuth -->
-          <div v-if="googleClientId" class="oauth-primary">
-            <GoogleSignInButton
-              :client-id="googleClientId"
-              button-text="signup_with"
-              :width="320"
-              @success="handleGoogleSuccess"
-              @error="handleGoogleError"
-            />
+          <div v-if="googleClientId" class="oauth-primary-wrap">
+            <div class="oauth-primary" :class="{ 'consent-gated': !agreed }">
+              <GoogleSignInButton
+                :client-id="googleClientId"
+                button-text="signup_with"
+                :width="320"
+                @success="handleGoogleSuccess"
+                @error="handleGoogleError"
+              />
+            </div>
+            <!-- 未同意前攔截 Google 按鈕點擊（GIS iframe 無法直接攔截 click） -->
+            <button
+              v-if="!agreed"
+              type="button"
+              class="consent-overlay"
+              :aria-label="$t('auth.consentRequired')"
+              @click="flashConsentHint"
+            ></button>
           </div>
 
           <!-- 錯誤訊息；表單收合時也看得到 -->
@@ -136,7 +159,7 @@
             <button
               type="submit"
               class="btn-primary"
-              :disabled="loading || !isPasswordValid || password !== confirmPassword"
+              :disabled="loading || !isPasswordValid || password !== confirmPassword || !agreed"
             >
               {{ loading ? $t('auth.registering') : $t('auth.registerButton') }}
             </button>
@@ -154,14 +177,6 @@
             </div>
           </div>
 
-          <i18n-t keypath="auth.agreeNotice" tag="p" class="legal-consent" scope="global">
-            <template #terms>
-              <a href="https://soundlite.app/terms" target="_blank" rel="noopener noreferrer">{{ $t('auth.termsLink') }}</a>
-            </template>
-            <template #privacy>
-              <a href="https://soundlite.app/privacy" target="_blank" rel="noopener noreferrer">{{ $t('auth.privacyLink') }}</a>
-            </template>
-          </i18n-t>
         </div>
     </div>
   </div>
@@ -184,6 +199,7 @@ const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 const email = ref('')
 const password = ref('')
 const confirmPassword = ref('')
+const agreed = ref(false)
 const showPassword = ref(false)
 const showConfirmPassword = ref(false)
 // 第三方為主：email 表單預設收合；無 Google 時自動展開
@@ -215,7 +231,16 @@ function validatePassword() {
   }
 }
 
+function flashConsentHint() {
+  error.value = $t('auth.consentRequired')
+}
+
 async function handleRegister() {
+  if (!agreed.value) {
+    error.value = $t('auth.consentRequired')
+    return
+  }
+
   if (password.value !== confirmPassword.value) {
     error.value = $t('auth.passwordMismatch')
     return
@@ -229,7 +254,7 @@ async function handleRegister() {
   loading.value = true
   error.value = ''
 
-  const result = await authStore.register(email.value, password.value)
+  const result = await authStore.register(email.value, password.value, agreed.value)
 
   if (result.success) {
     // 註冊成功 → 跳到「請查信」中間頁，由它處理 cooldown / 重發
@@ -248,10 +273,16 @@ async function handleRegister() {
 }
 
 async function handleGoogleSuccess(credential) {
+  // 防禦性檢查：正常情況下未同意時 Google 按鈕已被 overlay 攔截
+  if (!agreed.value) {
+    error.value = $t('auth.consentRequired')
+    return
+  }
+
   loading.value = true
   error.value = ''
 
-  const result = await authStore.googleLogin(credential)
+  const result = await authStore.googleLogin(credential, agreed.value)
 
   if (result.success) {
     router.push('/')
@@ -609,23 +640,62 @@ function handleGoogleError(err) {
   text-decoration: underline;
 }
 
-.legal-consent {
-  margin: 20px 0 0;
-  text-align: center;
+/* 同意條款 checkbox（Email 與第三方註冊共用前置條件） */
+.consent-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 20px;
   color: var(--main-text-light);
-  font-size: 0.78rem;
-  line-height: 1.6;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  cursor: pointer;
 }
 
-.legal-consent a {
-  color: var(--main-text-light);
+.consent-checkbox.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.consent-checkbox input[type="checkbox"] {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  accent-color: var(--main-primary);
+  cursor: pointer;
+}
+
+.consent-checkbox a {
+  color: var(--main-primary);
   text-decoration: underline;
   font-weight: 600;
   transition: color 0.2s ease;
 }
 
-.legal-consent a:hover {
-  color: var(--main-primary);
+.consent-checkbox a:hover {
+  color: var(--main-primary-dark);
+}
+
+/* 第三方 OAuth 同意閘門 */
+.oauth-primary-wrap {
+  position: relative;
+}
+
+.oauth-primary.consent-gated {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.consent-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: not-allowed;
 }
 
 .quota-info {

@@ -73,12 +73,16 @@ export const useAuthStore = defineStore('auth', () => {
   })
 
   // Actions
-  async function register(email, password) {
+  async function register(email, password, agreedToTerms = false) {
     loading.value = true
     error.value = null
 
     try {
-      const response = await api.post('/auth/register', { email, password })
+      const response = await api.post('/auth/register', {
+        email,
+        password,
+        agreed_to_terms: agreedToTerms,
+      })
       // 註冊成功（包含寄信失敗的情況，user 已被保留）
       // API 返回 { message, email, email_sent }
       return {
@@ -239,12 +243,15 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function googleLogin(credential) {
+  async function googleLogin(credential, agreedToTerms = false) {
     loading.value = true
     error.value = null
 
     try {
-      const response = await api.post('/auth/google', { credential })
+      const response = await api.post('/auth/google', {
+        credential,
+        agreed_to_terms: agreedToTerms,
+      })
       setAccessTokenExpiry(response.data.expires_at)
       await fetchCurrentUser()
 
@@ -253,7 +260,9 @@ export const useAuthStore = defineStore('auth', () => {
       error.value = resolveAuthError(err, 'auth.googleLoginError')
       return {
         success: false,
-        error: error.value
+        error: error.value,
+        // 後端錯誤碼（供 caller 判斷「新帳號未同意」需導向註冊頁）
+        code: err?.response?.data?.detail?.code || null,
       }
     } finally {
       loading.value = false

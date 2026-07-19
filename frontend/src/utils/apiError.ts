@@ -71,6 +71,8 @@ export const ERROR_I18N: Record<string, string> = {
   OAUTH_NOT_LINKED: 'errors.oauthNotLinked',
   OAUTH_UNLINK_REQUIRES_PASSWORD: 'errors.oauthUnlinkRequiresPassword',
   OAUTH_PASSWORD_ALREADY_SET: 'errors.oauthPasswordAlreadySet',
+  OAUTH_CONSENT_REQUIRED: 'errors.consentRequiredOAuth',
+  AUTH_CONSENT_REQUIRED: 'errors.consentRequired',
   // Audio
   AUDIO_MERGE_TOO_FEW_FILES: 'errors.audioMergeTooFewFiles',
   AUDIO_MERGE_TOTAL_TOO_LARGE: 'errors.audioMergeTotalTooLarge',
