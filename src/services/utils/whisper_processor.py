@@ -233,11 +233,21 @@ def _apply_time_offset(seg: Dict, offset: float) -> Dict:
 
 # 重疊搶話區（兩個 diar turn 互相重疊、word 被雙方完整罩住）常出現「重疊秒數精確平手」——
 # 嚴格 `>` 比較只會判給先迭代到的 turn，等同偏袒固定順序、與實際插話證據無關。
-# PROXIMITY_WEIGHT 只在 overlap_fraction 近平手時才有感（見 _turn_score）：
-# word 落在「短 turn 的正中央」= 插話證據強（該 turn 幾乎就是為了涵蓋這個字才短）；
-# 落在「長 turn 的尾端」= 證據弱（掃到的只是長 turn 尾巴，中心離很遠）。
-# 權重刻意壓低——overlap_fraction 差距明顯時（見驗收 b）proximity 不該蓋過重疊本身的證據力。
-PROXIMITY_WEIGHT = 0.1
+# TIEBREAK_WEIGHT 是 tie-break 項（proximity 或 affinity，見 _word_speaker_candidates）
+# 的權重，刻意壓低——overlap_fraction 差距明顯時 tie-break 不該蓋過重疊本身的證據力。
+TIEBREAK_WEIGHT = 0.1
+
+# 近平手判定：word 被 ≥2 個「不同 speaker」覆蓋、且 per-speaker 最佳 overlap_fraction
+# 前兩名差 < 此值 → tie-break 改用 turn-start affinity（否則用 proximity）。只看不同
+# speaker——同語者多個重疊 turn 的 fraction 相近不構成競爭，不觸發近平手。
+# staging 合併幾何實證 proximity 在近平手時有反效果（dump 70cba0b5「我也」）：
+# 互相重疊的 turns 幾何上常一長一短疊在一起，word 距長 turn 中心的貼近度與
+# 「誰在講話」無關。
+NEAR_TIE_EPSILON = 0.05
+
+# turn-start affinity 距離尺度（秒）：affinity = max(0, 1 − |word有效起點 − turn.start| / 此值)。
+# 理據：剛開口的 turn 對交界字證據較強——插話/搶話的字通常緊貼新 turn 的起點。
+AFFINITY_SCALE_SEC = 1.0
 
 # 零重疊 word（落在 turn 間隙）時 nearest-turn speaker 的 emission 分數。
 # 必須恆低於任何實務上有意義的真實重疊分數（微弱真實重疊約 0.1~0.15）——否則間隙字的
@@ -282,39 +292,6 @@ def _build_turn_index(diar_turns: List[Dict]) -> Tuple[List[Dict], List[float], 
     return sorted_turns, starts, prefix_max_end
 
 
-def _turn_score(start: float, end: float, turn: Dict, use_proximity: bool = True) -> float:
-    """單一 turn 對 [start,end] 的評分：overlap_fraction + PROXIMITY_WEIGHT * proximity。
-
-    - overlap ≤ 0 → 直接回 0.0。零重疊時 proximity 也恆為 0（span 中點嚴格落在 turn
-      內部必有正重疊；零長 span 的 overlap 恆為 0 亦被此守衛擋掉），因此
-      score > 0 ⟺ overlap > 0——呼叫端可直接以 score 判斷有無重疊，不必另算 overlap。
-    - overlap_fraction：重疊秒數 / span 長度（span 長度 0 時視為 1e-6 防除零）。
-    - proximity：1 - |span中點 - turn中點| / (turn長度/2)，下限 0；turn 長度 0 時為 0。
-    - use_proximity=False：只算 overlap_fraction。word 級 span 受 reseg 6s 上限約束，
-      proximity 的翻盤窗受控；無 words 的 passthrough/degenerate 段沒有長度上限，
-      span 越長 proximity 能翻盤的絕對重疊差越大（例：6s span 重疊 4.0s 會輸給
-      重疊 3.6s 但貼中心的 turn），該路徑必須關掉 proximity。
-    """
-    overlap = max(0.0, min(end, turn["end"]) - max(start, turn["start"]))
-    if overlap <= 0.0:
-        return 0.0
-
-    span_len = max(end - start, 1e-6)
-    overlap_fraction = overlap / span_len
-    if not use_proximity:
-        return overlap_fraction
-
-    turn_len = turn["end"] - turn["start"]
-    if turn_len <= 0:
-        proximity = 0.0
-    else:
-        span_mid = (start + end) / 2.0
-        turn_mid = (turn["start"] + turn["end"]) / 2.0
-        proximity = max(0.0, 1 - abs(span_mid - turn_mid) / (turn_len / 2.0))
-
-    return overlap_fraction + PROXIMITY_WEIGHT * proximity
-
-
 def _word_speaker_candidates(
     start: float,
     end: float,
@@ -323,16 +300,25 @@ def _word_speaker_candidates(
     prefix_max_end: List[float],
     use_proximity: bool = True,
     anchor_tail: bool = True,
+    anchor_budget: float = WORD_TAIL_ANCHOR_SEC,
 ) -> Dict[str, float]:
     """[start,end] 的候選 speaker 分數表 {speaker: score}，供 Viterbi 當 emission 用。
 
-    score = `_turn_score`（score > 0 ⟺ overlap > 0，見該函數註解，不必另算 overlap）；
-    同 speaker 有多個重疊 turn 時取分數最高者。use_proximity 直通 `_turn_score`
-    （無 words 的長 segment 路徑要關掉 proximity）。
-    anchor_tail=True（word 路徑）：有效評分 span = (max(start, end − WORD_TAIL_ANCHOR_SEC),
-    end)——只影響時長 > WORD_TAIL_ANCHOR_SEC 的 word（起點前漂吸入的前導音段不參與
-    評分，overlap/proximity/零重疊 fallback 一律用有效 span）；無 words 的 segment
-    路徑傳 False（整段評分本來就該用完整範圍）。
+    score = overlap_fraction + TIEBREAK_WEIGHT × tie-break；tie-break 依近平手與否切換：
+    - 近平手（≥2 個不同 speaker，且 per-speaker 最佳 overlap_fraction 前兩名差 <
+      NEAR_TIE_EPSILON；同語者多個重疊 turn 不構成競爭）→ turn-start affinity =
+      max(0, 1 − |有效起點 − turn.start| / AFFINITY_SCALE_SEC)，「剛開口的 turn」
+      證據較強；近平手時「全部」候選都改用 affinity（同一把尺才可比）。
+    - 其餘 → proximity = max(0, 1 − |span中點 − turn中點| / (turn長度/2))（turn 長度 0 → 0）。
+    同 speaker 有多個重疊 turn 時取分數最高者。
+    use_proximity=False（無 words 的長 segment 路徑）：只算 overlap_fraction——該路徑
+    沒有 reseg 6s 上限，span 越長 tie-break 能翻盤的絕對重疊差越大，必須關掉。
+    anchor_tail=True（word 路徑）：有效評分 span = (max(start, end − anchor_budget), end)
+    ——起點前漂吸入的前導音段不參與評分，overlap/tie-break/零重疊 fallback 一律用
+    有效 span；無 words 路徑傳 False。anchor_budget 預設 WORD_TAIL_ANCHOR_SEC（單一
+    word），黏合單位（`_build_units`）應傳 WORD_TAIL_ANCHOR_SEC × 單位 word 數——
+    多 token 英文字的 span 由多個真實 token 組成，錨定預算隨之放大，
+    否則會把前導 sub-word 的真證據裁掉。
     用 `_build_turn_index` 產出的排序+prefix-max-end 索引，只掃可能與 span 重疊的
     turns（bisect 找上界 + 往回掃到 prefix max-end ≤ span.start 為止），
     避免每個 word 都要 O(turns) 全掃。
@@ -343,43 +329,119 @@ def _word_speaker_candidates(
         return {}
 
     if anchor_tail:
-        start = max(start, end - WORD_TAIL_ANCHOR_SEC)
+        start = max(start, end - anchor_budget)
 
     # start < end 的 turns 都在 starts[:idx] 內（bisect_left 找第一個 start >= end 的位置）
     idx = bisect.bisect_left(starts, end)
 
-    candidates: Dict[str, float] = {}
+    span_len = max(end - start, 1e-6)
+    overlapping: List[Tuple[Dict, float]] = []  # [(turn, overlap_fraction)]
     i = idx - 1
     while i >= 0:
         if prefix_max_end[i] <= start:
             # 0..i 的 turn.end 全都 <= start → 之後不可能再有重疊，提前中止
             break
         turn = sorted_turns[i]
-        score = _turn_score(start, end, turn, use_proximity)
-        if score > candidates.get(turn["speaker"], 0.0):
-            candidates[turn["speaker"]] = score
+        overlap = max(0.0, min(end, turn["end"]) - max(start, turn["start"]))
+        if overlap > 0.0:
+            overlapping.append((turn, overlap / span_len))
         i -= 1
 
-    if candidates:
+    if not overlapping:
+        # 零重疊（落在 turn 間隙）→ 依區間中點距最近的 turn 歸屬（rare path，全掃沒關係）
+        midpoint = (start + end) / 2.0
+
+        def _distance(turn: Dict) -> float:
+            if midpoint < turn["start"]:
+                return turn["start"] - midpoint
+            if midpoint > turn["end"]:
+                return midpoint - turn["end"]
+            return 0.0
+
+        nearest = min(sorted_turns, key=_distance)["speaker"]
+        return {nearest: NEAREST_FALLBACK_SCORE}
+
+    candidates: Dict[str, float] = {}
+
+    if not use_proximity:
+        for turn, fraction in overlapping:
+            if fraction > candidates.get(turn["speaker"], 0.0):
+                candidates[turn["speaker"]] = fraction
         return candidates
 
-    # 零重疊（落在 turn 間隙）→ 依區間中點距最近的 turn 歸屬（rare path，全掃沒關係）
-    midpoint = (start + end) / 2.0
+    # near-tie 看「不同 speaker」的競爭：per-speaker 先取最佳 fraction，再比前兩名——
+    # 同語者多個重疊 turn（fraction 相近）不構成競爭，不觸發近平手
+    best_frac_by_speaker: Dict[str, float] = {}
+    for turn, fraction in overlapping:
+        if fraction > best_frac_by_speaker.get(turn["speaker"], 0.0):
+            best_frac_by_speaker[turn["speaker"]] = fraction
+    speaker_fracs = sorted(best_frac_by_speaker.values(), reverse=True)
+    near_tie = len(speaker_fracs) >= 2 and (speaker_fracs[0] - speaker_fracs[1] < NEAR_TIE_EPSILON)
 
-    def _distance(turn: Dict) -> float:
-        if midpoint < turn["start"]:
-            return turn["start"] - midpoint
-        if midpoint > turn["end"]:
-            return midpoint - turn["end"]
-        return 0.0
-
-    nearest = min(sorted_turns, key=_distance)["speaker"]
-    return {nearest: NEAREST_FALLBACK_SCORE}
+    for turn, fraction in overlapping:
+        if near_tie:
+            tiebreak = max(0.0, 1 - abs(start - turn["start"]) / AFFINITY_SCALE_SEC)
+        else:
+            turn_len = turn["end"] - turn["start"]
+            if turn_len <= 0:
+                tiebreak = 0.0
+            else:
+                span_mid = (start + end) / 2.0
+                turn_mid = (turn["start"] + turn["end"]) / 2.0
+                tiebreak = max(0.0, 1 - abs(span_mid - turn_mid) / (turn_len / 2.0))
+        score = fraction + TIEBREAK_WEIGHT * tiebreak
+        if score > candidates.get(turn["speaker"], 0.0):
+            candidates[turn["speaker"]] = score
+    return candidates
 
 
 def _argmax_speaker(scores: Dict[str, float]) -> str:
     """分數最高的 speaker；精確平分時取字典序最小者（決定性，不依賴掃描/插入順序）。"""
     return min(scores, key=lambda spk: (-scores[spk], spk))
+
+
+# 拉丁 token（字母/數字/連字號，無空白）——whisper 對英文字常切出 sub-word token
+# （'Em'+'ily'、'D'+'em'+'ocracy'），無前導空格即代表與前一 token 同屬一個英文字
+_LATIN_TOKEN_RE = re.compile(r"^[A-Za-z0-9\-]+$")
+
+
+def _is_latin_glue(prev_token: str, token: str) -> bool:
+    """拉丁 sub-word 黏合規則：token 全為拉丁字母/數字/'-'（regex 已排除前導空格，
+    faster-whisper 的新英文字自帶前導空格）、且前一 token 以拉丁字母結尾 → 黏合。
+
+    同一個英文字被切成多個 token 時各 token span 極短，逐 token 指派容易被
+    語者交界切開（staging 實測 'Em'(02)|'ily'(03)）；黏成原子單位、以單位 span
+    評分，整個字共用一個 speaker。
+    """
+    if not _LATIN_TOKEN_RE.fullmatch(token):
+        return False
+    if not prev_token:
+        return False
+    last = prev_token[-1]
+    return last.isascii() and last.isalpha()
+
+
+def _build_units(stream: List[Dict]) -> List[Dict]:
+    """把全域 word 流黏成原子單位（拉丁 sub-word grouping）。
+
+    stream: [{seg_idx, word_idx, start, end, word}]（時間序）。
+    依 `_is_latin_glue` 把 sub-word token 黏進前一單位——只在同一 segment 內黏
+    （reseg 切點本身就是停頓，跨段不黏）；其餘每個 word 自成一單位。
+    回傳 [{start, end, words: [stream entries]}]，單位內 words 共用一個 speaker
+    （由呼叫端以單位 span 評分 + Viterbi 指派）。
+    """
+    units: List[Dict] = []
+    for entry in stream:
+        if (
+            units
+            and units[-1]["words"][-1]["seg_idx"] == entry["seg_idx"]
+            and _is_latin_glue(units[-1]["words"][-1]["word"], entry["word"])
+        ):
+            units[-1]["words"].append(entry)
+            units[-1]["end"] = entry["end"]
+        else:
+            units.append({"start": entry["start"], "end": entry["end"], "words": [entry]})
+    return units
 
 
 def _pick_speaker_indexed(
@@ -395,8 +457,7 @@ def _pick_speaker_indexed(
 
     單一 span 的判定（無 words 的 segment、`_pick_speaker_for_span` 薄包裝）走這裡，
     不經 Viterbi（單點沒有前後文可用）。use_proximity / anchor_tail 直通評分
-    （無 words 的長 segment 兩者皆傳 False，見 `_turn_score` 與
-    `_word_speaker_candidates` 註解）。
+    （無 words 的長 segment 兩者皆傳 False，見 `_word_speaker_candidates` 註解）。
     """
     candidates = _word_speaker_candidates(
         start, end, sorted_turns, starts, prefix_max_end, use_proximity, anchor_tail
@@ -407,7 +468,8 @@ def _pick_speaker_indexed(
 
 
 def _pick_speaker_for_span(start: float, end: float, diar_turns: List[Dict]) -> Optional[str]:
-    """[start,end] 對 turns 取最高重疊+貼近度評分者；零重疊 → 以區間中點距 turn 最近者。
+    """[start,end] 對 turns 取最高評分者（重疊比例 + 近平手 affinity / 其餘 proximity）；
+    零重疊 → 以區間中點距 turn 最近者。
 
     模組層函數簽名維持不變（測試直接呼叫）；內部臨時建索引後委派給
     `_pick_speaker_indexed`。效能敏感路徑（逐 word 迴圈）應改用
@@ -418,17 +480,18 @@ def _pick_speaker_for_span(start: float, end: float, diar_turns: List[Dict]) -> 
 
 
 def _viterbi_word_speakers(
-    words: List[Dict],
+    items: List[Dict],
     candidates_list: List[Dict[str, float]],
 ) -> List[str]:
-    """segment 內逐 word 的 Viterbi 語者路徑：最大化 total emission − total switch cost。
+    """時間序列（word/unit 流）的 Viterbi 語者路徑：最大化 total emission − switch cost。
 
-    - 狀態：該 segment 所有 word candidates 的 speaker 聯集（sorted，平分時選擇有決定性）。
+    items 只需有 start/end（word 或 `_build_units` 的單位皆可）；序列跨全部
+    segments（全域 DP）——segment 邊界不再免費換手，跨段 gap 照常適用停頓折扣。
+    - 狀態：整條序列 candidates 的 speaker 聯集（sorted，平分時選擇有決定性）。
     - emission：`_word_speaker_candidates` 的分數表；不在 candidate 的 speaker 為 0.0。
-    - transition：相鄰 word 換 speaker 扣 SWITCH_PENALTY；兩 word 間 gap ≥
-      SWITCH_GAP_RELIEF_SEC 時扣 SWITCH_PENALTY × SWITCH_GAP_RELIEF_FACTOR
-      （換手常發生在停頓處）。同 speaker 不扣。
-    - segment 首尾不設額外成本（per-segment 獨立）。
+    - transition：相鄰項換 speaker 扣 SWITCH_PENALTY；gap ≥ SWITCH_GAP_RELIEF_SEC
+      時扣 SWITCH_PENALTY × SWITCH_GAP_RELIEF_FACTOR（換手常發生在停頓處，
+      reseg 切點/segment 邊界通常就是停頓 → 自然享折扣）。同 speaker 不扣。
 
     取代舊的孤立單字 smoothing：孤立雜訊（弱 emission 差）被換手成本壓掉，
     強證據插話（emission 差 > 兩次換手成本）與換手點（後文 emission 持續支持新語者，
@@ -437,14 +500,14 @@ def _viterbi_word_speakers(
     speakers = sorted({spk for cand in candidates_list for spk in cand})
     if len(speakers) <= 1:
         # 單一（或零）候選語者：路徑唯一，不用跑 DP
-        return [speakers[0] if speakers else None] * len(words)
+        return [speakers[0] if speakers else None] * len(items)
 
-    # prev_best[s] = 到前一個 word 為止、以 s 結尾的最佳累計分數
+    # prev_best[s] = 到前一項為止、以 s 結尾的最佳累計分數
     prev_best = {spk: candidates_list[0].get(spk, 0.0) for spk in speakers}
     backptrs: List[Dict[str, str]] = []
 
-    for i in range(1, len(words)):
-        gap = words[i]["start"] - words[i - 1]["end"]
+    for i in range(1, len(items)):
+        gap = items[i]["start"] - items[i - 1]["end"]
         switch_cost = SWITCH_PENALTY * (
             SWITCH_GAP_RELIEF_FACTOR if gap >= SWITCH_GAP_RELIEF_SEC else 1.0
         )
@@ -476,36 +539,68 @@ def assign_speakers_word_level(
     transcription_segments: List[Dict],
     diar_turns: List[Dict],
 ) -> List[Dict]:
-    """word 級語者指派（Viterbi DP）+ 語者變換點切段。
+    """word 級語者指派（全域 Viterbi DP + 拉丁 unit grouping）+ 語者變換點切段。
 
     輸入：segments（可含 words: [{start,end,word}]）、diar turns [{start,end,speaker}]。
     輸出：[{start,end,text,speaker}]，不含 words。
-    - 有 words：逐 word 算候選分數表（`_word_speaker_candidates`，重疊+貼近度評分）
-      → segment 內 `_viterbi_word_speakers`（前後文一致性，取代舊的孤立單字 smoothing）
-      → 依 speaker 變換點切開；子段 start=首字 start、end=末字 end、
-      text = "".join(w["word"]).strip()（沿用 `_resegment_by_words` 的拼接慣例，中英皆正確）。
-    - 無 words（passthrough/degenerate 段）：整段 `_pick_speaker_indexed`（不經 DP）。
+    - 有 words：全部 segments 的 words 攤成一條時間序 stream → `_build_units` 黏合
+      拉丁 sub-word（'Em'+'ily' 等，單位內共用 speaker）→ 逐單位算候選分數表
+      （`_word_speaker_candidates`，以單位 span 評分）→ 跨 segment 的
+      `_viterbi_word_speakers`（segment 邊界不再免費換手——換手點恰在 reseg 切點
+      時，前後文證據仍會接住交界字；跨段 gap 照常享停頓折扣）→ 攤回逐 word speaker。
+    - 輸出結構維持在原 segment 邊界 + 語者變換點切開（與逐段版相同，只有 speaker
+      判定跨段）；子段 start=首字 start、end=末字 end、text = "".join(w["word"]).strip()
+      （沿用 `_resegment_by_words` 的拼接慣例，中英皆正確）。
+    - 無 words（passthrough/degenerate 段）：整段 `_pick_speaker_indexed`（不經 DP；
+      其時間間隔自然反映在前後 word 的 gap）。
     - diar_turns 空：原樣回傳（不加 speaker、不剝 words——words 的剝除統一由
       orchestrator `_run_transcription_phase` 出口單點處理，此處不重複）。
 
     效能：turns 只排序 + 建 prefix max-end 索引一次（`_build_turn_index`），
-    每個 word/segment 重用同一份索引（bisect 找窗口，不對全部 turns 掃描），
-    把配對成本從 O(words×turns) 降到窗口內 turns 的量級。
-
-    DP 只在 segment 內做（words 只存在於 segment 內，reseg 切點本身就是停頓處），
-    跨 segment 的一致性不在本函數範圍。
+    每個單位重用同一份索引（bisect 找窗口）；全域 DP 狀態 = 全檔 speaker 聯集
+    （實務上個位數），O(units × speakers²)。
     """
     if not diar_turns:
         return transcription_segments
 
     sorted_turns, starts, prefix_max_end = _build_turn_index(diar_turns)
 
+    # ── 1. 全域 word 流（segments 本身時間序）→ 黏合成單位 ──
+    stream: List[Dict] = []
+    for seg_idx, seg in enumerate(transcription_segments):
+        for word_idx, w in enumerate(seg.get("words") or []):
+            stream.append({
+                "seg_idx": seg_idx, "word_idx": word_idx,
+                "start": w["start"], "end": w["end"], "word": w["word"],
+            })
+    units = _build_units(stream)
+
+    # ── 2. 逐單位 emission + 跨段 Viterbi → 攤平回逐 word speaker ──
+    # 錨定預算隨單位 token 數放大：多 token 英文字（黏合單位）的 span 由多個真實
+    # token 組成，不該被裁到只剩尾端 0.6s（單 word 單位 = 1 × 0.6，行為不變）
+    candidates_list = [
+        _word_speaker_candidates(
+            u["start"], u["end"], sorted_turns, starts, prefix_max_end,
+            anchor_budget=WORD_TAIL_ANCHOR_SEC * len(u["words"]),
+        )
+        for u in units
+    ]
+    unit_speakers = _viterbi_word_speakers(units, candidates_list)
+    word_speaker: Dict[Tuple[int, int], str] = {}
+    # 不用 zip(strict=)：本地 dev venv 仍是 3.9（strict= 需 3.10+）；enumerate 等價且通吃
+    if len(unit_speakers) != len(units):
+        raise ValueError(f"Viterbi 輸出長度 {len(unit_speakers)} != units {len(units)}")
+    for idx, u in enumerate(units):
+        for entry in u["words"]:
+            word_speaker[(entry["seg_idx"], entry["word_idx"])] = unit_speakers[idx]
+
+    # ── 3. 輸出（照原 segment 結構；segment 內依 speaker 變換點切）──
     out: List[Dict] = []
-    for seg in transcription_segments:
+    for seg_idx, seg in enumerate(transcription_segments):
         words = seg.get("words")
         if not words:
             # 無 words 的段沒有 reseg 6s 上限，span 可能很長 → 關掉 proximity
-            # （只比重疊比例，見 _turn_score 註解）與尾端錨定（整段評分該用完整範圍）
+            # （只比重疊比例）與尾端錨定（整段評分該用完整範圍），不經 DP
             speaker = _pick_speaker_indexed(
                 seg.get("start", 0.0), seg.get("end", 0.0), sorted_turns, starts, prefix_max_end,
                 use_proximity=False, anchor_tail=False,
@@ -518,11 +613,7 @@ def assign_speakers_word_level(
             })
             continue
 
-        candidates_list = [
-            _word_speaker_candidates(w["start"], w["end"], sorted_turns, starts, prefix_max_end)
-            for w in words
-        ]
-        word_speakers = _viterbi_word_speakers(words, candidates_list)
+        word_speakers = [word_speaker[(seg_idx, i)] for i in range(len(words))]
 
         run_start = 0
         for i in range(1, len(words) + 1):
