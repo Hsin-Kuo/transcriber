@@ -228,6 +228,10 @@ async function handleGoogleSuccess(credential) {
 
   if (result.success) {
     router.push(await resolveLandingPath(router.currentRoute.value.query.redirect))
+  } else if (result.code === 'OAUTH_CONSENT_REQUIRED') {
+    // 全新帳號但登入頁無同意勾選 → 導去註冊頁完成同意
+    error.value = $t('auth.consentRequired')
+    router.push({ name: 'register' })
   } else {
     error.value = result.error
   }

@@ -98,6 +98,14 @@ function removeNotification(id) {
   hoverEnterTimes.delete(id)
 }
 
+// 一次清空所有 toast（登出時呼叫）：連同各自的 auto-close timer 一起清，
+// 避免前一位使用者的通知（尤其 error/warning 是 duration 0 永久停留）跨 session 殘留。
+function clearAll() {
+  notifications.value.forEach(n => { if (n.timer) clearTimeout(n.timer) })
+  notifications.value = []
+  hoverEnterTimes.clear()
+}
+
 // 動作按鈕（如「查看」）：執行 handler 後關閉該則通知。
 function handleAction(notification) {
   notification.action?.handler?.()
@@ -125,7 +133,8 @@ function handleToastMouseLeave(notification) {
 // Expose methods to parent component
 defineExpose({
   addNotification,
-  removeNotification
+  removeNotification,
+  clearAll
 })
 
 // Listen to global notification events

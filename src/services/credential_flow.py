@@ -160,10 +160,14 @@ class CredentialFlow:
         self.user_repo = user_repo
 
     async def issue(
-        self, intent: CredentialIntent, email: str, password: Optional[str] = None
+        self,
+        intent: CredentialIntent,
+        email: str,
+        password: Optional[str] = None,
+        consent: Optional[dict] = None,
     ) -> CredentialOutcome:
         if intent == CredentialIntent.REGISTER:
-            return await self._issue_register(email, password)
+            return await self._issue_register(email, password, consent)
         if intent == CredentialIntent.RESEND:
             return await self._issue_resend(email)
         if intent == CredentialIntent.FORGOT:
@@ -318,7 +322,9 @@ class CredentialFlow:
             "email_sent": True,
         }
 
-    async def _issue_register(self, email: str, password: Optional[str]) -> CredentialOutcome:
+    async def _issue_register(
+        self, email: str, password: Optional[str], consent: Optional[dict] = None
+    ) -> CredentialOutcome:
         from ..auth.password import hash_password
 
         existing = await self.user_repo.get_by_email(email)
@@ -345,30 +351,34 @@ class CredentialFlow:
         # unknown email → 建新（inactive + unverified）帳號並簽 verification token
         token, token_hash = _new_token()
         now = get_utc_timestamp()
-        created = await self.user_repo.create({
-                "email": email,
-                "password_hash": hash_password(password),
-                "auth_providers": ["password"],
-                "role": "user",
-                "is_active": False,
-                "email_verified": False,
-                "verification_token": None,
-                "verification_token_hash": token_hash,
-                "verification_expires": now + VERIFICATION_TTL_SECONDS,
-                "quota": _free_quota(),
-                "usage": {
-                    "transcriptions": 0,
-                    "duration_minutes": 0,
-                    "ai_summaries": 0,
-                    "last_reset": now,
-                    "total_transcriptions": 0,
-                    "total_duration_minutes": 0,
-                    "total_ai_summaries": 0,
-                },
+        new_user = {
+            "email": email,
+            "password_hash": hash_password(password),
+            "auth_providers": ["password"],
+            "role": "user",
+            "is_active": False,
+            "email_verified": False,
+            "verification_token": None,
+            "verification_token_hash": token_hash,
+            "verification_expires": now + VERIFICATION_TTL_SECONDS,
+            "quota": _free_quota(),
+            "usage": {
+                "transcriptions": 0,
+                "duration_minutes": 0,
+                "ai_summaries": 0,
+                "last_reset": now,
+                "total_transcriptions": 0,
+                "total_duration_minutes": 0,
+                "total_ai_summaries": 0,
+            },
             "refresh_tokens": [],
             "created_at": now,
             "updated_at": now,
-        })
+        }
+        # 同意軌跡（edge 已把關「無同意不得註冊」，這裡僅落檔快照）
+        if consent:
+            new_user["consent"] = consent
+        created = await self.user_repo.create(new_user)
         return CredentialOutcome(
             response=self._register_response(email),
             email=SendVerification(to=email, token=token),

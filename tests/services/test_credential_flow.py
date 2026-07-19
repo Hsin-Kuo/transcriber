@@ -70,6 +70,25 @@ class TestRegisterIssue:
         assert out.audit.action == "register"
         assert out.audit.user_id == "uid"
 
+    async def test_consent_record_is_persisted_when_provided(self):
+        flow, user_repo = _make(user=None)
+
+        consent = {"agreed": True, "terms_version": "2026-07-19", "method": "register"}
+        await flow.issue(
+            CredentialIntent.REGISTER, "New@x.com", password="Abc12345", consent=consent
+        )
+
+        created = user_repo.create.await_args.args[0]
+        assert created["consent"] == consent
+
+    async def test_consent_absent_when_not_provided(self):
+        flow, user_repo = _make(user=None)
+
+        await flow.issue(CredentialIntent.REGISTER, "New@x.com", password="Abc12345")
+
+        created = user_repo.create.await_args.args[0]
+        assert "consent" not in created
+
     async def test_verified_email_sends_account_exists_without_token_write(self):
         verified = {"_id": "u1", "email": "a@x.com", "email_verified": True}
         flow, user_repo = _make(user=verified)

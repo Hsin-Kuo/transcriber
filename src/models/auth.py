@@ -12,6 +12,9 @@ class UserRegister(BaseModel):
     """用戶註冊請求"""
     email: EmailStr
     password: str = Field(..., min_length=8, description="密碼至少 8 個字元")
+    agreed_to_terms: bool = Field(
+        False, description="是否勾選同意服務條款及隱私權政策（未同意不得註冊）"
+    )
 
 
 class UserLogin(BaseModel):
@@ -152,6 +155,10 @@ class ResetPasswordRequest(BaseModel):
 class GoogleAuthRequest(BaseModel):
     """Google OAuth 登入/註冊請求"""
     credential: str = Field(..., description="Google ID Token (從前端 Google Sign-In 取得)")
+    agreed_to_terms: bool = Field(
+        False,
+        description="是否勾選同意服務條款及隱私權政策；僅首次登入自動建帳時必填（既有帳號登入忽略）",
+    )
 
 
 class GoogleBindRequest(BaseModel):
