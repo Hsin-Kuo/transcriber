@@ -143,7 +143,9 @@ python3.12 -m pip install -r requirements-worker.lock -q
 sudo cp /opt/transcriber/deploy/transcriber-worker.service /etc/systemd/system/transcriber-worker.service
 sudo systemctl daemon-reload
 sudo systemctl enable transcriber-worker
-sudo systemctl start transcriber-worker
+# restart 而非 start：服務已在跑時 start 是 no-op，.env.worker/unit 的變更不會生效
+# （2026-07-19 staging 驗證 DIAR_DEBUG_DUMP 時踩到：檔案更新了、跑的還是舊 env 進程）
+sudo systemctl restart transcriber-worker
 
 echo "=== 佈建完成（${APP_ENV}）==="
 echo "GPU Worker 已啟動，poll ${SQS_NAME}；閒置 ${IDLE_MIN} 分鐘後自動關機。"
