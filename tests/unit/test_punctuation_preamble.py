@@ -68,15 +68,22 @@ def test_fence_and_preamble_combined():
     assert _proc()._strip_llm_preamble(text) == BODY
 
 
-def test_trailing_note_stripped_with_double_keywords():
-    # 結尾註記變體：「以上是……」+ 領域詞 + 句號結尾 → 剝
-    text = f"{BODY}\n\n以上是為您潤飾後的逐字稿，已完成標點補全。"
-    assert _proc()._strip_llm_preamble(text) == BODY
+def test_trailing_lines_never_stripped():
+    # 刻意不剝結尾行：正文最後一句幾乎都以句號收尾，且與 LLM 結尾註記無法
+    # 可靠區分（「以上就是我們整理逐字稿的方法。」是真實內容）——誤刪代價
+    # 高於留下罕見註記，結尾只靠 prompt 禁令。兩種樣態都必須原樣保留。
+    for tail in (
+        "以上是為您潤飾後的逐字稿，已完成標點補全。",  # 真的像 LLM 註記
+        "以上就是我們整理逐字稿的方法。",  # 真實內容
+        "以上就是今天的會議內容。",
+    ):
+        text = f"{BODY}\n\n{tail}"
+        assert _proc()._strip_llm_preamble(text) == text
 
 
-def test_trailing_content_line_without_domain_word_kept():
-    # 結尾行有動詞無領域詞 → 保留
-    text = f"{BODY}\n\n以上就是今天的會議內容。"
+def test_english_content_word_containing_sure_not_stripped():
+    # 'measure' 不可 substring 命中 'Sure'（詞界 \b 防護）
+    text = "We measure punctuation quality as follows:\n\nFirst, the accuracy."
     assert _proc()._strip_llm_preamble(text) == text
 
 

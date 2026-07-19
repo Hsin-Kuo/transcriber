@@ -18,7 +18,7 @@ log = get_logger(__name__)
 _PREAMBLE_VERB_RE = re.compile(
     r"好的|這是|这是|以下是|以下為|以下为|以上是|以上為|以上为|以上就是"
     r"|為您|为您|已完成|已為|已为|幫您|帮您"
-    r"|Here is|Here's|Sure|Certainly|Below is|Above is"
+    r"|\bHere is\b|\bHere's\b|\bSure\b|\bCertainly\b|\bBelow is\b|\bAbove is\b"
     r"|以下が|こちらが|以上が|次のとおり"
     r"|다음은|여기에|이상이",
     re.IGNORECASE,
@@ -174,21 +174,10 @@ class PunctuationProcessor:
                     j += 1
                 lines = lines[:fi] + lines[j:]
 
-        # 3. 結尾註記（最後一個非空行，雙關鍵詞 + 標點結尾才剝）
-        li = _last_nonempty()
-        if li != -1:
-            line = lines[li].strip()
-            if (
-                line.endswith((":", "：", "。", ".", "!", "！"))
-                and "[SPEAKER_" not in line
-                and _PREAMBLE_VERB_RE.search(line)
-                and _PREAMBLE_DOMAIN_RE.search(line)
-            ):
-                j = li - 1
-                while j >= 0 and not lines[j].strip():
-                    j -= 1
-                lines = lines[:j + 1] + lines[li + 1:]
-
+        # 不剝結尾註記：正文最後一句幾乎都以句號收尾，且「以上就是我們整理
+        # 逐字稿的方法。」這類真實內容與 LLM 結尾註記在規則層面無法可靠區分
+        # ——誤刪正文的代價高於留下罕見註記。結尾行為只靠 prompt 禁令約束；
+        # 若日後有實證案例再依樣本設計規則。
         return "\n".join(lines).strip()
 
     def _remove_cjk_latin_spaces(self, text: str) -> str:
