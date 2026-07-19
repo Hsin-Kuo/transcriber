@@ -1,6 +1,6 @@
 """OAuth 第三方登入路由"""
 import os
-from fastapi import APIRouter, Depends, status, Response
+from fastapi import APIRouter, Depends, status, Response, Request
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
@@ -34,6 +34,7 @@ from ..database.mongodb import get_database
 from ..database.repositories.user_repo import UserRepository
 from ..models.quota import QUOTA_TIERS, QuotaTier
 from ..utils.api_errors import api_error
+from ..utils.legal import build_consent_record
 from ..utils.logger import get_logger
 
 router = APIRouter(prefix="/auth", tags=["OAuth"])
@@ -102,6 +103,7 @@ def verify_google_token(credential: str) -> dict:
 async def google_auth(
     request: GoogleAuthRequest,
     response: Response,
+    http_request: Request,
     db=Depends(get_database)
 ):
     """Google 登入/註冊
@@ -157,7 +159,20 @@ async def google_auth(
                 status.HTTP_409_CONFLICT,
             )
 
-        # 3. 建立新帳號
+        # 3. 建立新帳號（首次登入）——需明確同意條款
+        # 既有帳號登入不會走到這裡，故 agreed_to_terms 只在「建帳」時強制。
+        # 登入頁 Google 按鈕無同意勾選 → 新用戶會落到這裡被擋，前端導去註冊頁。
+        if not request.agreed_to_terms:
+            raise api_error(
+                "OAUTH_CONSENT_REQUIRED",
+                "You must agree to the Terms of Service and Privacy Policy to create an account",
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+        client_ip = http_request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        if not client_ip:
+            client_ip = http_request.client.host if http_request.client else "unknown"
+
         now = get_utc_timestamp()
         user = await user_repo.create({
             "email": email,
@@ -180,6 +195,7 @@ async def google_auth(
                 "total_duration_minutes": 0,
                 "total_ai_summaries": 0
             },
+            "consent": build_consent_record("google", client_ip),
             "refresh_tokens": [],
             "created_at": now,
             "updated_at": now

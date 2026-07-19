@@ -203,11 +203,11 @@
         <div v-if="googleError" class="google-message error">{{ googleError }}</div>
         <div v-if="googleSuccess" class="google-message success">{{ googleSuccess }}</div>
 
-        <!-- 管理帳單 -->
+        <!-- 訂單 -->
         <div v-if="authStore.isAuthenticated" class="setting-item">
           <span class="setting-label">{{ $t('userSettings.subscription.manageBilling') }}</span>
           <button class="change-password-btn" @click="showBillingPanel = true">
-            {{ $t('userSettings.subscription.manageBilling') }}
+            {{ $t('userSettings.subscription.billingHistoryBtn') }}
           </button>
         </div>
 

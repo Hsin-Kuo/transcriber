@@ -83,6 +83,7 @@ from ..services.credential_flow import (
 )
 from ..utils.privacy import mask_email
 from ..utils.api_errors import api_error
+from ..utils.legal import build_consent_record
 from ..models.quota import QUOTA_TIERS, QuotaTier
 
 from ..utils.logger import get_logger
@@ -144,6 +145,14 @@ async def register(
     Raises:
         HTTPException: Email 已被註冊或發送驗證郵件失敗
     """
+    # 未勾選同意條款不得註冊（前端已把關，後端再守一次；與 email 無關，不涉 enumeration）
+    if not user_data.agreed_to_terms:
+        raise api_error(
+            "AUTH_CONSENT_REQUIRED",
+            "You must agree to the Terms of Service and Privacy Policy to register",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
     rate_limit_repo = RateLimitRepository(db)
     email_service = get_email_service()
     audit_logger = get_audit_logger()
@@ -192,7 +201,10 @@ async def register(
     # 對外回應由 outcome 統一給出（unknown 與 duplicate 不可區分，防 enumeration）。
     flow = build_credential_flow(db)
     outcome = await flow.issue(
-        CredentialIntent.REGISTER, user_data.email, password=user_data.password
+        CredentialIntent.REGISTER,
+        user_data.email,
+        password=user_data.password,
+        consent=build_consent_record("register", client_ip),
     )
     email_sent = await _dispatch_credential_email(email_service, outcome.email)
 
