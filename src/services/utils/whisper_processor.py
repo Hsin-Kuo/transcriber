@@ -233,11 +233,19 @@ def _apply_time_offset(seg: Dict, offset: float) -> Dict:
 
 # 重疊搶話區（兩個 diar turn 互相重疊、word 被雙方完整罩住）常出現「重疊秒數精確平手」——
 # 嚴格 `>` 比較只會判給先迭代到的 turn，等同偏袒固定順序、與實際插話證據無關。
-# PROXIMITY_WEIGHT 只在 overlap_fraction 近平手時才有感（見 _turn_score）：
-# word 落在「短 turn 的正中央」= 插話證據強（該 turn 幾乎就是為了涵蓋這個字才短）；
-# 落在「長 turn 的尾端」= 證據弱（掃到的只是長 turn 尾巴，中心離很遠）。
-# 權重刻意壓低——overlap_fraction 差距明顯時（見驗收 b）proximity 不該蓋過重疊本身的證據力。
+# PROXIMITY_WEIGHT 是 tie-break 項（proximity 或 affinity，見 _word_speaker_candidates）
+# 的權重，刻意壓低——overlap_fraction 差距明顯時 tie-break 不該蓋過重疊本身的證據力。
 PROXIMITY_WEIGHT = 0.1
+
+# 近平手判定：word 被 ≥2 個 turn 覆蓋、且 overlap_fraction 最高兩者差 < 此值 → tie-break
+# 改用 turn-start affinity（否則用 proximity）。staging 合併幾何實證 proximity 在近平手
+# 時有反效果（dump 70cba0b5「我也」）：互相重疊的 turns 幾何上常一長一短疊在一起，
+# word 距長 turn 中心的貼近度與「誰在講話」無關。
+NEAR_TIE_EPSILON = 0.05
+
+# turn-start affinity 距離尺度（秒）：affinity = max(0, 1 − |word有效起點 − turn.start| / 此值)。
+# 理據：剛開口的 turn 對交界字證據較強——插話/搶話的字通常緊貼新 turn 的起點。
+AFFINITY_SCALE_SEC = 1.0
 
 # 零重疊 word（落在 turn 間隙）時 nearest-turn speaker 的 emission 分數。
 # 必須恆低於任何實務上有意義的真實重疊分數（微弱真實重疊約 0.1~0.15）——否則間隙字的
@@ -282,39 +290,6 @@ def _build_turn_index(diar_turns: List[Dict]) -> Tuple[List[Dict], List[float], 
     return sorted_turns, starts, prefix_max_end
 
 
-def _turn_score(start: float, end: float, turn: Dict, use_proximity: bool = True) -> float:
-    """單一 turn 對 [start,end] 的評分：overlap_fraction + PROXIMITY_WEIGHT * proximity。
-
-    - overlap ≤ 0 → 直接回 0.0。零重疊時 proximity 也恆為 0（span 中點嚴格落在 turn
-      內部必有正重疊；零長 span 的 overlap 恆為 0 亦被此守衛擋掉），因此
-      score > 0 ⟺ overlap > 0——呼叫端可直接以 score 判斷有無重疊，不必另算 overlap。
-    - overlap_fraction：重疊秒數 / span 長度（span 長度 0 時視為 1e-6 防除零）。
-    - proximity：1 - |span中點 - turn中點| / (turn長度/2)，下限 0；turn 長度 0 時為 0。
-    - use_proximity=False：只算 overlap_fraction。word 級 span 受 reseg 6s 上限約束，
-      proximity 的翻盤窗受控；無 words 的 passthrough/degenerate 段沒有長度上限，
-      span 越長 proximity 能翻盤的絕對重疊差越大（例：6s span 重疊 4.0s 會輸給
-      重疊 3.6s 但貼中心的 turn），該路徑必須關掉 proximity。
-    """
-    overlap = max(0.0, min(end, turn["end"]) - max(start, turn["start"]))
-    if overlap <= 0.0:
-        return 0.0
-
-    span_len = max(end - start, 1e-6)
-    overlap_fraction = overlap / span_len
-    if not use_proximity:
-        return overlap_fraction
-
-    turn_len = turn["end"] - turn["start"]
-    if turn_len <= 0:
-        proximity = 0.0
-    else:
-        span_mid = (start + end) / 2.0
-        turn_mid = (turn["start"] + turn["end"]) / 2.0
-        proximity = max(0.0, 1 - abs(span_mid - turn_mid) / (turn_len / 2.0))
-
-    return overlap_fraction + PROXIMITY_WEIGHT * proximity
-
-
 def _word_speaker_candidates(
     start: float,
     end: float,
@@ -326,13 +301,17 @@ def _word_speaker_candidates(
 ) -> Dict[str, float]:
     """[start,end] 的候選 speaker 分數表 {speaker: score}，供 Viterbi 當 emission 用。
 
-    score = `_turn_score`（score > 0 ⟺ overlap > 0，見該函數註解，不必另算 overlap）；
-    同 speaker 有多個重疊 turn 時取分數最高者。use_proximity 直通 `_turn_score`
-    （無 words 的長 segment 路徑要關掉 proximity）。
+    score = overlap_fraction + PROXIMITY_WEIGHT × tie-break；tie-break 依近平手與否切換：
+    - 近平手（≥2 個重疊 turn 且 overlap_fraction 最高兩者差 < NEAR_TIE_EPSILON）→
+      turn-start affinity = max(0, 1 − |有效起點 − turn.start| / AFFINITY_SCALE_SEC)，
+      「剛開口的 turn」證據較強；近平手時「全部」候選都改用 affinity（同一把尺才可比）。
+    - 其餘 → proximity = max(0, 1 − |span中點 − turn中點| / (turn長度/2))（turn 長度 0 → 0）。
+    同 speaker 有多個重疊 turn 時取分數最高者。
+    use_proximity=False（無 words 的長 segment 路徑）：只算 overlap_fraction——該路徑
+    沒有 reseg 6s 上限，span 越長 tie-break 能翻盤的絕對重疊差越大，必須關掉。
     anchor_tail=True（word 路徑）：有效評分 span = (max(start, end − WORD_TAIL_ANCHOR_SEC),
     end)——只影響時長 > WORD_TAIL_ANCHOR_SEC 的 word（起點前漂吸入的前導音段不參與
-    評分，overlap/proximity/零重疊 fallback 一律用有效 span）；無 words 的 segment
-    路徑傳 False（整段評分本來就該用完整範圍）。
+    評分，overlap/tie-break/零重疊 fallback 一律用有效 span）；無 words 路徑傳 False。
     用 `_build_turn_index` 產出的排序+prefix-max-end 索引，只掃可能與 span 重疊的
     turns（bisect 找上界 + 往回掃到 prefix max-end ≤ span.start 為止），
     避免每個 word 都要 O(turns) 全掃。
@@ -348,33 +327,59 @@ def _word_speaker_candidates(
     # start < end 的 turns 都在 starts[:idx] 內（bisect_left 找第一個 start >= end 的位置）
     idx = bisect.bisect_left(starts, end)
 
-    candidates: Dict[str, float] = {}
+    span_len = max(end - start, 1e-6)
+    overlapping: List[Tuple[Dict, float]] = []  # [(turn, overlap_fraction)]
     i = idx - 1
     while i >= 0:
         if prefix_max_end[i] <= start:
             # 0..i 的 turn.end 全都 <= start → 之後不可能再有重疊，提前中止
             break
         turn = sorted_turns[i]
-        score = _turn_score(start, end, turn, use_proximity)
-        if score > candidates.get(turn["speaker"], 0.0):
-            candidates[turn["speaker"]] = score
+        overlap = max(0.0, min(end, turn["end"]) - max(start, turn["start"]))
+        if overlap > 0.0:
+            overlapping.append((turn, overlap / span_len))
         i -= 1
 
-    if candidates:
+    if not overlapping:
+        # 零重疊（落在 turn 間隙）→ 依區間中點距最近的 turn 歸屬（rare path，全掃沒關係）
+        midpoint = (start + end) / 2.0
+
+        def _distance(turn: Dict) -> float:
+            if midpoint < turn["start"]:
+                return turn["start"] - midpoint
+            if midpoint > turn["end"]:
+                return midpoint - turn["end"]
+            return 0.0
+
+        nearest = min(sorted_turns, key=_distance)["speaker"]
+        return {nearest: NEAREST_FALLBACK_SCORE}
+
+    candidates: Dict[str, float] = {}
+
+    if not use_proximity:
+        for turn, fraction in overlapping:
+            if fraction > candidates.get(turn["speaker"], 0.0):
+                candidates[turn["speaker"]] = fraction
         return candidates
 
-    # 零重疊（落在 turn 間隙）→ 依區間中點距最近的 turn 歸屬（rare path，全掃沒關係）
-    midpoint = (start + end) / 2.0
+    fracs = sorted((fraction for _, fraction in overlapping), reverse=True)
+    near_tie = len(overlapping) >= 2 and (fracs[0] - fracs[1] < NEAR_TIE_EPSILON)
 
-    def _distance(turn: Dict) -> float:
-        if midpoint < turn["start"]:
-            return turn["start"] - midpoint
-        if midpoint > turn["end"]:
-            return midpoint - turn["end"]
-        return 0.0
-
-    nearest = min(sorted_turns, key=_distance)["speaker"]
-    return {nearest: NEAREST_FALLBACK_SCORE}
+    for turn, fraction in overlapping:
+        if near_tie:
+            tiebreak = max(0.0, 1 - abs(start - turn["start"]) / AFFINITY_SCALE_SEC)
+        else:
+            turn_len = turn["end"] - turn["start"]
+            if turn_len <= 0:
+                tiebreak = 0.0
+            else:
+                span_mid = (start + end) / 2.0
+                turn_mid = (turn["start"] + turn["end"]) / 2.0
+                tiebreak = max(0.0, 1 - abs(span_mid - turn_mid) / (turn_len / 2.0))
+        score = fraction + PROXIMITY_WEIGHT * tiebreak
+        if score > candidates.get(turn["speaker"], 0.0):
+            candidates[turn["speaker"]] = score
+    return candidates
 
 
 def _argmax_speaker(scores: Dict[str, float]) -> str:
@@ -395,8 +400,7 @@ def _pick_speaker_indexed(
 
     單一 span 的判定（無 words 的 segment、`_pick_speaker_for_span` 薄包裝）走這裡，
     不經 Viterbi（單點沒有前後文可用）。use_proximity / anchor_tail 直通評分
-    （無 words 的長 segment 兩者皆傳 False，見 `_turn_score` 與
-    `_word_speaker_candidates` 註解）。
+    （無 words 的長 segment 兩者皆傳 False，見 `_word_speaker_candidates` 註解）。
     """
     candidates = _word_speaker_candidates(
         start, end, sorted_turns, starts, prefix_max_end, use_proximity, anchor_tail
@@ -407,7 +411,8 @@ def _pick_speaker_indexed(
 
 
 def _pick_speaker_for_span(start: float, end: float, diar_turns: List[Dict]) -> Optional[str]:
-    """[start,end] 對 turns 取最高重疊+貼近度評分者；零重疊 → 以區間中點距 turn 最近者。
+    """[start,end] 對 turns 取最高評分者（重疊比例 + 近平手 affinity / 其餘 proximity）；
+    零重疊 → 以區間中點距 turn 最近者。
 
     模組層函數簽名維持不變（測試直接呼叫）；內部臨時建索引後委派給
     `_pick_speaker_indexed`。效能敏感路徑（逐 word 迴圈）應改用

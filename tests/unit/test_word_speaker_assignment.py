@@ -8,7 +8,6 @@ from src.services.utils.whisper_processor import (
     _pick_speaker_for_span,
     _pick_speaker_indexed,
     _build_turn_index,
-    _turn_score,
     _word_speaker_candidates,
     assign_speakers_word_level,
 )
@@ -48,23 +47,23 @@ def test_pick_speaker_empty_turns_returns_none():
     assert _pick_speaker_for_span(0, 1, []) is None
 
 
-# ── proximity tiebreak（真實 staging 案例：83.8s 附近「我也」誤分）───────────
+# ── 近平手 tie-break（真實 staging 案例：83.8s 附近「我也」誤分）──────────────
 
-def test_proximity_breaks_exact_overlap_tie_in_favor_of_short_centered_turn():
-    # 真實案例數字：長 turn A 尾端與短 turn B（幾乎以 word 為中心）同時完整罩住
-    # word「我也」，重疊秒數精確平手（0.480s vs 0.480s）。
-    # 嚴格 `>` 比較下先迭代的 A 會贏 → 誤分；proximity 應該讓證據更強的 B 勝出。
+def test_near_tie_broken_in_favor_of_freshly_started_turn():
+    # 真實案例數字：長 turn A 尾端與剛開口的短 turn B 同時完整罩住 word「我也」，
+    # 重疊秒數精確平手（0.480s vs 0.480s）→ 近平手改用 turn-start affinity 決勝：
+    # B 的 turn 起點（83.583）緊貼 word 起點（83.800）→ affinity 0.783；
+    # A 早在 79.230 就開講 → affinity 0。剛開口的 B 證據較強，勝出。
     turns = [
         _turn(79.230, 84.427, "SPEAKER_00"),  # A：長 turn，word 落在尾端
-        _turn(83.583, 84.393, "SPEAKER_02"),  # B：短 turn，幾乎以 word 為中心
+        _turn(83.583, 84.393, "SPEAKER_02"),  # B：剛開口的插話短 turn
     ]
     assert _pick_speaker_for_span(83.800, 84.280, turns) == "SPEAKER_02"
 
 
-def test_proximity_does_not_flip_clear_overlap_fraction_difference():
-    # X 重疊比例 0.8、Y 重疊比例 0.5（差 0.3 > 0.2）；Y 雖然以 span 為正中心
-    # （proximity=1.0，優於 X 的 0.75），但 PROXIMITY_WEIGHT=0.1 不足以蓋過
-    # 0.3 的重疊比例差距——X 仍須勝出，否則 proximity 會蓋過真正的重疊證據。
+def test_tiebreak_does_not_flip_clear_overlap_fraction_difference():
+    # 重疊比例差距明顯（> NEAR_TIE_EPSILON）→ 不進近平手路徑，tie-break 用 proximity
+    # 且權重 0.1 不足以蓋過重疊差——重疊較多的 X 仍須勝出。
     span = (0.0, 1.0)
     turn_x = _turn(0.0, 0.8, "X")   # overlap=0.8 → fraction=0.8；proximity=0.75
     turn_y = _turn(0.25, 0.75, "Y")  # overlap=0.5 → fraction=0.5；proximity=1.0（span 正中心）
@@ -92,7 +91,7 @@ def test_no_words_long_segment_ignores_proximity_more_overlap_wins():
 def test_word_tail_anchor_recovers_batched_drifted_word():
     # batched pipeline 實測：「我也」起點前漂 0.59s（83.800→83.210）、時長 0.48→1.06s，
     # 膨脹 span 稀釋與插話 turn 的重疊比例（1.0→0.636），近平手變一面倒 → 誤判前語者。
-    # 尾端錨定只取 (end-0.6, end) 評分 → 恢復近平手，proximity+DP 判給後語者。
+    # 尾端錨定只取 (end-0.6, end) 評分 → 恢復近平手，affinity+DP 判給後語者。
     turns = [
         _turn(79.225, 84.423, "SPEAKER_02"),  # 前語者長 turn
         _turn(83.596, 84.406, "SPEAKER_03"),  # 插話短 turn
@@ -107,11 +106,15 @@ def test_word_tail_anchor_recovers_batched_drifted_word():
     ]
     segs = [{"start": 82.930, "end": 84.850, "text": "臉我也常會", "words": words}]
 
-    # 對照斷言：不套尾端錨定的「原始膨脹 span」分數一面倒偏前語者
-    # （前導音段稀釋插話 turn 重疊：1.0+prox vs ~0.64+prox），proximity/DP 無從翻盤
-    raw_02 = _turn_score(drifted["start"], drifted["end"], turns[0])
-    raw_03 = _turn_score(drifted["start"], drifted["end"], turns[1])
-    assert raw_02 > raw_03 + 0.2
+    # 對照斷言：不套尾端錨定的「原始膨脹 span」候選分數一面倒偏前語者
+    # （前導音段稀釋插話 turn 重疊：fraction 1.0 vs ~0.64，差距 > NEAR_TIE_EPSILON
+    # → 連近平手路徑都進不去），tie-break/DP 無從翻盤
+    sorted_turns, starts, prefix_max_end = _build_turn_index(turns)
+    raw = _word_speaker_candidates(
+        drifted["start"], drifted["end"], sorted_turns, starts, prefix_max_end,
+        anchor_tail=False,
+    )
+    assert raw["SPEAKER_02"] > raw["SPEAKER_03"] + 0.2
 
     out = assign_speakers_word_level(segs, turns)
 
@@ -142,7 +145,7 @@ def test_word_tail_anchor_leaves_short_words_untouched():
 
 def test_viterbi_flips_tie_at_speaker_handover_point():
     # 真實案例數字（staging 音檔 83.8s「我也」）：前文 word 屬 00、
-    # 「我也」重疊精確平手但 proximity 偏 02、後文 words 屬 02（換手點）。
+    # 「我也」重疊精確平手但 affinity 偏剛開口的 02、後文 words 屬 02（換手點）。
     # DP 只需一次換手（且發生在 0.56s 停頓處、成本打折）→ 我也判給 02。
     turns = [
         _turn(79.230, 84.427, "SPEAKER_00"),  # 前語者長 turn
@@ -166,8 +169,8 @@ def test_viterbi_flips_tie_at_speaker_handover_point():
 
 
 def test_viterbi_keeps_context_speaker_for_mid_run_backchannel_tie():
-    # 中段搭腔：前後文皆屬 A（長 turn），中間 word 被 nested 短 turn B 同時罩住、
-    # 重疊平手且 proximity 偏 B——但 B 只是搭腔證據，前後文一致性（兩次換手成本）
+    # 中段搭腔：前後文皆屬 A（長 turn），中間 word 被剛開口的 nested 短 turn B 同時
+    # 罩住、重疊平手且 affinity 偏 B——但 B 只是搭腔證據，前後文一致性（兩次換手成本）
     # 應讓該字留給 A，不得翻盤。
     turns = [
         _turn(0.0, 10.0, "A"),   # 主 turn
@@ -187,8 +190,8 @@ def test_viterbi_keeps_context_speaker_for_mid_run_backchannel_tie():
 
 
 def test_viterbi_suppresses_isolated_weak_flip():
-    # 原 smoothing 功能：A A B A A 型孤立單字雜訊（B 靠弱優勢贏 per-word，非強證據）
-    # → 兩次換手成本 0.6 遠大於 emission 差 → DP 全判 A。
+    # 原 smoothing 功能：A A B A A 型孤立單字雜訊（B 靠近平手 affinity 弱優勢贏
+    # per-word，非強證據）→ 兩次換手成本遠大於 emission 差 → DP 全判 A。
     # words 用 0.5s（< WORD_TAIL_ANCHOR_SEC），不受尾端錨定影響。
     turns = [
         _turn(0.0, 10.0, "A"),
@@ -240,7 +243,7 @@ def test_viterbi_prefers_switching_at_pause():
         _turn(3.4, 4.4, "B"),
     ]
     w1 = _w(3.0, 3.3, "w1")    # A 獨占
-    w2 = _w(3.55, 3.85, "w2")  # A/B 皆完整罩住，emission 微偏 B（B 中心 3.9 較近）
+    w2 = _w(3.55, 3.85, "w2")  # A/B 皆完整罩住（近平手），affinity 微偏剛開口的 B
 
     # 有停頓：w2→w3 gap 0.35 ≥ SWITCH_GAP_RELIEF_SEC → 換手發生在 gap 處
     w3_gapped = _w(4.2, 4.5, "w3")
@@ -297,7 +300,7 @@ def test_viterbi_converges_weak_alternating_pattern():
     ]
     segs = [{"start": 1.0, "end": 5.5, "text": "uvxyz", "words": words}]
 
-    # 前置確認：per-word 確實是 A B A B A（w2/w4 靠 proximity 弱優勢偏 B）
+    # 前置確認：per-word 確實是 A B A B A（w2/w4 靠近平手 affinity 弱優勢偏 B）
     assert [_pick_speaker_for_span(w["start"], w["end"], turns) for w in words] == \
         ["A", "B", "A", "B", "A"]
 
@@ -381,51 +384,59 @@ def test_paragraph_mode_output_format_matches_existing_convention():
 
 def _brute_force_pick_speaker(start, end, turns):
     """暴力對照版：對「全部」turns 評分，不做 bisect 窗口裁剪（獨立重寫評分公式，
-    不 import 生產的 PROXIMITY_WEIGHT / _turn_score / WORD_TAIL_ANCHOR_SEC，
-    避免和被測程式碼共用同一段邏輯）。
-    平手語意與生產 `_argmax_speaker` 一致：精確平分時取字典序最小的 speaker；
-    尾端錨定語意與生產 word 路徑一致：有效 span = (max(start, end-0.6), end)。
+    不 import 生產的常數與函數，避免和被測程式碼共用同一段邏輯）。
+    規格與生產 word 路徑一致：尾端錨定 0.6s、近平手（fraction 差 < 0.05）用
+    turn-start affinity（scale 1.0）、其餘用 proximity；
+    平手語意與生產 `_argmax_speaker` 一致：精確平分時取字典序最小的 speaker。
     """
     if not turns:
         return None
 
     start = max(start, end - 0.6)  # word 尾端錨定（獨立重寫，同生產規格）
+    span_len = max(end - start, 1e-6)
+
+    overlapping = []  # [(turn, overlap_fraction)]
+    for turn in turns:
+        overlap = max(0.0, min(end, turn["end"]) - max(start, turn["start"]))
+        if overlap > 0.0:
+            overlapping.append((turn, overlap / span_len))
+
+    if not overlapping:
+        midpoint = (start + end) / 2.0
+
+        def _distance(turn):
+            if midpoint < turn["start"]:
+                return turn["start"] - midpoint
+            if midpoint > turn["end"]:
+                return midpoint - turn["end"]
+            return 0.0
+
+        return min(turns, key=_distance)["speaker"]
+
+    fracs = sorted((f for _, f in overlapping), reverse=True)
+    near_tie = len(overlapping) >= 2 and (fracs[0] - fracs[1] < 0.05)
 
     best_speaker = None
     best_score = 0.0
-    for turn in turns:
-        overlap = max(0.0, min(end, turn["end"]) - max(start, turn["start"]))
-        if overlap <= 0.0:
-            continue
-        span_len = max(end - start, 1e-6)
-        overlap_fraction = overlap / span_len
-        turn_len = turn["end"] - turn["start"]
-        if turn_len <= 0:
-            proximity = 0.0
+    for turn, fraction in overlapping:
+        if near_tie:
+            tiebreak = max(0.0, 1 - abs(start - turn["start"]) / 1.0)
         else:
-            span_mid = (start + end) / 2.0
-            turn_mid = (turn["start"] + turn["end"]) / 2.0
-            proximity = max(0.0, 1 - abs(span_mid - turn_mid) / (turn_len / 2.0))
-        score = overlap_fraction + 0.1 * proximity
+            turn_len = turn["end"] - turn["start"]
+            if turn_len <= 0:
+                tiebreak = 0.0
+            else:
+                span_mid = (start + end) / 2.0
+                turn_mid = (turn["start"] + turn["end"]) / 2.0
+                tiebreak = max(0.0, 1 - abs(span_mid - turn_mid) / (turn_len / 2.0))
+        score = fraction + 0.1 * tiebreak
         if score > best_score or (
             score == best_score and best_speaker is not None and turn["speaker"] < best_speaker
         ):
             best_score = score
             best_speaker = turn["speaker"]
 
-    if best_speaker is not None:
-        return best_speaker
-
-    midpoint = (start + end) / 2.0
-
-    def _distance(turn):
-        if midpoint < turn["start"]:
-            return turn["start"] - midpoint
-        if midpoint > turn["end"]:
-            return midpoint - turn["end"]
-        return 0.0
-
-    return min(turns, key=_distance)["speaker"]
+    return best_speaker
 
 
 def test_indexed_window_matches_brute_force_across_overlapping_and_nested_turns():
