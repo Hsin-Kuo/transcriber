@@ -6,6 +6,7 @@ import UsersView from '../views/UsersView.vue'
 import UserDetailView from '../views/UserDetailView.vue'
 import AdminTasksView from '../views/AdminTasksView.vue'
 import AdminTaskDetailView from '../views/AdminTaskDetailView.vue'
+import AiCostView from '../views/AiCostView.vue'
 import LoginView from '../views/auth/LoginView.vue'
 
 const routes = [
@@ -51,6 +52,15 @@ const routes = [
     component: AdminTaskDetailView,
     meta: {
       title: '任務詳情',
+      requiresAuth: true
+    }
+  },
+  {
+    path: '/cost',
+    name: 'ai-cost',
+    component: AiCostView,
+    meta: {
+      title: 'AI 成本統計',
       requiresAuth: true
     }
   },

@@ -91,6 +91,7 @@ class TranscriptionOrchestrator:
         # local 模式 run() 在 executor thread 跑、不繼承 request contextvars,故在此自綁。
         bind_contextvars(task_id=task_id)
         log.info("transcription.run.started")
+        started_ts = get_utc_timestamp()  # 供 _mark_completed 算 stats.duration_seconds
         temp_dir = get_temp_dir(prefix="run_")
         succeeded = False
         try:
@@ -130,7 +131,7 @@ class TranscriptionOrchestrator:
             self._save_compact_audio(task_id, mp3_path)
             self._mark_completed(
                 task_id, detected_language or language, final_text,
-                punct_model, punct_tokens,
+                punct_model, punct_tokens, started_ts,
             )
             succeeded = True
             log.info("transcription.run.completed")
@@ -270,7 +271,11 @@ class TranscriptionOrchestrator:
                         segments, diar_segments
                     )
                 self._maybe_dump_diar_debug(task_id, diar_segments, pre_merge_segments)
-                self._update_task(task_id, {"stats.diarization.num_speakers": num_speakers})
+                diar_updates = {"stats.diarization.num_speakers": num_speakers}
+                diar_model = getattr(self.diarization, "model_name", None)
+                if diar_model:
+                    diar_updates["models.diarization"] = diar_model
+                self._update_task(task_id, diar_updates)
                 self.complete_phase(
                     task_id, Phase.TRANSCRIPTION, "語者辨識完成",
                     details={"diarization_completed": True, "num_speakers": num_speakers},
@@ -467,16 +472,25 @@ class TranscriptionOrchestrator:
     def _mark_completed(
         self, task_id: str, language: Optional[str], transcription_text: str,
         punctuation_model: Optional[str], punctuation_token_usage: Optional[Dict[str, int]],
+        started_ts: Optional[int] = None,
     ) -> None:
         """標記完成 + quota consume。完成時順帶 unset 殘留 error。"""
         text_length = len(transcription_text)
+        completed_ts = get_utc_timestamp()
         update_data = {
             "status": "completed",
             "result.text_length": text_length,
             "result.word_count": len(transcription_text.split()),
             "config.language": language,
-            "timestamps.completed_at": get_utc_timestamp(),
+            "timestamps.completed_at": completed_ts,
         }
+        # 轉錄模型：從注入的 whisper processor 讀（台語 Breeze 路由也反映在此屬性）
+        transcription_model = getattr(self.whisper, "model_name", None)
+        if transcription_model:
+            update_data["models.transcription"] = transcription_model
+        # 處理時長：本次 run 的實際耗時（不含排隊等待）
+        if started_ts is not None:
+            update_data["stats.duration_seconds"] = max(0, completed_ts - started_ts)
         if punctuation_model:
             update_data["models.punctuation"] = punctuation_model
         if punctuation_token_usage:

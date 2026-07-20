@@ -21,7 +21,7 @@
 
     <!-- 用戶詳情 -->
     <div v-else-if="user" class="user-detail">
-      <h1 class="page-title">{{ user.email }}</h1>
+      <h1 class="page-title">{{ user.display_name || user.email || '—' }}</h1>
 
       <div class="detail-grid">
         <!-- 基本資訊 -->
@@ -33,7 +33,7 @@
           </div>
           <div class="info-row">
             <span class="label">Email：</span>
-            <span class="value">{{ user.email }}</span>
+            <span class="value">{{ user.display_name || user.email || '—' }}</span>
           </div>
           <div class="info-row">
             <span class="label">角色：</span>
@@ -302,7 +302,7 @@
       <div class="modal">
         <h3>調整額外額度</h3>
         <div class="modal-body">
-          <p class="modal-user-email">用戶：{{ user.email }}</p>
+          <p class="modal-user-email">用戶：{{ user.display_name || user.email }}</p>
           <p class="card-hint">正數補償、負數扣除；不影響每月配額</p>
 
           <div class="balance-preview">
@@ -374,7 +374,7 @@
       <div class="modal">
         <h3>重設密碼</h3>
         <div class="modal-body">
-          <p class="modal-user-email">用戶：{{ user.email }}</p>
+          <p class="modal-user-email">用戶：{{ user.display_name || user.email }}</p>
           <div class="form-group">
             <label>新密碼：</label>
             <input

@@ -92,4 +92,6 @@ class SummaryLogRepository:
         """建立索引"""
         # 後台依 task_id 查詢、依時間排序
         await self.collection.create_index([("task_id", 1), ("created_at", -1)])
+        # AI 成本統計依 created_at 範圍聚合（無 task_id 前綴），需獨立時間索引
+        await self.collection.create_index("created_at")
         log.info("summary_log.indexes.created")
