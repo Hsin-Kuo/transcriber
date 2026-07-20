@@ -8,6 +8,7 @@
   角色或調整能力都只改這張表，不動任何 endpoint。
 """
 from enum import Enum
+from typing import Optional
 
 
 class AdminRole(str, Enum):
@@ -70,3 +71,18 @@ def role_has(role: AdminRole, perm: Permission) -> bool:
 def permissions_for(role: AdminRole) -> set[Permission]:
     """回傳角色的完整能力集合（供 /me/permissions 之類下發前端渲染用）。"""
     return set(ROLE_PERMISSIONS.get(role, set()))
+
+
+def resolve_admin_role(raw) -> Optional[AdminRole]:
+    """把 user 文件的 admin_role 原始值解析成 AdminRole。
+
+    - None（尚未 migrate 的舊 admin）→ SUPERADMIN（Phase 0 相容政策，Phase 3 移除）。
+    - 可辨識的 enum 值 → 對應 AdminRole。
+    - 無法辨識 → None（由呼叫端決定如何處理，例如回 403）。
+    """
+    if raw is None:
+        return AdminRole.SUPERADMIN
+    try:
+        return AdminRole(raw)
+    except ValueError:
+        return None

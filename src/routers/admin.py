@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from pydantic import BaseModel, EmailStr
 from bson import ObjectId
 
-from ..auth.dependencies import get_current_admin, get_database
+from ..auth.dependencies import get_current_admin, get_database, require_permission
+from ..auth.rbac import Permission, permissions_for, resolve_admin_role
 from ..auth.password import hash_password
 from ..database.repositories.user_repo import UserRepository
 from ..database.repositories.task_repo import TaskRepository
@@ -89,6 +90,29 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 
+# ========== 當前管理員 ==========
+
+@router.get("/me/permissions")
+async def get_my_permissions(
+    admin: dict = Depends(get_current_admin),
+    db = Depends(get_database)
+):
+    """回傳當前管理員的角色與能力清單，供前端據以隱藏無權操作的 UI。
+
+    這是「渲染輔助」，非授權來源——真正的閘門是各 endpoint 的 require_permission。
+    未 migrate（無 admin_role）的 admin 依 Phase 0 相容政策回 superadmin。
+    """
+    user = await UserRepository(db).get_by_id(str(admin["_id"]))
+    role = resolve_admin_role((user or {}).get("admin_role"))
+    if role is None:
+        raise api_error("ADMIN_INVALID_ROLE", "Invalid admin role",
+                        status.HTTP_403_FORBIDDEN)
+    return {
+        "role": role.value,
+        "permissions": sorted(p.value for p in permissions_for(role)),
+    }
+
+
 # ========== 用戶管理 API ==========
 
 @router.get("/users")
@@ -101,7 +125,7 @@ async def list_users(
     sort_order: int = Query(-1, description="排序方向 (1=升序, -1=降序)"),
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.USER_READ)),
     db = Depends(get_database)
 ):
     """獲取用戶列表（管理員）"""
@@ -167,7 +191,7 @@ async def list_users(
 @router.get("/users/{user_id}")
 async def get_user_detail(
     user_id: str,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.USER_READ)),
     db = Depends(get_database)
 ):
     """獲取用戶詳情（管理員）"""
@@ -225,7 +249,7 @@ async def update_user_status(
     user_id: str,
     body: UpdateUserStatusRequest,
     http_request: Request,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.USER_MANAGE)),
     db = Depends(get_database)
 ):
     """停用/啟用用戶帳號（管理員）"""
@@ -278,7 +302,7 @@ async def update_user_role(
     user_id: str,
     body: UpdateUserRoleRequest,
     http_request: Request,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.ADMIN_GRANT)),
     db = Depends(get_database)
 ):
     """修改用戶角色（管理員）"""
@@ -335,7 +359,7 @@ async def update_user_quota(
     user_id: str,
     body: UpdateUserQuotaRequest,
     http_request: Request,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.USER_QUOTA)),
     db = Depends(get_database)
 ):
     """調整用戶配額（管理員）"""
@@ -418,7 +442,7 @@ async def update_user_quota(
 async def reset_user_monthly_quota(
     user_id: str,
     http_request: Request,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.USER_QUOTA)),
     db = Depends(get_database)
 ):
     """重置用戶月配額使用量（管理員）"""
@@ -481,7 +505,7 @@ async def adjust_user_extra_quota(
     user_id: str,
     body: AdjustExtraQuotaRequest,
     http_request: Request,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.USER_QUOTA)),
     db = Depends(get_database)
 ):
     """調整用戶額外額度（補償或扣除，不影響每月配額）
@@ -594,7 +618,7 @@ async def reset_user_password(
     user_id: str,
     body: ResetPasswordRequest,
     http_request: Request,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.USER_PASSWORD_RESET)),
     db = Depends(get_database)
 ):
     """重設用戶密碼（管理員）"""
@@ -654,7 +678,7 @@ async def list_all_tasks(
     sort_order: int = Query(-1, description="排序方向"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.TASK_READ)),
     db = Depends(get_database)
 ):
     """獲取全域任務列表（管理員）"""
@@ -740,7 +764,7 @@ async def list_all_tasks(
 @router.get("/tasks/{task_id}")
 async def get_task_detail(
     task_id: str,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.TASK_READ)),
     db = Depends(get_database)
 ):
     """獲取任務詳情（管理員）"""
@@ -798,7 +822,7 @@ async def get_task_detail(
 @router.post("/tasks/{task_id}/cancel")
 async def admin_cancel_task(
     task_id: str,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.TASK_MANAGE)),
     db = Depends(get_database)
 ):
     """強制取消任務（管理員）"""
@@ -842,7 +866,7 @@ async def admin_cancel_task(
 @router.delete("/tasks/{task_id}")
 async def admin_delete_task(
     task_id: str,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.TASK_DELETE)),
     db = Depends(get_database)
 ):
     """強制刪除任務（管理員）"""
@@ -884,7 +908,7 @@ async def admin_delete_task(
 @router.post("/tasks/batch/delete")
 async def admin_batch_delete_tasks(
     request: BatchDeleteTasksRequest,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.TASK_DELETE)),
     db = Depends(get_database)
 ):
     """批次刪除任務（管理員）"""
@@ -924,7 +948,7 @@ async def admin_batch_delete_tasks(
 @router.get("/statistics")
 async def get_admin_statistics(
     request: Request,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.ANALYTICS_READ)),
     db = Depends(get_database)
 ):
     """獲取後台統計資料"""
@@ -958,7 +982,7 @@ async def get_admin_statistics(
 
 @router.get("/revenue")
 async def get_revenue_stats(
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.BILLING_READ)),
     db=Depends(get_database),
 ):
     """營收 dashboard 數據"""
@@ -971,7 +995,7 @@ async def get_revenue_stats(
 async def get_ai_cost_stats(
     request: Request,
     months: int = Query(6, ge=1, le=24, description="往回涵蓋幾個日曆月（含當月）"),
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.ANALYTICS_READ)),
     db = Depends(get_database),
 ):
     """AI 成本 dashboard：逐月 × 功能（標點/摘要）× 模型的 token → USD 試算。"""
@@ -1008,7 +1032,7 @@ async def get_audit_logs(
     skip: int = Query(0, ge=0),
     log_type: Optional[str] = Query(None),
     user_id: Optional[str] = Query(None),
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.AUDIT_READ)),
     db = Depends(get_database)
 ):
     """獲取操作記錄"""
@@ -1036,7 +1060,7 @@ async def get_audit_logs(
 async def get_failed_audit_logs(
     days: int = Query(7, ge=1, le=90),
     limit: int = Query(100, ge=1, le=500),
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.AUDIT_READ)),
     db = Depends(get_database)
 ):
     """獲取失敗的操作記錄"""
@@ -1053,7 +1077,7 @@ async def get_failed_audit_logs(
 @router.get("/audit-logs/statistics")
 async def get_audit_statistics(
     days: int = Query(30, ge=1, le=365),
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.AUDIT_READ)),
     db = Depends(get_database)
 ):
     """獲取操作記錄統計"""
@@ -1070,7 +1094,7 @@ async def get_audit_statistics(
 async def get_resource_audit_logs(
     resource_id: str,
     limit: int = Query(50, ge=1, le=200),
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.AUDIT_READ)),
     db = Depends(get_database)
 ):
     """獲取特定資源的操作記錄"""
@@ -1087,7 +1111,7 @@ async def get_resource_audit_logs(
 @router.post("/cleanup/handoff-orphans")
 async def cleanup_handoff_orphans(
     older_than_hours: int = Query(24, ge=1, le=720),
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.OPS)),
 ):
     """掃 S3 handoff/ 找超過 N 小時的孤兒並刪除。
 

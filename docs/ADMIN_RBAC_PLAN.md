@@ -42,10 +42,11 @@
 - `tests/auth/test_rbac.py`：能力表約束 + 依賴行為（含相容/非法角色）共 11 測試。
 - **結果**：行為完全不變（所有現有 admin = superadmin = 全開），基礎設施就緒。
 
-### Phase 1 — 把依賴掛上 endpoint（仍沒人被鎖）
-- 逐一在 `src/routers/admin.py` 每支 endpoint 加 `Depends(require_permission(Permission.X))`。因所有人仍是 superadmin，行為不變、可安全逐批合併。
-- 補整合測試：每支 endpoint 用不同 `admin_role` 打，斷言該過的過、該擋的擋。
-- 加 `GET /api/admin/me/permissions` 下發當前 admin 能力清單 → 前端隱藏無權操作按鈕（縱深防禦，後端仍是真閘門）。
+### Phase 1 — 把依賴掛上 endpoint（仍沒人被鎖）✅ 後端完成
+- ✅ `src/routers/admin.py` 21 支 endpoint 全掛 `Depends(require_permission(Permission.X))`（見下表）。因所有人仍是 superadmin，行為不變。
+- ✅ `GET /api/admin/me/permissions`：下發當前 admin 的 role + 能力清單。
+- ✅ wiring 測試 `tests/routers/test_admin_rbac.py`：內省每支 route 的依賴樹，斷言掛對能力（endpoint→permission 對照鎖成可執行規格）+ `/me/permissions` 行為。
+- ⏳ **待做（前端）**：admin-frontend 用 `/me/permissions` 隱藏無權操作按鈕（縱深防禦，後端仍是真閘門）。
 
 endpoint → permission 對照（Phase 1 施工清單）：
 

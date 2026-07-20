@@ -21,7 +21,9 @@ os.environ.setdefault(
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from src.auth.rbac import AdminRole, Permission, ROLE_PERMISSIONS, role_has, permissions_for  # noqa: E402
+from src.auth.rbac import (  # noqa: E402
+    AdminRole, Permission, ROLE_PERMISSIONS, role_has, permissions_for, resolve_admin_role,
+)
 from src.auth.dependencies import require_permission  # noqa: E402
 
 _UID = "507f1f77bcf86cd799439011"
@@ -66,6 +68,20 @@ class TestRolePermissions:
         got = permissions_for(AdminRole.SUPPORT)
         got.add(Permission.TASK_DELETE)  # 改回傳值不得污染原表
         assert Permission.TASK_DELETE not in ROLE_PERMISSIONS[AdminRole.SUPPORT]
+
+
+class TestResolveAdminRole:
+    def test_none_is_superadmin_compat(self):
+        assert resolve_admin_role(None) is AdminRole.SUPERADMIN
+
+    def test_known_values_map(self):
+        assert resolve_admin_role("support") is AdminRole.SUPPORT
+        assert resolve_admin_role("billing") is AdminRole.BILLING
+        assert resolve_admin_role("read_only") is AdminRole.READ_ONLY
+
+    def test_unknown_is_none(self):
+        assert resolve_admin_role("wizard") is None
+        assert resolve_admin_role("") is None
 
 
 # ---------- require_permission 依賴 ----------

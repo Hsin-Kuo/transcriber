@@ -2,7 +2,7 @@
 from fastapi import Depends, HTTPException, Request, status
 from .cookies import ACCESS_COOKIE_NAME
 from .jwt_handler import verify_token
-from .rbac import AdminRole, Permission, role_has
+from .rbac import Permission, resolve_admin_role, role_has
 from ..database.mongodb import get_database
 from ..database.repositories.user_repo import UserRepository
 from ..utils.logger import get_logger
@@ -143,26 +143,23 @@ def require_permission(perm: Permission):
     ) -> dict:
         user = await UserRepository(db).get_by_id(str(current_user["_id"]))
         raw = (user or {}).get("admin_role")
+        role = resolve_admin_role(raw)
+        if role is None:
+            log.warning(
+                "rbac.invalid_role",
+                user_id=str(current_user["_id"]),
+                admin_role=str(raw),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="無效的管理員角色",
+            )
         if raw is None:
             log.warning(
                 "rbac.unmigrated_admin",
                 user_id=str(current_user["_id"]),
                 perm=perm.value,
             )
-            role = AdminRole.SUPERADMIN
-        else:
-            try:
-                role = AdminRole(raw)
-            except ValueError:
-                log.warning(
-                    "rbac.invalid_role",
-                    user_id=str(current_user["_id"]),
-                    admin_role=str(raw),
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="無效的管理員角色",
-                )
         if not role_has(role, perm):
             log.warning(
                 "rbac.denied",
@@ -178,6 +175,8 @@ def require_permission(perm: Permission):
         current_user["admin_role"] = role.value
         return current_user
 
+    # 供測試/內省用：這個依賴要求的能力（讓 wiring 測試能斷言每支 endpoint 掛對權限）
+    _checker._required_permission = perm
     return _checker
 
 
