@@ -96,10 +96,8 @@ async def test_full_report_against_real_mongo(seeded_db):
     assert ov["success_rate"] == 66.67           # 2/3
     assert ov["total_users"] == 2 and ov["active_users"] == 1
 
-    tu = report["token_usage"]
-    assert tu["punctuation"]["total_tokens"] == 150   # 100 + 50
-    assert tu["summary"]["total_tokens"] == 20
-    assert tu["total_tokens"] == 170
+    # full_report 不再回全期間 token_usage（成本統計移到 /admin/cost）
+    assert "token_usage" not in report
 
     # $lookup 把 summary A 的 token 歸給 task A 的 owner u1
     top = {u["user_id"]: u for u in report["top_users"]}

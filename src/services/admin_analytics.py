@@ -86,11 +86,6 @@ def merge_top_users(user_tasks_stats: list, user_summary_stats: list, *, limit: 
     return merged[:limit]
 
 
-def _safe_avg(total: float, count: int) -> float:
-    """total/count，round 2 位；count 為 0 回 0（除零保護）。"""
-    return round(total / count, 2) if count > 0 else 0
-
-
 def format_named_counts(stats: list, *, key: str, default: str) -> list:
     """把 `[{_id, count}]` 的 aggregation 結果轉成 `[{<key>: label, count}]`；_id 為 None 用 default。"""
     return [{key: (s["_id"] or default), "count": s["count"]} for s in stats]
@@ -102,33 +97,6 @@ def format_performance(duration_stats: dict) -> dict:
         "avg_duration_seconds": round(duration_stats.get("avg_duration", 0), 2),
         "min_duration_seconds": round(duration_stats.get("min_duration", 0), 2),
         "max_duration_seconds": round(duration_stats.get("max_duration", 0), 2),
-    }
-
-
-def combine_token_usage(punct_stats: dict, summary_stats: dict) -> dict:
-    """token 使用區塊：標點（tasks）+ AI 總結（summaries）兩來源合計 + 各自平均。"""
-    p_total = punct_stats.get("total_tokens", 0)
-    s_total = summary_stats.get("total_tokens", 0)
-    p_count = punct_stats.get("tasks_with_tokens", 0)
-    s_count = summary_stats.get("summaries_with_tokens", 0)
-    return {
-        "total_tokens": p_total + s_total,
-        "prompt_tokens": punct_stats.get("total_prompt_tokens", 0) + summary_stats.get("total_prompt_tokens", 0),
-        "completion_tokens": punct_stats.get("total_completion_tokens", 0) + summary_stats.get("total_completion_tokens", 0),
-        "punctuation": {
-            "total_tokens": p_total,
-            "prompt_tokens": punct_stats.get("total_prompt_tokens", 0),
-            "completion_tokens": punct_stats.get("total_completion_tokens", 0),
-            "tasks_count": p_count,
-            "avg_tokens_per_task": _safe_avg(p_total, p_count),
-        },
-        "summary": {
-            "total_tokens": s_total,
-            "prompt_tokens": summary_stats.get("total_prompt_tokens", 0),
-            "completion_tokens": summary_stats.get("total_completion_tokens", 0),
-            "summaries_count": s_count,
-            "avg_tokens_per_summary": _safe_avg(s_total, s_count),
-        },
     }
 
 
@@ -276,10 +244,6 @@ def format_recent_orders(recent_raw: list, email_map: dict) -> list:
 
 # ── orchestration（跑 pipeline + 用上面的純函式組 report）──────────────────────
 
-_EMPTY_TOKENS = {
-    "total_tokens": 0, "total_prompt_tokens": 0, "total_completion_tokens": 0,
-}
-
 
 def _thirty_days_ago_ts() -> int:
     """30 天前（以 UTC+8 當天 00:00 起算）的 Unix timestamp（秒）。"""
@@ -389,27 +353,8 @@ class AdminAnalytics:
         total_users = await db.users.count_documents({})
         active_users = await db.users.count_documents({"is_active": True})
 
-        # 2 token 使用
-        punct_tokens = await self._agg(db.tasks, [
-            {"$match": {"stats.token_usage.total": {"$exists": True, "$ne": None}}},
-            {"$group": {
-                "_id": None,
-                "total_tokens": {"$sum": "$stats.token_usage.total"},
-                "total_prompt_tokens": {"$sum": "$stats.token_usage.prompt"},
-                "total_completion_tokens": {"$sum": "$stats.token_usage.completion"},
-                "tasks_with_tokens": {"$sum": 1},
-            }},
-        ], one=True, default={**_EMPTY_TOKENS, "tasks_with_tokens": 0})
-        summary_tokens = await self._agg(db.summaries, [
-            {"$match": {"metadata.token_usage.total": {"$exists": True, "$ne": None}}},
-            {"$group": {
-                "_id": None,
-                "total_tokens": {"$sum": "$metadata.token_usage.total"},
-                "total_prompt_tokens": {"$sum": "$metadata.token_usage.prompt"},
-                "total_completion_tokens": {"$sum": "$metadata.token_usage.completion"},
-                "summaries_with_tokens": {"$sum": 1},
-            }},
-        ], one=True, default={**_EMPTY_TOKENS, "summaries_with_tokens": 0})
+        # token 成本統計已獨立成 /admin/cost（monthly_cost）；此處不再重複聚合全期間
+        # token_usage（dashboard 改顯示當月成本、AI 成本頁顯示各區間）。
 
         # 3 模型使用
         punct_models = await self._agg(db.tasks, _model_group("models.punctuation"))
@@ -467,7 +412,6 @@ class AdminAnalytics:
                 processing_tasks=processing_tasks, failed_tasks=failed_tasks,
                 total_users=total_users, active_users=active_users,
             ),
-            "token_usage": combine_token_usage(punct_tokens, summary_tokens),
             "model_usage": {
                 "punctuation": format_named_counts(punct_models, key="model", default="未知"),
                 "transcription": format_named_counts(trans_models, key="model", default="未知"),

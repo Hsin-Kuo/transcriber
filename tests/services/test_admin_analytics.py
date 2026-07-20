@@ -18,7 +18,6 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from src.services.admin_analytics import (  # noqa: E402
-    combine_token_usage,
     derive_overview,
     format_named_counts,
     format_performance,
@@ -45,31 +44,6 @@ class TestDeriveOverview:
             failed_tasks=0, total_users=0, active_users=0,
         )
         assert ov["success_rate"] == 0
-
-
-class TestCombineTokenUsage:
-    def test_combines_and_computes_averages(self):
-        punct = {"total_tokens": 1000, "total_prompt_tokens": 600,
-                 "total_completion_tokens": 400, "tasks_with_tokens": 4}
-        summary = {"total_tokens": 300, "total_prompt_tokens": 200,
-                   "total_completion_tokens": 100, "summaries_with_tokens": 2}
-        tu = combine_token_usage(punct, summary)
-        assert tu["total_tokens"] == 1300
-        assert tu["prompt_tokens"] == 800 and tu["completion_tokens"] == 500
-        assert tu["punctuation"]["avg_tokens_per_task"] == 250.0   # 1000/4
-        assert tu["summary"]["avg_tokens_per_summary"] == 150.0     # 300/2
-        assert tu["punctuation"]["tasks_count"] == 4
-        assert tu["summary"]["summaries_count"] == 2
-
-    def test_zero_counts_no_division_error(self):
-        empty = {"total_tokens": 0, "total_prompt_tokens": 0,
-                 "total_completion_tokens": 0, "tasks_with_tokens": 0}
-        empty_s = {"total_tokens": 0, "total_prompt_tokens": 0,
-                   "total_completion_tokens": 0, "summaries_with_tokens": 0}
-        tu = combine_token_usage(empty, empty_s)
-        assert tu["total_tokens"] == 0
-        assert tu["punctuation"]["avg_tokens_per_task"] == 0
-        assert tu["summary"]["avg_tokens_per_summary"] == 0
 
 
 class TestMergeDaily:

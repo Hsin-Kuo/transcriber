@@ -411,25 +411,6 @@ const stats = ref({
     failed_tasks: 0,
     success_rate: 0
   },
-  token_usage: {
-    total_tokens: 0,
-    prompt_tokens: 0,
-    completion_tokens: 0,
-    punctuation: {
-      total_tokens: 0,
-      prompt_tokens: 0,
-      completion_tokens: 0,
-      tasks_count: 0,
-      avg_tokens_per_task: 0
-    },
-    summary: {
-      total_tokens: 0,
-      prompt_tokens: 0,
-      completion_tokens: 0,
-      summaries_count: 0,
-      avg_tokens_per_summary: 0
-    }
-  },
   model_usage: {
     punctuation: [],
     transcription: [],
@@ -466,9 +447,10 @@ const hasAnyModelUsage = computed(() => {
          (stats.value.model_usage.summary && stats.value.model_usage.summary.length > 0)
 })
 
-// 計算總摘要數（用於 AI 總結模型佔比）
+// 計算總摘要數（用於 AI 總結模型佔比）：由各模型使用次數加總得出
 const totalSummaries = computed(() => {
-  return stats.value.token_usage.summary?.summaries_count || 1
+  const models = stats.value.model_usage?.summary || []
+  return models.reduce((sum, m) => sum + (m.count || 0), 0) || 1
 })
 
 // 訂閱者總數
