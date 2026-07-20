@@ -432,8 +432,8 @@ onMounted(() => {
 
 .filter-btn {
   padding: 8px 16px;
-  background: var(--color-primary, #dd8448); color: white;
-  color: var(--color-primary, #dd8448);
+  background: var(--color-primary, #dd8448);
+  color: white;
   border: none;
   border-radius: 12px;
   cursor: pointer;
@@ -504,8 +504,8 @@ onMounted(() => {
 
 .refresh-btn {
   padding: 8px 16px;
-  background: var(--color-primary, #dd8448); color: white;
-  color: var(--color-primary, #dd8448);
+  background: var(--color-primary, #dd8448);
+  color: white;
   border: none;
   border-radius: 12px;
   cursor: pointer;
@@ -632,8 +632,8 @@ onMounted(() => {
 
 .page-btn {
   padding: 10px 20px;
-  background: var(--color-primary, #dd8448); color: white;
-  color: var(--color-primary, #dd8448);
+  background: var(--color-primary, #dd8448);
+  color: white;
   border: none;
   border-radius: 12px;
   cursor: pointer;

@@ -848,8 +848,8 @@ code {
   width: 100%;
   padding: 12px;
   margin-top: 15px;
-  background: var(--color-primary, #dd8448); color: white;
-  color: var(--color-primary, #dd8448);
+  background: var(--color-primary, #dd8448);
+  color: white;
   border: none;
   border-radius: 12px;
   font-weight: 700;

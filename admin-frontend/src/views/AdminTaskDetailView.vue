@@ -675,8 +675,8 @@ code {
 }
 
 .action-btn.view {
-  background: var(--color-primary, #dd8448); color: white;
-  color: var(--color-primary, #dd8448);
+  background: var(--color-primary, #dd8448);
+  color: white;
 }
 
 .action-btn.cancel {
