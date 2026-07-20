@@ -16,6 +16,7 @@ export const NEW_ENDPOINTS = {
     updateSpeakerNames: (taskId: string) => `/transcriptions/${taskId}/speaker-names`,
     updateSubtitleSettings: (taskId: string) => `/transcriptions/${taskId}/subtitle-settings`,
     exportPdf: (taskId: string) => `/transcriptions/${taskId}/export/pdf`,
+    exportLog: (taskId: string) => `/transcriptions/${taskId}/export/log`,
   },
 
   // 任務管理

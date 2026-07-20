@@ -73,6 +73,16 @@ export function useTranscriptDownload(deps = {}) {
     showDownloadDialog.value = true
   }
 
+  // TXT/SRT/VTT 在瀏覽器用 Blob 直接存檔、不經後端，後端無從記稽核，因此存檔後
+  // 打一支 beacon 補記匯出 audit（PDF 走 /export/pdf 已自帶稽核，不在此列）。
+  // fire-and-forget：稽核失敗不能擋使用者下載，錯誤吞掉只記 console。
+  function logExport(format, filename) {
+    const taskId = currentTranscript.value?.task_id
+    if (!taskId) return
+    api.post(NEW_ENDPOINTS.transcriptions.exportLog(taskId), { format, filename })
+      .catch(err => console.warn('匯出稽核記錄失敗（不影響下載）:', err))
+  }
+
   // ========== 執行下載 ==========
 
   async function performDownload() {
@@ -133,6 +143,7 @@ export function useTranscriptDownload(deps = {}) {
       }
 
       performSubtitleDownload(content, filename, format)
+      logExport('txt', filename)
       return
     }
 
@@ -145,6 +156,7 @@ export function useTranscriptDownload(deps = {}) {
     }
 
     performSubtitleDownload(content, filename, format)
+    logExport(format, filename)
   }
 
   // ========== 摘要格式化 ==========
