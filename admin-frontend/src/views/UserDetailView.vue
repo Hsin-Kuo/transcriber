@@ -41,7 +41,7 @@
               {{ user.role === 'admin' ? '管理員' : '一般用戶' }}
             </span>
             <button
-              v-if="user.role !== 'admin'"
+              v-if="user.role !== 'admin' && authStore.can(PERM.ADMIN_GRANT)"
               @click="showRoleModal = true"
               class="edit-btn"
             >
@@ -54,6 +54,7 @@
               {{ user.is_active ? '啟用' : '停用' }}
             </span>
             <button
+              v-if="authStore.can(PERM.USER_MANAGE)"
               @click="toggleStatus"
               class="edit-btn"
               :class="user.is_active ? 'danger' : 'success'"
@@ -88,7 +89,7 @@
             <span :class="user.has_password ? 'verified' : 'not-verified'">
               {{ user.has_password ? '已設定' : '未設定' }}
             </span>
-            <button @click="showPasswordModal = true" class="edit-btn">
+            <button v-if="authStore.can(PERM.USER_PASSWORD_RESET)" @click="showPasswordModal = true" class="edit-btn">
               {{ user.has_password ? '重設密碼' : '設定密碼' }}
             </button>
           </div>
@@ -106,7 +107,7 @@
             <span class="tier-badge" :class="`tier-${user.quota?.tier || 'free'}`">
               {{ getTierName(user.quota?.tier) }}
             </span>
-            <button @click="showQuotaModal = true" class="edit-btn">調整配額</button>
+            <button v-if="authStore.can(PERM.USER_QUOTA)" @click="showQuotaModal = true" class="edit-btn">調整配額</button>
           </div>
           <div class="info-row">
             <span class="label">每月轉錄次數：</span>
@@ -185,7 +186,7 @@
             <span class="label">累計轉錄時長：</span>
             <span class="value">{{ (user.usage?.total_duration_minutes || 0).toFixed(1) }} 分鐘</span>
           </div>
-          <button @click="resetQuota" class="reset-btn">🔄 重置本月配額</button>
+          <button v-if="authStore.can(PERM.USER_QUOTA)" @click="resetQuota" class="reset-btn">🔄 重置本月配額</button>
         </div>
 
         <!-- 額外額度 -->
@@ -200,7 +201,7 @@
             <span class="label">額外 AI 摘要：</span>
             <span class="value">{{ user.extra_quota?.ai_summaries || 0 }} 次</span>
           </div>
-          <button @click="openExtraQuotaModal" class="edit-btn">調整額外額度</button>
+          <button v-if="authStore.can(PERM.USER_QUOTA)" @click="openExtraQuotaModal" class="edit-btn">調整額外額度</button>
         </div>
 
         <!-- 任務統計 -->
@@ -412,6 +413,10 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '../utils/api'
 import AdminNav from '../components/shared/AdminNav.vue'
+import { useAuthStore } from '../stores/auth'
+import { PERM } from '../constants/permissions'
+
+const authStore = useAuthStore()
 
 const route = useRoute()
 

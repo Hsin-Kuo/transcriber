@@ -144,6 +144,7 @@
                   查看
                 </router-link>
                 <button
+                  v-if="authStore.can(PERM.USER_MANAGE)"
                   @click="toggleUserStatus(user)"
                   class="action-btn"
                   :class="user.is_active ? 'disable' : 'enable'"
@@ -187,6 +188,10 @@
 import { ref, computed, onMounted } from 'vue'
 import api from '../utils/api'
 import AdminNav from '../components/shared/AdminNav.vue'
+import { useAuthStore } from '../stores/auth'
+import { PERM } from '../constants/permissions'
+
+const authStore = useAuthStore()
 
 const users = ref([])
 const loading = ref(true)

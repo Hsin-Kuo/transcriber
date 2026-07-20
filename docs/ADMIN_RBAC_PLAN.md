@@ -46,7 +46,8 @@
 - ✅ `src/routers/admin.py` 21 支 endpoint 全掛 `Depends(require_permission(Permission.X))`（見下表）。因所有人仍是 superadmin，行為不變。
 - ✅ `GET /api/admin/me/permissions`：下發當前 admin 的 role + 能力清單。
 - ✅ wiring 測試 `tests/routers/test_admin_rbac.py`：內省每支 route 的依賴樹，斷言掛對能力（endpoint→permission 對照鎖成可執行規格）+ `/me/permissions` 行為。
-- ⏳ **待做（前端）**：admin-frontend 用 `/me/permissions` 隱藏無權操作按鈕（縱深防禦，後端仍是真閘門）。
+- ✅ **前端**：`authStore.can(perm)`（fetch `/me/permissions`，未載入/失敗樂觀放行）+ `constants/permissions.js`；AdminNav 依能力隱藏頁籤，UsersView/UserDetailView/AdminTasksView/AdminTaskDetailView 的停用/改角色/改配額/重設密碼/取消/刪除按鈕依能力 v-if。後端仍是真閘門。
+  - 已知後續（Phase 2 收緊角色後才會浮現）：AdminDashboard 的營收 widget 走 `billing:read`，support 角色進 Dashboard 會讓 `/revenue` 回 403——屆時需在 Dashboard 內依 `billing:read` 隱藏該區塊或容錯。
 
 endpoint → permission 對照（Phase 1 施工清單）：
 
