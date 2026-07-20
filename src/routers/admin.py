@@ -20,6 +20,7 @@ from ..utils.email_service import get_email_service
 from ..utils.sentry_helpers import create_background_task
 from ..utils.logger import get_logger
 from ..utils.api_errors import api_error
+from ..utils.user_display import user_email_or_label
 from ..services.admin_analytics import build_admin_analytics
 
 
@@ -139,6 +140,9 @@ async def list_users(
         result.append({
             "id": user_id,
             "email": user.get("email"),
+            "display_name": user_email_or_label(
+                user.get("email"), user_id, deleted=bool(user.get("deleted_at"))),
+            "is_deleted": bool(user.get("deleted_at")),
             "role": user.get("role", "user"),
             "is_active": user.get("is_active", True),
             "email_verified": user.get("email_verified", False),
@@ -194,6 +198,9 @@ async def get_user_detail(
     return {
         "id": str(user["_id"]),
         "email": user.get("email"),
+        "display_name": user_email_or_label(
+            user.get("email"), str(user["_id"]), deleted=bool(user.get("deleted_at"))),
+        "is_deleted": bool(user.get("deleted_at")),
         "role": user.get("role", "user"),
         "is_active": user.get("is_active", True),
         "email_verified": user.get("email_verified", False),
@@ -701,9 +708,10 @@ async def list_all_tasks(
     # 處理任務資料
     result = []
     for task in tasks:
-        # 取得用戶資訊
+        # 取得用戶資訊（去識別化任務 email 為 None → 顯示穩定假名）
         task_user_id = task.get("user", {}).get("user_id")
-        task_user_email = task.get("user", {}).get("user_email")
+        task_user_email = user_email_or_label(
+            task.get("user", {}).get("user_email"), task_user_id)
 
         result.append({
             "task_id": task.get("_id") or task.get("task_id"),
@@ -743,9 +751,10 @@ async def get_task_detail(
         raise api_error("ADMIN_TASK_NOT_FOUND", "Task not found",
                         status.HTTP_404_NOT_FOUND)
 
-    # 取得用戶資訊
+    # 取得用戶資訊（去識別化任務 email 為 None → 顯示穩定假名）
     task_user_id = task.get("user", {}).get("user_id")
-    task_user_email = task.get("user", {}).get("user_email")
+    task_user_email = user_email_or_label(
+        task.get("user", {}).get("user_email"), task_user_id)
 
     # AI 摘要生成記錄（每次生成都 append，含時間與 token 消耗）
     summary_log_repo = SummaryLogRepository(db)
@@ -753,6 +762,7 @@ async def get_task_detail(
 
     return {
         "task_id": task.get("_id") or task.get("task_id"),
+        "task_type": task.get("task_type"),
         "user": {
             "user_id": task_user_id,
             "user_email": task_user_email
@@ -953,6 +963,41 @@ async def get_revenue_stats(
 ):
     """營收 dashboard 數據"""
     return await build_admin_analytics(db).revenue()
+
+
+# ========== AI 成本統計 API ==========
+
+@router.get("/cost")
+async def get_ai_cost_stats(
+    request: Request,
+    months: int = Query(6, ge=1, le=24, description="往回涵蓋幾個日曆月（含當月）"),
+    admin: dict = Depends(get_current_admin),
+    db = Depends(get_database),
+):
+    """AI 成本 dashboard：逐月 × 功能（標點/摘要）× 模型的 token → USD 試算。"""
+    try:
+        try:
+            from ..utils.audit_logger import get_audit_logger
+            await get_audit_logger().log_admin_operation(
+                request=request,
+                action="view_ai_cost",
+                user_id=str(admin["_id"]),
+                status_code=200,
+                message=f"查看 AI 成本統計（近 {months} 月）",
+            )
+        except Exception as e:
+            logger.warning("audit_log.write_failed", error=str(e))
+
+        return await build_admin_analytics(db).monthly_cost(months=months)
+
+    except Exception as e:
+        logger.error("admin.cost.failed", error=str(e))
+        raise api_error(
+            "ADMIN_COST_FAILED",
+            "Failed to fetch AI cost stats: {error}",
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error=str(e),
+        )
 
 
 # ========== 審計日誌 API ==========

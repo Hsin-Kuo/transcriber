@@ -39,6 +39,10 @@
             <code class="value">{{ task.task_id }}</code>
           </div>
           <div class="info-row">
+            <span class="label">任務類型：</span>
+            <span class="value">{{ getTaskTypeName(task.task_type) }}</span>
+          </div>
+          <div class="info-row">
             <span class="label">用戶：</span>
             <router-link
               v-if="task.user?.user_id"
@@ -304,6 +308,11 @@ function getStatusName(status) {
     failed: '失敗', cancelled: '已取消', canceling: '取消中'
   }
   return names[status] || status
+}
+
+function getTaskTypeName(type) {
+  const names = { paragraph: '文件', subtitle: '字幕' }
+  return names[type] || type || '-'
 }
 
 function formatDuration(seconds) {

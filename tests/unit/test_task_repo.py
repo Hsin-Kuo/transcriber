@@ -183,6 +183,41 @@ class TestUserScopedQueries:
         assert deleted == 2
         assert await repo.count_by_user("bob") == 1
 
+    async def test_anonymize_all_for_user(self, repo):
+        # 造一筆含 PII / 內容參照的完成任務
+        d = _doc(user_id="alice", tags=["會議", "客戶"])
+        d["user"]["user_email"] = "alice@example.com"
+        d["custom_name"] = "客戶王小明訪談"
+        d["file"] = {"filename": "王小明_面試.mp3", "size_mb": 3.2}
+        d["result"] = {"audio_file": "uploads/pro/x.mp3", "audio_filename": "x.mp3",
+                       "text_length": 1234, "word_count": 200}
+        d["stats"] = {"duration_seconds": 42, "token_usage": {"total": 10}}
+        d["models"] = {"transcription": "large-v3"}
+        await repo.create(d)
+        await repo.create(_doc(user_id="bob"))  # 不受影響
+
+        n = await repo.anonymize_all_for_user("alice", now=1700009999)
+        assert n == 1
+
+        task = await repo.get_by_id(d["_id"])
+        # PII / 內容參照被清除
+        assert task["user"]["user_email"] is None
+        assert task["custom_name"] is None
+        assert task["tags"] == []
+        assert task["file"]["filename"] is None
+        assert task["result"]["audio_file"] is None
+        assert task["result"]["audio_filename"] is None
+        # 統計欄位保留、任務仍存在、標記匿名化時間
+        assert task["user"]["user_id"] == "alice"       # 假名鍵保留
+        assert task["status"] == "completed"
+        assert task["stats"]["duration_seconds"] == 42
+        assert task["stats"]["token_usage"]["total"] == 10
+        assert task["models"]["transcription"] == "large-v3"
+        assert task["result"]["text_length"] == 1234    # 字數統計（非 PII）保留
+        assert task["anonymized_at"] == 1700009999
+        # bob 不受影響（任務數不變、未被匿名化）
+        assert await repo.count_by_user("bob") == 1
+
     async def test_get_audio_refs_projects_minimal(self, repo):
         d1 = _doc(user_id="alice")
         d1["result"] = {"audio_file": "uploads/pro/x.mp3"}

@@ -18,7 +18,6 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from src.services.admin_analytics import (  # noqa: E402
-    combine_token_usage,
     derive_overview,
     format_named_counts,
     format_performance,
@@ -47,31 +46,6 @@ class TestDeriveOverview:
         assert ov["success_rate"] == 0
 
 
-class TestCombineTokenUsage:
-    def test_combines_and_computes_averages(self):
-        punct = {"total_tokens": 1000, "total_prompt_tokens": 600,
-                 "total_completion_tokens": 400, "tasks_with_tokens": 4}
-        summary = {"total_tokens": 300, "total_prompt_tokens": 200,
-                   "total_completion_tokens": 100, "summaries_with_tokens": 2}
-        tu = combine_token_usage(punct, summary)
-        assert tu["total_tokens"] == 1300
-        assert tu["prompt_tokens"] == 800 and tu["completion_tokens"] == 500
-        assert tu["punctuation"]["avg_tokens_per_task"] == 250.0   # 1000/4
-        assert tu["summary"]["avg_tokens_per_summary"] == 150.0     # 300/2
-        assert tu["punctuation"]["tasks_count"] == 4
-        assert tu["summary"]["summaries_count"] == 2
-
-    def test_zero_counts_no_division_error(self):
-        empty = {"total_tokens": 0, "total_prompt_tokens": 0,
-                 "total_completion_tokens": 0, "tasks_with_tokens": 0}
-        empty_s = {"total_tokens": 0, "total_prompt_tokens": 0,
-                   "total_completion_tokens": 0, "summaries_with_tokens": 0}
-        tu = combine_token_usage(empty, empty_s)
-        assert tu["total_tokens"] == 0
-        assert tu["punctuation"]["avg_tokens_per_task"] == 0
-        assert tu["summary"]["avg_tokens_per_summary"] == 0
-
-
 class TestMergeDaily:
     def test_merges_tasks_and_summaries_by_date(self):
         tasks = [
@@ -79,7 +53,8 @@ class TestMergeDaily:
             {"_id": "2026-06-02", "tasks_count": 3, "punctuation_tokens": 50},
         ]
         summaries = [{"_id": "2026-06-01", "summaries_count": 2, "summary_tokens": 30}]
-        out = merge_daily(tasks, summaries)
+        dates = ["2026-06-01", "2026-06-02"]
+        out = merge_daily(tasks, summaries, dates)
         d1 = next(d for d in out if d["date"] == "2026-06-01")
         assert d1["summaries_count"] == 2 and d1["summary_tokens"] == 30
         assert d1["total_tokens"] == 130  # 100 + 30
@@ -88,12 +63,25 @@ class TestMergeDaily:
         assert d2["summaries_count"] == 0 and d2["summary_tokens"] == 0
         assert d2["total_tokens"] == 50
 
-    def test_summary_only_date_is_dropped(self):
-        # 保留原行為：只遍歷 task 日期，summary-only 日期不會出現
+    def test_missing_dates_filled_with_zero(self):
+        # date_list 為主軸：無任何資料的日期補 0（前端圖表才不跳日）
+        tasks = [{"_id": "2026-06-01", "tasks_count": 5, "punctuation_tokens": 100}]
+        dates = ["2026-06-01", "2026-06-02", "2026-06-03"]
+        out = merge_daily(tasks, [], dates)
+        assert [d["date"] for d in out] == dates  # 全部日期都出現且順序不變
+        empty = out[1]
+        assert empty["tasks_count"] == 0 and empty["summaries_count"] == 0
+        assert empty["punctuation_tokens"] == 0 and empty["total_tokens"] == 0
+
+    def test_summary_only_date_now_included(self):
+        # 新行為：summary-only 的日期只要在 date_list 內就會出現（不再被丟棄）
         tasks = [{"_id": "2026-06-01", "tasks_count": 1, "punctuation_tokens": 10}]
         summaries = [{"_id": "2026-06-09", "summaries_count": 9, "summary_tokens": 999}]
-        out = merge_daily(tasks, summaries)
-        assert [d["date"] for d in out] == ["2026-06-01"]
+        dates = ["2026-06-01", "2026-06-09"]
+        out = merge_daily(tasks, summaries, dates)
+        d9 = next(d for d in out if d["date"] == "2026-06-09")
+        assert d9["tasks_count"] == 0
+        assert d9["summaries_count"] == 9 and d9["total_tokens"] == 999
 
 
 class TestMergeTopUsers:

@@ -73,9 +73,11 @@ async def seeded_db():
         _task("B", "u1", "completed", total=50, duration=10, created=now),
         _task("C", "u2", "failed", created=now),
     ])
-    await db.summaries.insert_one({
-        "_id": "A", "metadata": {"token_usage": {"total": 20, "prompt": 12, "completion": 8}, "model": "gemini-2.0"},
-        "created_at": now,
+    # 摘要統計來源是 summary_logs（非 summaries）——見 D2。故意只 seed summary_logs：
+    # 若統計誤讀 summaries，下列 top_users / daily 的 summary token 斷言會失敗。
+    await db.summary_logs.insert_one({
+        "task_id": "A", "user_id": "u1", "status": "completed", "model": "gemini-2.0",
+        "token_usage": {"total": 20, "prompt": 12, "completion": 8}, "created_at": now,
     })
     await db.users.insert_many([
         {"_id": "u1", "is_active": True},
@@ -96,12 +98,10 @@ async def test_full_report_against_real_mongo(seeded_db):
     assert ov["success_rate"] == 66.67           # 2/3
     assert ov["total_users"] == 2 and ov["active_users"] == 1
 
-    tu = report["token_usage"]
-    assert tu["punctuation"]["total_tokens"] == 150   # 100 + 50
-    assert tu["summary"]["total_tokens"] == 20
-    assert tu["total_tokens"] == 170
+    # full_report 不再回全期間 token_usage（成本統計移到 /admin/cost）
+    assert "token_usage" not in report
 
-    # $lookup 把 summary A 的 token 歸給 task A 的 owner u1
+    # summary_logs.user_id 直接歸戶：u1 的 summary token 20 併入 punct 150
     top = {u["user_id"]: u for u in report["top_users"]}
     assert top["u1"]["total_tokens"] == 170          # 150 punct + 20 summary
     assert report["top_users"][0]["user_id"] == "u1"  # 依 total_tokens 排序
@@ -109,12 +109,17 @@ async def test_full_report_against_real_mongo(seeded_db):
     # performance：只計 completed 的 duration → (30+10)/2
     assert report["performance"]["avg_duration_seconds"] == 20.0
 
-    # daily：$dateToString 30 天窗內，今天一筆，3 tasks / 1 summary
-    assert len(report["daily_stats"]) == 1
-    assert report["daily_stats"][0]["tasks_count"] == 3
-    assert report["daily_stats"][0]["total_tokens"] == 170
+    # daily：補零後涵蓋完整日期窗（無資料日補 0）；有資料的僅今天那筆 3 tasks / 1 summary
+    non_empty = [d for d in report["daily_stats"] if d["tasks_count"] > 0]
+    assert len(non_empty) == 1
+    assert non_empty[0]["tasks_count"] == 3
+    assert non_empty[0]["total_tokens"] == 170
+    # 其餘日期一律補 0
+    assert all(d["total_tokens"] == 0 for d in report["daily_stats"] if d["date"] != non_empty[0]["date"])
 
     assert report["model_usage"]["transcription"][0]["model"] == "whisper-medium"
+    # 摘要模型分布來自 summary_logs（seed 的 model=gemini-2.0）
+    assert report["model_usage"]["summary"][0]["model"] == "gemini-2.0"
     assert report["punct_provider_usage"][0]["provider"] == "gemini"
 
 
