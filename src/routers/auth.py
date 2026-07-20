@@ -883,6 +883,14 @@ async def get_current_user_info(
             status.HTTP_404_NOT_FOUND,
         )
 
+    # 帳號已刪除（軟刪 email=None）或被停用：token 可能仍有效，但視為 session 失效 → 401，
+    # 讓前端攔截器登出導向 /login（回 UserResponse 會因 email=None 觸發 500）。
+    if full_user.get("deleted_at") or not full_user.get("is_active", True):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="帳號已停用或刪除",
+        )
+
     # 跨月自動歸零配額
     from src.auth.quota import QuotaManager
     usage = full_user.get("usage", {})
@@ -1107,6 +1115,7 @@ async def reset_password(
 async def delete_account(
     http_request: Request,
     request: DeleteAccountRequest,
+    response: Response,
     current_user: dict = Depends(get_current_user),
     db=Depends(get_database)
 ):
@@ -1232,5 +1241,10 @@ async def delete_account(
         "email_bounce_at": None,
         "email_bounce_reason": None
     })
+
+    # 清 access/refresh cookie：httpOnly 前端刪不掉，必須後端 Set-Cookie 清除，
+    # 否則瀏覽器仍帶有效 token 續打 /auth/me（帳號已軟刪 → 500/噪音）。
+    clear_refresh_cookie(response)
+    clear_access_cookie(response)
 
     return {"message": "帳號已永久刪除"}
