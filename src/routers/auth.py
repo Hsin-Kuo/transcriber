@@ -1112,7 +1112,10 @@ async def delete_account(
 ):
     """刪除帳號
 
-    永久刪除用戶帳號及所有相關資料，使用紀錄去識別化保留。
+    去識別化刪除：抹除個資與內容、保留匿名化使用紀錄供統計/稽核。
+    - 內容硬刪：音檔、transcriptions/segments/summaries（含實際逐字內容）。
+    - 任務匿名化保留：清 email/自訂名/標籤/檔名/音檔參照，保留統計欄位。
+    - 使用者文件匿名化：email/PII 設 None、is_active=False、寫 deleted_at。
 
     Args:
         http_request: HTTP Request 對象
@@ -1189,20 +1192,21 @@ async def delete_account(
             except Exception as e:
                 log.warning("audio.delete_failed", task_id=str(task["_id"]), error=str(e))
 
-    # 3. 刪除關聯資料
+    now = get_utc_timestamp()
+
+    # 3. 硬刪內容（含實際逐字內容，屬 PII 風險，必須清除）
     if task_ids:
         await db.transcriptions.delete_many({"_id": {"$in": task_ids}})
         await db.segments.delete_many({"_id": {"$in": task_ids}})
         await db.summaries.delete_many({"_id": {"$in": task_ids}})
 
-    # 4. 刪除任務
-    await task_repo.delete_all_for_user(user_id)
+    # 4. 任務去識別化保留（清 PII/內容參照，留統計欄位）——非硬刪
+    await task_repo.anonymize_all_for_user(user_id, now=now)
 
-    # 5. 刪除標籤
+    # 5. 刪除使用者自訂標籤（使用者建立的字串，可能含 PII）
     await db.tags.delete_many({"user_id": user_id})
 
     # 6. 抹除用戶個人資訊（軟刪除，保留 _id 讓 audit_logs 等仍可關聯到去識別帳號）
-    now = get_utc_timestamp()
     await user_repo.update(user_id, {
         "email": None,
         "password_hash": None,

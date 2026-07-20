@@ -91,7 +91,7 @@
             <tr v-for="user in users" :key="user.id">
               <td class="email">
                 <router-link :to="`/users/${user.id}`" class="user-link">
-                  {{ user.email }}
+                  {{ user.display_name || user.email || '—' }}
                 </router-link>
               </td>
               <td>
@@ -254,7 +254,7 @@ async function toggleUserStatus(user) {
   if (user.role === 'admin') return
 
   const action = user.is_active ? '停用' : '啟用'
-  if (!confirm(`確定要${action}用戶 ${user.email} 嗎？`)) return
+  if (!confirm(`確定要${action}用戶 ${user.display_name || user.email} 嗎？`)) return
 
   try {
     await api.put(`/api/admin/users/${user.id}/status`, {

@@ -507,10 +507,15 @@ class AdminAnalytics:
         user_ids = list({o.get("user_id") for o in recent_raw if o.get("user_id")})
         email_map = {}
         if user_ids:
+            # 已刪除帳號 email 為 None → 用穩定假名，避免訂單列 email 空白
+            from ..utils.user_display import user_email_or_label
             async for u in db.users.find(
-                {"_id": {"$in": [ObjectId(uid) for uid in user_ids]}}, {"email": 1}
+                {"_id": {"$in": [ObjectId(uid) for uid in user_ids]}},
+                {"email": 1, "deleted_at": 1},
             ):
-                email_map[str(u["_id"])] = u.get("email", "")
+                uid = str(u["_id"])
+                email_map[uid] = user_email_or_label(
+                    u.get("email"), uid, deleted=bool(u.get("deleted_at")))
         recent_orders = format_recent_orders(recent_raw, email_map)
 
         # 6 流失指標（「本月」以日曆月初為界，非滾動 30 天）
