@@ -37,21 +37,23 @@ def derive_overview(
     }
 
 
-def merge_daily(daily_tasks_stats: list, daily_summaries_stats: list) -> list:
-    """每日統計：以 task 日期為主軸，合併同日 summary。
+def merge_daily(daily_tasks_stats: list, daily_summaries_stats: list, date_list: list) -> list:
+    """每日統計：以 date_list 為主軸（連續日期，含無資料日）合併 task / summary。
 
-    保留原行為——只遍歷有 task 的日期；summary-only 的日期不出現在結果。
+    date_list 由呼叫端算出完整日期序列，缺資料的日期一律補 0（前端圖表才不會跳日）；
+    summary-only 的日期也會出現（不再被丟棄）。
     """
+    task_map = {t["_id"]: t for t in daily_tasks_stats}
     summary_map = {s["_id"]: s for s in daily_summaries_stats}
     out = []
-    for t in daily_tasks_stats:
-        date = t["_id"]
+    for date in date_list:
+        t = task_map.get(date, {})
         s = summary_map.get(date, {})
-        punct_tokens = t["punctuation_tokens"]
+        punct_tokens = t.get("punctuation_tokens", 0)
         summary_tokens = s.get("summary_tokens", 0)
         out.append({
             "date": date,
-            "tasks_count": t["tasks_count"],
+            "tasks_count": t.get("tasks_count", 0),
             "summaries_count": s.get("summaries_count", 0),
             "punctuation_tokens": punct_tokens,
             "summary_tokens": summary_tokens,
@@ -285,6 +287,18 @@ def _thirty_days_ago_ts() -> int:
     return int(dt.timestamp())
 
 
+def _daily_date_series(cutoff_ts: int) -> list:
+    """從 cutoff（UTC+8 00:00）那天到今天（UTC+8）的連續 'YYYY-MM-DD' 清單，供每日統計補零。"""
+    start = datetime.fromtimestamp(cutoff_ts, tz=TZ_UTC8).date()
+    today = datetime.now(TZ_UTC8).date()
+    out = []
+    d = start
+    while d <= today:
+        out.append(d.isoformat())
+        d += timedelta(days=1)
+    return out
+
+
 def _daily_group(date_field: str, count_key: str, token_path: str, token_key: str, cutoff_ts: int) -> list:
     """每日統計 pipeline（UTC+8 分日）。cutoff_ts 由呼叫端算一次傳入（兩條 pipeline 共用同一界線）。"""
     return [
@@ -460,7 +474,7 @@ class AdminAnalytics:
                 "diarization": format_named_counts(diar_models, key="model", default="未知"),
                 "summary": format_named_counts(summary_models, key="model", default="未知"),
             },
-            "daily_stats": merge_daily(daily_tasks, daily_summaries),
+            "daily_stats": merge_daily(daily_tasks, daily_summaries, _daily_date_series(cutoff)),
             "top_users": merge_top_users(user_tasks, user_summaries),
             "performance": format_performance(duration),
             "punct_provider_usage": format_named_counts(punct_providers, key="provider", default="none"),

@@ -79,7 +79,8 @@ class TestMergeDaily:
             {"_id": "2026-06-02", "tasks_count": 3, "punctuation_tokens": 50},
         ]
         summaries = [{"_id": "2026-06-01", "summaries_count": 2, "summary_tokens": 30}]
-        out = merge_daily(tasks, summaries)
+        dates = ["2026-06-01", "2026-06-02"]
+        out = merge_daily(tasks, summaries, dates)
         d1 = next(d for d in out if d["date"] == "2026-06-01")
         assert d1["summaries_count"] == 2 and d1["summary_tokens"] == 30
         assert d1["total_tokens"] == 130  # 100 + 30
@@ -88,12 +89,25 @@ class TestMergeDaily:
         assert d2["summaries_count"] == 0 and d2["summary_tokens"] == 0
         assert d2["total_tokens"] == 50
 
-    def test_summary_only_date_is_dropped(self):
-        # 保留原行為：只遍歷 task 日期，summary-only 日期不會出現
+    def test_missing_dates_filled_with_zero(self):
+        # date_list 為主軸：無任何資料的日期補 0（前端圖表才不跳日）
+        tasks = [{"_id": "2026-06-01", "tasks_count": 5, "punctuation_tokens": 100}]
+        dates = ["2026-06-01", "2026-06-02", "2026-06-03"]
+        out = merge_daily(tasks, [], dates)
+        assert [d["date"] for d in out] == dates  # 全部日期都出現且順序不變
+        empty = out[1]
+        assert empty["tasks_count"] == 0 and empty["summaries_count"] == 0
+        assert empty["punctuation_tokens"] == 0 and empty["total_tokens"] == 0
+
+    def test_summary_only_date_now_included(self):
+        # 新行為：summary-only 的日期只要在 date_list 內就會出現（不再被丟棄）
         tasks = [{"_id": "2026-06-01", "tasks_count": 1, "punctuation_tokens": 10}]
         summaries = [{"_id": "2026-06-09", "summaries_count": 9, "summary_tokens": 999}]
-        out = merge_daily(tasks, summaries)
-        assert [d["date"] for d in out] == ["2026-06-01"]
+        dates = ["2026-06-01", "2026-06-09"]
+        out = merge_daily(tasks, summaries, dates)
+        d9 = next(d for d in out if d["date"] == "2026-06-09")
+        assert d9["tasks_count"] == 0
+        assert d9["summaries_count"] == 9 and d9["total_tokens"] == 999
 
 
 class TestMergeTopUsers:
