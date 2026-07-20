@@ -83,9 +83,9 @@
 - [x] `task_repo.anonymize_all_for_user`（D1）
 - [x] `delete_account` 內容硬刪 + 任務匿名化保留（D1）
 - [x] 顯示假名 `user_display` + 套用各後台畫面（D4）
-- [ ] **D2**：`admin_analytics.full_report` 摘要統計（`summary_models` / `user_summaries` /
-      `daily_summaries`）改讀 `summary_logs`
-- [ ] **D3**：`delete_account` 的 audit message 移除 email，只記 user_id
+- [x] **D2**：`admin_analytics.full_report` 摘要統計（`summary_models` / `user_summaries` /
+      `daily_summaries`）改讀 `summary_logs`（`user_summaries` 順帶免去 $lookup join）
+- [x] **D3**：`delete_account` 的 audit message 移除 email，只記 user_id
 - [ ] 上 staging 用測試帳號實跑：確認內容清除、假名顯示、統計含匿名任務且不掉數
 
 ## 備註：既有已刪帳號

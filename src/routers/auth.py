@@ -1167,12 +1167,14 @@ async def delete_account(
             )
 
     # 記錄刪除操作（在刪除前記錄）
+    # 不記原始 email：切斷 user_id→email 反查鏈（見 docs/ACCOUNT_DELETION_GDPR.md D3）；
+    # user_id 已由 log_auth 另存，稽核仍可追蹤。
     await audit_logger.log_auth(
         request=http_request,
         action="delete_account",
         user_id=user_id,
         status_code=200,
-        message=f"帳號刪除: {user['email']}"
+        message="帳號刪除（去識別化）"
     )
 
     # 1. 取得用戶所有任務（用於刪除關聯資料）

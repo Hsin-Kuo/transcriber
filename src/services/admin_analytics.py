@@ -357,17 +357,19 @@ class AdminAnalytics:
         # token_usage（dashboard 改顯示當月成本、AI 成本頁顯示各區間）。
 
         # 3 模型使用
+        # 摘要類統計改讀 summary_logs（帳號刪除時 summaries 內容被砍、summary_logs 保留）
+        # → 歷史數字不掉；且 summary_logs 記每次生成，貼近實際用量。見 docs/ACCOUNT_DELETION_GDPR.md D2。
         punct_models = await self._agg(db.tasks, _model_group("models.punctuation"))
         trans_models = await self._agg(db.tasks, _model_group("models.transcription"))
         diar_models = await self._agg(db.tasks, _model_group("models.diarization"))
-        summary_models = await self._agg(db.summaries, _model_group("metadata.model"))
+        summary_models = await self._agg(db.summary_logs, _model_group("model"))
 
         # 4 每日統計（兩條 pipeline 共用同一個 30 天界線）
         cutoff = _thirty_days_ago_ts()
         daily_tasks = await self._agg(db.tasks, _daily_group(
             "timestamps.created_at", "tasks_count", "stats.token_usage.total", "punctuation_tokens", cutoff))
-        daily_summaries = await self._agg(db.summaries, _daily_group(
-            "created_at", "summaries_count", "metadata.token_usage.total", "summary_tokens", cutoff))
+        daily_summaries = await self._agg(db.summary_logs, _daily_group(
+            "created_at", "summaries_count", "token_usage.total", "summary_tokens", cutoff))
 
         # 5 top users
         user_tasks = await self._agg(db.tasks, [
@@ -379,13 +381,12 @@ class AdminAnalytics:
             {"$sort": {"tasks_count": -1}},
             {"$limit": 20},
         ])
-        user_summaries = await self._agg(db.summaries, [
-            {"$lookup": {"from": "tasks", "localField": "_id", "foreignField": "_id", "as": "task_info"}},
-            {"$unwind": {"path": "$task_info", "preserveNullAndEmptyArrays": True}},
+        # summary_logs 直接帶 user_id（= tasks.user.user_id），免 $lookup join
+        user_summaries = await self._agg(db.summary_logs, [
             {"$group": {
-                "_id": "$task_info.user.user_id",
+                "_id": "$user_id",
                 "summaries_count": {"$sum": 1},
-                "summary_tokens": {"$sum": {"$ifNull": ["$metadata.token_usage.total", 0]}},
+                "summary_tokens": {"$sum": {"$ifNull": ["$token_usage.total", 0]}},
             }},
         ])
 
