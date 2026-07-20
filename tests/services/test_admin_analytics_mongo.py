@@ -109,10 +109,13 @@ async def test_full_report_against_real_mongo(seeded_db):
     # performance：只計 completed 的 duration → (30+10)/2
     assert report["performance"]["avg_duration_seconds"] == 20.0
 
-    # daily：$dateToString 30 天窗內，今天一筆，3 tasks / 1 summary
-    assert len(report["daily_stats"]) == 1
-    assert report["daily_stats"][0]["tasks_count"] == 3
-    assert report["daily_stats"][0]["total_tokens"] == 170
+    # daily：補零後涵蓋完整日期窗（無資料日補 0）；有資料的僅今天那筆 3 tasks / 1 summary
+    non_empty = [d for d in report["daily_stats"] if d["tasks_count"] > 0]
+    assert len(non_empty) == 1
+    assert non_empty[0]["tasks_count"] == 3
+    assert non_empty[0]["total_tokens"] == 170
+    # 其餘日期一律補 0
+    assert all(d["total_tokens"] == 0 for d in report["daily_stats"] if d["date"] != non_empty[0]["date"])
 
     assert report["model_usage"]["transcription"][0]["model"] == "whisper-medium"
     assert report["punct_provider_usage"][0]["provider"] == "gemini"
