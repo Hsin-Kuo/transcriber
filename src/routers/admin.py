@@ -955,6 +955,41 @@ async def get_revenue_stats(
     return await build_admin_analytics(db).revenue()
 
 
+# ========== AI 成本統計 API ==========
+
+@router.get("/cost")
+async def get_ai_cost_stats(
+    request: Request,
+    months: int = Query(6, ge=1, le=24, description="往回涵蓋幾個日曆月（含當月）"),
+    admin: dict = Depends(get_current_admin),
+    db = Depends(get_database),
+):
+    """AI 成本 dashboard：逐月 × 功能（標點/摘要）× 模型的 token → USD 試算。"""
+    try:
+        try:
+            from ..utils.audit_logger import get_audit_logger
+            await get_audit_logger().log_admin_operation(
+                request=request,
+                action="view_ai_cost",
+                user_id=str(admin["_id"]),
+                status_code=200,
+                message=f"查看 AI 成本統計（近 {months} 月）",
+            )
+        except Exception as e:
+            logger.warning("audit_log.write_failed", error=str(e))
+
+        return await build_admin_analytics(db).monthly_cost(months=months)
+
+    except Exception as e:
+        logger.error("admin.cost.failed", error=str(e))
+        raise api_error(
+            "ADMIN_COST_FAILED",
+            "Failed to fetch AI cost stats: {error}",
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error=str(e),
+        )
+
+
 # ========== 審計日誌 API ==========
 
 @router.get("/audit-logs")

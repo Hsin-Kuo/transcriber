@@ -9,6 +9,8 @@
 """
 from datetime import datetime, timedelta, timezone
 
+from .llm_pricing import cost_usd, pricing_table_for_response
+
 TZ_UTC8 = timezone(timedelta(hours=8))
 
 
@@ -128,6 +130,112 @@ def combine_token_usage(punct_stats: dict, summary_stats: dict) -> dict:
     }
 
 
+# ── AI 成本（token → USD）純函式 ──────────────────────────────────────────────
+
+def _empty_cost_block() -> dict:
+    """單一功能（punctuation / summary）的成本累加 buffer。models 暫存為 dict，格式化時轉 list。"""
+    return {
+        "cost_usd": 0.0, "total_tokens": 0, "prompt_tokens": 0,
+        "completion_tokens": 0, "unpriced_tokens": 0, "models": {},
+    }
+
+
+def _fold_cost_row(block: dict, model: str, prompt: int, completion: int, total: int, count: int) -> None:
+    """把一列 (model 已聚合) token 折進成本 buffer；無單價的模型計入 unpriced_tokens 不當 0。"""
+    c = cost_usd(model, prompt, completion)
+    priced = c is not None
+    block["prompt_tokens"] += prompt
+    block["completion_tokens"] += completion
+    block["total_tokens"] += total
+    if priced:
+        block["cost_usd"] += c
+    else:
+        block["unpriced_tokens"] += total
+    mb = block["models"].setdefault(
+        model, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+                "cost_usd": 0.0, "count": 0, "priced": priced})
+    mb["prompt_tokens"] += prompt
+    mb["completion_tokens"] += completion
+    mb["total_tokens"] += total
+    mb["count"] += count
+    mb["priced"] = priced
+    if priced:
+        mb["cost_usd"] += c
+
+
+def _fold_rows(rows: list, block: dict) -> None:
+    """把一批 aggregation 結果（每列 = 一個 (month, model)）折進同一個成本 buffer。"""
+    for r in rows:
+        model = r["_id"].get("model") or "unknown"
+        _fold_cost_row(
+            block, model,
+            r.get("prompt", 0), r.get("completion", 0), r.get("total", 0), r.get("count", 0),
+        )
+
+
+def _format_cost_block(block: dict) -> dict:
+    """把成本 buffer 格式化成回應：round 金額、models dict → 依成本高到低的 list。"""
+    models = [{
+        "model": name,
+        "prompt_tokens": mb["prompt_tokens"],
+        "completion_tokens": mb["completion_tokens"],
+        "total_tokens": mb["total_tokens"],
+        "count": mb["count"],
+        "cost_usd": round(mb["cost_usd"], 4),
+        "priced": mb["priced"],
+    } for name, mb in block["models"].items()]
+    models.sort(key=lambda x: x["cost_usd"], reverse=True)
+    return {
+        "cost_usd": round(block["cost_usd"], 4),
+        "total_tokens": block["total_tokens"],
+        "prompt_tokens": block["prompt_tokens"],
+        "completion_tokens": block["completion_tokens"],
+        "unpriced_tokens": block["unpriced_tokens"],
+        "models": models,
+    }
+
+
+def build_monthly_cost(punct_rows: list, summary_rows: list, month_list: list) -> tuple:
+    """把標點 / 摘要的 (month, model) aggregation 結果組成逐月成本 + 期間總計。
+
+    回 (months, totals)。month_list 由呼叫端算好（含無資料的月份，補零成連續序列）。
+    """
+    # 逐月：先把每列依月份分組，再各自 fold
+    per_month = {m: {"punctuation": _empty_cost_block(), "summary": _empty_cost_block()} for m in month_list}
+    grand = {"punctuation": _empty_cost_block(), "summary": _empty_cost_block()}
+
+    for feature, rows in (("punctuation", punct_rows), ("summary", summary_rows)):
+        by_month = {}
+        for r in rows:
+            by_month.setdefault(r["_id"]["month"], []).append(r)
+        for month, month_rows in by_month.items():
+            if month in per_month:  # 越界月份理論上已被 $match 濾掉，防禦性略過
+                _fold_rows(month_rows, per_month[month][feature])
+        _fold_rows(rows, grand[feature])  # 期間總計直接由全部列折出（$match 已限制在區間內）
+
+    months = []
+    for m in month_list:
+        p, s = per_month[m]["punctuation"], per_month[m]["summary"]
+        months.append({
+            "month": m,
+            "total_cost_usd": round(p["cost_usd"] + s["cost_usd"], 4),
+            "total_tokens": p["total_tokens"] + s["total_tokens"],
+            "unpriced_tokens": p["unpriced_tokens"] + s["unpriced_tokens"],
+            "punctuation": _format_cost_block(p),
+            "summary": _format_cost_block(s),
+        })
+
+    gp, gs = grand["punctuation"], grand["summary"]
+    totals = {
+        "total_cost_usd": round(gp["cost_usd"] + gs["cost_usd"], 4),
+        "total_tokens": gp["total_tokens"] + gs["total_tokens"],
+        "unpriced_tokens": gp["unpriced_tokens"] + gs["unpriced_tokens"],
+        "punctuation": _format_cost_block(gp),
+        "summary": _format_cost_block(gs),
+    }
+    return months, totals
+
+
 def summarize_subscriptions(sub_list: list, price_of) -> tuple:
     """訂閱分佈 + MRR。price_of(tier, cycle)->價格(或 None)，注入以免耦合 NewebpayService。
 
@@ -199,6 +307,47 @@ def _model_group(field: str) -> list:
         {"$match": {field: {"$exists": True, "$ne": None}}},
         {"$group": {"_id": f"${field}", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
+    ]
+
+
+def _month_window(months: int) -> tuple:
+    """回 (cutoff_ts, month_list)：往回涵蓋 `months` 個日曆月（含當月，UTC+8 月初起算）。
+
+    月份計算用「年*12+月」的整數運算避免跨年出錯；month_list 為升序 'YYYY-MM' 且連續（無資料月補零用）。
+    """
+    now = datetime.now(TZ_UTC8)
+    idx = now.year * 12 + (now.month - 1) - (months - 1)  # 起始月的絕對月序
+    start_y, start_m0 = divmod(idx, 12)
+    cutoff = datetime(start_y, start_m0 + 1, 1, tzinfo=TZ_UTC8)
+    month_list = []
+    y, m = start_y, start_m0 + 1
+    while (y, m) <= (now.year, now.month):
+        month_list.append(f"{y:04d}-{m:02d}")
+        m += 1
+        if m > 12:
+            m, y = 1, y + 1
+    return int(cutoff.timestamp()), month_list
+
+
+def _monthly_cost_group(date_field: str, prompt_f: str, completion_f: str,
+                        total_f: str, model_f: str, cutoff_ts: int) -> list:
+    """逐月 × 逐模型 的 token 聚合（UTC+8 分月）。單價在 Python 端套（因各模型/級距不同）。"""
+    return [
+        {"$match": {total_f: {"$exists": True, "$ne": None}, date_field: {"$gte": cutoff_ts}}},
+        {"$group": {
+            "_id": {
+                "month": {"$dateToString": {
+                    "format": "%Y-%m",
+                    "date": {"$toDate": {"$multiply": [f"${date_field}", 1000]}},
+                    "timezone": "+08:00",
+                }},
+                "model": {"$ifNull": [f"${model_f}", "unknown"]},
+            },
+            "prompt": {"$sum": {"$ifNull": [f"${prompt_f}", 0]}},
+            "completion": {"$sum": {"$ifNull": [f"${completion_f}", 0]}},
+            "total": {"$sum": {"$ifNull": [f"${total_f}", 0]}},
+            "count": {"$sum": 1},
+        }},
     ]
 
 
@@ -315,6 +464,41 @@ class AdminAnalytics:
             "top_users": merge_top_users(user_tasks, user_summaries),
             "performance": format_performance(duration),
             "punct_provider_usage": format_named_counts(punct_providers, key="provider", default="none"),
+        }
+
+    async def monthly_cost(self, months: int = 6) -> dict:
+        """AI 成本 dashboard：逐月 × 功能（標點/摘要）× 模型的 token → USD 試算。
+
+        資料來源：
+          - 標點：`tasks.stats.token_usage`（分月依 timestamps.created_at）。
+          - 摘要：`summary_logs`（append-only，逐次生成含 model/token；分月依 created_at）。
+            用 summary_logs 而非 summaries，因它涵蓋重新生成、貼近實際 API 計費次數。
+
+        單價與計價假設見 `llm_pricing`。金額為估算（幣別 USD），非 Google/OpenAI 帳單實數。
+        """
+        months = max(1, min(int(months), 24))  # 白名單化，防惡意大範圍掃描
+        cutoff_ts, month_list = _month_window(months)
+
+        punct_rows = await self._agg(self.db.tasks, _monthly_cost_group(
+            "timestamps.created_at", "stats.token_usage.prompt", "stats.token_usage.completion",
+            "stats.token_usage.total", "stats.token_usage.model", cutoff_ts))
+        summary_rows = await self._agg(self.db.summary_logs, _monthly_cost_group(
+            "created_at", "token_usage.prompt", "token_usage.completion",
+            "token_usage.total", "model", cutoff_ts))
+
+        months_out, totals = build_monthly_cost(punct_rows, summary_rows, month_list)
+        return {
+            "currency": "USD",
+            "range_months": months,
+            "months": months_out,
+            "totals": totals,
+            "pricing": pricing_table_for_response(),
+            "notes": [
+                "金額為估算：依本表單價換算，非 Google/OpenAI 帳單實數。",
+                "分月以 UTC+8 月初為界。",
+                "摘要成本源自 summary_logs（含重新生成），標點源自 tasks.stats.token_usage。",
+                "unpriced_tokens 為單價表未收錄之模型的 token，未計入 cost_usd。",
+            ],
         }
 
     async def revenue(self) -> dict:
