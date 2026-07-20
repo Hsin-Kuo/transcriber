@@ -753,6 +753,7 @@ async def get_task_detail(
 
     return {
         "task_id": task.get("_id") or task.get("task_id"),
+        "task_type": task.get("task_type"),
         "user": {
             "user_id": task_user_id,
             "user_email": task_user_email
