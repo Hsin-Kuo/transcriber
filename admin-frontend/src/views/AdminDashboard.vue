@@ -134,66 +134,59 @@
         </div>
       </div>
 
-      <!-- Token 使用量卡片 -->
+      <!-- 本月 AI 成本卡片（其他區間見「AI 成本」頁）-->
       <div class="stat-card wide">
-        <h2>🔢 Token 使用量</h2>
+        <h2>💰 本月 AI 成本
+          <router-link to="/cost" class="card-link">查看其他區間 →</router-link>
+        </h2>
 
         <!-- 總計 -->
         <div class="token-summary">
           <div class="token-total">
-            <span class="total-label">總 Token</span>
-            <span class="total-value">{{ formatNumber(stats.token_usage.total_tokens) }}</span>
+            <span class="total-label">本月總成本 (USD){{ monthCost ? '・' + monthCost.month : '' }}</span>
+            <span class="total-value">{{ formatUsd(monthCost?.total_cost_usd) }}</span>
           </div>
           <div class="token-breakdown">
-            <span>輸入: {{ formatNumber(stats.token_usage.prompt_tokens) }}</span>
-            <span>輸出: {{ formatNumber(stats.token_usage.completion_tokens) }}</span>
+            <span>總 Token: {{ formatNumber(monthCost?.total_tokens) }}</span>
           </div>
-          <div class="cost-estimate">
-            預估成本: ${{ estimatedCost.toFixed(4) }} USD
+          <div v-if="monthCost && monthCost.unpriced_tokens > 0" class="cost-estimate unpriced">
+            ⚠️ 另有 {{ formatNumber(monthCost.unpriced_tokens) }} tokens 來自未收錄單價的模型，未計入成本
           </div>
         </div>
 
         <!-- 分類統計 -->
         <div class="token-categories">
-          <!-- 標點符號 -->
+          <!-- 標點強化 -->
           <div class="token-category">
-            <h3>📝 標點符號</h3>
+            <h3>📝 標點強化</h3>
+            <div class="stat-item">
+              <span class="label">成本：</span>
+              <span class="value highlight">{{ formatUsd(monthCost?.punctuation.cost_usd) }}</span>
+            </div>
             <div class="stat-item">
               <span class="label">總 Token：</span>
-              <span class="value">{{ formatNumber(stats.token_usage.punctuation?.total_tokens || 0) }}</span>
+              <span class="value">{{ formatNumber(monthCost?.punctuation.total_tokens) }}</span>
             </div>
             <div class="stat-item">
               <span class="label">輸入 / 輸出：</span>
-              <span class="value">{{ formatNumber(stats.token_usage.punctuation?.prompt_tokens || 0) }} / {{ formatNumber(stats.token_usage.punctuation?.completion_tokens || 0) }}</span>
-            </div>
-            <div class="stat-item">
-              <span class="label">任務數：</span>
-              <span class="value">{{ stats.token_usage.punctuation?.tasks_count || 0 }}</span>
-            </div>
-            <div class="stat-item">
-              <span class="label">平均每任務：</span>
-              <span class="value">{{ formatNumber(stats.token_usage.punctuation?.avg_tokens_per_task || 0) }}</span>
+              <span class="value">{{ formatNumber(monthCost?.punctuation.prompt_tokens) }} / {{ formatNumber(monthCost?.punctuation.completion_tokens) }}</span>
             </div>
           </div>
 
-          <!-- AI 總結 -->
+          <!-- AI 摘要 -->
           <div class="token-category">
-            <h3>🤖 AI 總結</h3>
+            <h3>🤖 AI 摘要</h3>
+            <div class="stat-item">
+              <span class="label">成本：</span>
+              <span class="value highlight">{{ formatUsd(monthCost?.summary.cost_usd) }}</span>
+            </div>
             <div class="stat-item">
               <span class="label">總 Token：</span>
-              <span class="value">{{ formatNumber(stats.token_usage.summary?.total_tokens || 0) }}</span>
+              <span class="value">{{ formatNumber(monthCost?.summary.total_tokens) }}</span>
             </div>
             <div class="stat-item">
               <span class="label">輸入 / 輸出：</span>
-              <span class="value">{{ formatNumber(stats.token_usage.summary?.prompt_tokens || 0) }} / {{ formatNumber(stats.token_usage.summary?.completion_tokens || 0) }}</span>
-            </div>
-            <div class="stat-item">
-              <span class="label">摘要數：</span>
-              <span class="value">{{ stats.token_usage.summary?.summaries_count || 0 }}</span>
-            </div>
-            <div class="stat-item">
-              <span class="label">平均每摘要：</span>
-              <span class="value">{{ formatNumber(stats.token_usage.summary?.avg_tokens_per_summary || 0) }}</span>
+              <span class="value">{{ formatNumber(monthCost?.summary.prompt_tokens) }} / {{ formatNumber(monthCost?.summary.completion_tokens) }}</span>
             </div>
           </div>
         </div>
@@ -454,17 +447,11 @@ const stats = ref({
 })
 
 const revenue = ref(null)
+const monthCost = ref(null)
 
 const loading = ref(true)
 const error = ref(null)
 const lastUpdate = ref('')
-
-// 計算預估成本（基於 Gemini 2.0 Flash 定價）
-const estimatedCost = computed(() => {
-  const promptCost = (stats.value.token_usage.prompt_tokens / 1000000) * 0.075
-  const completionCost = (stats.value.token_usage.completion_tokens / 1000000) * 0.30
-  return promptCost + completionCost
-})
 
 // 計算每日最大任務數（用於圖表縮放）
 const maxDailyTasks = computed(() => {
@@ -512,6 +499,17 @@ async function fetchRevenue() {
   }
 }
 
+// 本月 AI 成本（沿用 /admin/cost 取當月；其他區間見「AI 成本」頁）
+async function fetchMonthCost() {
+  try {
+    const response = await api.get('/api/admin/cost', { params: { months: 1 } })
+    const months = response.data.months || []
+    monthCost.value = months.length ? months[months.length - 1] : null
+  } catch (err) {
+    console.error('載入本月成本失敗:', err)
+  }
+}
+
 function formatOrderTime(ts) {
   if (!ts) return '—'
   return new Date(ts * 1000).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -545,6 +543,13 @@ function formatNumber(num) {
   return num.toLocaleString('zh-TW')
 }
 
+// 格式化美金：小額顯示 4 位小數、較大顯示 2 位
+function formatUsd(n) {
+  if (n === undefined || n === null) return '$0.00'
+  const digits = Math.abs(n) < 1 ? 4 : 2
+  return '$' + n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+}
+
 // 格式化時長
 function formatDuration(seconds) {
   if (!seconds) return '0秒'
@@ -564,6 +569,7 @@ function formatDuration(seconds) {
 onMounted(() => {
   fetchStats()
   fetchRevenue()
+  fetchMonthCost()
 })
 </script>
 
@@ -658,6 +664,25 @@ onMounted(() => {
   font-weight: 700;
   color: var(--color-primary-dark, #b8762d);
   font-size: 14px;
+}
+
+.cost-estimate.unpriced {
+  background: #fff8e1;
+  border-color: rgba(233, 118, 12, 0.35);
+  color: #9a5b00;
+  font-size: 13px;
+}
+
+.card-link {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-primary, #dd8448);
+  text-decoration: none;
+}
+
+.card-link:hover {
+  text-decoration: underline;
 }
 
 .data-table {
