@@ -145,20 +145,18 @@ def require_permission(perm: Permission):
         raw = (user or {}).get("admin_role")
         role = resolve_admin_role(raw)
         if role is None:
+            # Phase 3 後：沒有合法 admin_role（未 backfill 或值非法）一律拒。
+            # admin_role=None 代表該 admin 尚未 migrate——若在 prod 大量出現，
+            # 表示 backfill_admin_role 沒跑（見 verify_rbac_ready.py）。
             log.warning(
-                "rbac.invalid_role",
+                "rbac.no_valid_admin_role",
                 user_id=str(current_user["_id"]),
                 admin_role=str(raw),
+                perm=perm.value,
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="無效的管理員角色",
-            )
-        if raw is None:
-            log.warning(
-                "rbac.unmigrated_admin",
-                user_id=str(current_user["_id"]),
-                perm=perm.value,
             )
         if not role_has(role, perm):
             log.warning(

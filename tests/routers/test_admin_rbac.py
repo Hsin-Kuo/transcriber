@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 from bson import ObjectId
+from fastapi import HTTPException
 
 os.environ.setdefault(
     "JWT_SECRET_KEY",
@@ -124,9 +125,10 @@ class TestMyPermissions:
         assert set(result["permissions"]) == {p.value for p in permissions_for(AdminRole.SUPPORT)}
 
     @pytest.mark.asyncio
-    async def test_unmigrated_admin_gets_superadmin(self):
+    async def test_unmigrated_admin_denied(self):
+        # Phase 3：無 admin_role → 403（相容後門已移除）
         admin = {"_id": ObjectId("507f1f77bcf86cd799439011")}
         db = _FakeDB({"_id": admin["_id"], "role": "admin"})  # 無 admin_role
-        result = await get_my_permissions(admin=admin, db=db)
-        assert result["role"] == "superadmin"
-        assert len(result["permissions"]) == len(list(Permission))
+        with pytest.raises(HTTPException) as exc:
+            await get_my_permissions(admin=admin, db=db)
+        assert exc.value.status_code == 403

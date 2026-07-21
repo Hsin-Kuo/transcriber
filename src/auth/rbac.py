@@ -76,12 +76,15 @@ def permissions_for(role: AdminRole) -> set[Permission]:
 def resolve_admin_role(raw) -> Optional[AdminRole]:
     """把 user 文件的 admin_role 原始值解析成 AdminRole。
 
-    - None（尚未 migrate 的舊 admin）→ SUPERADMIN（Phase 0 相容政策，Phase 3 移除）。
     - 可辨識的 enum 值 → 對應 AdminRole。
-    - 無法辨識 → None（由呼叫端決定如何處理，例如回 403）。
+    - None（未設定）或無法辨識 → None（呼叫端據以拒絕）。
+
+    Phase 3 已移除「None → SUPERADMIN」的過渡相容後門：現在沒有明確 admin_role 的
+    admin 一律視為無效、被拒。部署此版本前必須先跑 backfill_admin_role migration
+    讓所有現存 admin 都有合法 admin_role（見 verify_rbac_ready.py 與 docs/ADMIN_RBAC_PLAN.md）。
     """
     if raw is None:
-        return AdminRole.SUPERADMIN
+        return None
     try:
         return AdminRole(raw)
     except ValueError:

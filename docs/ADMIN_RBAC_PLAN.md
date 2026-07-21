@@ -2,7 +2,7 @@
 
 > 建立日期：2026-07-20
 > 對應 roadmap：`docs/ADMIN_ROADMAP.md` P0-1
-> 狀態：**Phase 0 已完成**（`src/auth/rbac.py` + `require_permission` + backfill migration + 測試）
+> 狀態：**Phase 0–3 程式皆完成**；剩「部署 + 營運切換角色」（見 Phase 3 runbook）與 P0-2 帳號安全（獨立）
 
 ## 核心設計原則
 
@@ -78,9 +78,16 @@ endpoint → permission 對照（Phase 1 施工清單）：
 
 > **P0-2 剩餘部分**（獨立於本 RBAC 收尾，未做）：管理員邀請流程（email invite）、首登強制改密、移除 `seed_admin.py` 硬編碼帳密、admin 強制 2FA。見 `docs/ADMIN_ROADMAP.md` P0-2。
 
-### Phase 3 — 收緊相容後門
-- 全部 admin migrate 後，把 Phase 0 的「未設 admin_role → superadmin」改為**拒絕/最小權限**。
-- 翻轉前先確認 `rbac.unmigrated_admin` log 歸零、且 ≥1 個 superadmin 存在。
+### Phase 3 — 收緊相容後門 ✅ 完成（程式）
+- ✅ `resolve_admin_role(None)` 從 SUPERADMIN 改回 `None`：沒有合法 `admin_role` 的 admin 一律被拒（相容後門移除）。`require_permission` / `/me/permissions` 對 None 一律 403，log `rbac.no_valid_admin_role`。
+- ✅ 新增 `src/database/migrations/verify_rbac_ready.py`：部署前 readiness gate（唯讀），檢查「0 個未 migrate admin」且「≥1 superadmin」，not ready 時 exit 1。
+- ✅ 測試改為斷言「無 admin_role → 403」。
+
+> **⚠️ 部署順序（重要，順序錯會把 admin 鎖在門外）**
+> 1. `python -m src.database.migrations.backfill_admin_role`（把現存 admin 補成 superadmin；冪等、向後相容，可提早跑）
+> 2. `python -m src.database.migrations.verify_rbac_ready`（必須印 `✅ READY` / exit 0）
+> 3. 才 deploy 含本 Phase 3 的程式（staging 先行，再 prod）
+> 4. 部署後把實際客服/財務帳號用 `/users/{id}/admin-role` 改成 `support`/`billing`，最小權限正式生效
 
 ## 回滾策略
 - Phase 0–1 是純新增，回滾 = 移除 endpoint 上的 `Depends(require_permission(...))`；粗閘門 `get_current_admin` 仍在，後台不會失守。

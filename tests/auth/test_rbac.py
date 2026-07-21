@@ -71,8 +71,9 @@ class TestRolePermissions:
 
 
 class TestResolveAdminRole:
-    def test_none_is_superadmin_compat(self):
-        assert resolve_admin_role(None) is AdminRole.SUPERADMIN
+    def test_none_is_now_denied(self):
+        # Phase 3：None 不再對應 superadmin，改回 None（拒絕）
+        assert resolve_admin_role(None) is None
 
     def test_known_values_map(self):
         assert resolve_admin_role("support") is AdminRole.SUPPORT
@@ -125,11 +126,12 @@ class TestRequirePermission:
         assert exc.value.status_code == 403
 
     @pytest.mark.asyncio
-    async def test_unmigrated_admin_treated_as_superadmin(self):
-        """過渡相容：沒有 admin_role 的舊 admin 暫時全開（Phase 3 前）。"""
-        checker = require_permission(Permission.ADMIN_GRANT)
-        result = await checker(current_user=_current_user(), db=_FakeDB(_admin_doc(None)))
-        assert result["admin_role"] == AdminRole.SUPERADMIN.value
+    async def test_unmigrated_admin_denied(self):
+        """Phase 3：相容後門已移除——沒有 admin_role 的 admin 一律被拒（403）。"""
+        checker = require_permission(Permission.USER_READ)
+        with pytest.raises(HTTPException) as exc:
+            await checker(current_user=_current_user(), db=_FakeDB(_admin_doc(None)))
+        assert exc.value.status_code == 403
 
     @pytest.mark.asyncio
     async def test_invalid_admin_role_403(self):
