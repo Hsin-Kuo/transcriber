@@ -66,12 +66,17 @@ endpoint → permission 對照（Phase 1 施工清單）：
 | `GET /audit-logs*` | `audit:read` |
 | `POST /cleanup/*` | `ops` |
 
-### Phase 2 — 導入真實角色 + 護欄
-- 把實際客服/財務帳號改成 `support` / `billing`，最小權限正式生效（併 P0-2 管理員管理 UI，邀請時指派角色）。
-- 護欄（superadmin 專屬邏輯）：
-  - 只有 superadmin 能指派 `admin`/`superadmin`（`admin:grant`）。
-  - 禁止移除系統中**最後一個 superadmin**、禁止自我降級造成鎖死。
+### Phase 2 — 導入真實角色 + 護欄 ✅ 完成
+- ✅ 後端：`PUT /users/{id}/admin-role` 指派細分角色（ADMIN_GRANT → superadmin 專屬）；`PUT /users/{id}/role` 升級時套用 `admin_role`（預設 `read_only`）、降級時清 `admin_role`。護欄抽在 `src/services/admin_role_service.py` 純函式：
+  - 只有 superadmin 能到這兩支（ADMIN_GRANT）。
+  - 禁止移除系統中**最後一個 superadmin**（降級 or 改細分角色皆擋）、禁止改自己的角色/細分角色。
   - `admin_role` 只接受 enum 白名單值。
+- ✅ `user_repo.set_admin_role()`：支援 `$unset`（降級清殘值）；`GET /users/{id}` 回傳 `admin_role`。
+- ✅ 前端 UserDetailView：顯示當前權限角色 + 指派 modal（4 角色 select）+ 升級時可選角色。
+- ✅ 測試：`tests/services/test_admin_role_service.py` 窮舉護欄；wiring 測試納入新 endpoint。
+- ⏳ **待做（正式切換）**：實際把客服/財務帳號從 superadmin 改成 `support`/`billing`（一個 admin-role API 呼叫即可），最小權限才真正生效。這是營運動作、非程式。
+
+> **P0-2 剩餘部分**（獨立於本 RBAC 收尾，未做）：管理員邀請流程（email invite）、首登強制改密、移除 `seed_admin.py` 硬編碼帳密、admin 強制 2FA。見 `docs/ADMIN_ROADMAP.md` P0-2。
 
 ### Phase 3 — 收緊相容後門
 - 全部 admin migrate 後，把 Phase 0 的「未設 admin_role → superadmin」改為**拒絕/最小權限**。

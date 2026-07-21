@@ -48,6 +48,17 @@
               修改
             </button>
           </div>
+          <div v-if="user.role === 'admin'" class="info-row">
+            <span class="label">權限角色：</span>
+            <span class="role-badge role-admin">{{ adminRoleLabel(user.admin_role) }}</span>
+            <button
+              v-if="authStore.can(PERM.ADMIN_GRANT)"
+              @click="openAdminRoleModal"
+              class="edit-btn"
+            >
+              調整
+            </button>
+          </div>
           <div class="info-row">
             <span class="label">狀態：</span>
             <span class="status-badge" :class="user.is_active ? 'active' : 'inactive'">
@@ -289,11 +300,43 @@
         <h3>修改角色</h3>
         <div class="modal-body">
           <p>確定要將此用戶設為管理員嗎？</p>
-          <p class="warning">⚠️ 此操作將賦予該用戶管理後台的完整權限</p>
+          <p class="warning">⚠️ 此操作將賦予該用戶登入管理後台的權限</p>
+          <label class="modal-field">
+            <span>權限角色</span>
+            <select v-model="selectedPromoteRole">
+              <option v-for="opt in ADMIN_ROLE_OPTIONS" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+          </label>
+          <p class="card-hint">預設「唯讀」（最小權限），可日後再調整</p>
         </div>
         <div class="modal-footer">
           <button @click="showRoleModal = false" class="btn-cancel">取消</button>
           <button @click="updateRole" class="btn-confirm">確認</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 調整權限角色 Modal -->
+    <div v-if="showAdminRoleModal" class="modal-overlay" @click.self="showAdminRoleModal = false">
+      <div class="modal">
+        <h3>調整權限角色</h3>
+        <div class="modal-body">
+          <p class="modal-user-email">用戶：{{ user.display_name || user.email }}</p>
+          <label class="modal-field">
+            <span>權限角色</span>
+            <select v-model="selectedAdminRole">
+              <option v-for="opt in ADMIN_ROLE_OPTIONS" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+          </label>
+          <p class="card-hint">superadmin 具全部權限；support 不能刪除/退款/改密碼；read_only 僅檢視</p>
+        </div>
+        <div class="modal-footer">
+          <button @click="showAdminRoleModal = false" class="btn-cancel">取消</button>
+          <button @click="updateAdminRole" class="btn-confirm">確認</button>
         </div>
       </div>
     </div>
@@ -427,6 +470,27 @@ const showQuotaModal = ref(false)
 const showRoleModal = ref(false)
 const showPasswordModal = ref(false)
 const showExtraQuotaModal = ref(false)
+const showAdminRoleModal = ref(false)
+const selectedPromoteRole = ref('read_only')
+const selectedAdminRole = ref('read_only')
+
+// 與後端 AdminRole enum 對齊；label 給後台顯示用
+const ADMIN_ROLE_OPTIONS = [
+  { value: 'read_only', label: '唯讀 read_only' },
+  { value: 'support', label: '客服 support' },
+  { value: 'billing', label: '財務 billing' },
+  { value: 'superadmin', label: '超級管理員 superadmin' },
+]
+const ADMIN_ROLE_LABELS = Object.fromEntries(
+  ADMIN_ROLE_OPTIONS.map(o => [o.value, o.label.split(' ')[0]])
+)
+function adminRoleLabel(role) {
+  return ADMIN_ROLE_LABELS[role] || role || '未設定'
+}
+function openAdminRoleModal() {
+  selectedAdminRole.value = user.value?.admin_role || 'read_only'
+  showAdminRoleModal.value = true
+}
 const isResettingPassword = ref(false)
 const passwordError = ref('')
 const extraQuotaError = ref('')
@@ -504,11 +568,26 @@ async function updateQuota() {
 async function updateRole() {
   try {
     await api.put(`/api/admin/users/${user.value.id}/role`, {
-      role: 'admin'
+      role: 'admin',
+      admin_role: selectedPromoteRole.value
     })
     user.value.role = 'admin'
+    user.value.admin_role = selectedPromoteRole.value
     showRoleModal.value = false
     alert('角色已更新')
+  } catch (err) {
+    alert(err.response?.data?.detail || '更新失敗')
+  }
+}
+
+async function updateAdminRole() {
+  try {
+    await api.put(`/api/admin/users/${user.value.id}/admin-role`, {
+      admin_role: selectedAdminRole.value
+    })
+    user.value.admin_role = selectedAdminRole.value
+    showAdminRoleModal.value = false
+    alert('權限角色已更新')
   } catch (err) {
     alert(err.response?.data?.detail || '更新失敗')
   }
@@ -968,6 +1047,24 @@ code {
 
 .modal-body {
   margin-bottom: 20px;
+}
+
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 14px 0 6px;
+  font-weight: 600;
+  color: var(--color-text, rgb(145, 106, 45));
+}
+
+.modal-field select {
+  padding: 10px 12px;
+  border: 1px solid var(--color-divider, rgba(163, 177, 198, 0.4));
+  border-radius: 8px;
+  font-size: 14px;
+  background: var(--color-bg-card, #fff);
+  color: var(--color-text, rgb(145, 106, 45));
 }
 
 .form-group {

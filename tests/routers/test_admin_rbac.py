@@ -29,6 +29,7 @@ EXPECTED = {
     ("GET", "/api/admin/users/{user_id}"): Permission.USER_READ,
     ("PUT", "/api/admin/users/{user_id}/status"): Permission.USER_MANAGE,
     ("PUT", "/api/admin/users/{user_id}/role"): Permission.ADMIN_GRANT,
+    ("PUT", "/api/admin/users/{user_id}/admin-role"): Permission.ADMIN_GRANT,
     ("PUT", "/api/admin/users/{user_id}/quota"): Permission.USER_QUOTA,
     ("POST", "/api/admin/users/{user_id}/reset-quota"): Permission.USER_QUOTA,
     ("POST", "/api/admin/users/{user_id}/extra-quota"): Permission.USER_QUOTA,

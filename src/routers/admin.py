@@ -8,7 +8,12 @@ from pydantic import BaseModel, EmailStr
 from bson import ObjectId
 
 from ..auth.dependencies import get_current_admin, get_database, require_permission
-from ..auth.rbac import Permission, permissions_for, resolve_admin_role
+from ..auth.rbac import AdminRole, Permission, permissions_for, resolve_admin_role
+from ..services.admin_role_service import (
+    validate_admin_role_assignment,
+    validate_role_demotion,
+    normalize_promotion_admin_role,
+)
 from ..auth.password import hash_password
 from ..database.repositories.user_repo import UserRepository
 from ..database.repositories.task_repo import TaskRepository
@@ -65,6 +70,12 @@ class UpdateUserStatusRequest(BaseModel):
 class UpdateUserRoleRequest(BaseModel):
     """更新用戶角色請求"""
     role: str  # "user" or "admin"
+    admin_role: Optional[str] = None  # 升級為 admin 時要套用的細分角色；不給預設 read_only
+
+
+class UpdateAdminRoleRequest(BaseModel):
+    """指派後台細分角色請求（RBAC）"""
+    admin_role: str  # superadmin / billing / support / read_only
 
 
 class UpdateUserQuotaRequest(BaseModel):
@@ -226,6 +237,7 @@ async def get_user_detail(
             user.get("email"), str(user["_id"]), deleted=bool(user.get("deleted_at"))),
         "is_deleted": bool(user.get("deleted_at")),
         "role": user.get("role", "user"),
+        "admin_role": user.get("admin_role"),
         "is_active": user.get("is_active", True),
         "email_verified": user.get("email_verified", False),
         "auth_providers": user.get("auth_providers", []),
@@ -324,33 +336,110 @@ async def update_user_role(
                         status.HTTP_400_BAD_REQUEST)
 
     old_role = user.get("role", "user")
-    success = await user_repo.update(user_id, {"role": body.role})
+    old_admin_role = user.get("admin_role")
+    new_admin_role = None
 
-    if success:
-        await log_admin_action(
-            admin_id=str(admin["_id"]),
-            action="change_role",
-            resource_type="user",
-            resource_id=user_id,
-            details={
-                "email": user.get("email"),
-                "before": {"role": old_role},
-                "after": {"role": body.role}
-            },
-            request=http_request,
+    if body.role == "admin" and old_role != "admin":
+        # 升級：套用細分角色（未指定 → read_only 最小權限），避免相容路徑把新 admin
+        # 當成 superadmin。
+        chosen = normalize_promotion_admin_role(body.admin_role)
+        if isinstance(chosen, tuple):
+            raise api_error(chosen[0], chosen[1], status.HTTP_400_BAD_REQUEST)
+        new_admin_role = chosen
+        await user_repo.update(user_id, {"role": "admin", "admin_role": chosen})
+    elif body.role == "user" and old_role == "admin":
+        # 降級：護欄——不能降掉最後一個 superadmin；並清掉 admin_role 殘值。
+        superadmin_count = await user_repo.count(
+            {"role": "admin", "admin_role": AdminRole.SUPERADMIN.value})
+        err = validate_role_demotion(
+            target_admin_role=old_admin_role, superadmin_count=superadmin_count)
+        if err:
+            raise api_error(err[0], err[1], status.HTTP_400_BAD_REQUEST)
+        await user_repo.update(user_id, {"role": "user"})
+        await user_repo.set_admin_role(user_id, None)
+    else:
+        # 同角色，維持原本 idempotent 行為
+        await user_repo.update(user_id, {"role": body.role})
+
+    success = True
+    await log_admin_action(
+        admin_id=str(admin["_id"]),
+        action="change_role",
+        resource_type="user",
+        resource_id=user_id,
+        details={
+            "email": user.get("email"),
+            "before": {"role": old_role, "admin_role": old_admin_role},
+            "after": {"role": body.role, "admin_role": new_admin_role}
+        },
+        request=http_request,
+    )
+
+    if old_role != body.role:
+        _notify_user_async(
+            to_email=user.get("email"),
+            action_label=f"角色已變更：{old_role} → {body.role}",
+            admin_email=admin.get("email", "unknown"),
+            details_lines=[f"原本角色：{old_role}", f"新角色：{body.role}"],
         )
-
-        if old_role != body.role:
-            _notify_user_async(
-                to_email=user.get("email"),
-                action_label=f"角色已變更：{old_role} → {body.role}",
-                admin_email=admin.get("email", "unknown"),
-                details_lines=[f"原本角色：{old_role}", f"新角色：{body.role}"],
-            )
 
     return {
         "success": success,
         "message": f"用戶角色已更新為 {body.role}"
+    }
+
+
+@router.put("/users/{user_id}/admin-role")
+async def update_user_admin_role(
+    user_id: str,
+    body: UpdateAdminRoleRequest,
+    http_request: Request,
+    admin: dict = Depends(require_permission(Permission.ADMIN_GRANT)),
+    db = Depends(get_database)
+):
+    """指派後台細分角色 admin_role（superadmin 專屬——ADMIN_GRANT 只有 superadmin 有）。
+
+    護欄：白名單值、不能改自己、目標須已是 admin、不能移除最後一個 superadmin。
+    這些判斷抽在 services/admin_role_service.py 純函式，這裡只負責查 DB + 轉錯誤。
+    """
+    user_repo = UserRepository(db)
+    user = await user_repo.get_by_id(user_id)
+    if not user:
+        raise api_error("ADMIN_USER_NOT_FOUND", "User not found",
+                        status.HTTP_404_NOT_FOUND)
+
+    superadmin_count = await user_repo.count(
+        {"role": "admin", "admin_role": AdminRole.SUPERADMIN.value})
+    err = validate_admin_role_assignment(
+        is_self=(str(admin["_id"]) == user_id),
+        target_role=user.get("role", "user"),
+        new_admin_role=body.admin_role,
+        target_admin_role=user.get("admin_role"),
+        superadmin_count=superadmin_count,
+    )
+    if err:
+        raise api_error(err[0], err[1], status.HTTP_400_BAD_REQUEST)
+
+    old_admin_role = user.get("admin_role")
+    success = await user_repo.set_admin_role(user_id, body.admin_role)
+
+    if success:
+        await log_admin_action(
+            admin_id=str(admin["_id"]),
+            action="change_admin_role",
+            resource_type="user",
+            resource_id=user_id,
+            details={
+                "email": user.get("email"),
+                "before": {"admin_role": old_admin_role},
+                "after": {"admin_role": body.admin_role}
+            },
+            request=http_request,
+        )
+
+    return {
+        "success": success,
+        "message": f"管理員角色已更新為 {body.admin_role}"
     }
 
 
