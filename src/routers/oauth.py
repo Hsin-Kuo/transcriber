@@ -36,9 +36,29 @@ from ..models.quota import QUOTA_TIERS, QuotaTier
 from ..utils.api_errors import api_error
 from ..utils.legal import build_consent_record
 from ..utils.logger import get_logger
+from ..utils.audit_logger import get_audit_logger
 
 router = APIRouter(prefix="/auth", tags=["OAuth"])
 log = get_logger(__name__)
+
+
+async def _safe_log_auth(http_request, action, user_id, status_code, message):
+    """寫入 auth 稽核紀錄；稽核失敗只告警、不可中斷登入/註冊流程。
+
+    與 email/password 路徑（auth.py）一致改用 log_auth 落 audit_logs，
+    差別在這裡包 try/except：對已種下 cookie 的成功路徑，audit 寫入失敗
+    不應讓使用者的登入/註冊整體失敗（比照 admin.py 的防禦式寫法）。
+    """
+    try:
+        await get_audit_logger().log_auth(
+            request=http_request,
+            action=action,
+            user_id=user_id,
+            status_code=status_code,
+            message=message,
+        )
+    except Exception as e:  # noqa: BLE001 — 稽核失敗不可影響登入
+        log.warning("oauth.audit.write_failed", action=action, error=str(e))
 
 # Google OAuth 設定（AWS 從 SSM 讀取，本地從環境變數）
 GOOGLE_CLIENT_ID = get_parameter("/transcriber/google-client-id", fallback_env="GOOGLE_CLIENT_ID", default="")
@@ -137,10 +157,18 @@ async def google_auth(
 
     # 1. 先檢查是否有綁定此 Google ID 的帳號
     user = await user_repo.get_by_google_id(google_id)
+    is_new_user = False
 
     if user:
         # 已有帳號，直接登入
         if not user.get("is_active"):
+            await _safe_log_auth(
+                http_request,
+                action="oauth_login_disabled_account",
+                user_id=str(user["_id"]),
+                status_code=status.HTTP_403_FORBIDDEN,
+                message=f"停用帳號嘗試 Google 登入: {email}",
+            )
             raise api_error(
                 "OAUTH_ACCOUNT_DISABLED",
                 "Account has been disabled",
@@ -200,6 +228,7 @@ async def google_auth(
             "created_at": now,
             "updated_at": now
         })
+        is_new_user = True
 
     # 生成 Token
     access_token, expires_at = create_access_token({
@@ -219,6 +248,16 @@ async def google_auth(
     # httpOnly cookie 傳給 client；body 不再回 refresh_token
     set_refresh_cookie(response, refresh_token_value)
     set_access_cookie(response, access_token)
+
+    # 稽核：Google 註冊（首次登入）/ 一般登入。用 oauth_ 前綴與 email 路徑區分來源，
+    # 後台 audit_logs 依 log_type=auth 分類、action 為自由文字直接顯示。
+    await _safe_log_auth(
+        http_request,
+        action="oauth_register" if is_new_user else "oauth_login",
+        user_id=str(user["_id"]),
+        status_code=200,
+        message=f"Google {'註冊' if is_new_user else '登入'}: {email}",
+    )
 
     return TokenResponse(token_type="bearer", expires_at=expires_at)
 
