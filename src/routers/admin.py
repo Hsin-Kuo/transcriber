@@ -19,6 +19,7 @@ from ..database.repositories.user_repo import UserRepository
 from ..database.repositories.task_repo import TaskRepository
 from ..database.repositories.audit_log_repo import AuditLogRepository
 from ..database.repositories.summary_log_repo import SummaryLogRepository
+from ..database.repositories.presence_repo import PresenceRepository, PRESENCE_TTL_SECONDS
 from ..models.quota import QuotaTier, QUOTA_TIERS
 from ..utils.time_utils import get_utc_timestamp
 from ..utils.audit_logger import log_admin_action
@@ -1065,6 +1066,26 @@ async def get_admin_statistics(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             error=str(e),
         )
+
+
+# ========== 線上人數 API ==========
+
+@router.get("/stats/online")
+async def get_online_users(
+    window_seconds: int = Query(
+        PRESENCE_TTL_SECONDS, ge=30, le=900,
+        description="視為在線的閒置門檻（秒）；預設等於 presence TTL",
+    ),
+    admin: dict = Depends(require_permission(Permission.ANALYTICS_READ)),
+    db=Depends(get_database),
+):
+    """當下線上（最近 window_seconds 內有活動）的已登入使用者數。
+
+    供後台即時運營看板輪詢用；刻意不寫 audit log（會被高頻輪詢，寫了反而灌爆
+    audit_logs）。資料來源為 user_presence collection（被動記錄 + TTL 自動清）。
+    """
+    count = await PresenceRepository(db).count_online(window_seconds=window_seconds)
+    return {"online_users": count, "window_seconds": window_seconds}
 
 
 # ========== 收入統計 API ==========

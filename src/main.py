@@ -297,6 +297,10 @@ async def startup_event():
     rate_limit_repo = RateLimitRepository(db)
     await _safe_create("rate_limits", rate_limit_repo.ensure_indexes())
 
+    from src.database.repositories.presence_repo import PresenceRepository
+    presence_repo_init = PresenceRepository(db)
+    await _safe_create("user_presence", presence_repo_init.ensure_indexes())
+
     from src.database.repositories.order_repo import OrderRepository
     order_repo_init = OrderRepository(db)
     await _safe_create("orders", order_repo_init.create_indexes())
