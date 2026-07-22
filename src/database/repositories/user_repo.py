@@ -156,6 +156,22 @@ class UserRepository:
         )
         return result.modified_count > 0
 
+    async def set_admin_role(self, user_id: str, admin_role: Optional[str]) -> bool:
+        """設定/清除後台細分角色（RBAC）。
+
+        admin_role=None 時 $unset admin_role 欄位（例：admin 降級為一般用戶，
+        避免留下殘值被 resolve_admin_role 當成 superadmin 相容路徑）。
+        用 acknowledged 而非 modified_count 判斷成功——$unset 一個本就不存在的
+        欄位 modified_count 會是 0，但那不算失敗。
+        """
+        now = get_utc_timestamp()
+        if admin_role is None:
+            update = {"$set": {"updated_at": now}, "$unset": {"admin_role": ""}}
+        else:
+            update = {"$set": {"admin_role": admin_role, "updated_at": now}}
+        result = await self.collection.update_one({"_id": ObjectId(user_id)}, update)
+        return result.acknowledged
+
     async def update_preferences(self, user_id: str, preferences: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """更新用戶偏好設定（merge 而非覆蓋）"""
         set_fields = {

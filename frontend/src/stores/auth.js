@@ -415,6 +415,9 @@ export const useAuthStore = defineStore('auth', () => {
       })
       setAccessTokenExpiry(null)
       user.value = null
+      // 比照 logout 廣播 session 結束：拆除 SSE/輪詢/toast/上傳浮層，
+      // 避免刪帳號後殘留請求續打 /auth/me。（後端已於此請求清除 cookie）
+      window.dispatchEvent(new CustomEvent('auth:logout'))
       return { success: true }
     } catch (err) {
       error.value = resolveAuthError(err, 'auth.deleteAccountFailed')
