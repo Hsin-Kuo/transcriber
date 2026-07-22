@@ -47,12 +47,14 @@ const PlanPanel = defineAsyncComponent(() => import('./components/PlanPanel.vue'
 const QuotaExceededModal = defineAsyncComponent(() => import('./components/QuotaExceededModal.vue'))
 import { useAuthStore } from './stores/auth'
 import { useUiStore } from './stores/ui'
+import { useUploadStore } from './stores/upload'
 
 const { t: $t } = useI18n()
 const route = useRoute()
 const notificationToast = ref(null)
 const authStore = useAuthStore()
 const uiStore = useUiStore()
+const uploadStore = useUploadStore()
 const currentTier = computed(() => authStore.quota?.tier || 'free')
 
 function handlePlanChanged(event) {
@@ -105,18 +107,29 @@ function handleNetworkError() {
   }
 }
 
+// 登出時拆除 app 層的跨 session 殘留：清空 toast 佇列（含永久停留的 error toast），
+// 並中止進行中的上傳、收起全域上傳浮層，避免前一位使用者的通知/進度殘留給下一位。
+// TasksView 的 SSE/輪詢由該頁自行監聽同一事件拆除。
+function handleAuthLogout() {
+  notificationToast.value?.clearAll()
+  uploadStore.cancel()
+  uploadStore.dismiss()
+}
+
 // navigator.onLine / offline 事件在 macOS Wi-Fi 省電休眠、背景 tab throttling 時會誤觸發，
 // 改靠 api:network-error（實際 request 失敗才 fire）作為唯一離線信號。
 onMounted(() => {
   window.addEventListener('api:rate-limited', handleRateLimit)
   window.addEventListener('api:server-error', handleServerError)
   window.addEventListener('api:network-error', handleNetworkError)
+  window.addEventListener('auth:logout', handleAuthLogout)
 })
 
 onUnmounted(() => {
   window.removeEventListener('api:rate-limited', handleRateLimit)
   window.removeEventListener('api:server-error', handleServerError)
   window.removeEventListener('api:network-error', handleNetworkError)
+  window.removeEventListener('auth:logout', handleAuthLogout)
 })
 </script>
 

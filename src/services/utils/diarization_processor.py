@@ -11,6 +11,9 @@ from src.utils.logger import get_logger
 
 log = get_logger(__name__)
 
+# 說話者辨識模型名稱（單一來源；載入與記錄任務 models.diarization 都引用此常數）
+DIARIZATION_MODEL = "pyannote/speaker-diarization-3.1"
+
 
 class DiarizationProcessor:
     """說話者辨識處理器
@@ -27,6 +30,7 @@ class DiarizationProcessor:
         """
         self.pipeline = pipeline
         self.hf_token = hf_token or os.getenv("HF_TOKEN")
+        self.model_name = DIARIZATION_MODEL  # 供 orchestrator 回寫 task models.diarization
 
     def is_available(self) -> bool:
         """檢查 diarization 功能是否可用
@@ -118,7 +122,7 @@ class DiarizationProcessor:
 
             log.debug("diarization.pipeline_loading", in_process=True)
             import torch
-            pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1")
+            pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL)
 
             # GPU 加速：優先 CUDA，其次 MPS
             if torch.cuda.is_available():
@@ -180,7 +184,7 @@ class DiarizationProcessor:
             login(token=hf_token, add_to_git_credential=False)
 
             log.debug("diarization.model.loading")
-            pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1")
+            pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL)
 
             # GPU 加速：優先 CUDA，其次 MPS
             if torch.cuda.is_available():

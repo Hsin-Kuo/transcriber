@@ -83,6 +83,7 @@ from ..services.credential_flow import (
 )
 from ..utils.privacy import mask_email
 from ..utils.api_errors import api_error
+from ..utils.legal import build_consent_record
 from ..models.quota import QUOTA_TIERS, QuotaTier
 
 from ..utils.logger import get_logger
@@ -144,6 +145,14 @@ async def register(
     Raises:
         HTTPException: Email 已被註冊或發送驗證郵件失敗
     """
+    # 未勾選同意條款不得註冊（前端已把關，後端再守一次；與 email 無關，不涉 enumeration）
+    if not user_data.agreed_to_terms:
+        raise api_error(
+            "AUTH_CONSENT_REQUIRED",
+            "You must agree to the Terms of Service and Privacy Policy to register",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
     rate_limit_repo = RateLimitRepository(db)
     email_service = get_email_service()
     audit_logger = get_audit_logger()
@@ -192,7 +201,10 @@ async def register(
     # 對外回應由 outcome 統一給出（unknown 與 duplicate 不可區分，防 enumeration）。
     flow = build_credential_flow(db)
     outcome = await flow.issue(
-        CredentialIntent.REGISTER, user_data.email, password=user_data.password
+        CredentialIntent.REGISTER,
+        user_data.email,
+        password=user_data.password,
+        consent=build_consent_record("register", client_ip),
     )
     email_sent = await _dispatch_credential_email(email_service, outcome.email)
 
@@ -871,6 +883,14 @@ async def get_current_user_info(
             status.HTTP_404_NOT_FOUND,
         )
 
+    # 帳號已刪除（軟刪 email=None）或被停用：token 可能仍有效，但視為 session 失效 → 401，
+    # 讓前端攔截器登出導向 /login（回 UserResponse 會因 email=None 觸發 500）。
+    if full_user.get("deleted_at") or not full_user.get("is_active", True):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="帳號已停用或刪除",
+        )
+
     # 跨月自動歸零配額
     from src.auth.quota import QuotaManager
     usage = full_user.get("usage", {})
@@ -1095,12 +1115,16 @@ async def reset_password(
 async def delete_account(
     http_request: Request,
     request: DeleteAccountRequest,
+    response: Response,
     current_user: dict = Depends(get_current_user),
     db=Depends(get_database)
 ):
     """刪除帳號
 
-    永久刪除用戶帳號及所有相關資料，使用紀錄去識別化保留。
+    去識別化刪除：抹除個資與內容、保留匿名化使用紀錄供統計/稽核。
+    - 內容硬刪：音檔、transcriptions/segments/summaries（含實際逐字內容）。
+    - 任務匿名化保留：清 email/自訂名/標籤/檔名/音檔參照，保留統計欄位。
+    - 使用者文件匿名化：email/PII 設 None、is_active=False、寫 deleted_at。
 
     Args:
         http_request: HTTP Request 對象
@@ -1152,12 +1176,14 @@ async def delete_account(
             )
 
     # 記錄刪除操作（在刪除前記錄）
+    # 不記原始 email：切斷 user_id→email 反查鏈（見 docs/ACCOUNT_DELETION_GDPR.md D3）；
+    # user_id 已由 log_auth 另存，稽核仍可追蹤。
     await audit_logger.log_auth(
         request=http_request,
         action="delete_account",
         user_id=user_id,
         status_code=200,
-        message=f"帳號刪除: {user['email']}"
+        message="帳號刪除（去識別化）"
     )
 
     # 1. 取得用戶所有任務（用於刪除關聯資料）
@@ -1177,20 +1203,21 @@ async def delete_account(
             except Exception as e:
                 log.warning("audio.delete_failed", task_id=str(task["_id"]), error=str(e))
 
-    # 3. 刪除關聯資料
+    now = get_utc_timestamp()
+
+    # 3. 硬刪內容（含實際逐字內容，屬 PII 風險，必須清除）
     if task_ids:
         await db.transcriptions.delete_many({"_id": {"$in": task_ids}})
         await db.segments.delete_many({"_id": {"$in": task_ids}})
         await db.summaries.delete_many({"_id": {"$in": task_ids}})
 
-    # 4. 刪除任務
-    await task_repo.delete_all_for_user(user_id)
+    # 4. 任務去識別化保留（清 PII/內容參照，留統計欄位）——非硬刪
+    await task_repo.anonymize_all_for_user(user_id, now=now)
 
-    # 5. 刪除標籤
+    # 5. 刪除使用者自訂標籤（使用者建立的字串，可能含 PII）
     await db.tags.delete_many({"user_id": user_id})
 
     # 6. 抹除用戶個人資訊（軟刪除，保留 _id 讓 audit_logs 等仍可關聯到去識別帳號）
-    now = get_utc_timestamp()
     await user_repo.update(user_id, {
         "email": None,
         "password_hash": None,
@@ -1214,5 +1241,10 @@ async def delete_account(
         "email_bounce_at": None,
         "email_bounce_reason": None
     })
+
+    # 清 access/refresh cookie：httpOnly 前端刪不掉，必須後端 Set-Cookie 清除，
+    # 否則瀏覽器仍帶有效 token 續打 /auth/me（帳號已軟刪 → 500/噪音）。
+    clear_refresh_cookie(response)
+    clear_access_cookie(response)
 
     return {"message": "帳號已永久刪除"}

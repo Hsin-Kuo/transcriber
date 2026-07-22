@@ -73,12 +73,16 @@ export const useAuthStore = defineStore('auth', () => {
   })
 
   // Actions
-  async function register(email, password) {
+  async function register(email, password, agreedToTerms = false) {
     loading.value = true
     error.value = null
 
     try {
-      const response = await api.post('/auth/register', { email, password })
+      const response = await api.post('/auth/register', {
+        email,
+        password,
+        agreed_to_terms: agreedToTerms,
+      })
       // 註冊成功（包含寄信失敗的情況，user 已被保留）
       // API 返回 { message, email, email_sent }
       return {
@@ -129,6 +133,11 @@ export const useAuthStore = defineStore('auth', () => {
     } finally {
       setAccessTokenExpiry(null)
       user.value = null
+      // 廣播 session 結束訊號：讓各處主動拆除跨 session 殘留狀態
+      //（TasksView 的 SSE/輪詢、App 層的 toast 佇列與上傳浮層）。
+      // 同步 dispatch，確保在呼叫端 router.push('/login') 之前就完成拆除，
+      // 關掉「登出後、TasksView 尚未卸載」這段空窗內 A 的完成事件仍觸發 toast 的漏洞。
+      window.dispatchEvent(new CustomEvent('auth:logout'))
     }
   }
 
@@ -234,12 +243,15 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function googleLogin(credential) {
+  async function googleLogin(credential, agreedToTerms = false) {
     loading.value = true
     error.value = null
 
     try {
-      const response = await api.post('/auth/google', { credential })
+      const response = await api.post('/auth/google', {
+        credential,
+        agreed_to_terms: agreedToTerms,
+      })
       setAccessTokenExpiry(response.data.expires_at)
       await fetchCurrentUser()
 
@@ -248,7 +260,9 @@ export const useAuthStore = defineStore('auth', () => {
       error.value = resolveAuthError(err, 'auth.googleLoginError')
       return {
         success: false,
-        error: error.value
+        error: error.value,
+        // 後端錯誤碼（供 caller 判斷「新帳號未同意」需導向註冊頁）
+        code: err?.response?.data?.detail?.code || null,
       }
     } finally {
       loading.value = false
@@ -401,6 +415,9 @@ export const useAuthStore = defineStore('auth', () => {
       })
       setAccessTokenExpiry(null)
       user.value = null
+      // 比照 logout 廣播 session 結束：拆除 SSE/輪詢/toast/上傳浮層，
+      // 避免刪帳號後殘留請求續打 /auth/me。（後端已於此請求清除 cookie）
+      window.dispatchEvent(new CustomEvent('auth:logout'))
       return { success: true }
     } catch (err) {
       error.value = resolveAuthError(err, 'auth.deleteAccountFailed')

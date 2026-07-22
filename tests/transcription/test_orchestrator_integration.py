@@ -71,7 +71,7 @@ class FakeWhisper:
     """罐頭轉錄結果。fail/empty 用來模擬失敗路徑。"""
 
     def __init__(self, *, text="hello world", segments=None, language="en",
-                 fail=False, empty=False):
+                 fail=False, empty=False, model_name="whisper-fake"):
         self._text = text
         self._segments = segments if segments is not None else [
             {"text": "hello", "start": 0.0, "end": 0.5},
@@ -80,6 +80,7 @@ class FakeWhisper:
         self._language = language
         self._fail = fail
         self._empty = empty
+        self.model_name = model_name
 
     def transcribe(self, mp3_path, language=None, progress_callback=None):
         if self._fail:
@@ -133,12 +134,13 @@ class CancellingPunctuation:
 class FakeDiarization:
     """記錄收到的音檔路徑——用來斷言 grilling 裁決「diarization 走 WAV」。"""
 
-    def __init__(self, *, segments=None, fail=False):
+    def __init__(self, *, segments=None, fail=False, model_name="pyannote-fake"):
         self._segments = segments if segments is not None else [
             {"speaker": "A", "start": 0.0, "end": 1.0},
         ]
         self._fail = fail
         self.called_with = None
+        self.model_name = model_name
 
     def perform_diarization(self, audio_path, max_speakers=None):
         self.called_with = Path(audio_path)
@@ -266,6 +268,10 @@ class TestHappyPath:
         assert db.transcriptions.find_one({"_id": task_id}) is not None
         assert db.segments.find_one({"_id": task_id}) is not None
         assert src.cleaned_with is True   # 成功 → cleanup(succeeded=True)
+        # 完成時記錄轉錄模型與處理時長
+        assert task["models"]["transcription"] == "whisper-fake"
+        assert task["stats"]["duration_seconds"] >= 0
+        assert "diarization" not in task.get("models", {})  # 沒開辨識 → 不寫
 
     def test_completion_unsets_stale_error(self, db, tiny_audio):
         """裁決:採用 Worker 的 unset error——完成時清掉殘留 error 欄位。"""
@@ -289,6 +295,8 @@ class TestHappyPath:
         seg_doc = db.segments.find_one({"_id": task_id})
         assert seg_doc is not None
         assert all("speaker" in s for s in seg_doc["segments"])
+        # 辨識成功 → 記錄 diarization 模型
+        assert db.tasks.find_one({"_id": task_id})["models"]["diarization"] == "pyannote-fake"
 
     def test_no_diarization_segments_never_carry_words_into_db(self, db, tiny_audio):
         """words 只供 transcription phase 內部用，orchestrator 單點剝除——無 diar 路徑。"""

@@ -7,7 +7,13 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from pydantic import BaseModel, EmailStr
 from bson import ObjectId
 
-from ..auth.dependencies import get_current_admin, get_database
+from ..auth.dependencies import get_current_admin, get_database, require_permission
+from ..auth.rbac import AdminRole, Permission, permissions_for, resolve_admin_role
+from ..services.admin_role_service import (
+    validate_admin_role_assignment,
+    validate_role_demotion,
+    normalize_promotion_admin_role,
+)
 from ..auth.password import hash_password
 from ..database.repositories.user_repo import UserRepository
 from ..database.repositories.task_repo import TaskRepository
@@ -20,6 +26,7 @@ from ..utils.email_service import get_email_service
 from ..utils.sentry_helpers import create_background_task
 from ..utils.logger import get_logger
 from ..utils.api_errors import api_error
+from ..utils.user_display import user_email_or_label
 from ..services.admin_analytics import build_admin_analytics
 
 
@@ -63,6 +70,12 @@ class UpdateUserStatusRequest(BaseModel):
 class UpdateUserRoleRequest(BaseModel):
     """更新用戶角色請求"""
     role: str  # "user" or "admin"
+    admin_role: Optional[str] = None  # 升級為 admin 時要套用的細分角色；不給預設 read_only
+
+
+class UpdateAdminRoleRequest(BaseModel):
+    """指派後台細分角色請求（RBAC）"""
+    admin_role: str  # superadmin / billing / support / read_only
 
 
 class UpdateUserQuotaRequest(BaseModel):
@@ -88,6 +101,29 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 
+# ========== 當前管理員 ==========
+
+@router.get("/me/permissions")
+async def get_my_permissions(
+    admin: dict = Depends(get_current_admin),
+    db = Depends(get_database)
+):
+    """回傳當前管理員的角色與能力清單，供前端據以隱藏無權操作的 UI。
+
+    這是「渲染輔助」，非授權來源——真正的閘門是各 endpoint 的 require_permission。
+    未 migrate（無 admin_role）的 admin 依 Phase 0 相容政策回 superadmin。
+    """
+    user = await UserRepository(db).get_by_id(str(admin["_id"]))
+    role = resolve_admin_role((user or {}).get("admin_role"))
+    if role is None:
+        raise api_error("ADMIN_INVALID_ROLE", "Invalid admin role",
+                        status.HTTP_403_FORBIDDEN)
+    return {
+        "role": role.value,
+        "permissions": sorted(p.value for p in permissions_for(role)),
+    }
+
+
 # ========== 用戶管理 API ==========
 
 @router.get("/users")
@@ -100,7 +136,7 @@ async def list_users(
     sort_order: int = Query(-1, description="排序方向 (1=升序, -1=降序)"),
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.USER_READ)),
     db = Depends(get_database)
 ):
     """獲取用戶列表（管理員）"""
@@ -139,6 +175,9 @@ async def list_users(
         result.append({
             "id": user_id,
             "email": user.get("email"),
+            "display_name": user_email_or_label(
+                user.get("email"), user_id, deleted=bool(user.get("deleted_at"))),
+            "is_deleted": bool(user.get("deleted_at")),
             "role": user.get("role", "user"),
             "is_active": user.get("is_active", True),
             "email_verified": user.get("email_verified", False),
@@ -163,7 +202,7 @@ async def list_users(
 @router.get("/users/{user_id}")
 async def get_user_detail(
     user_id: str,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.USER_READ)),
     db = Depends(get_database)
 ):
     """獲取用戶詳情（管理員）"""
@@ -194,7 +233,11 @@ async def get_user_detail(
     return {
         "id": str(user["_id"]),
         "email": user.get("email"),
+        "display_name": user_email_or_label(
+            user.get("email"), str(user["_id"]), deleted=bool(user.get("deleted_at"))),
+        "is_deleted": bool(user.get("deleted_at")),
         "role": user.get("role", "user"),
+        "admin_role": user.get("admin_role"),
         "is_active": user.get("is_active", True),
         "email_verified": user.get("email_verified", False),
         "auth_providers": user.get("auth_providers", []),
@@ -218,7 +261,7 @@ async def update_user_status(
     user_id: str,
     body: UpdateUserStatusRequest,
     http_request: Request,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.USER_MANAGE)),
     db = Depends(get_database)
 ):
     """停用/啟用用戶帳號（管理員）"""
@@ -271,7 +314,7 @@ async def update_user_role(
     user_id: str,
     body: UpdateUserRoleRequest,
     http_request: Request,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.ADMIN_GRANT)),
     db = Depends(get_database)
 ):
     """修改用戶角色（管理員）"""
@@ -293,33 +336,110 @@ async def update_user_role(
                         status.HTTP_400_BAD_REQUEST)
 
     old_role = user.get("role", "user")
-    success = await user_repo.update(user_id, {"role": body.role})
+    old_admin_role = user.get("admin_role")
+    new_admin_role = None
 
-    if success:
-        await log_admin_action(
-            admin_id=str(admin["_id"]),
-            action="change_role",
-            resource_type="user",
-            resource_id=user_id,
-            details={
-                "email": user.get("email"),
-                "before": {"role": old_role},
-                "after": {"role": body.role}
-            },
-            request=http_request,
+    if body.role == "admin" and old_role != "admin":
+        # 升級：套用細分角色（未指定 → read_only 最小權限），避免相容路徑把新 admin
+        # 當成 superadmin。
+        chosen = normalize_promotion_admin_role(body.admin_role)
+        if isinstance(chosen, tuple):
+            raise api_error(chosen[0], chosen[1], status.HTTP_400_BAD_REQUEST)
+        new_admin_role = chosen
+        await user_repo.update(user_id, {"role": "admin", "admin_role": chosen})
+    elif body.role == "user" and old_role == "admin":
+        # 降級：護欄——不能降掉最後一個 superadmin；並清掉 admin_role 殘值。
+        superadmin_count = await user_repo.count(
+            {"role": "admin", "admin_role": AdminRole.SUPERADMIN.value})
+        err = validate_role_demotion(
+            target_admin_role=old_admin_role, superadmin_count=superadmin_count)
+        if err:
+            raise api_error(err[0], err[1], status.HTTP_400_BAD_REQUEST)
+        await user_repo.update(user_id, {"role": "user"})
+        await user_repo.set_admin_role(user_id, None)
+    else:
+        # 同角色，維持原本 idempotent 行為
+        await user_repo.update(user_id, {"role": body.role})
+
+    success = True
+    await log_admin_action(
+        admin_id=str(admin["_id"]),
+        action="change_role",
+        resource_type="user",
+        resource_id=user_id,
+        details={
+            "email": user.get("email"),
+            "before": {"role": old_role, "admin_role": old_admin_role},
+            "after": {"role": body.role, "admin_role": new_admin_role}
+        },
+        request=http_request,
+    )
+
+    if old_role != body.role:
+        _notify_user_async(
+            to_email=user.get("email"),
+            action_label=f"角色已變更：{old_role} → {body.role}",
+            admin_email=admin.get("email", "unknown"),
+            details_lines=[f"原本角色：{old_role}", f"新角色：{body.role}"],
         )
-
-        if old_role != body.role:
-            _notify_user_async(
-                to_email=user.get("email"),
-                action_label=f"角色已變更：{old_role} → {body.role}",
-                admin_email=admin.get("email", "unknown"),
-                details_lines=[f"原本角色：{old_role}", f"新角色：{body.role}"],
-            )
 
     return {
         "success": success,
         "message": f"用戶角色已更新為 {body.role}"
+    }
+
+
+@router.put("/users/{user_id}/admin-role")
+async def update_user_admin_role(
+    user_id: str,
+    body: UpdateAdminRoleRequest,
+    http_request: Request,
+    admin: dict = Depends(require_permission(Permission.ADMIN_GRANT)),
+    db = Depends(get_database)
+):
+    """指派後台細分角色 admin_role（superadmin 專屬——ADMIN_GRANT 只有 superadmin 有）。
+
+    護欄：白名單值、不能改自己、目標須已是 admin、不能移除最後一個 superadmin。
+    這些判斷抽在 services/admin_role_service.py 純函式，這裡只負責查 DB + 轉錯誤。
+    """
+    user_repo = UserRepository(db)
+    user = await user_repo.get_by_id(user_id)
+    if not user:
+        raise api_error("ADMIN_USER_NOT_FOUND", "User not found",
+                        status.HTTP_404_NOT_FOUND)
+
+    superadmin_count = await user_repo.count(
+        {"role": "admin", "admin_role": AdminRole.SUPERADMIN.value})
+    err = validate_admin_role_assignment(
+        is_self=(str(admin["_id"]) == user_id),
+        target_role=user.get("role", "user"),
+        new_admin_role=body.admin_role,
+        target_admin_role=user.get("admin_role"),
+        superadmin_count=superadmin_count,
+    )
+    if err:
+        raise api_error(err[0], err[1], status.HTTP_400_BAD_REQUEST)
+
+    old_admin_role = user.get("admin_role")
+    success = await user_repo.set_admin_role(user_id, body.admin_role)
+
+    if success:
+        await log_admin_action(
+            admin_id=str(admin["_id"]),
+            action="change_admin_role",
+            resource_type="user",
+            resource_id=user_id,
+            details={
+                "email": user.get("email"),
+                "before": {"admin_role": old_admin_role},
+                "after": {"admin_role": body.admin_role}
+            },
+            request=http_request,
+        )
+
+    return {
+        "success": success,
+        "message": f"管理員角色已更新為 {body.admin_role}"
     }
 
 
@@ -328,7 +448,7 @@ async def update_user_quota(
     user_id: str,
     body: UpdateUserQuotaRequest,
     http_request: Request,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.USER_QUOTA)),
     db = Depends(get_database)
 ):
     """調整用戶配額（管理員）"""
@@ -411,7 +531,7 @@ async def update_user_quota(
 async def reset_user_monthly_quota(
     user_id: str,
     http_request: Request,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.USER_QUOTA)),
     db = Depends(get_database)
 ):
     """重置用戶月配額使用量（管理員）"""
@@ -474,7 +594,7 @@ async def adjust_user_extra_quota(
     user_id: str,
     body: AdjustExtraQuotaRequest,
     http_request: Request,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.USER_QUOTA)),
     db = Depends(get_database)
 ):
     """調整用戶額外額度（補償或扣除，不影響每月配額）
@@ -587,7 +707,7 @@ async def reset_user_password(
     user_id: str,
     body: ResetPasswordRequest,
     http_request: Request,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.USER_PASSWORD_RESET)),
     db = Depends(get_database)
 ):
     """重設用戶密碼（管理員）"""
@@ -647,7 +767,7 @@ async def list_all_tasks(
     sort_order: int = Query(-1, description="排序方向"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.TASK_READ)),
     db = Depends(get_database)
 ):
     """獲取全域任務列表（管理員）"""
@@ -701,9 +821,10 @@ async def list_all_tasks(
     # 處理任務資料
     result = []
     for task in tasks:
-        # 取得用戶資訊
+        # 取得用戶資訊（去識別化任務 email 為 None → 顯示穩定假名）
         task_user_id = task.get("user", {}).get("user_id")
-        task_user_email = task.get("user", {}).get("user_email")
+        task_user_email = user_email_or_label(
+            task.get("user", {}).get("user_email"), task_user_id)
 
         result.append({
             "task_id": task.get("_id") or task.get("task_id"),
@@ -732,7 +853,7 @@ async def list_all_tasks(
 @router.get("/tasks/{task_id}")
 async def get_task_detail(
     task_id: str,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.TASK_READ)),
     db = Depends(get_database)
 ):
     """獲取任務詳情（管理員）"""
@@ -743,9 +864,10 @@ async def get_task_detail(
         raise api_error("ADMIN_TASK_NOT_FOUND", "Task not found",
                         status.HTTP_404_NOT_FOUND)
 
-    # 取得用戶資訊
+    # 取得用戶資訊（去識別化任務 email 為 None → 顯示穩定假名）
     task_user_id = task.get("user", {}).get("user_id")
-    task_user_email = task.get("user", {}).get("user_email")
+    task_user_email = user_email_or_label(
+        task.get("user", {}).get("user_email"), task_user_id)
 
     # AI 摘要生成記錄（每次生成都 append，含時間與 token 消耗）
     summary_log_repo = SummaryLogRepository(db)
@@ -753,6 +875,7 @@ async def get_task_detail(
 
     return {
         "task_id": task.get("_id") or task.get("task_id"),
+        "task_type": task.get("task_type"),
         "user": {
             "user_id": task_user_id,
             "user_email": task_user_email
@@ -788,7 +911,7 @@ async def get_task_detail(
 @router.post("/tasks/{task_id}/cancel")
 async def admin_cancel_task(
     task_id: str,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.TASK_MANAGE)),
     db = Depends(get_database)
 ):
     """強制取消任務（管理員）"""
@@ -832,7 +955,7 @@ async def admin_cancel_task(
 @router.delete("/tasks/{task_id}")
 async def admin_delete_task(
     task_id: str,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.TASK_DELETE)),
     db = Depends(get_database)
 ):
     """強制刪除任務（管理員）"""
@@ -874,7 +997,7 @@ async def admin_delete_task(
 @router.post("/tasks/batch/delete")
 async def admin_batch_delete_tasks(
     request: BatchDeleteTasksRequest,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.TASK_DELETE)),
     db = Depends(get_database)
 ):
     """批次刪除任務（管理員）"""
@@ -914,7 +1037,7 @@ async def admin_batch_delete_tasks(
 @router.get("/statistics")
 async def get_admin_statistics(
     request: Request,
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.ANALYTICS_READ)),
     db = Depends(get_database)
 ):
     """獲取後台統計資料"""
@@ -948,11 +1071,46 @@ async def get_admin_statistics(
 
 @router.get("/revenue")
 async def get_revenue_stats(
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.BILLING_READ)),
     db=Depends(get_database),
 ):
     """營收 dashboard 數據"""
     return await build_admin_analytics(db).revenue()
+
+
+# ========== AI 成本統計 API ==========
+
+@router.get("/cost")
+async def get_ai_cost_stats(
+    request: Request,
+    months: int = Query(6, ge=1, le=24, description="往回涵蓋幾個日曆月（含當月）"),
+    admin: dict = Depends(require_permission(Permission.ANALYTICS_READ)),
+    db = Depends(get_database),
+):
+    """AI 成本 dashboard：逐月 × 功能（標點/摘要）× 模型的 token → USD 試算。"""
+    try:
+        try:
+            from ..utils.audit_logger import get_audit_logger
+            await get_audit_logger().log_admin_operation(
+                request=request,
+                action="view_ai_cost",
+                user_id=str(admin["_id"]),
+                status_code=200,
+                message=f"查看 AI 成本統計（近 {months} 月）",
+            )
+        except Exception as e:
+            logger.warning("audit_log.write_failed", error=str(e))
+
+        return await build_admin_analytics(db).monthly_cost(months=months)
+
+    except Exception as e:
+        logger.error("admin.cost.failed", error=str(e))
+        raise api_error(
+            "ADMIN_COST_FAILED",
+            "Failed to fetch AI cost stats: {error}",
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error=str(e),
+        )
 
 
 # ========== 審計日誌 API ==========
@@ -963,7 +1121,7 @@ async def get_audit_logs(
     skip: int = Query(0, ge=0),
     log_type: Optional[str] = Query(None),
     user_id: Optional[str] = Query(None),
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.AUDIT_READ)),
     db = Depends(get_database)
 ):
     """獲取操作記錄"""
@@ -991,7 +1149,7 @@ async def get_audit_logs(
 async def get_failed_audit_logs(
     days: int = Query(7, ge=1, le=90),
     limit: int = Query(100, ge=1, le=500),
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.AUDIT_READ)),
     db = Depends(get_database)
 ):
     """獲取失敗的操作記錄"""
@@ -1008,7 +1166,7 @@ async def get_failed_audit_logs(
 @router.get("/audit-logs/statistics")
 async def get_audit_statistics(
     days: int = Query(30, ge=1, le=365),
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.AUDIT_READ)),
     db = Depends(get_database)
 ):
     """獲取操作記錄統計"""
@@ -1025,7 +1183,7 @@ async def get_audit_statistics(
 async def get_resource_audit_logs(
     resource_id: str,
     limit: int = Query(50, ge=1, le=200),
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.AUDIT_READ)),
     db = Depends(get_database)
 ):
     """獲取特定資源的操作記錄"""
@@ -1042,7 +1200,7 @@ async def get_resource_audit_logs(
 @router.post("/cleanup/handoff-orphans")
 async def cleanup_handoff_orphans(
     older_than_hours: int = Query(24, ge=1, le=720),
-    admin: dict = Depends(get_current_admin),
+    admin: dict = Depends(require_permission(Permission.OPS)),
 ):
     """掃 S3 handoff/ 找超過 N 小時的孤兒並刪除。
 

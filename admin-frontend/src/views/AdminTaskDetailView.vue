@@ -39,6 +39,10 @@
             <code class="value">{{ task.task_id }}</code>
           </div>
           <div class="info-row">
+            <span class="label">任務類型：</span>
+            <span class="value">{{ getTaskTypeName(task.task_type) }}</span>
+          </div>
+          <div class="info-row">
             <span class="label">用戶：</span>
             <router-link
               v-if="task.user?.user_id"
@@ -222,14 +226,14 @@
       <!-- 操作按鈕 -->
       <div class="action-buttons">
         <button
-          v-if="['pending', 'processing'].includes(task.status)"
+          v-if="['pending', 'processing'].includes(task.status) && authStore.can(PERM.TASK_MANAGE)"
           @click="cancelTask"
           class="action-btn cancel"
         >
           取消任務
         </button>
         <button
-          v-else
+          v-else-if="!['pending', 'processing'].includes(task.status) && authStore.can(PERM.TASK_DELETE)"
           @click="deleteTask"
           class="action-btn delete"
         >
@@ -252,6 +256,10 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '../utils/api'
 import AdminNav from '../components/shared/AdminNav.vue'
+import { useAuthStore } from '../stores/auth'
+import { PERM } from '../constants/permissions'
+
+const authStore = useAuthStore()
 
 const route = useRoute()
 const router = useRouter()
@@ -304,6 +312,11 @@ function getStatusName(status) {
     failed: '失敗', cancelled: '已取消', canceling: '取消中'
   }
   return names[status] || status
+}
+
+function getTaskTypeName(type) {
+  const names = { paragraph: '文件', subtitle: '字幕' }
+  return names[type] || type || '-'
 }
 
 function formatDuration(seconds) {
@@ -666,8 +679,8 @@ code {
 }
 
 .action-btn.view {
-  background: var(--color-primary, #dd8448); color: white;
-  color: var(--color-primary, #dd8448);
+  background: var(--color-primary, #dd8448);
+  color: white;
 }
 
 .action-btn.cancel {

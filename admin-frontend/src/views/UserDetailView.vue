@@ -21,7 +21,7 @@
 
     <!-- 用戶詳情 -->
     <div v-else-if="user" class="user-detail">
-      <h1 class="page-title">{{ user.email }}</h1>
+      <h1 class="page-title">{{ user.display_name || user.email || '—' }}</h1>
 
       <div class="detail-grid">
         <!-- 基本資訊 -->
@@ -33,7 +33,7 @@
           </div>
           <div class="info-row">
             <span class="label">Email：</span>
-            <span class="value">{{ user.email }}</span>
+            <span class="value">{{ user.display_name || user.email || '—' }}</span>
           </div>
           <div class="info-row">
             <span class="label">角色：</span>
@@ -41,11 +41,22 @@
               {{ user.role === 'admin' ? '管理員' : '一般用戶' }}
             </span>
             <button
-              v-if="user.role !== 'admin'"
+              v-if="user.role !== 'admin' && authStore.can(PERM.ADMIN_GRANT)"
               @click="showRoleModal = true"
               class="edit-btn"
             >
               修改
+            </button>
+          </div>
+          <div v-if="user.role === 'admin'" class="info-row">
+            <span class="label">權限角色：</span>
+            <span class="role-badge role-admin">{{ adminRoleLabel(user.admin_role) }}</span>
+            <button
+              v-if="authStore.can(PERM.ADMIN_GRANT)"
+              @click="openAdminRoleModal"
+              class="edit-btn"
+            >
+              調整
             </button>
           </div>
           <div class="info-row">
@@ -54,6 +65,7 @@
               {{ user.is_active ? '啟用' : '停用' }}
             </span>
             <button
+              v-if="authStore.can(PERM.USER_MANAGE)"
               @click="toggleStatus"
               class="edit-btn"
               :class="user.is_active ? 'danger' : 'success'"
@@ -88,7 +100,7 @@
             <span :class="user.has_password ? 'verified' : 'not-verified'">
               {{ user.has_password ? '已設定' : '未設定' }}
             </span>
-            <button @click="showPasswordModal = true" class="edit-btn">
+            <button v-if="authStore.can(PERM.USER_PASSWORD_RESET)" @click="showPasswordModal = true" class="edit-btn">
               {{ user.has_password ? '重設密碼' : '設定密碼' }}
             </button>
           </div>
@@ -106,7 +118,7 @@
             <span class="tier-badge" :class="`tier-${user.quota?.tier || 'free'}`">
               {{ getTierName(user.quota?.tier) }}
             </span>
-            <button @click="showQuotaModal = true" class="edit-btn">調整配額</button>
+            <button v-if="authStore.can(PERM.USER_QUOTA)" @click="showQuotaModal = true" class="edit-btn">調整配額</button>
           </div>
           <div class="info-row">
             <span class="label">每月轉錄次數：</span>
@@ -185,7 +197,7 @@
             <span class="label">累計轉錄時長：</span>
             <span class="value">{{ (user.usage?.total_duration_minutes || 0).toFixed(1) }} 分鐘</span>
           </div>
-          <button @click="resetQuota" class="reset-btn">🔄 重置本月配額</button>
+          <button v-if="authStore.can(PERM.USER_QUOTA)" @click="resetQuota" class="reset-btn">🔄 重置本月配額</button>
         </div>
 
         <!-- 額外額度 -->
@@ -200,7 +212,7 @@
             <span class="label">額外 AI 摘要：</span>
             <span class="value">{{ user.extra_quota?.ai_summaries || 0 }} 次</span>
           </div>
-          <button @click="openExtraQuotaModal" class="edit-btn">調整額外額度</button>
+          <button v-if="authStore.can(PERM.USER_QUOTA)" @click="openExtraQuotaModal" class="edit-btn">調整額外額度</button>
         </div>
 
         <!-- 任務統計 -->
@@ -288,11 +300,43 @@
         <h3>修改角色</h3>
         <div class="modal-body">
           <p>確定要將此用戶設為管理員嗎？</p>
-          <p class="warning">⚠️ 此操作將賦予該用戶管理後台的完整權限</p>
+          <p class="warning">⚠️ 此操作將賦予該用戶登入管理後台的權限</p>
+          <label class="modal-field">
+            <span>權限角色</span>
+            <select v-model="selectedPromoteRole">
+              <option v-for="opt in ADMIN_ROLE_OPTIONS" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+          </label>
+          <p class="card-hint">預設「唯讀」（最小權限），可日後再調整</p>
         </div>
         <div class="modal-footer">
           <button @click="showRoleModal = false" class="btn-cancel">取消</button>
           <button @click="updateRole" class="btn-confirm">確認</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 調整權限角色 Modal -->
+    <div v-if="showAdminRoleModal" class="modal-overlay" @click.self="showAdminRoleModal = false">
+      <div class="modal">
+        <h3>調整權限角色</h3>
+        <div class="modal-body">
+          <p class="modal-user-email">用戶：{{ user.display_name || user.email }}</p>
+          <label class="modal-field">
+            <span>權限角色</span>
+            <select v-model="selectedAdminRole">
+              <option v-for="opt in ADMIN_ROLE_OPTIONS" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+          </label>
+          <p class="card-hint">superadmin 具全部權限；support 不能刪除/退款/改密碼；read_only 僅檢視</p>
+        </div>
+        <div class="modal-footer">
+          <button @click="showAdminRoleModal = false" class="btn-cancel">取消</button>
+          <button @click="updateAdminRole" class="btn-confirm">確認</button>
         </div>
       </div>
     </div>
@@ -302,7 +346,7 @@
       <div class="modal">
         <h3>調整額外額度</h3>
         <div class="modal-body">
-          <p class="modal-user-email">用戶：{{ user.email }}</p>
+          <p class="modal-user-email">用戶：{{ user.display_name || user.email }}</p>
           <p class="card-hint">正數補償、負數扣除；不影響每月配額</p>
 
           <div class="balance-preview">
@@ -374,7 +418,7 @@
       <div class="modal">
         <h3>重設密碼</h3>
         <div class="modal-body">
-          <p class="modal-user-email">用戶：{{ user.email }}</p>
+          <p class="modal-user-email">用戶：{{ user.display_name || user.email }}</p>
           <div class="form-group">
             <label>新密碼：</label>
             <input
@@ -412,6 +456,10 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '../utils/api'
 import AdminNav from '../components/shared/AdminNav.vue'
+import { useAuthStore } from '../stores/auth'
+import { PERM } from '../constants/permissions'
+
+const authStore = useAuthStore()
 
 const route = useRoute()
 
@@ -422,6 +470,27 @@ const showQuotaModal = ref(false)
 const showRoleModal = ref(false)
 const showPasswordModal = ref(false)
 const showExtraQuotaModal = ref(false)
+const showAdminRoleModal = ref(false)
+const selectedPromoteRole = ref('read_only')
+const selectedAdminRole = ref('read_only')
+
+// 與後端 AdminRole enum 對齊；label 給後台顯示用
+const ADMIN_ROLE_OPTIONS = [
+  { value: 'read_only', label: '唯讀 read_only' },
+  { value: 'support', label: '客服 support' },
+  { value: 'billing', label: '財務 billing' },
+  { value: 'superadmin', label: '超級管理員 superadmin' },
+]
+const ADMIN_ROLE_LABELS = Object.fromEntries(
+  ADMIN_ROLE_OPTIONS.map(o => [o.value, o.label.split(' ')[0]])
+)
+function adminRoleLabel(role) {
+  return ADMIN_ROLE_LABELS[role] || role || '未設定'
+}
+function openAdminRoleModal() {
+  selectedAdminRole.value = user.value?.admin_role || 'read_only'
+  showAdminRoleModal.value = true
+}
 const isResettingPassword = ref(false)
 const passwordError = ref('')
 const extraQuotaError = ref('')
@@ -499,11 +568,26 @@ async function updateQuota() {
 async function updateRole() {
   try {
     await api.put(`/api/admin/users/${user.value.id}/role`, {
-      role: 'admin'
+      role: 'admin',
+      admin_role: selectedPromoteRole.value
     })
     user.value.role = 'admin'
+    user.value.admin_role = selectedPromoteRole.value
     showRoleModal.value = false
     alert('角色已更新')
+  } catch (err) {
+    alert(err.response?.data?.detail || '更新失敗')
+  }
+}
+
+async function updateAdminRole() {
+  try {
+    await api.put(`/api/admin/users/${user.value.id}/admin-role`, {
+      admin_role: selectedAdminRole.value
+    })
+    user.value.admin_role = selectedAdminRole.value
+    showAdminRoleModal.value = false
+    alert('權限角色已更新')
   } catch (err) {
     alert(err.response?.data?.detail || '更新失敗')
   }
@@ -848,8 +932,8 @@ code {
   width: 100%;
   padding: 12px;
   margin-top: 15px;
-  background: var(--color-primary, #dd8448); color: white;
-  color: var(--color-primary, #dd8448);
+  background: var(--color-primary, #dd8448);
+  color: white;
   border: none;
   border-radius: 12px;
   font-weight: 700;
@@ -963,6 +1047,24 @@ code {
 
 .modal-body {
   margin-bottom: 20px;
+}
+
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 14px 0 6px;
+  font-weight: 600;
+  color: var(--color-text, rgb(145, 106, 45));
+}
+
+.modal-field select {
+  padding: 10px 12px;
+  border: 1px solid var(--color-divider, rgba(163, 177, 198, 0.4));
+  border-radius: 8px;
+  font-size: 14px;
+  background: var(--color-bg-card, #fff);
+  color: var(--color-text, rgb(145, 106, 45));
 }
 
 .form-group {

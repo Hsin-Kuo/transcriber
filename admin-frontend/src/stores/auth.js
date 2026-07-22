@@ -10,10 +10,24 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref(null)
   const loading = ref(false)
   const error = ref(null)
+  // 當前 admin 的細分角色與能力清單（來自 GET /api/admin/me/permissions）。
+  // null = 尚未載入或載入失敗 → can() 一律樂觀放行（後端 require_permission 才是真閘門）。
+  const adminRole = ref(null)
+  const permissions = ref(null)
 
   // Getters
   const isAuthenticated = computed(() => !!user.value)
   const isAdmin = computed(() => user.value?.role === 'admin')
+
+  /**
+   * 當前 admin 是否具備某能力（供 v-if 隱藏無權按鈕）。
+   * permissions 未載入/載入失敗時回 true——寧可多顯示讓後端擋，也不要因前端狀態
+   * 未就緒而把合法操作藏起來。
+   */
+  function can(perm) {
+    if (permissions.value === null) return true
+    return permissions.value.includes(perm)
+  }
   const quota = computed(() => user.value?.quota || {})
   const usage = computed(() => user.value?.usage || {})
 
@@ -91,6 +105,8 @@ export const useAuthStore = defineStore('auth', () => {
       console.error('登出錯誤:', err)
     } finally {
       user.value = null
+      permissions.value = null
+      adminRole.value = null
     }
   }
 
@@ -98,9 +114,27 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const response = await api.get('/auth/me')
       user.value = response.data
+      if (user.value?.role === 'admin') {
+        await fetchPermissions()
+      }
     } catch (err) {
       console.error('獲取用戶資訊失敗:', err)
       user.value = null
+      permissions.value = null
+      adminRole.value = null
+    }
+  }
+
+  async function fetchPermissions() {
+    try {
+      const { data } = await api.get('/api/admin/me/permissions')
+      adminRole.value = data.role
+      permissions.value = data.permissions || []
+    } catch (err) {
+      // 失敗不阻擋登入；permissions 維持 null → can() 樂觀放行（後端仍是真閘門）
+      console.error('獲取權限失敗:', err)
+      permissions.value = null
+      adminRole.value = null
     }
   }
 
@@ -130,9 +164,12 @@ export const useAuthStore = defineStore('auth', () => {
     user,
     loading,
     error,
+    adminRole,
+    permissions,
     // Getters
     isAuthenticated,
     isAdmin,
+    can,
     quota,
     usage,
     quotaPercentage,
@@ -142,6 +179,7 @@ export const useAuthStore = defineStore('auth', () => {
     login,
     logout,
     fetchCurrentUser,
+    fetchPermissions,
     initialize
   }
 })

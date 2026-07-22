@@ -9,6 +9,8 @@
 """
 from datetime import datetime, timedelta, timezone
 
+from .llm_pricing import cost_usd, pricing_table_for_response
+
 TZ_UTC8 = timezone(timedelta(hours=8))
 
 
@@ -35,21 +37,23 @@ def derive_overview(
     }
 
 
-def merge_daily(daily_tasks_stats: list, daily_summaries_stats: list) -> list:
-    """每日統計：以 task 日期為主軸，合併同日 summary。
+def merge_daily(daily_tasks_stats: list, daily_summaries_stats: list, date_list: list) -> list:
+    """每日統計：以 date_list 為主軸（連續日期，含無資料日）合併 task / summary。
 
-    保留原行為——只遍歷有 task 的日期；summary-only 的日期不出現在結果。
+    date_list 由呼叫端算出完整日期序列，缺資料的日期一律補 0（前端圖表才不會跳日）；
+    summary-only 的日期也會出現（不再被丟棄）。
     """
+    task_map = {t["_id"]: t for t in daily_tasks_stats}
     summary_map = {s["_id"]: s for s in daily_summaries_stats}
     out = []
-    for t in daily_tasks_stats:
-        date = t["_id"]
+    for date in date_list:
+        t = task_map.get(date, {})
         s = summary_map.get(date, {})
-        punct_tokens = t["punctuation_tokens"]
+        punct_tokens = t.get("punctuation_tokens", 0)
         summary_tokens = s.get("summary_tokens", 0)
         out.append({
             "date": date,
-            "tasks_count": t["tasks_count"],
+            "tasks_count": t.get("tasks_count", 0),
             "summaries_count": s.get("summaries_count", 0),
             "punctuation_tokens": punct_tokens,
             "summary_tokens": summary_tokens,
@@ -82,11 +86,6 @@ def merge_top_users(user_tasks_stats: list, user_summary_stats: list, *, limit: 
     return merged[:limit]
 
 
-def _safe_avg(total: float, count: int) -> float:
-    """total/count，round 2 位；count 為 0 回 0（除零保護）。"""
-    return round(total / count, 2) if count > 0 else 0
-
-
 def format_named_counts(stats: list, *, key: str, default: str) -> list:
     """把 `[{_id, count}]` 的 aggregation 結果轉成 `[{<key>: label, count}]`；_id 為 None 用 default。"""
     return [{key: (s["_id"] or default), "count": s["count"]} for s in stats]
@@ -101,31 +100,110 @@ def format_performance(duration_stats: dict) -> dict:
     }
 
 
-def combine_token_usage(punct_stats: dict, summary_stats: dict) -> dict:
-    """token 使用區塊：標點（tasks）+ AI 總結（summaries）兩來源合計 + 各自平均。"""
-    p_total = punct_stats.get("total_tokens", 0)
-    s_total = summary_stats.get("total_tokens", 0)
-    p_count = punct_stats.get("tasks_with_tokens", 0)
-    s_count = summary_stats.get("summaries_with_tokens", 0)
+# ── AI 成本（token → USD）純函式 ──────────────────────────────────────────────
+
+def _empty_cost_block() -> dict:
+    """單一功能（punctuation / summary）的成本累加 buffer。models 暫存為 dict，格式化時轉 list。"""
     return {
-        "total_tokens": p_total + s_total,
-        "prompt_tokens": punct_stats.get("total_prompt_tokens", 0) + summary_stats.get("total_prompt_tokens", 0),
-        "completion_tokens": punct_stats.get("total_completion_tokens", 0) + summary_stats.get("total_completion_tokens", 0),
-        "punctuation": {
-            "total_tokens": p_total,
-            "prompt_tokens": punct_stats.get("total_prompt_tokens", 0),
-            "completion_tokens": punct_stats.get("total_completion_tokens", 0),
-            "tasks_count": p_count,
-            "avg_tokens_per_task": _safe_avg(p_total, p_count),
-        },
-        "summary": {
-            "total_tokens": s_total,
-            "prompt_tokens": summary_stats.get("total_prompt_tokens", 0),
-            "completion_tokens": summary_stats.get("total_completion_tokens", 0),
-            "summaries_count": s_count,
-            "avg_tokens_per_summary": _safe_avg(s_total, s_count),
-        },
+        "cost_usd": 0.0, "total_tokens": 0, "prompt_tokens": 0,
+        "completion_tokens": 0, "unpriced_tokens": 0, "models": {},
     }
+
+
+def _fold_cost_row(block: dict, model: str, prompt: int, completion: int, total: int, count: int) -> None:
+    """把一列 (model 已聚合) token 折進成本 buffer；無單價的模型計入 unpriced_tokens 不當 0。"""
+    c = cost_usd(model, prompt, completion)
+    priced = c is not None
+    block["prompt_tokens"] += prompt
+    block["completion_tokens"] += completion
+    block["total_tokens"] += total
+    if priced:
+        block["cost_usd"] += c
+    else:
+        block["unpriced_tokens"] += total
+    mb = block["models"].setdefault(
+        model, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+                "cost_usd": 0.0, "count": 0, "priced": priced})
+    mb["prompt_tokens"] += prompt
+    mb["completion_tokens"] += completion
+    mb["total_tokens"] += total
+    mb["count"] += count
+    mb["priced"] = priced
+    if priced:
+        mb["cost_usd"] += c
+
+
+def _fold_rows(rows: list, block: dict) -> None:
+    """把一批 aggregation 結果（每列 = 一個 (month, model)）折進同一個成本 buffer。"""
+    for r in rows:
+        model = r["_id"].get("model") or "unknown"
+        _fold_cost_row(
+            block, model,
+            r.get("prompt", 0), r.get("completion", 0), r.get("total", 0), r.get("count", 0),
+        )
+
+
+def _format_cost_block(block: dict) -> dict:
+    """把成本 buffer 格式化成回應：round 金額、models dict → 依成本高到低的 list。"""
+    models = [{
+        "model": name,
+        "prompt_tokens": mb["prompt_tokens"],
+        "completion_tokens": mb["completion_tokens"],
+        "total_tokens": mb["total_tokens"],
+        "count": mb["count"],
+        "cost_usd": round(mb["cost_usd"], 4),
+        "priced": mb["priced"],
+    } for name, mb in block["models"].items()]
+    models.sort(key=lambda x: x["cost_usd"], reverse=True)
+    return {
+        "cost_usd": round(block["cost_usd"], 4),
+        "total_tokens": block["total_tokens"],
+        "prompt_tokens": block["prompt_tokens"],
+        "completion_tokens": block["completion_tokens"],
+        "unpriced_tokens": block["unpriced_tokens"],
+        "models": models,
+    }
+
+
+def build_monthly_cost(punct_rows: list, summary_rows: list, month_list: list) -> tuple:
+    """把標點 / 摘要的 (month, model) aggregation 結果組成逐月成本 + 期間總計。
+
+    回 (months, totals)。month_list 由呼叫端算好（含無資料的月份，補零成連續序列）。
+    """
+    # 逐月：先把每列依月份分組，再各自 fold
+    per_month = {m: {"punctuation": _empty_cost_block(), "summary": _empty_cost_block()} for m in month_list}
+    grand = {"punctuation": _empty_cost_block(), "summary": _empty_cost_block()}
+
+    for feature, rows in (("punctuation", punct_rows), ("summary", summary_rows)):
+        by_month = {}
+        for r in rows:
+            by_month.setdefault(r["_id"]["month"], []).append(r)
+        for month, month_rows in by_month.items():
+            if month in per_month:  # 越界月份理論上已被 $match 濾掉，防禦性略過
+                _fold_rows(month_rows, per_month[month][feature])
+        _fold_rows(rows, grand[feature])  # 期間總計直接由全部列折出（$match 已限制在區間內）
+
+    months = []
+    for m in month_list:
+        p, s = per_month[m]["punctuation"], per_month[m]["summary"]
+        months.append({
+            "month": m,
+            "total_cost_usd": round(p["cost_usd"] + s["cost_usd"], 4),
+            "total_tokens": p["total_tokens"] + s["total_tokens"],
+            "unpriced_tokens": p["unpriced_tokens"] + s["unpriced_tokens"],
+            "punctuation": _format_cost_block(p),
+            "summary": _format_cost_block(s),
+        })
+
+    gp, gs = grand["punctuation"], grand["summary"]
+    totals = {
+        "total_cost_usd": round(gp["cost_usd"] + gs["cost_usd"], 4),
+        "total_tokens": gp["total_tokens"] + gs["total_tokens"],
+        "unpriced_tokens": gp["unpriced_tokens"] + gs["unpriced_tokens"],
+        "punctuation": _format_cost_block(gp),
+        "summary": _format_cost_block(gs),
+    }
+    return months, totals
 
 
 def summarize_subscriptions(sub_list: list, price_of) -> tuple:
@@ -166,15 +244,23 @@ def format_recent_orders(recent_raw: list, email_map: dict) -> list:
 
 # ── orchestration（跑 pipeline + 用上面的純函式組 report）──────────────────────
 
-_EMPTY_TOKENS = {
-    "total_tokens": 0, "total_prompt_tokens": 0, "total_completion_tokens": 0,
-}
-
 
 def _thirty_days_ago_ts() -> int:
     """30 天前（以 UTC+8 當天 00:00 起算）的 Unix timestamp（秒）。"""
     dt = datetime.now(TZ_UTC8).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=30)
     return int(dt.timestamp())
+
+
+def _daily_date_series(cutoff_ts: int) -> list:
+    """從 cutoff（UTC+8 00:00）那天到今天（UTC+8）的連續 'YYYY-MM-DD' 清單，供每日統計補零。"""
+    start = datetime.fromtimestamp(cutoff_ts, tz=TZ_UTC8).date()
+    today = datetime.now(TZ_UTC8).date()
+    out = []
+    d = start
+    while d <= today:
+        out.append(d.isoformat())
+        d += timedelta(days=1)
+    return out
 
 
 def _daily_group(date_field: str, count_key: str, token_path: str, token_key: str, cutoff_ts: int) -> list:
@@ -202,6 +288,47 @@ def _model_group(field: str) -> list:
     ]
 
 
+def _month_window(months: int) -> tuple:
+    """回 (cutoff_ts, month_list)：往回涵蓋 `months` 個日曆月（含當月，UTC+8 月初起算）。
+
+    月份計算用「年*12+月」的整數運算避免跨年出錯；month_list 為升序 'YYYY-MM' 且連續（無資料月補零用）。
+    """
+    now = datetime.now(TZ_UTC8)
+    idx = now.year * 12 + (now.month - 1) - (months - 1)  # 起始月的絕對月序
+    start_y, start_m0 = divmod(idx, 12)
+    cutoff = datetime(start_y, start_m0 + 1, 1, tzinfo=TZ_UTC8)
+    month_list = []
+    y, m = start_y, start_m0 + 1
+    while (y, m) <= (now.year, now.month):
+        month_list.append(f"{y:04d}-{m:02d}")
+        m += 1
+        if m > 12:
+            m, y = 1, y + 1
+    return int(cutoff.timestamp()), month_list
+
+
+def _monthly_cost_group(date_field: str, prompt_f: str, completion_f: str,
+                        total_f: str, model_f: str, cutoff_ts: int) -> list:
+    """逐月 × 逐模型 的 token 聚合（UTC+8 分月）。單價在 Python 端套（因各模型/級距不同）。"""
+    return [
+        {"$match": {total_f: {"$exists": True, "$ne": None}, date_field: {"$gte": cutoff_ts}}},
+        {"$group": {
+            "_id": {
+                "month": {"$dateToString": {
+                    "format": "%Y-%m",
+                    "date": {"$toDate": {"$multiply": [f"${date_field}", 1000]}},
+                    "timezone": "+08:00",
+                }},
+                "model": {"$ifNull": [f"${model_f}", "unknown"]},
+            },
+            "prompt": {"$sum": {"$ifNull": [f"${prompt_f}", 0]}},
+            "completion": {"$sum": {"$ifNull": [f"${completion_f}", 0]}},
+            "total": {"$sum": {"$ifNull": [f"${total_f}", 0]}},
+            "count": {"$sum": 1},
+        }},
+    ]
+
+
 class AdminAnalytics:
     """後台統計：跑 3-collection aggregation，組成 /statistics 回應。"""
 
@@ -226,40 +353,23 @@ class AdminAnalytics:
         total_users = await db.users.count_documents({})
         active_users = await db.users.count_documents({"is_active": True})
 
-        # 2 token 使用
-        punct_tokens = await self._agg(db.tasks, [
-            {"$match": {"stats.token_usage.total": {"$exists": True, "$ne": None}}},
-            {"$group": {
-                "_id": None,
-                "total_tokens": {"$sum": "$stats.token_usage.total"},
-                "total_prompt_tokens": {"$sum": "$stats.token_usage.prompt"},
-                "total_completion_tokens": {"$sum": "$stats.token_usage.completion"},
-                "tasks_with_tokens": {"$sum": 1},
-            }},
-        ], one=True, default={**_EMPTY_TOKENS, "tasks_with_tokens": 0})
-        summary_tokens = await self._agg(db.summaries, [
-            {"$match": {"metadata.token_usage.total": {"$exists": True, "$ne": None}}},
-            {"$group": {
-                "_id": None,
-                "total_tokens": {"$sum": "$metadata.token_usage.total"},
-                "total_prompt_tokens": {"$sum": "$metadata.token_usage.prompt"},
-                "total_completion_tokens": {"$sum": "$metadata.token_usage.completion"},
-                "summaries_with_tokens": {"$sum": 1},
-            }},
-        ], one=True, default={**_EMPTY_TOKENS, "summaries_with_tokens": 0})
+        # token 成本統計已獨立成 /admin/cost（monthly_cost）；此處不再重複聚合全期間
+        # token_usage（dashboard 改顯示當月成本、AI 成本頁顯示各區間）。
 
         # 3 模型使用
+        # 摘要類統計改讀 summary_logs（帳號刪除時 summaries 內容被砍、summary_logs 保留）
+        # → 歷史數字不掉；且 summary_logs 記每次生成，貼近實際用量。見 docs/ACCOUNT_DELETION_GDPR.md D2。
         punct_models = await self._agg(db.tasks, _model_group("models.punctuation"))
         trans_models = await self._agg(db.tasks, _model_group("models.transcription"))
         diar_models = await self._agg(db.tasks, _model_group("models.diarization"))
-        summary_models = await self._agg(db.summaries, _model_group("metadata.model"))
+        summary_models = await self._agg(db.summary_logs, _model_group("model"))
 
         # 4 每日統計（兩條 pipeline 共用同一個 30 天界線）
         cutoff = _thirty_days_ago_ts()
         daily_tasks = await self._agg(db.tasks, _daily_group(
             "timestamps.created_at", "tasks_count", "stats.token_usage.total", "punctuation_tokens", cutoff))
-        daily_summaries = await self._agg(db.summaries, _daily_group(
-            "created_at", "summaries_count", "metadata.token_usage.total", "summary_tokens", cutoff))
+        daily_summaries = await self._agg(db.summary_logs, _daily_group(
+            "created_at", "summaries_count", "token_usage.total", "summary_tokens", cutoff))
 
         # 5 top users
         user_tasks = await self._agg(db.tasks, [
@@ -271,13 +381,12 @@ class AdminAnalytics:
             {"$sort": {"tasks_count": -1}},
             {"$limit": 20},
         ])
-        user_summaries = await self._agg(db.summaries, [
-            {"$lookup": {"from": "tasks", "localField": "_id", "foreignField": "_id", "as": "task_info"}},
-            {"$unwind": {"path": "$task_info", "preserveNullAndEmptyArrays": True}},
+        # summary_logs 直接帶 user_id（= tasks.user.user_id），免 $lookup join
+        user_summaries = await self._agg(db.summary_logs, [
             {"$group": {
-                "_id": "$task_info.user.user_id",
+                "_id": "$user_id",
                 "summaries_count": {"$sum": 1},
-                "summary_tokens": {"$sum": {"$ifNull": ["$metadata.token_usage.total", 0]}},
+                "summary_tokens": {"$sum": {"$ifNull": ["$token_usage.total", 0]}},
             }},
         ])
 
@@ -304,17 +413,51 @@ class AdminAnalytics:
                 processing_tasks=processing_tasks, failed_tasks=failed_tasks,
                 total_users=total_users, active_users=active_users,
             ),
-            "token_usage": combine_token_usage(punct_tokens, summary_tokens),
             "model_usage": {
                 "punctuation": format_named_counts(punct_models, key="model", default="未知"),
                 "transcription": format_named_counts(trans_models, key="model", default="未知"),
                 "diarization": format_named_counts(diar_models, key="model", default="未知"),
                 "summary": format_named_counts(summary_models, key="model", default="未知"),
             },
-            "daily_stats": merge_daily(daily_tasks, daily_summaries),
+            "daily_stats": merge_daily(daily_tasks, daily_summaries, _daily_date_series(cutoff)),
             "top_users": merge_top_users(user_tasks, user_summaries),
             "performance": format_performance(duration),
             "punct_provider_usage": format_named_counts(punct_providers, key="provider", default="none"),
+        }
+
+    async def monthly_cost(self, months: int = 6) -> dict:
+        """AI 成本 dashboard：逐月 × 功能（標點/摘要）× 模型的 token → USD 試算。
+
+        資料來源：
+          - 標點：`tasks.stats.token_usage`（分月依 timestamps.created_at）。
+          - 摘要：`summary_logs`（append-only，逐次生成含 model/token；分月依 created_at）。
+            用 summary_logs 而非 summaries，因它涵蓋重新生成、貼近實際 API 計費次數。
+
+        單價與計價假設見 `llm_pricing`。金額為估算（幣別 USD），非 Google/OpenAI 帳單實數。
+        """
+        months = max(1, min(int(months), 24))  # 白名單化，防惡意大範圍掃描
+        cutoff_ts, month_list = _month_window(months)
+
+        punct_rows = await self._agg(self.db.tasks, _monthly_cost_group(
+            "timestamps.created_at", "stats.token_usage.prompt", "stats.token_usage.completion",
+            "stats.token_usage.total", "stats.token_usage.model", cutoff_ts))
+        summary_rows = await self._agg(self.db.summary_logs, _monthly_cost_group(
+            "created_at", "token_usage.prompt", "token_usage.completion",
+            "token_usage.total", "model", cutoff_ts))
+
+        months_out, totals = build_monthly_cost(punct_rows, summary_rows, month_list)
+        return {
+            "currency": "USD",
+            "range_months": months,
+            "months": months_out,
+            "totals": totals,
+            "pricing": pricing_table_for_response(),
+            "notes": [
+                "金額為估算：依本表單價換算，非 Google/OpenAI 帳單實數。",
+                "分月以 UTC+8 月初為界。",
+                "摘要成本源自 summary_logs（含重新生成），標點源自 tasks.stats.token_usage。",
+                "unpriced_tokens 為單價表未收錄之模型的 token，未計入 cost_usd。",
+            ],
         }
 
     async def revenue(self) -> dict:
@@ -365,10 +508,15 @@ class AdminAnalytics:
         user_ids = list({o.get("user_id") for o in recent_raw if o.get("user_id")})
         email_map = {}
         if user_ids:
+            # 已刪除帳號 email 為 None → 用穩定假名，避免訂單列 email 空白
+            from ..utils.user_display import user_email_or_label
             async for u in db.users.find(
-                {"_id": {"$in": [ObjectId(uid) for uid in user_ids]}}, {"email": 1}
+                {"_id": {"$in": [ObjectId(uid) for uid in user_ids]}},
+                {"email": 1, "deleted_at": 1},
             ):
-                email_map[str(u["_id"])] = u.get("email", "")
+                uid = str(u["_id"])
+                email_map[uid] = user_email_or_label(
+                    u.get("email"), uid, deleted=bool(u.get("deleted_at")))
         recent_orders = format_recent_orders(recent_raw, email_map)
 
         # 6 流失指標（「本月」以日曆月初為界，非滾動 30 天）

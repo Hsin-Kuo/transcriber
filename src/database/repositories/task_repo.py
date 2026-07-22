@@ -362,9 +362,35 @@ class TaskRepository:
         ).to_list(length=None)
 
     async def delete_all_for_user(self, user_id: str) -> int:
-        """硬刪除某 user 的所有任務（帳號刪除用）。回傳刪除筆數。"""
+        """硬刪除某 user 的所有任務。回傳刪除筆數。"""
         result = await self.collection.delete_many(self.owned_by(user_id))
         return result.deleted_count
+
+    async def anonymize_all_for_user(self, user_id: str, *, now: int) -> int:
+        """帳號刪除：把某 user 的所有任務去識別化保留（供統計/稽核）。
+
+        清除 PII 與內容參照（email / 自訂名 / 標籤 / 檔名 / 音檔參照），
+        保留統計所需的非個資欄位（user_id 假名鍵、status、task_type、
+        models、stats、timestamps、字數統計、config）。實際逐字內容
+        （transcriptions/segments/summaries）與音檔另由呼叫端硬刪。
+        回傳更新筆數。
+        """
+        result = await self.collection.update_many(
+            self.owned_by(user_id),
+            {
+                "$set": {
+                    "user.user_email": None,
+                    "custom_name": None,
+                    "tags": [],
+                    "file.filename": None,
+                    "result.audio_file": None,
+                    "result.audio_filename": None,
+                    "anonymized_at": now,
+                    "updated_at": now,
+                }
+            },
+        )
+        return result.modified_count
 
     async def get_all_user_tags(self, user_id: str) -> List[str]:
         """獲取用戶所有使用過的標籤"""
