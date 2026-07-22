@@ -138,8 +138,11 @@ export function useTranscriptData() {
 
       // 並行獲取逐字稿和 segments
       const [transcriptResponse, segmentsResponse] = await Promise.all([
+        // purpose=view：這只是開詳情頁讀取內容顯示、不是下載，讓後端把稽核記成
+        // 「檢視轉錄結果」而非「下載轉錄結果」（同一支 endpoint 靠 purpose 區分）。
         api.get(NEW_ENDPOINTS.transcriptions.download(taskId), {
           responseType: 'text',
+          params: { purpose: 'view' },
           signal,
         }),
         api.get(NEW_ENDPOINTS.transcriptions.segments(taskId), { signal }).catch(err => {

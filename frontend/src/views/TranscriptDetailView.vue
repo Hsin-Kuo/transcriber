@@ -1332,9 +1332,26 @@ usePageLifecycle({
   border: 0.5px solid;
   border-radius: 13px;
   padding: 20px 10px;
-  max-height: calc(100vh - var(--header-height) - 40px);
+  /* max-height 必須把自身 margin-top(23px) 一起扣掉，否則視窗變矮、max-height 生效時
+     面板底部會被推出 container 的 overflow:hidden 範圍，導致底部邊框/圓角被裁切。
+     40px = 右欄基準餘裕；+23px = 對齊本欄的 margin-top，使左右兩欄底部齊平。 */
+  max-height: calc(100vh - var(--header-height) - 40px - 23px);
   overflow-y: auto;
-  overflow-x: visible;
+  /* overflow-x 必須明確設為非 visible：當 overflow-y 為 auto 而 overflow-x 為
+     visible 時，CSS 規範會把 visible 計算成 auto，讓水平方向也變成 scroll container，
+     hover 浮層可能觸發瞬時水平捲軸 →連帶影響可用高度→ scrollbar 抖動。
+     註：收合模式的 pop-right tooltip 因此會被裁切（本就如此），正解是把浮層 teleport 出面板。 */
+  overflow-x: hidden;
+  /* 隱藏式捲軸：捲軸不佔版面寬度（等同 overlay），因此
+     (1) 內容維持置中，不會被預留槽位推偏；
+     (2) 內容寬度恆定 → AudioPlayer 的 height:auto SVG 不再隨寬度縮放 → 斷開 scrollbar 抖動迴圈。
+     仍可用滾輪 / 觸控板滾動；macOS 預設 overlay 捲軸滑動時仍會浮現。 */
+  scrollbar-width: none; /* Firefox / 新版 Chrome */
+}
+
+/* WebKit（Safari / 舊 Chrome）隱藏捲軸 */
+.left-panel::-webkit-scrollbar {
+  display: none;
 }
 
 /* 右側文字區域 */

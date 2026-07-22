@@ -1,5 +1,5 @@
 """轉錄管理路由"""
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Request
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Request, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List, Literal
@@ -446,14 +446,20 @@ async def create_transcription(
 async def download_transcription(
     request: Request,
     task_id: str,
+    purpose: str = Query("download"),
     current_user: dict = Depends(get_current_user),
     db = Depends(get_database)
 ):
-    """下載轉錄結果
+    """下載 / 檢視轉錄結果
+
+    此 endpoint 同時服務兩種前端情境：開啟任務詳情時「檢視」內容（purpose=view，
+    只讀取顯示、不存檔），以及任務列表的「快速下載 TXT」（purpose=download，實際存檔）。
+    兩者共用同一支 API，靠 purpose 區分稽核語意——不然檢視也會被記成「下載轉錄結果」。
 
     Args:
         request: Request 對象
         task_id: 任務 ID
+        purpose: 稽核意圖，view=檢視詳情 / download=實際下載（白名單，非白名單值一律當 download）
         current_user: 當前用戶
         db: 資料庫實例
 
@@ -512,20 +518,24 @@ async def download_transcription(
     # 使用 RFC 5987 編碼來支援中文檔名
     encoded_filename = quote(download_filename, safe='')
 
-    # 記錄 audit log（下載轉錄結果）
+    # 記錄 audit log。purpose=view（開啟詳情檢視）與實際下載語意不同，分開記
+    # 才不會把「檢視」誤標成「下載轉錄結果」。白名單外的值一律當 download。
+    is_view = purpose == "view"
+    audit_action = "view" if is_view else "download"
+    audit_message = "檢視轉錄結果" if is_view else f"下載轉錄結果：{download_filename}"
     try:
         from ..utils.audit_logger import get_audit_logger
         audit_logger = get_audit_logger()
         await audit_logger.log_transcription_operation(
             request=request,
-            action="download",
+            action=audit_action,
             user_id=str(current_user["_id"]),
             task_id=task_id,
             status_code=200,
-            message=f"下載轉錄結果：{download_filename}"
+            message=audit_message
         )
     except Exception as e:
-        log.warning("transcription.audit_log.failed", action="download", error=str(e))
+        log.warning("transcription.audit_log.failed", action=audit_action, error=str(e))
 
     return StreamingResponse(
         BytesIO(content.encode('utf-8')),
@@ -635,6 +645,54 @@ async def export_transcription_pdf(
             "Content-Length": str(len(pdf_bytes)),
         }
     )
+
+
+class ExportLogRequest(BaseModel):
+    """前端 client-side 匯出（TXT/SRT/VTT）的稽核 beacon 參數。
+
+    format 白名單擋非法值；filename 只作為 audit message 顯示用，上限 500 字防灌爆。
+    """
+    format: Literal["txt", "srt", "vtt"]
+    filename: str = Field("", max_length=500)
+
+
+@router.post("/{task_id}/export/log")
+async def log_transcript_export(
+    task_id: str,
+    payload: ExportLogRequest,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+    db = Depends(get_database)
+):
+    """記錄前端 client-side 匯出（TXT/SRT/VTT）的稽核 trail。
+
+    這些格式在瀏覽器用 Blob 直接存檔、不經後端，後端無從得知，因此前端存檔成功
+    後打這支 beacon 補記 audit（PDF 走 /export/pdf 已自帶稽核，不會經過這裡）。
+    先驗任務屬於當前用戶，避免拿他人 task_id 灌假稽核。
+    """
+    task_repo = TaskRepository(db)
+    task = await task_repo.get_by_id_and_user(task_id, str(current_user["_id"]))
+    if not task:
+        raise api_error("TRANSCRIPTION_TASK_NOT_FOUND", "Task not found or access denied", status.HTTP_404_NOT_FOUND)
+
+    fmt = payload.format
+    filename = (payload.filename or "").strip() or f"{task_id}.{fmt}"
+
+    try:
+        from ..utils.audit_logger import get_audit_logger
+        audit_logger = get_audit_logger()
+        await audit_logger.log_transcription_operation(
+            request=request,
+            action=f"export_{fmt}",
+            user_id=str(current_user["_id"]),
+            task_id=task_id,
+            status_code=200,
+            message=f"匯出 {fmt.upper()}：{filename}"
+        )
+    except Exception as e:
+        log.warning("transcription.audit_log.failed", action=f"export_{fmt}", error=str(e))
+
+    return {"success": True}
 
 
 @router.get("/{task_id}/audio")

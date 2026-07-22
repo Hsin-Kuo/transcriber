@@ -17,7 +17,7 @@
     </div>
 
     <div class="nav-links">
-      <router-link to="/" class="nav-link" exact-active-class="active">
+      <router-link v-if="authStore.can(PERM.ANALYTICS_READ)" to="/" class="nav-link" exact-active-class="active">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M3 3v18h18" />
           <path d="M18 17V9" />
@@ -26,7 +26,7 @@
         </svg>
         <span>系統統計</span>
       </router-link>
-      <router-link to="/users" class="nav-link" exact-active-class="active">
+      <router-link v-if="authStore.can(PERM.USER_READ)" to="/users" class="nav-link" exact-active-class="active">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
           <circle cx="9" cy="7" r="4" />
@@ -35,21 +35,21 @@
         </svg>
         <span>用戶管理</span>
       </router-link>
-      <router-link to="/tasks" class="nav-link" exact-active-class="active">
+      <router-link v-if="authStore.can(PERM.TASK_READ)" to="/tasks" class="nav-link" exact-active-class="active">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M9 11l3 3L22 4" />
           <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
         </svg>
         <span>任務管理</span>
       </router-link>
-      <router-link to="/cost" class="nav-link" exact-active-class="active">
+      <router-link v-if="authStore.can(PERM.ANALYTICS_READ)" to="/cost" class="nav-link" exact-active-class="active">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="12" y1="1" x2="12" y2="23" />
           <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
         </svg>
         <span>AI 成本</span>
       </router-link>
-      <router-link to="/audit-logs" class="nav-link" exact-active-class="active">
+      <router-link v-if="authStore.can(PERM.AUDIT_READ)" to="/audit-logs" class="nav-link" exact-active-class="active">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
           <polyline points="14 2 14 8 20 8" />
@@ -82,6 +82,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
+import { PERM } from '../../constants/permissions'
 
 const router = useRouter()
 const authStore = useAuthStore()

@@ -64,7 +64,7 @@
     <!-- 批次操作 -->
     <div v-if="selectedTasks.length > 0" class="batch-actions">
       <span>已選擇 {{ selectedTasks.length }} 個任務</span>
-      <button @click="batchDelete" class="batch-btn danger">
+      <button v-if="authStore.can(PERM.TASK_DELETE)" @click="batchDelete" class="batch-btn danger">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 4px;">
           <polyline points="3 6 5 6 21 6"></polyline>
           <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -159,14 +159,14 @@
                   查看
                 </router-link>
                 <button
-                  v-if="['pending', 'processing'].includes(task.status)"
+                  v-if="['pending', 'processing'].includes(task.status) && authStore.can(PERM.TASK_MANAGE)"
                   @click="cancelTask(task)"
                   class="action-btn cancel"
                 >
                   取消
                 </button>
                 <button
-                  v-else
+                  v-else-if="!['pending', 'processing'].includes(task.status) && authStore.can(PERM.TASK_DELETE)"
                   @click="deleteTask(task)"
                   class="action-btn delete"
                 >
@@ -196,6 +196,10 @@
 import { ref, computed, onMounted } from 'vue'
 import api from '../utils/api'
 import AdminNav from '../components/shared/AdminNav.vue'
+import { useAuthStore } from '../stores/auth'
+import { PERM } from '../constants/permissions'
+
+const authStore = useAuthStore()
 
 const tasks = ref([])
 const loading = ref(true)
@@ -432,8 +436,8 @@ onMounted(() => {
 
 .filter-btn {
   padding: 8px 16px;
-  background: var(--color-primary, #dd8448); color: white;
-  color: var(--color-primary, #dd8448);
+  background: var(--color-primary, #dd8448);
+  color: white;
   border: none;
   border-radius: 12px;
   cursor: pointer;
@@ -504,8 +508,8 @@ onMounted(() => {
 
 .refresh-btn {
   padding: 8px 16px;
-  background: var(--color-primary, #dd8448); color: white;
-  color: var(--color-primary, #dd8448);
+  background: var(--color-primary, #dd8448);
+  color: white;
   border: none;
   border-radius: 12px;
   cursor: pointer;
@@ -632,8 +636,8 @@ onMounted(() => {
 
 .page-btn {
   padding: 10px 20px;
-  background: var(--color-primary, #dd8448); color: white;
-  color: var(--color-primary, #dd8448);
+  background: var(--color-primary, #dd8448);
+  color: white;
   border: none;
   border-radius: 12px;
   cursor: pointer;

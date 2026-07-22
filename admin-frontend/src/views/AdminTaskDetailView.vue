@@ -226,14 +226,14 @@
       <!-- 操作按鈕 -->
       <div class="action-buttons">
         <button
-          v-if="['pending', 'processing'].includes(task.status)"
+          v-if="['pending', 'processing'].includes(task.status) && authStore.can(PERM.TASK_MANAGE)"
           @click="cancelTask"
           class="action-btn cancel"
         >
           取消任務
         </button>
         <button
-          v-else
+          v-else-if="!['pending', 'processing'].includes(task.status) && authStore.can(PERM.TASK_DELETE)"
           @click="deleteTask"
           class="action-btn delete"
         >
@@ -256,6 +256,10 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '../utils/api'
 import AdminNav from '../components/shared/AdminNav.vue'
+import { useAuthStore } from '../stores/auth'
+import { PERM } from '../constants/permissions'
+
+const authStore = useAuthStore()
 
 const route = useRoute()
 const router = useRouter()
@@ -675,8 +679,8 @@ code {
 }
 
 .action-btn.view {
-  background: var(--color-primary, #dd8448); color: white;
-  color: var(--color-primary, #dd8448);
+  background: var(--color-primary, #dd8448);
+  color: white;
 }
 
 .action-btn.cancel {
