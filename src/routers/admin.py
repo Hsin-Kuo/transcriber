@@ -2,7 +2,7 @@
 管理後台 API - 用戶管理、任務管理、統計、審計日誌
 """
 from typing import Optional, List
-from datetime import timezone, timedelta
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from pydantic import BaseModel, EmailStr
 from bson import ObjectId
@@ -19,6 +19,8 @@ from ..database.repositories.user_repo import UserRepository
 from ..database.repositories.task_repo import TaskRepository
 from ..database.repositories.audit_log_repo import AuditLogRepository
 from ..database.repositories.summary_log_repo import SummaryLogRepository
+from ..database.repositories.presence_repo import PresenceRepository, PRESENCE_TTL_SECONDS
+from ..database.repositories.presence_rollup_repo import PresenceRollupRepository
 from ..models.quota import QuotaTier, QUOTA_TIERS
 from ..utils.time_utils import get_utc_timestamp
 from ..utils.audit_logger import log_admin_action
@@ -1065,6 +1067,45 @@ async def get_admin_statistics(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             error=str(e),
         )
+
+
+# ========== 線上人數 API ==========
+
+@router.get("/stats/online")
+async def get_online_users(
+    window_seconds: int = Query(
+        PRESENCE_TTL_SECONDS, ge=30, le=900,
+        description="視為在線的閒置門檻（秒）；預設等於 presence TTL",
+    ),
+    admin: dict = Depends(require_permission(Permission.ANALYTICS_READ)),
+    db=Depends(get_database),
+):
+    """當下線上（最近 window_seconds 內有活動）的已登入使用者數。
+
+    供後台即時運營看板輪詢用；刻意不寫 audit log（會被高頻輪詢，寫了反而灌爆
+    audit_logs）。資料來源為 user_presence collection（被動記錄 + TTL 自動清）。
+    """
+    count = await PresenceRepository(db).count_online(window_seconds=window_seconds)
+    return {"online_users": count, "window_seconds": window_seconds}
+
+
+@router.get("/stats/online/history")
+async def get_online_history(
+    days: int = Query(7, ge=1, le=90, description="往回涵蓋幾天"),
+    admin: dict = Depends(require_permission(Permission.ANALYTICS_READ)),
+    db=Depends(get_database),
+):
+    """線上人數歷史（每小時桶：峰值、平均、峰值發生時間）。
+
+    供後台趨勢圖看「長期活躍巔峰」；資料來自 presence_rollup（背景每分鐘抽樣、
+    每小時彙整）。回傳 buckets（時間正序）與 peak（區間內最高的那一桶）。
+    """
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=days)
+    repo = PresenceRollupRepository(db)
+    buckets = await repo.buckets_between(start, now)
+    peak = await repo.peak_between(start, now)
+    return {"days": days, "buckets": buckets, "peak": peak}
 
 
 # ========== 收入統計 API ==========

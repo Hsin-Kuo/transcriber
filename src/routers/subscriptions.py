@@ -24,7 +24,7 @@ from ..utils.logger import get_logger
 router = APIRouter(prefix="/subscriptions", tags=["Subscriptions"])
 log = get_logger(__name__)
 
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
 
