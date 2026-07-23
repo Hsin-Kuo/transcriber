@@ -42,6 +42,7 @@ EXPECTED = {
     ("POST", "/api/admin/tasks/batch/delete"): Permission.TASK_DELETE,
     ("GET", "/api/admin/statistics"): Permission.ANALYTICS_READ,
     ("GET", "/api/admin/stats/online"): Permission.ANALYTICS_READ,
+    ("GET", "/api/admin/stats/online/history"): Permission.ANALYTICS_READ,
     ("GET", "/api/admin/revenue"): Permission.BILLING_READ,
     ("GET", "/api/admin/cost"): Permission.ANALYTICS_READ,
     ("GET", "/api/admin/audit-logs"): Permission.AUDIT_READ,

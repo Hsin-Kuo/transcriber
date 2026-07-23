@@ -15,6 +15,62 @@
     </div>
 
     <div v-else class="stats-grid">
+      <!-- 線上使用者（即時輪詢；資料來自 user_presence，被動記錄 + TTL 自動清） -->
+      <div class="stat-card online-card">
+        <h2>
+          <span class="live-dot" :class="{ stale: onlineError }"></span>
+          線上使用者
+        </h2>
+        <div class="online-display">
+          <span class="online-count">{{ onlineUsers === null ? '—' : formatNumber(onlineUsers) }}</span>
+          <span class="online-unit">人在線</span>
+        </div>
+        <div class="stat-item">
+          <span class="label">在線判定門檻</span>
+          <select v-model.number="onlineWindow" @change="fetchOnline" class="window-select">
+            <option :value="60">近 1 分鐘</option>
+            <option :value="120">近 2 分鐘</option>
+          </select>
+        </div>
+        <div v-if="onlineError" class="online-error">⚠️ {{ onlineError }}</div>
+        <div v-else class="online-hint">每 {{ ONLINE_POLL_SECONDS }} 秒自動更新 · 最後更新 {{ onlineUpdate || '—' }}</div>
+      </div>
+
+      <!-- 線上人數趨勢（長期活躍峰值；資料來自 presence_rollup） -->
+      <div class="stat-card full-width">
+        <h2>
+          線上人數趨勢
+          <select v-model.number="historyDays" @change="fetchOnlineHistory" class="window-select" style="margin-left:auto">
+            <option :value="1">近 1 天</option>
+            <option :value="7">近 7 天</option>
+            <option :value="30">近 30 天</option>
+          </select>
+        </h2>
+        <div v-if="onlineHistory.length === 0" class="online-hint">
+          尚無歷史資料（背景每分鐘抽樣、每小時彙整，累積一段時間後即可看到趨勢）
+        </div>
+        <template v-else>
+          <div v-if="onlinePeak" class="peak-callout">
+            歷史峰值 <strong>{{ formatNumber(onlinePeak.peak_online) }}</strong> 人同時在線
+            <span class="peak-when">· {{ formatPeakAt(onlinePeak.peak_at) }}</span>
+          </div>
+          <div class="trend-chart">
+            <div
+              v-for="b in onlineHistory"
+              :key="b.bucket"
+              class="trend-bar-wrapper"
+              :title="`${formatBucket(b.bucket_start)}：峰值 ${b.peak_online} 人（平均 ${b.avg_online}）`"
+            >
+              <div
+                class="trend-bar"
+                :class="{ peak: onlinePeak && b.bucket === onlinePeak.bucket }"
+                :style="{ height: `${maxPeak ? (b.peak_online / maxPeak * 100) : 0}%` }"
+              ></div>
+            </div>
+          </div>
+        </template>
+      </div>
+
       <!-- 收入總覽 -->
       <div v-if="revenue" class="stat-card revenue-highlight">
         <h2>收入</h2>
@@ -399,9 +455,12 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import api from '../utils/api'
 import AdminNav from '../components/shared/AdminNav.vue'
+
+// 線上人數輪詢間隔（秒）。presence 每人 30s 節流寫入、TTL 120s，15s 輪詢足夠即時又不吵。
+const ONLINE_POLL_SECONDS = 15
 
 const stats = ref({
   overview: {
@@ -433,6 +492,19 @@ const monthCost = ref(null)
 const loading = ref(true)
 const error = ref(null)
 const lastUpdate = ref('')
+
+// 線上人數（獨立輪詢，不受 loading gate 影響）
+const onlineUsers = ref(null)
+const onlineWindow = ref(120)  // 秒；預設對齊 presence TTL（120s）
+const onlineError = ref(null)
+const onlineUpdate = ref('')
+let onlineTimer = null
+
+// 線上人數歷史趨勢（每小時 rollup；非即時，選單切換或掛載時抓）
+const historyDays = ref(7)
+const onlineHistory = ref([])
+const onlinePeak = ref(null)
+const maxPeak = computed(() => Math.max(...onlineHistory.value.map(b => b.peak_online), 1))
 
 // 計算每日最大任務數（用於圖表縮放）
 const maxDailyTasks = computed(() => {
@@ -502,6 +574,46 @@ function orderTypeLabel(type) {
   return map[type] || type
 }
 
+// 獲取線上人數（輪詢呼叫，失敗只記在卡片上、不干擾整頁）
+async function fetchOnline() {
+  try {
+    const response = await api.get('/api/admin/stats/online', {
+      params: { window_seconds: onlineWindow.value },
+    })
+    onlineUsers.value = response.data.online_users
+    onlineError.value = null
+    onlineUpdate.value = new Date().toLocaleTimeString('zh-TW')
+  } catch (err) {
+    onlineError.value = err.response?.data?.detail || err.message || '載入失敗'
+    console.error('載入線上人數失敗:', err)
+  }
+}
+
+// 獲取線上人數歷史（趨勢圖用）
+async function fetchOnlineHistory() {
+  try {
+    const response = await api.get('/api/admin/stats/online/history', {
+      params: { days: historyDays.value },
+    })
+    onlineHistory.value = response.data.buckets || []
+    onlinePeak.value = response.data.peak || null
+  } catch (err) {
+    console.error('載入線上人數歷史失敗:', err)
+  }
+}
+
+// 桶時間（趨勢圖 tooltip / x 軸）：後端回 UTC ISO，瀏覽器轉本地時區顯示
+function formatBucket(iso) {
+  if (!iso) return ''
+  return new Date(iso).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit' })
+}
+
+// 峰值發生時間（精確到分）
+function formatPeakAt(iso) {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
 // 獲取統計資料
 async function fetchStats() {
   loading.value = true
@@ -552,6 +664,13 @@ onMounted(() => {
   fetchStats()
   fetchRevenue()
   fetchMonthCost()
+  fetchOnline()
+  fetchOnlineHistory()
+  onlineTimer = setInterval(fetchOnline, ONLINE_POLL_SECONDS * 1000)
+})
+
+onUnmounted(() => {
+  if (onlineTimer) clearInterval(onlineTimer)
 })
 </script>
 
@@ -634,6 +753,124 @@ onMounted(() => {
 .value.highlight {
   color: var(--color-primary, #dd8448);
   font-size: 1.1em;
+}
+
+/* 線上人數卡片 */
+.online-display {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.online-count {
+  font-size: 2.5rem;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--color-primary, #dd8448);
+}
+
+.online-unit {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-light, #a0917c);
+}
+
+.live-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #2e7d32;
+  display: inline-block;
+  animation: live-pulse 2s infinite;
+}
+
+.live-dot.stale {
+  background: #c62828;
+  animation: none;
+}
+
+@keyframes live-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(46, 125, 50, 0.45); }
+  70%  { box-shadow: 0 0 0 8px rgba(46, 125, 50, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(46, 125, 50, 0); }
+}
+
+.window-select {
+  border: 1px solid rgba(163, 177, 198, 0.4);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text, rgb(145, 106, 45));
+  background: white;
+  cursor: pointer;
+}
+
+.online-hint {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--color-text-light, #a0917c);
+}
+
+.online-error {
+  margin-top: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #c62828;
+}
+
+/* 線上人數趨勢圖 */
+.peak-callout {
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  background: #fff8f3;
+  border: 1px solid rgba(221, 132, 72, 0.2);
+  border-radius: 10px;
+  font-size: 14px;
+  color: var(--color-primary-dark, #b8762d);
+}
+
+.peak-callout strong {
+  font-size: 1.2em;
+  color: var(--color-primary, #dd8448);
+}
+
+.peak-when {
+  color: var(--color-text-light, #a0917c);
+  font-weight: 500;
+}
+
+.trend-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 160px;
+  padding-top: 8px;
+}
+
+.trend-bar-wrapper {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+
+.trend-bar {
+  width: 100%;
+  min-height: 1px;
+  background: rgba(221, 132, 72, 0.35);
+  border-radius: 2px 2px 0 0;
+  transition: height 0.2s ease;
+}
+
+.trend-bar.peak {
+  background: var(--color-primary, #dd8448);
+}
+
+.trend-bar:hover {
+  background: rgba(221, 132, 72, 0.6);
 }
 
 .cost-estimate {
