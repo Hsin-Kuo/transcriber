@@ -71,6 +71,35 @@
         </template>
       </div>
 
+      <!-- 日活躍使用者 DAU（資料來自 dau_daily 長期 rollup） -->
+      <div class="stat-card full-width">
+        <h2>
+          日活躍使用者 (DAU)
+          <select v-model.number="dauDays" @change="fetchDau" class="window-select" style="margin-left:auto">
+            <option :value="30">近 30 天</option>
+            <option :value="90">近 90 天</option>
+            <option :value="365">近 1 年</option>
+          </select>
+        </h2>
+        <div class="peak-callout">
+          今日至此 <strong>{{ formatNumber(dauToday) }}</strong> 位不重複使用者
+          <span class="peak-when">· 當天有效登入去重（非併發）</span>
+        </div>
+        <div v-if="dauSeries.length === 0" class="online-hint">
+          尚無 DAU 資料（每日彙整，累積後即可看到歷史）
+        </div>
+        <div v-else class="trend-chart">
+          <div
+            v-for="d in dauSeries"
+            :key="d.date"
+            class="trend-bar-wrapper"
+            :title="`${d.date}：${d.dau} 位`"
+          >
+            <div class="trend-bar dau" :style="{ height: `${maxDau ? (d.dau / maxDau * 100) : 0}%` }"></div>
+          </div>
+        </div>
+      </div>
+
       <!-- 收入總覽 -->
       <div v-if="revenue" class="stat-card revenue-highlight">
         <h2>收入</h2>
@@ -506,6 +535,12 @@ const onlineHistory = ref([])
 const onlinePeak = ref(null)
 const maxPeak = computed(() => Math.max(...onlineHistory.value.map(b => b.peak_online), 1))
 
+// 日活躍使用者 DAU（每日 rollup；非即時）
+const dauDays = ref(30)
+const dauSeries = ref([])
+const dauToday = ref(0)
+const maxDau = computed(() => Math.max(...dauSeries.value.map(d => d.dau), 1))
+
 // 計算每日最大任務數（用於圖表縮放）
 const maxDailyTasks = computed(() => {
   return Math.max(...stats.value.daily_stats.map(d => d.tasks_count), 1)
@@ -614,6 +649,19 @@ function formatPeakAt(iso) {
   return new Date(iso).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
+// 獲取 DAU 歷史（每日 rollup + 今日即時）
+async function fetchDau() {
+  try {
+    const response = await api.get('/api/admin/stats/dau', {
+      params: { days: dauDays.value },
+    })
+    dauSeries.value = response.data.series || []
+    dauToday.value = response.data.today || 0
+  } catch (err) {
+    console.error('載入 DAU 失敗:', err)
+  }
+}
+
 // 獲取統計資料
 async function fetchStats() {
   loading.value = true
@@ -666,6 +714,7 @@ onMounted(() => {
   fetchMonthCost()
   fetchOnline()
   fetchOnlineHistory()
+  fetchDau()
   onlineTimer = setInterval(fetchOnline, ONLINE_POLL_SECONDS * 1000)
 })
 
@@ -867,6 +916,14 @@ onUnmounted(() => {
 
 .trend-bar.peak {
   background: var(--color-primary, #dd8448);
+}
+
+.trend-bar.dau {
+  background: rgba(46, 125, 50, 0.45);
+}
+
+.trend-bar.dau:hover {
+  background: rgba(46, 125, 50, 0.7);
 }
 
 .trend-bar:hover {

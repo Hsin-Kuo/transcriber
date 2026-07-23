@@ -305,6 +305,10 @@ async def startup_event():
     presence_rollup_repo_init = PresenceRollupRepository(db)
     await _safe_create("presence_rollup", presence_rollup_repo_init.ensure_indexes())
 
+    from src.database.repositories.daily_active_repo import DailyActiveRepository
+    daily_active_repo_init = DailyActiveRepository(db)
+    await _safe_create("daily_active", daily_active_repo_init.ensure_indexes())
+
     from src.database.repositories.order_repo import OrderRepository
     order_repo_init = OrderRepository(db)
     await _safe_create("orders", order_repo_init.create_indexes())
@@ -431,6 +435,13 @@ async def startup_event():
         create_background_task(
             periodic_presence_rollup(db),
             name="periodic_presence_rollup",
+        )
+
+        # 5.7 定期 DAU rollup（daily_active 去重數 → dau_daily 長期保留）
+        from src.database.repositories.daily_active_repo import periodic_dau_rollup
+        create_background_task(
+            periodic_dau_rollup(db),
+            name="periodic_dau_rollup",
         )
     else:
         logger.info("app.background_jobs.disabled", reason="RUN_BACKGROUND_JOBS=false")

@@ -21,6 +21,7 @@ from ..database.repositories.audit_log_repo import AuditLogRepository
 from ..database.repositories.summary_log_repo import SummaryLogRepository
 from ..database.repositories.presence_repo import PresenceRepository, PRESENCE_TTL_SECONDS
 from ..database.repositories.presence_rollup_repo import PresenceRollupRepository
+from ..database.repositories.daily_active_repo import DailyActiveRepository
 from ..models.quota import QuotaTier, QUOTA_TIERS
 from ..utils.time_utils import get_utc_timestamp
 from ..utils.audit_logger import log_admin_action
@@ -1106,6 +1107,25 @@ async def get_online_history(
     buckets = await repo.buckets_between(start, now)
     peak = await repo.peak_between(start, now)
     return {"days": days, "buckets": buckets, "peak": peak}
+
+
+@router.get("/stats/dau")
+async def get_dau(
+    days: int = Query(30, ge=1, le=365, description="往回涵蓋幾天"),
+    admin: dict = Depends(require_permission(Permission.ANALYTICS_READ)),
+    db=Depends(get_database),
+):
+    """每日活躍使用者數（DAU）歷史 + 今日即時去重數。
+
+    「活躍」= 當天有帶有效 token 發過請求的不重複使用者（被動記錄）。與線上人數
+    （併發）是不同指標。history 來自 dau_daily（長期），today 即時查 daily_active。
+    """
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=days)
+    repo = DailyActiveRepository(db)
+    series = await repo.dau_between(start, now)
+    today = await repo.count_active(now.strftime("%Y-%m-%d"))
+    return {"days": days, "series": series, "today": today}
 
 
 # ========== 收入統計 API ==========
