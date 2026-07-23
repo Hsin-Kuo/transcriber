@@ -83,6 +83,9 @@
               ></div>
             </div>
           </div>
+          <div class="chart-axis">
+            <span v-for="t in trendTicks" :key="t.key" class="axis-tick">{{ t.label }}</span>
+          </div>
         </template>
       </div>
 
@@ -112,6 +115,9 @@
           >
             <div class="trend-bar dau" :style="{ height: `${maxDau ? (d.dau / maxDau * 100) : 0}%` }"></div>
           </div>
+        </div>
+        <div v-if="dauSeries.length" class="chart-axis">
+          <span v-for="t in dauTicks" :key="t.key" class="axis-tick">{{ t.label }}</span>
         </div>
       </div>
 
@@ -563,6 +569,31 @@ const dauDays = ref(30)
 const dauSeries = ref([])
 const dauToday = ref(0)
 const maxDau = computed(() => Math.max(...dauSeries.value.map(d => d.dau), 1))
+
+// 圖表 x 軸：bars 太密無法逐根標，改等距取 ~5 個時間刻度（tooltip 仍可看單根精確值）
+function _evenTicks(arr, accessor, fmt, n = 5) {
+  if (!arr.length) return []
+  const last = arr.length - 1
+  const count = Math.min(n, arr.length)
+  const out = []
+  for (let i = 0; i < count; i++) {
+    const idx = count === 1 ? 0 : Math.round((i * last) / (count - 1))
+    out.push({ key: idx, label: fmt(accessor(arr[idx])) })
+  }
+  return out
+}
+// 小時刻度（後端回 UTC，轉本地時區顯示）：M/D HH:00
+function _fmtHourTick(iso) {
+  const d = new Date(iso)
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:00`
+}
+// 日刻度：直接拆 "YYYY-MM-DD"（避免 new Date 的時區位移）
+function _fmtDayTick(s) {
+  const [, m, d] = s.split('-')
+  return `${+m}/${+d}`
+}
+const trendTicks = computed(() => _evenTicks(onlineHistory.value, b => b.bucket_start, _fmtHourTick))
+const dauTicks = computed(() => _evenTicks(dauSeries.value, d => d.date, _fmtDayTick))
 
 // 計算每日最大任務數（用於圖表縮放）
 const maxDailyTasks = computed(() => {
@@ -1017,6 +1048,21 @@ onUnmounted(() => {
   gap: 1px;
   height: 160px;
   padding-top: 8px;
+}
+
+/* x 軸稀疏刻度：首個靠左、末個靠右，其餘平均分布 */
+.chart-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(163, 177, 198, 0.15);
+}
+
+.axis-tick {
+  font-size: 11px;
+  color: var(--color-text-light, #a0917c);
+  white-space: nowrap;
 }
 
 .trend-bar-wrapper {
