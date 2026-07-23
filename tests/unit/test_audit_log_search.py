@@ -96,6 +96,15 @@ async def test_log_type_action_ip_combine():
     assert f["ip_address"] == "203.0.113.7"
 
 
+async def test_log_type_action_multi_select_uses_in():
+    """多選（list）→ $in；單值（str）維持等值（向後相容）。"""
+    f, _ = await _build_audit_filter(
+        _FakeDB(), log_type=["auth", "task", "tag"], action=["login", "logout"]
+    )
+    assert f["log_type"] == {"$in": ["auth", "task", "tag"]}
+    assert f["action"] == {"$in": ["login", "logout"]}
+
+
 # ---------- repo.search / distinct_facets（需 Mongo）----------
 
 try:
