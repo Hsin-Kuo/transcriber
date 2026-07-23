@@ -39,7 +39,7 @@ class EmailService:
         # 不再對沒有 verified domain 的 SMTP_USER fallback，避免發出 invalid From header
         self.from_email = os.getenv("FROM_EMAIL", "").strip()
         self.from_name = os.getenv("FROM_NAME", "SoundLite 服務")
-        self.frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+        self.frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
         self._validate_config()
 

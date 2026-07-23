@@ -5,32 +5,80 @@
 
     <h1 class="page-title">操作記錄 Audit Logs</h1>
 
-    <!-- 過濾器 -->
+    <!-- 過濾器（forensics 多維篩選；時間範圍必帶、上限 90 天） -->
     <div class="filters">
       <div class="filter-item">
-        <label>日誌類型：</label>
-        <select v-model="filters.log_type" @change="resetAndFetch" class="filter-select">
-          <option value="">全部</option>
-          <option value="auth">認證 (auth)</option>
-          <option value="task">任務 (task)</option>
-          <option value="transcription">轉錄 (transcription)</option>
-          <option value="tag">標籤 (tag)</option>
-          <option value="admin">管理 (admin)</option>
-          <option value="file">檔案 (file)</option>
+        <label>時間範圍：</label>
+        <select v-model="preset" @change="onPresetChange" class="filter-select">
+          <option value="24h">近 24 小時</option>
+          <option value="7d">近 7 天</option>
+          <option value="30d">近 30 天</option>
+          <option value="custom">自訂區間</option>
         </select>
       </div>
+      <template v-if="preset === 'custom'">
+        <div class="filter-item">
+          <label>起：</label>
+          <input type="datetime-local" v-model="fromLocal" class="filter-input" />
+        </div>
+        <div class="filter-item">
+          <label>迄：</label>
+          <input type="datetime-local" v-model="toLocal" class="filter-input" />
+        </div>
+      </template>
 
       <div class="filter-item">
-        <label>用戶 ID：</label>
+        <label>操作者：</label>
         <input
-          v-model="filters.user_id"
-          @keyup.enter="resetAndFetch"
-          placeholder="輸入用戶 ID"
+          v-model="actor"
+          @keyup.enter="applyFilters"
+          placeholder="email 或 user ID"
           class="filter-input"
         />
       </div>
 
-      <button @click="resetAndFetch" class="filter-btn">🔍 套用篩選</button>
+      <div class="filter-item">
+        <MultiSelect label="類型" :options="facets.log_types" v-model="logTypes" />
+      </div>
+
+      <div class="filter-item">
+        <MultiSelect label="操作" :options="facets.actions" v-model="actions" />
+      </div>
+
+      <div class="filter-item">
+        <MultiSelect label="成敗" :options="statusOptions" v-model="statuses" />
+      </div>
+
+      <div class="filter-item">
+        <label>狀態碼：</label>
+        <input
+          v-model="statusCode"
+          @keyup.enter="applyFilters"
+          placeholder="如 403"
+          inputmode="numeric"
+          class="filter-input narrow"
+        />
+      </div>
+
+      <div class="filter-item">
+        <label>IP：</label>
+        <input
+          v-model="ip"
+          @keyup.enter="applyFilters"
+          placeholder="精確 IP"
+          class="filter-input"
+        />
+      </div>
+
+      <div class="filter-item">
+        <label>排序：</label>
+        <select v-model="sort" class="filter-select">
+          <option value="desc">最新在上</option>
+          <option value="asc">最舊在上</option>
+        </select>
+      </div>
+
+      <button @click="applyFilters" class="filter-btn">🔍 套用篩選</button>
       <button @click="clearFilters" class="filter-btn secondary">✕ 清除</button>
     </div>
 
@@ -48,7 +96,7 @@
     <!-- 記錄列表 -->
     <div v-else class="logs-section">
       <div class="logs-header">
-        <span class="total-count">共 {{ logs.length }} 筆記錄（第 {{ currentPage }} 頁）</span>
+        <span class="total-count">共 {{ total }} 筆（第 {{ currentPage }} / {{ totalPages }} 頁）</span>
         <button @click="fetchLogs" class="refresh-btn">🔄 刷新</button>
       </div>
 
@@ -115,12 +163,12 @@
         </button>
 
         <span class="page-info">
-          第 {{ currentPage }} 頁（每頁 {{ pageSize }} 筆）
+          第 {{ currentPage }} / {{ totalPages }} 頁（每頁 {{ pageSize }} 筆）
         </span>
 
         <button
           @click="nextPage"
-          :disabled="logs.length < pageSize"
+          :disabled="currentPage >= totalPages"
           class="page-btn"
         >
           下一頁 →
@@ -131,45 +179,145 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import api from '../utils/api'
 import AdminNav from '../components/shared/AdminNav.vue'
+import MultiSelect from '../components/shared/MultiSelect.vue'
+
+const route = useRoute()
+const router = useRouter()
 
 // 狀態
 const logs = ref([])
+const total = ref(0)
 const loading = ref(true)
 const error = ref(null)
 const currentPage = ref(1)
 const pageSize = ref(50)
+const facets = ref({ actions: [], log_types: [] })
 
-// 過濾條件
-const filters = ref({
-  log_type: '',
-  user_id: ''
-})
+// 篩選控制項
+const preset = ref('7d')          // 24h / 7d / 30d / custom
+const fromLocal = ref('')         // datetime-local（自訂區間用）
+const toLocal = ref('')
+const actor = ref('')             // email 或 user_id
+// 多選（預設全選；類型預設排除 admin）。空陣列/全選皆視為「無約束」= 全部
+const logTypes = ref([])
+const actions = ref([])
+const statuses = ref(['success', 'failed'])
+const statusOptions = [
+  { value: 'success', label: '成功' },
+  { value: 'failed', label: '失敗' },
+]
+const statusCode = ref('')        // 選填精確碼
+const ip = ref('')
+const sort = ref('desc')
 
-// 獲取 audit logs
+// 記錄多選是否已由 URL 指定（是則不套 facets 預設）
+let hydratedLogTypes = false
+let hydratedActions = false
+
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
+
+// datetime-local ↔ epoch(秒)，皆本地時區
+function localToEpoch(s) {
+  if (!s) return undefined
+  const t = new Date(s).getTime()
+  return Number.isNaN(t) ? undefined : Math.floor(t / 1000)
+}
+
+// preset → 實際時間窗（epoch 秒）
+function computeRange() {
+  const now = Math.floor(Date.now() / 1000)
+  if (preset.value === 'custom') {
+    return { from: localToEpoch(fromLocal.value), to: localToEpoch(toLocal.value) }
+  }
+  const span = { '24h': 86400, '7d': 7 * 86400, '30d': 30 * 86400 }[preset.value] || 7 * 86400
+  return { from: now - span, to: now }
+}
+
+// 成敗多選 → 後端 status 字串：只選一個才是約束；0 或 2 個 = 全部
+function deriveStatus() {
+  return statuses.value.length === 1 ? statuses.value[0] : 'all'
+}
+
+// 多選子集才算約束：非空且未涵蓋全部選項才送（全選/清空 = 無約束 = 全部）
+function isSubset(selected, options) {
+  return selected.length > 0 && selected.length < options.length
+}
+
+function buildParams() {
+  const { from, to } = computeRange()
+  const p = {
+    limit: pageSize.value,
+    skip: (currentPage.value - 1) * pageSize.value,
+    sort: sort.value,
+    status: deriveStatus(),
+  }
+  if (from) p.from = from
+  if (to) p.to = to
+  if (actor.value.trim()) p.actor = actor.value.trim()
+  if (isSubset(logTypes.value, facets.value.log_types)) p.log_type = logTypes.value
+  if (isSubset(actions.value, facets.value.actions)) p.action = actions.value
+  if (statusCode.value) p.status_code = Number(statusCode.value)
+  if (ip.value.trim()) p.ip = ip.value.trim()
+  return p
+}
+
+// 把可見篩選條件同步進 URL（可分享、重整不丟）
+function syncToUrl() {
+  const q = { preset: preset.value }
+  if (preset.value === 'custom') {
+    if (fromLocal.value) q.from = fromLocal.value
+    if (toLocal.value) q.to = toLocal.value
+  }
+  if (actor.value.trim()) q.actor = actor.value.trim()
+  if (isSubset(logTypes.value, facets.value.log_types)) q.log_type = logTypes.value.join(',')
+  if (isSubset(actions.value, facets.value.actions)) q.action = actions.value.join(',')
+  const st = deriveStatus()
+  if (st !== 'all') q.status = st
+  if (statusCode.value) q.status_code = statusCode.value
+  if (ip.value.trim()) q.ip = ip.value.trim()
+  if (sort.value !== 'desc') q.sort = sort.value
+  if (currentPage.value > 1) q.page = String(currentPage.value)
+  router.replace({ query: q }).catch(() => {})
+}
+
+function hydrateFromUrl() {
+  const q = route.query
+  if (q.preset) preset.value = q.preset
+  if (q.from) fromLocal.value = q.from
+  if (q.to) toLocal.value = q.to
+  if (q.actor) actor.value = q.actor
+  if (q.log_type) {
+    logTypes.value = String(q.log_type).split(',').filter(Boolean)
+    hydratedLogTypes = true
+  }
+  if (q.action) {
+    actions.value = String(q.action).split(',').filter(Boolean)
+    hydratedActions = true
+  }
+  if (q.status) {
+    statuses.value = q.status === 'success' ? ['success']
+      : q.status === 'failed' ? ['failed'] : ['success', 'failed']
+  }
+  if (q.status_code) statusCode.value = q.status_code
+  if (q.ip) ip.value = q.ip
+  if (q.sort) sort.value = q.sort
+  if (q.page) currentPage.value = Math.max(1, parseInt(q.page, 10) || 1)
+}
+
 async function fetchLogs() {
   loading.value = true
   error.value = null
-
   try {
-    const skip = (currentPage.value - 1) * pageSize.value
-    const params = {
-      limit: pageSize.value,
-      skip: skip
-    }
-
-    // 添加過濾條件
-    if (filters.value.log_type) {
-      params.log_type = filters.value.log_type
-    }
-    if (filters.value.user_id) {
-      params.user_id = filters.value.user_id.trim()
-    }
-
-    const response = await api.get('/api/admin/audit-logs', { params })
+    const response = await api.get('/api/admin/audit-logs', {
+      params: buildParams(),
+      paramsSerializer: { indexes: null },  // 陣列 → log_type=a&log_type=b（對上 FastAPI）
+    })
     logs.value = response.data.logs || []
+    total.value = response.data.total || 0
   } catch (err) {
     error.value = err.response?.data?.detail || err.message || '載入失敗'
     console.error('載入 audit logs 失敗:', err)
@@ -178,31 +326,64 @@ async function fetchLogs() {
   }
 }
 
-// 重置並重新獲取
-function resetAndFetch() {
+async function fetchFacets() {
+  try {
+    const response = await api.get('/api/admin/audit-logs/facets')
+    facets.value = {
+      actions: response.data.actions || [],
+      log_types: response.data.log_types || [],
+    }
+  } catch (err) {
+    console.error('載入 facets 失敗:', err)
+  }
+}
+
+// 套用篩選（explicit apply）：回第一頁 + 同步 URL + 重抓
+function applyFilters() {
   currentPage.value = 1
+  syncToUrl()
   fetchLogs()
 }
 
-// 清除過濾器
-function clearFilters() {
-  filters.value.log_type = ''
-  filters.value.user_id = ''
-  resetAndFetch()
+function onPresetChange() {
+  if (preset.value !== 'custom') {
+    fromLocal.value = ''
+    toLocal.value = ''
+  }
+  applyFilters()
 }
 
-// 上一頁
+// 依 facets 套多選預設：類型排除 admin、操作全選、成敗全選
+function applyMultiDefaults() {
+  logTypes.value = facets.value.log_types.filter((t) => t !== 'admin')
+  actions.value = [...facets.value.actions]
+  statuses.value = ['success', 'failed']
+}
+
+function clearFilters() {
+  preset.value = '7d'
+  fromLocal.value = ''
+  toLocal.value = ''
+  actor.value = ''
+  applyMultiDefaults()
+  statusCode.value = ''
+  ip.value = ''
+  sort.value = 'desc'
+  applyFilters()
+}
+
 function previousPage() {
   if (currentPage.value > 1) {
     currentPage.value--
+    syncToUrl()
     fetchLogs()
   }
 }
 
-// 下一頁
 function nextPage() {
-  if (logs.value.length === pageSize.value) {
+  if (currentPage.value < totalPages.value) {
     currentPage.value++
+    syncToUrl()
     fetchLogs()
   }
 }
@@ -256,7 +437,12 @@ function getStatusClass(statusCode) {
   return ''
 }
 
-onMounted(() => {
+onMounted(async () => {
+  hydrateFromUrl()          // 先從 URL 還原（可能設好多選 + 標記 hydrated）
+  await fetchFacets()       // 確保 facets 到位，buildParams 的「子集判定」才準
+  // 未由 URL 指定的多選 → 套 facets 預設（類型去 admin、其餘全選）
+  if (!hydratedLogTypes) logTypes.value = facets.value.log_types.filter((t) => t !== 'admin')
+  if (!hydratedActions) actions.value = [...facets.value.actions]
   fetchLogs()
 })
 </script>
@@ -317,6 +503,7 @@ onMounted(() => {
 
 .filter-select { min-width: 140px; }
 .filter-input { min-width: 180px; }
+.filter-input.narrow { min-width: 90px; }
 
 .filter-select:focus,
 .filter-input:focus {

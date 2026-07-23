@@ -247,3 +247,44 @@ class AuditLogRepository:
             "by_type": [{"type": s["_id"], "count": s["count"]} for s in type_stats],
             "top_actions": [{"action": s["_id"], "count": s["count"]} for s in action_stats]
         }
+
+    async def search(
+        self,
+        mongo_filter: Dict[str, Any],
+        sort_desc: bool = True,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> tuple[List[Dict[str, Any]], int]:
+        """統一查詢：依已組好的 mongo filter 取一頁 + 回符合總數。
+
+        呼叫端（router 的 _build_audit_filter）負責組 filter，這裡只執行。
+        filter 一律含時間窗（timestamp 範圍）以走索引並限制掃描量。
+
+        Returns:
+            (該頁記錄, 符合 filter 的總筆數)
+        """
+        direction = -1 if sort_desc else 1
+        cursor = (
+            self.collection.find(mongo_filter)
+            .sort("timestamp", direction)
+            .skip(skip)
+            .limit(limit)
+        )
+        items = await cursor.to_list(length=limit)
+        total = await self.collection.count_documents(mongo_filter)
+        return items, total
+
+    async def distinct_facets(self, within_days: int = 90) -> Dict[str, List[str]]:
+        """回傳近 within_days 內出現過的 action / log_type 相異值，供前端下拉。
+
+        action / log_type 皆為自由字串、無中央 enum，故動態 distinct 才不會漂移。
+        以時間窗限制掃描量（走 timestamp 索引）。呼叫端負責快取。
+        """
+        since = get_utc_timestamp() - within_days * 24 * 60 * 60
+        match = {"timestamp": {"$gte": since}}
+        actions = await self.collection.distinct("action", match)
+        log_types = await self.collection.distinct("log_type", match)
+        return {
+            "actions": sorted(a for a in actions if a),
+            "log_types": sorted(t for t in log_types if t),
+        }

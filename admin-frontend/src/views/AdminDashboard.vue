@@ -15,6 +15,112 @@
     </div>
 
     <div v-else class="stats-grid">
+      <!-- 線上使用者（即時輪詢；資料來自 user_presence，被動記錄 + TTL 自動清） -->
+      <div class="stat-card online-card">
+        <h2>
+          <span class="live-dot" :class="{ stale: onlineError }"></span>
+          線上使用者
+        </h2>
+        <div class="online-display">
+          <span class="online-count">{{ onlineUsers === null ? '—' : formatNumber(onlineUsers) }}</span>
+          <span class="online-unit">人在線</span>
+        </div>
+        <div class="stat-item">
+          <span class="label">在線判定門檻</span>
+          <select v-model.number="onlineWindow" @change="onWindowChange" class="window-select">
+            <option :value="60">近 1 分鐘</option>
+            <option :value="120">近 2 分鐘</option>
+          </select>
+        </div>
+        <div v-if="onlineError" class="online-error">⚠️ {{ onlineError }}</div>
+        <div v-else class="online-hint">每 {{ ONLINE_POLL_SECONDS }} 秒自動更新 · 最後更新 {{ onlineUpdate || '—' }}</div>
+
+        <!-- 在線名單（逐一 PII，需 PRESENCE_VIEW：support/superadmin 才看得到；查看會寫 audit） -->
+        <div v-if="authStore.can(PERM.PRESENCE_VIEW)" class="online-roster">
+          <button class="roster-toggle" @click="toggleRoster">
+            {{ showRoster ? '▾ 隱藏名單' : '▸ 查看在線名單' }}
+          </button>
+          <ul v-if="showRoster" class="roster-list">
+            <li v-if="onlineRoster.length === 0" class="roster-empty">目前無人在線</li>
+            <li v-for="u in onlineRoster" :key="u.user_id" class="roster-item">
+              <span class="roster-email">{{ u.email || u.user_id }}</span>
+              <span v-if="u.role === 'admin'" class="roster-badge">{{ u.admin_role || 'admin' }}</span>
+              <span class="roster-idle">{{ u.idle_seconds }}s 前</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- 線上人數趨勢（長期活躍峰值；資料來自 presence_rollup） -->
+      <div class="stat-card full-width">
+        <h2>
+          線上人數趨勢
+          <select v-model.number="historyDays" @change="fetchOnlineHistory" class="window-select" style="margin-left:auto">
+            <option :value="1">近 1 天</option>
+            <option :value="7">近 7 天</option>
+            <option :value="30">近 30 天</option>
+          </select>
+        </h2>
+        <div v-if="onlineHistory.length === 0" class="online-hint">
+          尚無歷史資料（背景每分鐘抽樣、每小時彙整，累積一段時間後即可看到趨勢）
+        </div>
+        <template v-else>
+          <div v-if="onlinePeak" class="peak-callout">
+            歷史峰值 <strong>{{ formatNumber(onlinePeak.peak_online) }}</strong> 人同時在線
+            <span class="peak-when">· {{ formatPeakAt(onlinePeak.peak_at) }}</span>
+          </div>
+          <div class="trend-chart">
+            <div
+              v-for="b in onlineHistory"
+              :key="b.bucket"
+              class="trend-bar-wrapper"
+              :title="`${formatBucket(b.bucket_start)}：峰值 ${b.peak_online} 人（平均 ${b.avg_online}）`"
+            >
+              <div
+                class="trend-bar"
+                :class="{ peak: onlinePeak && b.bucket === onlinePeak.bucket }"
+                :style="{ height: `${maxPeak ? (b.peak_online / maxPeak * 100) : 0}%` }"
+              ></div>
+            </div>
+          </div>
+          <div class="chart-axis">
+            <span v-for="t in trendTicks" :key="t.key" class="axis-tick">{{ t.label }}</span>
+          </div>
+        </template>
+      </div>
+
+      <!-- 日活躍使用者 DAU（資料來自 dau_daily 長期 rollup） -->
+      <div class="stat-card full-width">
+        <h2>
+          日活躍使用者 (DAU)
+          <select v-model.number="dauDays" @change="fetchDau" class="window-select" style="margin-left:auto">
+            <option :value="30">近 30 天</option>
+            <option :value="90">近 90 天</option>
+            <option :value="365">近 1 年</option>
+          </select>
+        </h2>
+        <div class="peak-callout">
+          今日至此 <strong>{{ formatNumber(dauToday) }}</strong> 位不重複使用者
+          <span class="peak-when">· 當天有效登入去重（非併發）</span>
+        </div>
+        <div v-if="dauSeries.length === 0" class="online-hint">
+          尚無 DAU 資料（每日彙整，累積後即可看到歷史）
+        </div>
+        <div v-else class="trend-chart">
+          <div
+            v-for="d in dauSeries"
+            :key="d.date"
+            class="trend-bar-wrapper"
+            :title="`${d.date}：${d.dau} 位`"
+          >
+            <div class="trend-bar dau" :style="{ height: `${maxDau ? (d.dau / maxDau * 100) : 0}%` }"></div>
+          </div>
+        </div>
+        <div v-if="dauSeries.length" class="chart-axis">
+          <span v-for="t in dauTicks" :key="t.key" class="axis-tick">{{ t.label }}</span>
+        </div>
+      </div>
+
       <!-- 收入總覽 -->
       <div v-if="revenue" class="stat-card revenue-highlight">
         <h2>收入</h2>
@@ -399,9 +505,16 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import api from '../utils/api'
 import AdminNav from '../components/shared/AdminNav.vue'
+import { useAuthStore } from '../stores/auth'
+import { PERM } from '../constants/permissions'
+
+const authStore = useAuthStore()
+
+// 線上人數輪詢間隔（秒）。presence 每人 30s 節流寫入、TTL 120s，15s 輪詢足夠即時又不吵。
+const ONLINE_POLL_SECONDS = 15
 
 const stats = ref({
   overview: {
@@ -433,6 +546,54 @@ const monthCost = ref(null)
 const loading = ref(true)
 const error = ref(null)
 const lastUpdate = ref('')
+
+// 線上人數（獨立輪詢，不受 loading gate 影響）
+const onlineUsers = ref(null)
+const onlineWindow = ref(120)  // 秒；預設對齊 presence TTL（120s）
+const onlineError = ref(null)
+const onlineUpdate = ref('')
+let onlineTimer = null
+
+// 在線名單（含 PII，需 PRESENCE_VIEW；展開才抓、查看會在後端寫 audit）
+const showRoster = ref(false)
+const onlineRoster = ref([])
+
+// 線上人數歷史趨勢（每小時 rollup；非即時，選單切換或掛載時抓）
+const historyDays = ref(7)
+const onlineHistory = ref([])
+const onlinePeak = ref(null)
+const maxPeak = computed(() => Math.max(...onlineHistory.value.map(b => b.peak_online), 1))
+
+// 日活躍使用者 DAU（每日 rollup；非即時）
+const dauDays = ref(30)
+const dauSeries = ref([])
+const dauToday = ref(0)
+const maxDau = computed(() => Math.max(...dauSeries.value.map(d => d.dau), 1))
+
+// 圖表 x 軸：bars 太密無法逐根標，改等距取 ~5 個時間刻度（tooltip 仍可看單根精確值）
+function _evenTicks(arr, accessor, fmt, n = 5) {
+  if (!arr.length) return []
+  const last = arr.length - 1
+  const count = Math.min(n, arr.length)
+  const out = []
+  for (let i = 0; i < count; i++) {
+    const idx = count === 1 ? 0 : Math.round((i * last) / (count - 1))
+    out.push({ key: idx, label: fmt(accessor(arr[idx])) })
+  }
+  return out
+}
+// 小時刻度（後端回 UTC，轉本地時區顯示）：M/D HH:00
+function _fmtHourTick(iso) {
+  const d = new Date(iso)
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:00`
+}
+// 日刻度：直接拆 "YYYY-MM-DD"（避免 new Date 的時區位移）
+function _fmtDayTick(s) {
+  const [, m, d] = s.split('-')
+  return `${+m}/${+d}`
+}
+const trendTicks = computed(() => _evenTicks(onlineHistory.value, b => b.bucket_start, _fmtHourTick))
+const dauTicks = computed(() => _evenTicks(dauSeries.value, d => d.date, _fmtDayTick))
 
 // 計算每日最大任務數（用於圖表縮放）
 const maxDailyTasks = computed(() => {
@@ -502,6 +663,88 @@ function orderTypeLabel(type) {
   return map[type] || type
 }
 
+// 獲取線上人數（輪詢呼叫，失敗只記在卡片上、不干擾整頁）
+async function fetchOnline() {
+  try {
+    const response = await api.get('/api/admin/stats/online', {
+      params: { window_seconds: onlineWindow.value },
+    })
+    onlineUsers.value = response.data.online_users
+    onlineError.value = null
+    onlineUpdate.value = new Date().toLocaleTimeString('zh-TW')
+  } catch (err) {
+    onlineError.value = err.response?.data?.detail || err.message || '載入失敗'
+    console.error('載入線上人數失敗:', err)
+  }
+}
+
+// 在線名單（含身分；僅 PRESENCE_VIEW 可呼叫，後端會寫 audit）
+async function fetchOnlineRoster() {
+  try {
+    const response = await api.get('/api/admin/stats/online/users', {
+      params: { window_seconds: onlineWindow.value },
+    })
+    onlineRoster.value = response.data.users || []
+  } catch (err) {
+    console.error('載入在線名單失敗:', err)
+  }
+}
+
+function toggleRoster() {
+  showRoster.value = !showRoster.value
+  if (showRoster.value) fetchOnlineRoster()  // 展開才抓，避免無謂寫 audit
+}
+
+// 即時輪詢：人數必抓；名單只在展開時一起刷新
+function pollOnline() {
+  fetchOnline()
+  if (showRoster.value) fetchOnlineRoster()
+}
+
+// 門檻切換：人數重抓；名單若開著也跟著重抓
+function onWindowChange() {
+  fetchOnline()
+  if (showRoster.value) fetchOnlineRoster()
+}
+
+// 獲取線上人數歷史（趨勢圖用）
+async function fetchOnlineHistory() {
+  try {
+    const response = await api.get('/api/admin/stats/online/history', {
+      params: { days: historyDays.value },
+    })
+    onlineHistory.value = response.data.buckets || []
+    onlinePeak.value = response.data.peak || null
+  } catch (err) {
+    console.error('載入線上人數歷史失敗:', err)
+  }
+}
+
+// 桶時間（趨勢圖 tooltip / x 軸）：後端回 UTC ISO，瀏覽器轉本地時區顯示
+function formatBucket(iso) {
+  if (!iso) return ''
+  return new Date(iso).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit' })
+}
+
+// 峰值發生時間（精確到分）
+function formatPeakAt(iso) {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
+// 獲取 DAU 歷史（每日 rollup + 今日即時）
+async function fetchDau() {
+  try {
+    const response = await api.get('/api/admin/stats/dau', {
+      params: { days: dauDays.value },
+    })
+    dauSeries.value = response.data.series || []
+    dauToday.value = response.data.today || 0
+  } catch (err) {
+    console.error('載入 DAU 失敗:', err)
+  }
+}
+
 // 獲取統計資料
 async function fetchStats() {
   loading.value = true
@@ -552,6 +795,14 @@ onMounted(() => {
   fetchStats()
   fetchRevenue()
   fetchMonthCost()
+  fetchOnline()
+  fetchOnlineHistory()
+  fetchDau()
+  onlineTimer = setInterval(pollOnline, ONLINE_POLL_SECONDS * 1000)
+})
+
+onUnmounted(() => {
+  if (onlineTimer) clearInterval(onlineTimer)
 })
 </script>
 
@@ -634,6 +885,216 @@ onMounted(() => {
 .value.highlight {
   color: var(--color-primary, #dd8448);
   font-size: 1.1em;
+}
+
+/* 線上人數卡片 */
+.online-display {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.online-count {
+  font-size: 2.5rem;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--color-primary, #dd8448);
+}
+
+.online-unit {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-light, #a0917c);
+}
+
+.live-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #2e7d32;
+  display: inline-block;
+  animation: live-pulse 2s infinite;
+}
+
+.live-dot.stale {
+  background: #c62828;
+  animation: none;
+}
+
+@keyframes live-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(46, 125, 50, 0.45); }
+  70%  { box-shadow: 0 0 0 8px rgba(46, 125, 50, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(46, 125, 50, 0); }
+}
+
+.window-select {
+  border: 1px solid rgba(163, 177, 198, 0.4);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text, rgb(145, 106, 45));
+  background: white;
+  cursor: pointer;
+}
+
+.online-hint {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--color-text-light, #a0917c);
+}
+
+.online-error {
+  margin-top: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #c62828;
+}
+
+/* 在線名單 */
+.online-roster {
+  margin-top: 14px;
+  border-top: 1px solid rgba(163, 177, 198, 0.15);
+  padding-top: 12px;
+}
+
+.roster-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-primary, #dd8448);
+}
+
+.roster-toggle:hover {
+  text-decoration: underline;
+}
+
+.roster-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.roster-empty {
+  color: var(--color-text-light, #a0917c);
+  font-size: 13px;
+  padding: 6px 0;
+}
+
+.roster-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(163, 177, 198, 0.1);
+  font-size: 13px;
+}
+
+.roster-email {
+  color: var(--color-text, rgb(145, 106, 45));
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roster-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-primary, #dd8448);
+  background: #fff8f3;
+  border: 1px solid rgba(221, 132, 72, 0.3);
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+
+.roster-idle {
+  margin-left: auto;
+  color: var(--color-text-light, #a0917c);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+/* 線上人數趨勢圖 */
+.peak-callout {
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  background: #fff8f3;
+  border: 1px solid rgba(221, 132, 72, 0.2);
+  border-radius: 10px;
+  font-size: 14px;
+  color: var(--color-primary-dark, #b8762d);
+}
+
+.peak-callout strong {
+  font-size: 1.2em;
+  color: var(--color-primary, #dd8448);
+}
+
+.peak-when {
+  color: var(--color-text-light, #a0917c);
+  font-weight: 500;
+}
+
+.trend-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 160px;
+  padding-top: 8px;
+}
+
+/* x 軸稀疏刻度：首個靠左、末個靠右，其餘平均分布 */
+.chart-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(163, 177, 198, 0.15);
+}
+
+.axis-tick {
+  font-size: 11px;
+  color: var(--color-text-light, #a0917c);
+  white-space: nowrap;
+}
+
+.trend-bar-wrapper {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+
+.trend-bar {
+  width: 100%;
+  min-height: 1px;
+  background: rgba(221, 132, 72, 0.35);
+  border-radius: 2px 2px 0 0;
+  transition: height 0.2s ease;
+}
+
+.trend-bar.peak {
+  background: var(--color-primary, #dd8448);
+}
+
+.trend-bar.dau {
+  background: rgba(46, 125, 50, 0.45);
+}
+
+.trend-bar.dau:hover {
+  background: rgba(46, 125, 50, 0.7);
+}
+
+.trend-bar:hover {
+  background: rgba(221, 132, 72, 0.6);
 }
 
 .cost-estimate {

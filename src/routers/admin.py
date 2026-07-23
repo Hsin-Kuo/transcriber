@@ -2,7 +2,7 @@
 管理後台 API - 用戶管理、任務管理、統計、審計日誌
 """
 from typing import Optional, List
-from datetime import timezone, timedelta
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from pydantic import BaseModel, EmailStr
 from bson import ObjectId
@@ -19,6 +19,9 @@ from ..database.repositories.user_repo import UserRepository
 from ..database.repositories.task_repo import TaskRepository
 from ..database.repositories.audit_log_repo import AuditLogRepository
 from ..database.repositories.summary_log_repo import SummaryLogRepository
+from ..database.repositories.presence_repo import PresenceRepository, PRESENCE_TTL_SECONDS
+from ..database.repositories.presence_rollup_repo import PresenceRollupRepository
+from ..database.repositories.daily_active_repo import DailyActiveRepository
 from ..models.quota import QuotaTier, QUOTA_TIERS
 from ..utils.time_utils import get_utc_timestamp
 from ..utils.audit_logger import log_admin_action
@@ -1067,6 +1070,123 @@ async def get_admin_statistics(
         )
 
 
+# ========== 線上人數 API ==========
+
+@router.get("/stats/online")
+async def get_online_users(
+    window_seconds: int = Query(
+        PRESENCE_TTL_SECONDS, ge=30, le=900,
+        description="視為在線的閒置門檻（秒）；預設等於 presence TTL",
+    ),
+    admin: dict = Depends(require_permission(Permission.ANALYTICS_READ)),
+    db=Depends(get_database),
+):
+    """當下線上（最近 window_seconds 內有活動）的已登入使用者數。
+
+    供後台即時運營看板輪詢用；刻意不寫 audit log（會被高頻輪詢，寫了反而灌爆
+    audit_logs）。資料來源為 user_presence collection（被動記錄 + TTL 自動清）。
+    """
+    count = await PresenceRepository(db).count_online(window_seconds=window_seconds)
+    return {"online_users": count, "window_seconds": window_seconds}
+
+
+@router.get("/stats/online/history")
+async def get_online_history(
+    days: int = Query(7, ge=1, le=90, description="往回涵蓋幾天"),
+    admin: dict = Depends(require_permission(Permission.ANALYTICS_READ)),
+    db=Depends(get_database),
+):
+    """線上人數歷史（每小時桶：峰值、平均、峰值發生時間）。
+
+    供後台趨勢圖看「長期活躍巔峰」；資料來自 presence_rollup（背景每分鐘抽樣、
+    每小時彙整）。回傳 buckets（時間正序）與 peak（區間內最高的那一桶）。
+    """
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=days)
+    repo = PresenceRollupRepository(db)
+    buckets = await repo.buckets_between(start, now)
+    peak = await repo.peak_between(start, now)
+    return {"days": days, "buckets": buckets, "peak": peak}
+
+
+@router.get("/stats/dau")
+async def get_dau(
+    days: int = Query(30, ge=1, le=365, description="往回涵蓋幾天"),
+    admin: dict = Depends(require_permission(Permission.ANALYTICS_READ)),
+    db=Depends(get_database),
+):
+    """每日活躍使用者數（DAU）歷史 + 今日即時去重數。
+
+    「活躍」= 當天有帶有效 token 發過請求的不重複使用者（被動記錄）。與線上人數
+    （併發）是不同指標。history 來自 dau_daily（長期），today 即時查 daily_active。
+    """
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=days)
+    repo = DailyActiveRepository(db)
+    series = await repo.dau_between(start, now)
+    today = await repo.count_active(now.strftime("%Y-%m-%d"))
+    return {"days": days, "series": series, "today": today}
+
+
+@router.get("/stats/online/users")
+async def get_online_users_list(
+    request: Request,
+    window_seconds: int = Query(
+        PRESENCE_TTL_SECONDS, ge=30, le=900,
+        description="視為在線的閒置門檻（秒）",
+    ),
+    admin: dict = Depends(require_permission(Permission.PRESENCE_VIEW)),
+    db=Depends(get_database),
+):
+    """當下在線的使用者名單（含身分）。
+
+    比聚合人數敏感（逐一 PII），故：
+    - 需 `PRESENCE_VIEW`（僅 support / superadmin；read_only 拿不到）。
+    - **寫 audit_log**（誰在何時查了在線名單）——與只回數字、刻意不 audit 的
+      `/stats/online` 不同。
+    身分於讀取時 join users 解析（presence 本身不存 PII）。
+    """
+    presence = await PresenceRepository(db).list_online(window_seconds=window_seconds)
+    now = datetime.now(timezone.utc)
+
+    # 批次 join users 解析身分（一次 $in，不逐筆查）。presence 的 user_id 本為
+    # str(ObjectId)，is_valid 只是防禦性過濾非法值。
+    oids = [ObjectId(p["user_id"]) for p in presence if ObjectId.is_valid(p["user_id"])]
+    users = {}
+    if oids:
+        cursor = UserRepository(db).collection.find(
+            {"_id": {"$in": oids}},
+            {"email": 1, "username": 1, "role": 1, "admin_role": 1},
+        )
+        async for u in cursor:
+            users[str(u["_id"])] = u
+
+    items = []
+    for p in presence:
+        u = users.get(p["user_id"], {})
+        ls = p["last_seen"]
+        if ls.tzinfo is None:  # motor 讀回為 naive UTC
+            ls = ls.replace(tzinfo=timezone.utc)
+        items.append({
+            "user_id": p["user_id"],
+            "email": u.get("email"),
+            "username": u.get("username"),
+            "role": u.get("role"),
+            "admin_role": u.get("admin_role"),
+            "last_seen": ls.isoformat(),
+            "idle_seconds": int((now - ls).total_seconds()),
+        })
+
+    await log_admin_action(
+        admin_id=str(admin["_id"]),
+        action="view_online_users",
+        resource_type="presence",
+        details={"count": len(items), "window_seconds": window_seconds},
+        request=request,
+    )
+    return {"window_seconds": window_seconds, "online_users": len(items), "users": items}
+
+
 # ========== 收入統計 API ==========
 
 @router.get("/revenue")
@@ -1115,34 +1235,127 @@ async def get_ai_cost_stats(
 
 # ========== 審計日誌 API ==========
 
+# 時間窗：forensics 查詢的效能錨點。單次最多涵蓋 90 天、預設近 7 天——確保 action/ip
+# 等無索引條件都在時間窗（timestamp 索引）內過濾，掃描量可控。
+_AUDIT_MAX_SPAN_SECONDS = 90 * 24 * 60 * 60
+_AUDIT_DEFAULT_SPAN_SECONDS = 7 * 24 * 60 * 60
+
+# facets（distinct actions/log_types）per-worker 快取，避免高頻 distinct 掃描
+_AUDIT_FACETS_TTL = 300
+_audit_facets_cache: dict = {"at": 0, "data": None}
+
+
+async def _build_audit_filter(
+    db,
+    *,
+    from_ts=None,
+    to_ts=None,
+    actor=None,
+    log_type=None,
+    action=None,
+    status="all",
+    status_code=None,
+    ip=None,
+):
+    """把查詢參數組成 audit_logs 的 mongo filter（可共用；v2 匯出端點沿用同一組）。
+
+    - 時間窗必帶：預設近 7 天、上限 90 天（超過自動夾成 90 天）。
+    - actor 接受 user_id 或 email；email 先解析成 user_id（查無 → meta.actor_not_found）。
+    - status 三態（all/success/failed）以 status_code 推導；status_code 精確碼優先。
+    回傳 (mongo_filter, meta)。
+    """
+    now = get_utc_timestamp()
+    to_ts = to_ts if to_ts is not None else now
+    from_ts = from_ts if from_ts is not None else to_ts - _AUDIT_DEFAULT_SPAN_SECONDS
+    if from_ts > to_ts:
+        from_ts, to_ts = to_ts, from_ts
+    if to_ts - from_ts > _AUDIT_MAX_SPAN_SECONDS:
+        from_ts = to_ts - _AUDIT_MAX_SPAN_SECONDS
+
+    mongo: dict = {"timestamp": {"$gte": from_ts, "$lte": to_ts}}
+    meta: dict = {"from": from_ts, "to": to_ts}
+
+    if actor:
+        actor = actor.strip()
+        if "@" in actor:
+            user_repo = UserRepository(db)
+            u = await user_repo.get_by_email(actor) or await user_repo.get_by_email(actor.lower())
+            if not u:
+                meta["actor_not_found"] = True
+                return mongo, meta
+            mongo["user_id"] = str(u["_id"])
+            meta["actor_resolved"] = str(u["_id"])
+        else:
+            mongo["user_id"] = actor
+
+    if log_type:
+        mongo["log_type"] = {"$in": log_type} if isinstance(log_type, list) else log_type
+    if action:
+        mongo["action"] = {"$in": action} if isinstance(action, list) else action
+    if ip:
+        mongo["ip_address"] = ip.strip()
+
+    if status == "failed":
+        mongo["status_code"] = {"$gte": 400}
+    elif status == "success":
+        mongo["status_code"] = {"$lt": 400}
+    if status_code is not None:  # 精確碼優先於三態
+        mongo["status_code"] = status_code
+
+    return mongo, meta
+
+
 @router.get("/audit-logs")
 async def get_audit_logs(
-    limit: int = Query(100, ge=1, le=500),
+    from_ts: Optional[int] = Query(None, alias="from", description="起始 epoch 秒；預設 now-7d"),
+    to_ts: Optional[int] = Query(None, alias="to", description="結束 epoch 秒；預設 now"),
+    actor: Optional[str] = Query(None, description="操作者 user_id 或 email"),
+    log_type: Optional[List[str]] = Query(None, description="日誌類型（可多選；省略=全部）"),
+    action: Optional[List[str]] = Query(None, description="操作（可多選；省略=全部）"),
+    status: str = Query("all", pattern="^(all|success|failed)$"),
+    status_code: Optional[int] = Query(None, ge=100, le=599, description="精確 HTTP 狀態碼"),
+    ip: Optional[str] = Query(None, description="精確比對 IP"),
+    sort: str = Query("desc", pattern="^(asc|desc)$", description="依 timestamp 排序方向"),
+    limit: int = Query(50, ge=1, le=500),
     skip: int = Query(0, ge=0),
-    log_type: Optional[str] = Query(None),
-    user_id: Optional[str] = Query(None),
     admin: dict = Depends(require_permission(Permission.AUDIT_READ)),
-    db = Depends(get_database)
+    db=Depends(get_database),
 ):
-    """獲取操作記錄"""
-    audit_log_repo = AuditLogRepository(db)
+    """操作記錄查詢（forensics 多維篩選）。
 
-    if user_id:
-        logs = await audit_log_repo.get_by_user(user_id, limit=limit, skip=skip, log_type=log_type)
-    else:
-        logs = await audit_log_repo.get_recent(limit=limit, skip=skip, log_type=log_type)
+    時間窗必帶（預設近 7 天、上限 90 天），可疊加 actor/log_type/action/成敗/
+    status_code/ip；回真實 total 供正確分頁。
+    """
+    mongo_filter, meta = await _build_audit_filter(
+        db, from_ts=from_ts, to_ts=to_ts, actor=actor, log_type=log_type,
+        action=action, status=status, status_code=status_code, ip=ip,
+    )
+    if meta.get("actor_not_found"):
+        return {"logs": [], "total": 0, "limit": limit, "skip": skip, "filter": meta}
 
-    # 轉換 ObjectId 為字串
-    for log in logs:
-        if "_id" in log:
-            log["_id"] = str(log["_id"])
+    logs, total = await AuditLogRepository(db).search(
+        mongo_filter, sort_desc=(sort == "desc"), skip=skip, limit=limit
+    )
+    for lg in logs:
+        if "_id" in lg:
+            lg["_id"] = str(lg["_id"])
+    return {"logs": logs, "total": total, "limit": limit, "skip": skip, "filter": meta}
 
-    return {
-        "logs": logs,
-        "total": len(logs),
-        "limit": limit,
-        "skip": skip
-    }
+
+@router.get("/audit-logs/facets")
+async def get_audit_facets(
+    admin: dict = Depends(require_permission(Permission.AUDIT_READ)),
+    db=Depends(get_database),
+):
+    """近 90 天出現過的 action / log_type distinct 值，供前端下拉（per-worker 快取 5 分鐘）。"""
+    now = get_utc_timestamp()
+    cached = _audit_facets_cache
+    if cached["data"] is not None and now - cached["at"] < _AUDIT_FACETS_TTL:
+        return cached["data"]
+    data = await AuditLogRepository(db).distinct_facets()
+    cached["data"] = data
+    cached["at"] = now
+    return data
 
 
 @router.get("/audit-logs/failed")
@@ -1150,17 +1363,18 @@ async def get_failed_audit_logs(
     days: int = Query(7, ge=1, le=90),
     limit: int = Query(100, ge=1, le=500),
     admin: dict = Depends(require_permission(Permission.AUDIT_READ)),
-    db = Depends(get_database)
+    db=Depends(get_database),
 ):
-    """獲取失敗的操作記錄"""
-    audit_log_repo = AuditLogRepository(db)
-    logs = await audit_log_repo.get_failed_operations(days=days, limit=limit)
-
-    return {
-        "failed_logs": logs,
-        "total": len(logs),
-        "days": days
-    }
+    """失敗操作記錄（保留向後相容；內部轉呼叫統一查詢 status=failed）。"""
+    now = get_utc_timestamp()
+    mongo_filter, _ = await _build_audit_filter(
+        db, from_ts=now - days * 24 * 60 * 60, to_ts=now, status="failed",
+    )
+    logs, total = await AuditLogRepository(db).search(mongo_filter, sort_desc=True, skip=0, limit=limit)
+    for lg in logs:
+        if "_id" in lg:
+            lg["_id"] = str(lg["_id"])
+    return {"failed_logs": logs, "total": total, "days": days}
 
 
 @router.get("/audit-logs/statistics")
