@@ -146,6 +146,16 @@ jobs:
           sudo chmod 600 /opt/transcriber/.env
           ls -1t /opt/transcriber/.env.bak.* 2>/dev/null | tail -n +6 | xargs -r sudo rm -f
 
+          # ===== RBAC readiness gate（restart 前的最後守門，只讀不寫）=====
+          # 與 deploy-aws.yml 同一道守門。Phase 3 起「role=admin 但無合法 admin_role 的帳號
+          # 一律被拒」。若 staging DB 尚未 backfill，在此擋下 restart（此刻服務仍跑舊碼、不中斷），
+          # 避免把 admin 鎖在門外。此時新碼已解壓、依賴已裝、.env 已同步（APP_ENV=staging →
+          # 打 staging Atlas）→ 檢查的正是 restart 後的執行環境。
+          # not-ready 修法：先跑 `python3.11 -m src.database.migrations.backfill_admin_role`
+          # （idempotent），再重觸發本次部署。set -e 會讓 exit 1 中止本步、部署標記失敗。
+          echo "=== RBAC readiness gate ==="
+          python3.11 -m src.database.migrations.verify_rbac_ready
+
           # Sync systemd unit（EnvironmentFile + WEB_CONCURRENCY；.env 設 1）
           sudo cp /opt/transcriber/deploy/transcriber.service /etc/systemd/system/transcriber.service
           chmod +x /opt/transcriber/deploy/pre-start-cleanup.sh
