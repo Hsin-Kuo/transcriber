@@ -44,6 +44,7 @@ EXPECTED = {
     ("GET", "/api/admin/stats/online"): Permission.ANALYTICS_READ,
     ("GET", "/api/admin/stats/online/history"): Permission.ANALYTICS_READ,
     ("GET", "/api/admin/stats/dau"): Permission.ANALYTICS_READ,
+    ("GET", "/api/admin/stats/online/users"): Permission.PRESENCE_VIEW,
     ("GET", "/api/admin/revenue"): Permission.BILLING_READ,
     ("GET", "/api/admin/cost"): Permission.ANALYTICS_READ,
     ("GET", "/api/admin/audit-logs"): Permission.AUDIT_READ,

@@ -14,6 +14,7 @@ export const PERM = {
   TASK_MANAGE: 'task:manage',
   TASK_DELETE: 'task:delete',
   ANALYTICS_READ: 'analytics:read',
+  PRESENCE_VIEW: 'presence:view',
   BILLING_READ: 'billing:read',
   BILLING_WRITE: 'billing:write',
   AUDIT_READ: 'audit:read',

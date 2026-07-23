@@ -27,13 +27,28 @@
         </div>
         <div class="stat-item">
           <span class="label">在線判定門檻</span>
-          <select v-model.number="onlineWindow" @change="fetchOnline" class="window-select">
+          <select v-model.number="onlineWindow" @change="onWindowChange" class="window-select">
             <option :value="60">近 1 分鐘</option>
             <option :value="120">近 2 分鐘</option>
           </select>
         </div>
         <div v-if="onlineError" class="online-error">⚠️ {{ onlineError }}</div>
         <div v-else class="online-hint">每 {{ ONLINE_POLL_SECONDS }} 秒自動更新 · 最後更新 {{ onlineUpdate || '—' }}</div>
+
+        <!-- 在線名單（逐一 PII，需 PRESENCE_VIEW：support/superadmin 才看得到；查看會寫 audit） -->
+        <div v-if="authStore.can(PERM.PRESENCE_VIEW)" class="online-roster">
+          <button class="roster-toggle" @click="toggleRoster">
+            {{ showRoster ? '▾ 隱藏名單' : '▸ 查看在線名單' }}
+          </button>
+          <ul v-if="showRoster" class="roster-list">
+            <li v-if="onlineRoster.length === 0" class="roster-empty">目前無人在線</li>
+            <li v-for="u in onlineRoster" :key="u.user_id" class="roster-item">
+              <span class="roster-email">{{ u.email || u.user_id }}</span>
+              <span v-if="u.role === 'admin'" class="roster-badge">{{ u.admin_role || 'admin' }}</span>
+              <span class="roster-idle">{{ u.idle_seconds }}s 前</span>
+            </li>
+          </ul>
+        </div>
       </div>
 
       <!-- 線上人數趨勢（長期活躍峰值；資料來自 presence_rollup） -->
@@ -487,6 +502,10 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import api from '../utils/api'
 import AdminNav from '../components/shared/AdminNav.vue'
+import { useAuthStore } from '../stores/auth'
+import { PERM } from '../constants/permissions'
+
+const authStore = useAuthStore()
 
 // 線上人數輪詢間隔（秒）。presence 每人 30s 節流寫入、TTL 120s，15s 輪詢足夠即時又不吵。
 const ONLINE_POLL_SECONDS = 15
@@ -528,6 +547,10 @@ const onlineWindow = ref(120)  // 秒；預設對齊 presence TTL（120s）
 const onlineError = ref(null)
 const onlineUpdate = ref('')
 let onlineTimer = null
+
+// 在線名單（含 PII，需 PRESENCE_VIEW；展開才抓、查看會在後端寫 audit）
+const showRoster = ref(false)
+const onlineRoster = ref([])
 
 // 線上人數歷史趨勢（每小時 rollup；非即時，選單切換或掛載時抓）
 const historyDays = ref(7)
@@ -624,6 +647,35 @@ async function fetchOnline() {
   }
 }
 
+// 在線名單（含身分；僅 PRESENCE_VIEW 可呼叫，後端會寫 audit）
+async function fetchOnlineRoster() {
+  try {
+    const response = await api.get('/api/admin/stats/online/users', {
+      params: { window_seconds: onlineWindow.value },
+    })
+    onlineRoster.value = response.data.users || []
+  } catch (err) {
+    console.error('載入在線名單失敗:', err)
+  }
+}
+
+function toggleRoster() {
+  showRoster.value = !showRoster.value
+  if (showRoster.value) fetchOnlineRoster()  // 展開才抓，避免無謂寫 audit
+}
+
+// 即時輪詢：人數必抓；名單只在展開時一起刷新
+function pollOnline() {
+  fetchOnline()
+  if (showRoster.value) fetchOnlineRoster()
+}
+
+// 門檻切換：人數重抓；名單若開著也跟著重抓
+function onWindowChange() {
+  fetchOnline()
+  if (showRoster.value) fetchOnlineRoster()
+}
+
 // 獲取線上人數歷史（趨勢圖用）
 async function fetchOnlineHistory() {
   try {
@@ -715,7 +767,7 @@ onMounted(() => {
   fetchOnline()
   fetchOnlineHistory()
   fetchDau()
-  onlineTimer = setInterval(fetchOnline, ONLINE_POLL_SECONDS * 1000)
+  onlineTimer = setInterval(pollOnline, ONLINE_POLL_SECONDS * 1000)
 })
 
 onUnmounted(() => {
@@ -867,6 +919,75 @@ onUnmounted(() => {
   font-size: 13px;
   font-weight: 600;
   color: #c62828;
+}
+
+/* 在線名單 */
+.online-roster {
+  margin-top: 14px;
+  border-top: 1px solid rgba(163, 177, 198, 0.15);
+  padding-top: 12px;
+}
+
+.roster-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-primary, #dd8448);
+}
+
+.roster-toggle:hover {
+  text-decoration: underline;
+}
+
+.roster-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.roster-empty {
+  color: var(--color-text-light, #a0917c);
+  font-size: 13px;
+  padding: 6px 0;
+}
+
+.roster-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(163, 177, 198, 0.1);
+  font-size: 13px;
+}
+
+.roster-email {
+  color: var(--color-text, rgb(145, 106, 45));
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roster-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-primary, #dd8448);
+  background: #fff8f3;
+  border: 1px solid rgba(221, 132, 72, 0.3);
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+
+.roster-idle {
+  margin-left: auto;
+  color: var(--color-text-light, #a0917c);
+  font-size: 12px;
+  flex-shrink: 0;
 }
 
 /* 線上人數趨勢圖 */

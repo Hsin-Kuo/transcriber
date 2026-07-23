@@ -1128,6 +1128,65 @@ async def get_dau(
     return {"days": days, "series": series, "today": today}
 
 
+@router.get("/stats/online/users")
+async def get_online_users_list(
+    request: Request,
+    window_seconds: int = Query(
+        PRESENCE_TTL_SECONDS, ge=30, le=900,
+        description="視為在線的閒置門檻（秒）",
+    ),
+    admin: dict = Depends(require_permission(Permission.PRESENCE_VIEW)),
+    db=Depends(get_database),
+):
+    """當下在線的使用者名單（含身分）。
+
+    比聚合人數敏感（逐一 PII），故：
+    - 需 `PRESENCE_VIEW`（僅 support / superadmin；read_only 拿不到）。
+    - **寫 audit_log**（誰在何時查了在線名單）——與只回數字、刻意不 audit 的
+      `/stats/online` 不同。
+    身分於讀取時 join users 解析（presence 本身不存 PII）。
+    """
+    presence = await PresenceRepository(db).list_online(window_seconds=window_seconds)
+    now = datetime.now(timezone.utc)
+
+    # 批次 join users 解析身分（一次 $in，不逐筆查）。presence 的 user_id 本為
+    # str(ObjectId)，is_valid 只是防禦性過濾非法值。
+    oids = [ObjectId(p["user_id"]) for p in presence if ObjectId.is_valid(p["user_id"])]
+    users = {}
+    if oids:
+        cursor = UserRepository(db).collection.find(
+            {"_id": {"$in": oids}},
+            {"email": 1, "username": 1, "role": 1, "admin_role": 1},
+        )
+        async for u in cursor:
+            users[str(u["_id"])] = u
+
+    items = []
+    for p in presence:
+        u = users.get(p["user_id"], {})
+        ls = p["last_seen"]
+        if ls.tzinfo is None:  # motor 讀回為 naive UTC
+            ls = ls.replace(tzinfo=timezone.utc)
+        items.append({
+            "user_id": p["user_id"],
+            "email": u.get("email"),
+            "username": u.get("username"),
+            "role": u.get("role"),
+            "admin_role": u.get("admin_role"),
+            "last_seen": ls.isoformat(),
+            "idle_seconds": int((now - ls).total_seconds()),
+        })
+
+    await log_admin_action(
+        admin_id=str(admin["_id"]),
+        action="view_online_users",
+        resource_type="presence",
+        details={"count": len(items), "window_seconds": window_seconds},
+        request=request,
+    )
+    return {"window_seconds": window_seconds, "online_users": len(items), "users": items}
+
+
 # ========== 收入統計 API ==========
 
 @router.get("/revenue")
