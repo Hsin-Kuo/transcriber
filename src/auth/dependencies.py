@@ -1,9 +1,14 @@
 """認證中介層（依賴注入）"""
+import asyncio
+import time
+from datetime import datetime, timezone
 from fastapi import Depends, HTTPException, Request, status
 from .cookies import ACCESS_COOKIE_NAME
 from .jwt_handler import verify_token
 from .rbac import Permission, resolve_admin_role, role_has
 from ..database.mongodb import get_database
+from ..database.repositories.daily_active_repo import DailyActiveRepository
+from ..database.repositories.presence_repo import PresenceRepository
 from ..database.repositories.user_repo import UserRepository
 from ..utils.logger import get_logger
 from bson import ObjectId
@@ -20,6 +25,70 @@ def _user_dict_from_token_data(token_data) -> dict:
         "username": token_data.email.split("@")[0],  # 從 email 推導
         "is_active": True  # JWT 有效即表示活躍
     }
+
+
+# --- 被動活動記錄（節流、fire-and-forget）-----------------------------------
+# 每個已驗證請求都會經過 get_current_user，這裡順手記兩種運營統計，皆非阻塞、
+# 絕不影響請求：
+#   1) presence（即時在線）：同一 user _PRESENCE_TOUCH_GAP 秒內只寫一次。
+#   2) DAU（日活躍去重）：同一 user 每天每 worker 只寫一次。
+# uvicorn --workers N 下各 worker 各持一份 in-memory 狀態，寫入量可控；DB 端分別
+# 靠 _id=user_id / _id="date:user_id" 去重收斂。
+_PRESENCE_TOUCH_GAP = 30  # 秒
+_presence_last: dict[str, float] = {}
+_presence_tasks: set = set()  # 持有 task 參考，避免 pending task 被 GC
+
+# DAU 每日 guard：日期換手即清空，天然封頂在「單日不重複使用者數」且 UTC 午夜自動重置。
+_daily_active_seen: set = set()
+_daily_active_date: Optional[str] = None
+
+
+def _spawn(coro) -> None:
+    """背景跑一個 fire-and-forget coroutine，持有參考避免被 GC。"""
+    task = asyncio.create_task(coro)
+    _presence_tasks.add(task)
+    task.add_done_callback(_presence_tasks.discard)
+
+
+async def _do_touch(db, user_id: str) -> None:
+    try:
+        await PresenceRepository(db).touch(user_id)
+    except Exception as e:
+        # presence 是純運營統計，寫失敗絕不可影響請求
+        log.debug("presence.touch.failed", user_id=user_id, error=str(e))
+
+
+async def _do_mark_daily(db, user_id: str) -> None:
+    try:
+        await DailyActiveRepository(db).mark_active(user_id)
+    except Exception as e:
+        log.debug("daily_active.mark.failed", user_id=user_id, error=str(e))
+
+
+def _daily_active_needed(user_id: str) -> bool:
+    """是否需要為此 user 寫今日 DAU 標記（每 worker 每日每人一次）。"""
+    global _daily_active_date
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if today != _daily_active_date:
+        _daily_active_date = today
+        _daily_active_seen.clear()
+    if user_id in _daily_active_seen:
+        return False
+    _daily_active_seen.add(user_id)
+    return True
+
+
+def _record_presence(db, user_id: str) -> None:
+    """被動記錄 presence（30s 節流）+ DAU（每日一次）。非阻塞、任何情況都不得拋出。"""
+    try:
+        now = time.monotonic()
+        if now - _presence_last.get(user_id, 0.0) >= _PRESENCE_TOUCH_GAP:
+            _presence_last[user_id] = now
+            _spawn(_do_touch(db, user_id))
+        if _daily_active_needed(user_id):
+            _spawn(_do_mark_daily(db, user_id))
+    except Exception:
+        pass
 
 
 async def get_current_user(
@@ -59,7 +128,9 @@ async def get_current_user(
     # JWT 本身已經過驗證且有過期時間，足以確保安全性
     # 只在關鍵操作（登入、修改資料）時才查 DB 確認用戶狀態
     # 這樣可以避免每次輪詢都查詢資料庫
-    return _user_dict_from_token_data(token_data)
+    user = _user_dict_from_token_data(token_data)
+    _record_presence(db, str(user["_id"]))  # 節流 + 非阻塞，不影響上面的效能優化
+    return user
 
 
 async def get_current_user_sse(
@@ -96,7 +167,9 @@ async def get_current_user_sse(
             detail="無效或過期的 Token"
         )
 
-    return _user_dict_from_token_data(token_data)
+    user = _user_dict_from_token_data(token_data)
+    _record_presence(db, str(user["_id"]))  # SSE 輪詢是強 presence 訊號，一併記錄
+    return user
 
 
 async def get_current_admin(
