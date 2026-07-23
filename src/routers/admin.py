@@ -1289,9 +1289,9 @@ async def _build_audit_filter(
             mongo["user_id"] = actor
 
     if log_type:
-        mongo["log_type"] = log_type
+        mongo["log_type"] = {"$in": log_type} if isinstance(log_type, list) else log_type
     if action:
-        mongo["action"] = action
+        mongo["action"] = {"$in": action} if isinstance(action, list) else action
     if ip:
         mongo["ip_address"] = ip.strip()
 
@@ -1310,8 +1310,8 @@ async def get_audit_logs(
     from_ts: Optional[int] = Query(None, alias="from", description="起始 epoch 秒；預設 now-7d"),
     to_ts: Optional[int] = Query(None, alias="to", description="結束 epoch 秒；預設 now"),
     actor: Optional[str] = Query(None, description="操作者 user_id 或 email"),
-    log_type: Optional[str] = Query(None),
-    action: Optional[str] = Query(None),
+    log_type: Optional[List[str]] = Query(None, description="日誌類型（可多選；省略=全部）"),
+    action: Optional[List[str]] = Query(None, description="操作（可多選；省略=全部）"),
     status: str = Query("all", pattern="^(all|success|failed)$"),
     status_code: Optional[int] = Query(None, ge=100, le=599, description="精確 HTTP 狀態碼"),
     ip: Optional[str] = Query(None, description="精確比對 IP"),

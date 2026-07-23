@@ -38,28 +38,15 @@
       </div>
 
       <div class="filter-item">
-        <label>類型：</label>
-        <select v-model="logType" class="filter-select">
-          <option value="">全部</option>
-          <option v-for="t in facets.log_types" :key="t" :value="t">{{ t }}</option>
-        </select>
+        <MultiSelect label="類型" :options="facets.log_types" v-model="logTypes" />
       </div>
 
       <div class="filter-item">
-        <label>操作：</label>
-        <select v-model="action" class="filter-select">
-          <option value="">全部</option>
-          <option v-for="a in facets.actions" :key="a" :value="a">{{ a }}</option>
-        </select>
+        <MultiSelect label="操作" :options="facets.actions" v-model="actions" />
       </div>
 
       <div class="filter-item">
-        <label>成敗：</label>
-        <select v-model="status" class="filter-select">
-          <option value="all">全部</option>
-          <option value="success">成功</option>
-          <option value="failed">失敗</option>
-        </select>
+        <MultiSelect label="成敗" :options="statusOptions" v-model="statuses" />
       </div>
 
       <div class="filter-item">
@@ -196,6 +183,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '../utils/api'
 import AdminNav from '../components/shared/AdminNav.vue'
+import MultiSelect from '../components/shared/MultiSelect.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -214,12 +202,21 @@ const preset = ref('7d')          // 24h / 7d / 30d / custom
 const fromLocal = ref('')         // datetime-local（自訂區間用）
 const toLocal = ref('')
 const actor = ref('')             // email 或 user_id
-const logType = ref('')
-const action = ref('')
-const status = ref('all')         // all / success / failed
+// 多選（預設全選；類型預設排除 admin）。空陣列/全選皆視為「無約束」= 全部
+const logTypes = ref([])
+const actions = ref([])
+const statuses = ref(['success', 'failed'])
+const statusOptions = [
+  { value: 'success', label: '成功' },
+  { value: 'failed', label: '失敗' },
+]
 const statusCode = ref('')        // 選填精確碼
 const ip = ref('')
 const sort = ref('desc')
+
+// 記錄多選是否已由 URL 指定（是則不套 facets 預設）
+let hydratedLogTypes = false
+let hydratedActions = false
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 
@@ -240,19 +237,29 @@ function computeRange() {
   return { from: now - span, to: now }
 }
 
+// 成敗多選 → 後端 status 字串：只選一個才是約束；0 或 2 個 = 全部
+function deriveStatus() {
+  return statuses.value.length === 1 ? statuses.value[0] : 'all'
+}
+
+// 多選子集才算約束：非空且未涵蓋全部選項才送（全選/清空 = 無約束 = 全部）
+function isSubset(selected, options) {
+  return selected.length > 0 && selected.length < options.length
+}
+
 function buildParams() {
   const { from, to } = computeRange()
   const p = {
     limit: pageSize.value,
     skip: (currentPage.value - 1) * pageSize.value,
     sort: sort.value,
-    status: status.value,
+    status: deriveStatus(),
   }
   if (from) p.from = from
   if (to) p.to = to
   if (actor.value.trim()) p.actor = actor.value.trim()
-  if (logType.value) p.log_type = logType.value
-  if (action.value) p.action = action.value
+  if (isSubset(logTypes.value, facets.value.log_types)) p.log_type = logTypes.value
+  if (isSubset(actions.value, facets.value.actions)) p.action = actions.value
   if (statusCode.value) p.status_code = Number(statusCode.value)
   if (ip.value.trim()) p.ip = ip.value.trim()
   return p
@@ -266,9 +273,10 @@ function syncToUrl() {
     if (toLocal.value) q.to = toLocal.value
   }
   if (actor.value.trim()) q.actor = actor.value.trim()
-  if (logType.value) q.log_type = logType.value
-  if (action.value) q.action = action.value
-  if (status.value !== 'all') q.status = status.value
+  if (isSubset(logTypes.value, facets.value.log_types)) q.log_type = logTypes.value.join(',')
+  if (isSubset(actions.value, facets.value.actions)) q.action = actions.value.join(',')
+  const st = deriveStatus()
+  if (st !== 'all') q.status = st
   if (statusCode.value) q.status_code = statusCode.value
   if (ip.value.trim()) q.ip = ip.value.trim()
   if (sort.value !== 'desc') q.sort = sort.value
@@ -282,9 +290,18 @@ function hydrateFromUrl() {
   if (q.from) fromLocal.value = q.from
   if (q.to) toLocal.value = q.to
   if (q.actor) actor.value = q.actor
-  if (q.log_type) logType.value = q.log_type
-  if (q.action) action.value = q.action
-  if (q.status) status.value = q.status
+  if (q.log_type) {
+    logTypes.value = String(q.log_type).split(',').filter(Boolean)
+    hydratedLogTypes = true
+  }
+  if (q.action) {
+    actions.value = String(q.action).split(',').filter(Boolean)
+    hydratedActions = true
+  }
+  if (q.status) {
+    statuses.value = q.status === 'success' ? ['success']
+      : q.status === 'failed' ? ['failed'] : ['success', 'failed']
+  }
   if (q.status_code) statusCode.value = q.status_code
   if (q.ip) ip.value = q.ip
   if (q.sort) sort.value = q.sort
@@ -295,7 +312,10 @@ async function fetchLogs() {
   loading.value = true
   error.value = null
   try {
-    const response = await api.get('/api/admin/audit-logs', { params: buildParams() })
+    const response = await api.get('/api/admin/audit-logs', {
+      params: buildParams(),
+      paramsSerializer: { indexes: null },  // 陣列 → log_type=a&log_type=b（對上 FastAPI）
+    })
     logs.value = response.data.logs || []
     total.value = response.data.total || 0
   } catch (err) {
@@ -333,14 +353,19 @@ function onPresetChange() {
   applyFilters()
 }
 
+// 依 facets 套多選預設：類型排除 admin、操作全選、成敗全選
+function applyMultiDefaults() {
+  logTypes.value = facets.value.log_types.filter((t) => t !== 'admin')
+  actions.value = [...facets.value.actions]
+  statuses.value = ['success', 'failed']
+}
+
 function clearFilters() {
   preset.value = '7d'
   fromLocal.value = ''
   toLocal.value = ''
   actor.value = ''
-  logType.value = ''
-  action.value = ''
-  status.value = 'all'
+  applyMultiDefaults()
   statusCode.value = ''
   ip.value = ''
   sort.value = 'desc'
@@ -412,9 +437,12 @@ function getStatusClass(statusCode) {
   return ''
 }
 
-onMounted(() => {
-  hydrateFromUrl()   // 從 URL 還原篩選（可分享連結 / 重整不丟）
-  fetchFacets()
+onMounted(async () => {
+  hydrateFromUrl()          // 先從 URL 還原（可能設好多選 + 標記 hydrated）
+  await fetchFacets()       // 確保 facets 到位，buildParams 的「子集判定」才準
+  // 未由 URL 指定的多選 → 套 facets 預設（類型去 admin、其餘全選）
+  if (!hydratedLogTypes) logTypes.value = facets.value.log_types.filter((t) => t !== 'admin')
+  if (!hydratedActions) actions.value = [...facets.value.actions]
   fetchLogs()
 })
 </script>
