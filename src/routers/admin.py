@@ -1149,13 +1149,9 @@ async def get_online_users_list(
     presence = await PresenceRepository(db).list_online(window_seconds=window_seconds)
     now = datetime.now(timezone.utc)
 
-    # 批次 join users 解析身分（一次 $in，不逐筆查）
-    oids = []
-    for p in presence:
-        try:
-            oids.append(ObjectId(p["user_id"]))
-        except Exception:
-            continue
+    # 批次 join users 解析身分（一次 $in，不逐筆查）。presence 的 user_id 本為
+    # str(ObjectId)，is_valid 只是防禦性過濾非法值。
+    oids = [ObjectId(p["user_id"]) for p in presence if ObjectId.is_valid(p["user_id"])]
     users = {}
     if oids:
         cursor = UserRepository(db).collection.find(
