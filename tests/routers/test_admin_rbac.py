@@ -48,6 +48,7 @@ EXPECTED = {
     ("GET", "/api/admin/revenue"): Permission.BILLING_READ,
     ("GET", "/api/admin/cost"): Permission.ANALYTICS_READ,
     ("GET", "/api/admin/audit-logs"): Permission.AUDIT_READ,
+    ("GET", "/api/admin/audit-logs/facets"): Permission.AUDIT_READ,
     ("GET", "/api/admin/audit-logs/failed"): Permission.AUDIT_READ,
     ("GET", "/api/admin/audit-logs/statistics"): Permission.AUDIT_READ,
     ("GET", "/api/admin/audit-logs/resource/{resource_id}"): Permission.AUDIT_READ,
