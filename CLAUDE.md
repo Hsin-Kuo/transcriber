@@ -37,8 +37,8 @@ src/                  # 後端 FastAPI
   utils/              # storage_service, config_loader, newebpay_service, email_service, logger…
   database/repositories/  # MongoDB CRUD
   auth/  models/
-frontend/             # 使用者前端 (Vue3+Vite, dev 5173 / docker 3000)
-admin-frontend/       # 管理後台 (dev 5174 / docker 3003)
+frontend/             # 使用者前端 (Vue3+Vite, dev 3000 / docker 3000)
+admin-frontend/       # 管理後台 (dev 3001 / docker 3003)
 deploy/               # 部署腳本 + nginx / systemd canonical 檔（禁止 SSH 直接改 EC2 上的檔）
 docs/                 # 深度文件（部署、staging、金流、postmortem…）
 ```
