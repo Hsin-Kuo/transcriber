@@ -55,3 +55,18 @@ class PresenceRepository:
         """
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=window_seconds)
         return await self.collection.count_documents({"last_seen": {"$gte": cutoff}})
+
+    async def list_online(
+        self, window_seconds: int = PRESENCE_TTL_SECONDS, limit: int = 500
+    ) -> list[dict]:
+        """回傳最近 window_seconds 內有活動的使用者（user_id + last_seen），依活動時間新→舊。
+
+        只回 presence 本身的欄位（不含 PII）；呼叫端負責 join users 解析身分。limit 防爆量。
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=window_seconds)
+        cursor = (
+            self.collection.find({"last_seen": {"$gte": cutoff}})
+            .sort("last_seen", -1)
+            .limit(limit)
+        )
+        return [{"user_id": d["_id"], "last_seen": d["last_seen"]} async for d in cursor]

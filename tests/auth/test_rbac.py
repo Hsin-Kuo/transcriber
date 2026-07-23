@@ -64,6 +64,13 @@ class TestRolePermissions:
         holders = [r for r in AdminRole if role_has(r, Permission.ADMIN_GRANT)]
         assert holders == [AdminRole.SUPERADMIN]
 
+    def test_presence_view_excludes_read_only_and_billing(self):
+        """在線名單含逐一 PII：只有 support / superadmin，read_only 與 billing 拿不到。"""
+        assert role_has(AdminRole.SUPERADMIN, Permission.PRESENCE_VIEW)
+        assert role_has(AdminRole.SUPPORT, Permission.PRESENCE_VIEW)
+        assert not role_has(AdminRole.READ_ONLY, Permission.PRESENCE_VIEW)
+        assert not role_has(AdminRole.BILLING, Permission.PRESENCE_VIEW)
+
     def test_permissions_for_returns_copy(self):
         got = permissions_for(AdminRole.SUPPORT)
         got.add(Permission.TASK_DELETE)  # 改回傳值不得污染原表

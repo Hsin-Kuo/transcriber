@@ -29,6 +29,7 @@ class Permission(str, Enum):
     TASK_MANAGE = "task:manage"                 # 取消任務
     TASK_DELETE = "task:delete"                 # 刪除 / 批次刪除
     ANALYTICS_READ = "analytics:read"           # 系統統計 / AI 成本
+    PRESENCE_VIEW = "presence:view"             # 查看「當下在線的是誰」（逐一 PII，比聚合人數敏感）
     BILLING_READ = "billing:read"               # 營收 / 訂單檢視
     BILLING_WRITE = "billing:write"             # 退款 / 手動開通（P0-3）
     AUDIT_READ = "audit:read"
@@ -57,6 +58,7 @@ ROLE_PERMISSIONS: dict[AdminRole, set[Permission]] = {
         Permission.TASK_READ,
         Permission.TASK_MANAGE,
         Permission.ANALYTICS_READ,
+        Permission.PRESENCE_VIEW,   # 客服需知道當下誰在線以協助；read_only 刻意不給
         Permission.AUDIT_READ,
     },
     AdminRole.READ_ONLY: {p for p in Permission if p.value.endswith(":read")},
