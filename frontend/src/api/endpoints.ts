@@ -77,7 +77,9 @@ export const NEW_ENDPOINTS = {
 
   // 訂閱管理
   subscriptions: {
+    paymentConfig: '/subscriptions/payment-config',
     checkout: '/subscriptions/checkout',
+    pay: '/subscriptions/pay',
     status: '/subscriptions/status',
     cancel: '/subscriptions/cancel',
     reactivate: '/subscriptions/reactivate',

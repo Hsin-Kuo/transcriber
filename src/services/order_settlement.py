@@ -1,4 +1,4 @@
-"""OrderSettlement — 把藍新付款收斂成帳號狀態變更的 deep module。
+"""OrderSettlement — 把 91APP 付款收斂成帳號狀態變更的 deep module。
 
 兩個入口：
 - `open_pending(order_data)`：建 pending [[Order]]（防連點冷卻 + supersede 既有
@@ -6,19 +6,17 @@
 - `settle(notification)`：收一個 typed [[PaymentNotification]]，依
   `(order_type, is_first_payment, success)` 矩陣套用 Settlement effect
   （啟用訂閱 / 續訂展期 / 降為 free / 加值 / 拒絕重複完成），回 SettleResult。
-  排程降級（PeriodType=D+PeriodStartType=3）在首扣日之前到達的 first-payment Notify
-  會被擋下（回 SCHEDULED、不套用），改由首扣日當天（今日≥首扣日）的 Notify 觸發，
-  維持舊方案到期末。判別以首扣日 vs 今日為準，不依賴藍新 Notify 欄位格式。
 
-Router 的殘留責任：checkout 組裝（算 amount、判 upgrade/downgrade/scheduled、用
-newebpay_service adapter 產 form）、webhook 解密、idempotency claim/release。
-settle() 完全不碰 AES / webhook_repo / FastAPI——它的 test surface 就是
+91APP 是 merchant-initiated：無 gateway 委託，故無「終止委託」動作——取消訂閱只是
+停止排程（見 quota.py 到期掃描與 Phase 2 續扣排程器）。cardToken 由 router `/pay`
+從 request-by-txnToken 回應捕捉、暫存 pending order，首扣成功時搬進 subscription。
+
+settle() 不碰任何金流 provider / webhook / FastAPI——test surface 就是
 PaymentNotification dataclass。詳見 CONTEXT.md「金流與訂單」。
 """
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
-from typing import Optional
 
 from fastapi import HTTPException
 
@@ -28,7 +26,7 @@ from ..database.repositories.order_repo import (
 )
 from ..database.repositories.user_repo import UserRepository
 from ..models.quota import build_quota_from_tier
-from ..utils.newebpay_service import NewebpayService, get_newebpay_service
+from ..utils.billing_period import calc_period_end
 from ..utils.time_utils import get_utc_timestamp
 from ..utils.logger import get_logger
 
@@ -43,23 +41,20 @@ _SUBSCRIPTION_TYPES = ("subscription", "upgrade_subscription", "downgrade_subscr
 
 @dataclass
 class PaymentNotification:
-    """跨 settlement seam 的 typed payload（router 解密 + claim 後交進來）。
+    """跨 settlement seam 的 typed payload（router 回查交易 + claim 後交進來）。
 
-    is_first_payment：藍新定期定額以 Result 是否含 AlreadyTimes 區分初次建立 vs
-    續扣（==1 為首期）；MPG 一次性付款一律視為 first。
+    is_first_payment：初次建立訂閱（含升降級換約）為 True；續扣（Phase 2 排程器）為 False。
+    trade_id：91APP 交易序號。cardToken 不走這裡——由 /pay 存進 order，settle 從 order 讀。
     """
     order_no: str
     success: bool
     is_first_payment: bool
-    period_no: str = ""
-    trade_no: str = ""
-    auth_times: Optional[int] = None
+    trade_id: str = ""
 
 
 class SettleOutcome(str, Enum):
     """settle() 對單一 notification 的結果（供 router 記 log / 測試斷言）。"""
     ACTIVATED = "activated"                 # 首期成功，啟用訂閱
-    SCHEDULED = "scheduled"                 # 排程降級委託建立完成，尚未生效（等期末首扣）
     RENEWED = "renewed"                     # 續扣成功，展期
     EXPIRED = "expired"                     # 續扣失敗，降為 free
     GRANTED = "granted"                     # extra_quota 加值成功
@@ -81,11 +76,9 @@ class OrderSettlement:
         *,
         order_repo: OrderRepository,
         user_repo: UserRepository,
-        newebpay: NewebpayService,
     ):
         self.order_repo = order_repo
         self.user_repo = user_repo
-        self.newebpay = newebpay
 
     # ── 建單（checkout 入口）────────────────────────────────────────────────
 
@@ -160,14 +153,9 @@ class OrderSettlement:
         tier = order["tier"]
         billing_cycle = order["billing_cycle"]
         order_type = order.get("type", "subscription")
-        period_end = self.newebpay.calc_period_end(billing_cycle, now)
+        period_end = calc_period_end(billing_cycle, now)
 
-        # 定期定額成功一律先記委託編號 / 期數 / 交易序號
-        await self.order_repo.update_by_order_no(n.order_no, {
-            "period_no": n.period_no,
-            "auth_times": n.auth_times or 1,
-            "newebpay_trade_no": n.trade_no,
-        })
+        await self.order_repo.update_by_order_no(n.order_no, {"trade_id": n.trade_id})
 
         if not n.is_first_payment:
             # 續扣成功：只滾計費週期 + 歸零當期用量
@@ -176,6 +164,7 @@ class OrderSettlement:
             sub.update({
                 "current_period_start": now.timestamp(),
                 "current_period_end": period_end.timestamp(),
+                "next_charge_at": period_end.timestamp(),
                 "updated_at": now.timestamp(),
             })
             await self.user_repo.update_subscription(user_id, sub)
@@ -188,28 +177,13 @@ class OrderSettlement:
             return SettleResult(SettleOutcome.RENEWED, n.order_no)
 
         # 首期成功
-        # 排程降級：藍新在「委託建立完成」當下即送一封 first-payment Notify，但實際首扣
-        # 要等 PeriodFirstdate（期末）。首扣日之前到達的這封只記委託編號（上面已記）、
-        # 保留 pending_plan_change、不動 tier / quota，且 status 維持 pending——絕不可設 paid，
-        # 否則期末真正首扣會被 settle() 開頭的 already_paid 短路，降級永遠不生效。
-        # 維持舊方案直到首扣日當天（今日≥首扣日）的 Notify 到達才真正降級。
-        if self._should_defer_scheduled_downgrade(order, now):
-            log.info(
-                "subscription.downgrade.deferred_until_first_charge",
-                user_id=user_id, order_no=n.order_no,
-                scheduled_date=order.get("scheduled_date"), period_no=n.period_no,
-            )
-            return SettleResult(SettleOutcome.SCHEDULED, n.order_no)
-
         full_user = await self.user_repo.get_by_id(user_id)
         cur_sub = full_user.get("subscription", {}) if full_user else {}
         if self._is_duplicate_first_completion(cur_sub, order):
-            await self._reject_duplicate(order, user_id, n.period_no)
+            await self._reject_duplicate(order, user_id)
             return SettleResult(SettleOutcome.REJECTED_DUPLICATE, n.order_no)
 
-        # 升降級：終止舊委託；升級另把舊方案剩餘額度結轉進 extra_quota
-        if order_type in ("upgrade_subscription", "downgrade_subscription"):
-            await self._terminate_prev(order)
+        # 升級：把舊方案剩餘額度結轉進 extra_quota（91APP 無 gateway 委託可終止，換約即換 tier）
         if order_type == "upgrade_subscription":
             extra_dur = order.get("extra_duration_minutes", 0)
             extra_ai = order.get("extra_ai_summaries", 0)
@@ -222,12 +196,14 @@ class OrderSettlement:
             "billing_cycle": billing_cycle,
             "current_period_start": now.timestamp(),
             "current_period_end": period_end.timestamp(),
+            "next_charge_at": period_end.timestamp(),  # Phase 2 續扣排程器讀此
             "cancel_at_period_end": False,
             "canceled_at": None,
             "pending_plan_change": None,
-            "payment_provider": "newebpay",
+            "payment_provider": "91app",
             "active_order_no": order["merchant_order_no"],
-            "period_no": n.period_no,
+            "card_token": order.get("card_token", ""),      # /pay 捕捉並暫存於 order
+            "merchant_consumer_id": str(user_id),           # 綁卡與續扣共用
             # 沿用既有訂閱的建立時間（降級/升級換約時不重置）；全新訂閱才用 now
             "created_at": cur_sub.get("created_at", now.timestamp()),
             "updated_at": now.timestamp(),
@@ -239,15 +215,13 @@ class OrderSettlement:
             n.order_no, {"status": "paid", "paid_at": now.timestamp()}
         )
         log.info("subscription.activated", user_id=user_id, tier=tier, billing_cycle=billing_cycle, type=order_type)
-        # 對帳收斂：終止此 user 其他非當前的 active 委託（防雙重完成造成孤兒重複扣款）
-        await self._terminate_orphan_contracts(user_id, n.period_no)
         # 降級生效後（quota 已 commit）：釋放超過新方案額度的釘選音檔，進寬限期。
         #   best-effort（reconcile 自行吞例外），不影響已成功的訂閱啟用。
         if order_type == "downgrade_subscription":
             await self._reconcile_pinned_audio(user_id, tier)
         return SettleResult(SettleOutcome.ACTIVATED, n.order_no)
 
-    # ── 額外額度（MPG 一次性）────────────────────────────────────────────────
+    # ── 額外額度（一次性加購）────────────────────────────────────────────────
 
     async def _settle_extra_quota(self, order: dict, n: PaymentNotification) -> SettleResult:
         user_id = order["user_id"]
@@ -256,7 +230,7 @@ class OrderSettlement:
         await self.user_repo.add_extra_quota(user_id, extra_dur, extra_ai)
         await self.order_repo.update_by_order_no(n.order_no, {
             "status": "paid",
-            "newebpay_trade_no": n.trade_no,
+            "trade_id": n.trade_id,
             "paid_at": datetime.utcnow().timestamp(),
         })
         log.info(
@@ -290,50 +264,12 @@ class OrderSettlement:
         except Exception as e:
             log.error("subscription.reconcile_pinned_audio.failed", user_id=user_id, error=str(e), exc_info=True)
 
-    async def _terminate_prev(self, order: dict) -> None:
-        """升降級首期成功後，終止被取代的前一張藍新委託。"""
-        prev_order_no = order.get("prev_order_no")
-        prev_period_no = order.get("prev_period_no")
-        if not (prev_order_no and prev_period_no):
-            return
-        ok, msg = await self.newebpay.terminate_period_contract(prev_order_no, prev_period_no)
-        if not ok:
-            log.warning(
-                "subscription.prev_contract_terminate_failed",
-                type=order.get("type"), prev_period_no=prev_period_no, message=msg,
-            )
-
-    @staticmethod
-    def _should_defer_scheduled_downgrade(order: dict, now_utc: datetime) -> bool:
-        """排程降級（PeriodType=D + PeriodStartType=3）：first-payment Notify 若在
-        首扣日（PeriodFirstdate）之前到達，就延後套用、維持舊方案到首扣日。
-
-        以「首扣日 vs 今日」判別，**不依賴 Notify 欄位格式**：藍新的建立完成 Notify
-        （AuthTimes，合約建立後）與期末真正首扣的 Notify 型態可能都不帶 AlreadyTimes
-        （NPA-N050 依手冊是第二期含之後才發），所以用 auth_times 判別並不可靠——
-        期末首扣一旦也是無 AlreadyTimes 格式，就會被誤擋、降級永不生效。改用日期最穩。
-
-        藍新以台灣時間（UTC+8）於 PeriodFirstdate 首扣，故用台灣當日比較避免跨日誤判。
-        立即降級分支（剩餘 <2 天，scheduled_date=None）與期末首扣（今日≥首扣日）皆回 False。
-        """
-        if order.get("type") != "downgrade_subscription":
-            return False
-        sd = order.get("scheduled_date")  # "YYYY/MM/DD" 台灣日期；立即降級為 None
-        if not sd:
-            return False
-        try:
-            scheduled = datetime.strptime(sd, "%Y/%m/%d").date()
-        except (ValueError, TypeError):
-            return False  # 解析不出首扣日 → 不敢延後，照常套用（保守：寧可即時生效也別卡死）
-        today_taipei = (now_utc + timedelta(hours=8)).date()
-        return today_taipei < scheduled
-
     @staticmethod
     def _is_duplicate_first_completion(sub: dict, order: dict) -> bool:
         """判斷這筆 first-payment 是否為『重複完成』（sibling 已先啟動）。
 
-        使用者過了冷卻後重開 checkout 會 supersede 舊單並建新單，兩張藍新付款頁
-        都可能被完成。第一張完成正常啟動；第二張完成時應被擋下。
+        使用者過了冷卻後重開 checkout 會 supersede 舊單並建新單，兩張付款頁
+        都可能被完成。第一張完成正常啟動；第二張完成時應被擋下（需退款）。
         """
         if sub.get("status") != "active":
             return False  # 無既有 active → 第一筆完成，正常啟動
@@ -348,83 +284,35 @@ class OrderSettlement:
         # 新訂閱 / reactivate：重複新訂閱則 sibling 已把 cancel_at_period_end 設為 False。
         return not sub.get("cancel_at_period_end", False)
 
-    async def _reject_duplicate(self, order: dict, user_id: str, period_no: str) -> None:
-        """重複完成處理：終止這張多出來的委託、標記需退款，不啟用/不加值。
+    async def _reject_duplicate(self, order: dict, user_id: str) -> None:
+        """重複完成處理：標記需退款，不啟用/不加值。
 
-        首期已立即授權扣款（PeriodStartType=2），故標記 needs_refund + 送 Sentry
-        供人工退首期款。狀態保留 paid（period_no 已設），終止失敗時下次啟動的對帳
-        收斂仍會接手重試。
+        首期已實際扣款，故標記 needs_refund + 送 Sentry 供人工用 91APP refund API 退款。
+        91APP 無 gateway 委託可終止，這裡不再有終止動作。
         """
         ono = order["merchant_order_no"]
-        try:
-            ok, msg = await self.newebpay.terminate_period_contract(ono, period_no)
-        except Exception as e:
-            ok, msg = False, f"exception: {e}"
-        already = ("無法重複終止" in (msg or "")) or ("已終止" in (msg or ""))
-        updates = {
+        await self.order_repo.update_by_order_no(ono, {
             "status": "paid",
             "paid_at": get_utc_timestamp(),
             "is_duplicate": True,
             "needs_refund": True,
-        }
-        if ok or already:
-            updates["contract_terminated_at"] = get_utc_timestamp()
-        await self.order_repo.update_by_order_no(ono, updates)
+        })
         log.warning(
             "subscription.duplicate_completion.rejected",
-            user_id=user_id, order_no=ono, period_no=period_no, terminate_ok=ok, message=msg,
+            user_id=user_id, order_no=ono,
         )
-        self._capture_orphan_contract_alert(
-            user_id, period_no, f"重複完成已拒絕，需退首期款；終止結果: ok={ok} msg={msg}"
-        )
-
-    async def _terminate_orphan_contracts(self, user_id: str, keep_period_no: str) -> None:
-        """對帳收斂：終止該 user 名下「已 paid 但 period_no ≠ 目前 active」的其他委託。
-
-        best-effort：本函式在訂閱啟動成功之後執行，絕不可拋例外拖垮已成功的啟用；
-        任何終止失敗改為記錄 + 送 Sentry 供人工處理。冪等（已標記或藍新回已終止皆略過）。
-        """
-        # 防呆：拿不到目前委託編號時不敢動（否則 $nin:[None] 可能誤終止其他委託）
-        if not keep_period_no:
-            return
-        try:
-            orphans = await self.order_repo.find_orphan_contracts(user_id, keep_period_no)
-        except Exception as e:
-            log.error("subscription.orphan_contract.scan_failed", user_id=user_id, error=str(e), exc_info=True)
-            return
-
-        for o in orphans:
-            pno = o.get("period_no")
-            ono = o.get("merchant_order_no")
-            if not pno or not ono:
-                continue
-            try:
-                ok, msg = await self.newebpay.terminate_period_contract(ono, pno)
-            except Exception as e:
-                log.error("subscription.orphan_contract.terminate_error", user_id=user_id, period_no=pno, error=str(e), exc_info=True)
-                self._capture_orphan_contract_alert(user_id, pno, str(e))
-                continue
-            already = ("無法重複終止" in (msg or "")) or ("已終止" in (msg or ""))
-            if ok or already:
-                await self.order_repo.update_by_order_no(ono, {"contract_terminated_at": get_utc_timestamp()})
-                log.info("subscription.orphan_contract.terminated", user_id=user_id, period_no=pno, already=already)
-            else:
-                log.warning("subscription.orphan_contract.terminate_failed", user_id=user_id, period_no=pno, message=msg)
-                self._capture_orphan_contract_alert(user_id, pno, msg)
+        self._capture_refund_alert(user_id, ono, "重複完成已拒絕，需退首期款")
 
     @staticmethod
-    def _capture_orphan_contract_alert(user_id: str, period_no: str, detail: str) -> None:
-        """孤兒/重複委託未能自動終止 → 送 Sentry 供人工終止（可能造成重複扣款）。
-
-        lazy import：未裝 sentry_sdk 時靜默略過，且絕不在錯誤處理路徑上再炸一次。
-        """
+    def _capture_refund_alert(user_id: str, order_no: str, detail: str) -> None:
+        """需人工退款事件 → 送 Sentry。lazy import：未裝 sentry_sdk 時靜默略過。"""
         try:
             import sentry_sdk
             with sentry_sdk.push_scope() as scope:
-                scope.set_tag("payment.issue", "orphan_contract_terminate_failed")
-                scope.set_context("orphan_contract", {"user_id": user_id, "period_no": period_no, "detail": detail})
+                scope.set_tag("payment.issue", "needs_manual_refund")
+                scope.set_context("refund", {"user_id": user_id, "order_no": order_no, "detail": detail})
                 sentry_sdk.capture_message(
-                    f"藍新定期定額委託未能自動終止，需人工終止：user={user_id} period_no={period_no}",
+                    f"91APP 付款需人工退款：user={user_id} order={order_no}",
                     level="error",
                 )
         except Exception:
@@ -432,9 +320,8 @@ class OrderSettlement:
 
 
 def build_order_settlement(db) -> OrderSettlement:
-    """以 request-scoped db 組出 OrderSettlement（repos 從 db 建、newebpay 用 singleton）。"""
+    """以 request-scoped db 組出 OrderSettlement（repos 從 db 建；不再依賴金流 provider）。"""
     return OrderSettlement(
         order_repo=OrderRepository(db),
         user_repo=UserRepository(db),
-        newebpay=get_newebpay_service(),
     )

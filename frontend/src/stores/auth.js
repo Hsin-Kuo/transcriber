@@ -336,9 +336,33 @@ export const useAuthStore = defineStore('auth', () => {
   // extra_quota（分開顯示）
   const extraQuota = computed(() => user.value?.extra_quota || { duration_minutes: 0, ai_summaries: 0 })
 
+  // 建立（或取回）待付訂單。91APP 流程：先建單拿 publishable_key + order_no，
+  // 前端才能 setupSDK 並讓使用者填卡。回 { order_no, amount, publishable_key, sdk_server_type }。
+  // 取 SDK 初始化參數（publishable_key / sdk_server_type），不建單。
+  // 結帳頁 onMounted 用此 setupSDK；建單另由 createCheckoutSession 在按付款時一次完成
+  // （/checkout 有 30s 建單冷卻，重複呼叫會 429，故 SDK 初始化不可綁建單）。
+  async function getPaymentConfig() {
+    const response = await api.get('/subscriptions/payment-config')
+    return response.data
+  }
+
   async function createCheckoutSession(tier, billing, invoiceData = {}) {
     const response = await api.post('/subscriptions/checkout', { tier, billing, ...invoiceData })
-    return response.data  // { form, order_no }
+    return response.data
+  }
+
+  // 用 91APP SDK 取得的 txn_token 對已建立的訂單發動扣款。
+  // 回 { payment_url, status }：payment_url 非空 → 需 3D，前端導去該 URL；
+  // status="success" 且無 payment_url → 直接成功。
+  async function payOrder(orderNo, txnToken) {
+    const response = await api.post('/subscriptions/pay', { order_no: orderNo, txn_token: txnToken })
+    return response.data
+  }
+
+  // 訂閱狀態輪詢用（PaymentReturnView 在 3D 導回後輪詢至 active）。
+  async function getSubscriptionStatus() {
+    const response = await api.get('/subscriptions/status')
+    return response.data
   }
 
   async function cancelSubscription() {
@@ -387,22 +411,6 @@ export const useAuthStore = defineStore('auth', () => {
   async function getOrders(skip = 0, limit = 6) {
     const response = await api.get('/subscriptions/orders', { params: { skip, limit } })
     return response.data  // { orders, has_more }
-  }
-
-  function submitNewebpayForm(formData) {
-    const form = document.createElement('form')
-    form.method = 'POST'
-    form.action = formData.gateway_url
-    Object.entries(formData).forEach(([key, value]) => {
-      if (key === 'gateway_url') return
-      const input = document.createElement('input')
-      input.type = 'hidden'
-      input.name = key
-      input.value = value
-      form.appendChild(input)
-    })
-    document.body.appendChild(form)
-    form.submit()
   }
 
   async function deleteAccount(password, confirmation) {
@@ -488,7 +496,10 @@ export const useAuthStore = defineStore('auth', () => {
     deleteAccount,
     setPassword,
     updatePreferences,
+    getPaymentConfig,
     createCheckoutSession,
+    payOrder,
+    getSubscriptionStatus,
     cancelSubscription,
     reactivateSubscription,
     changePlan,
@@ -496,6 +507,5 @@ export const useAuthStore = defineStore('auth', () => {
     getPackages,
     getTiers,
     getOrders,
-    submitNewebpayForm,
   }
 })
