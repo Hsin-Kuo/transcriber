@@ -53,7 +53,7 @@
             v-if="currentTier !== plan.key"
             class="plan-select-btn"
             :class="{ 'upgrade-btn': isUpgrade(plan.key), 'downgrade-btn': isDowngrade(plan.key) }"
-            :disabled="changingPlan"
+            :disabled="changingPlan || (plan.key === 'free' && cancelScheduled) || isPlanChangeDisabled(plan.key)"
             @click="selectPlan(plan.key)"
           >
             {{ getButtonLabel(plan.key) }}
@@ -126,7 +126,7 @@
 </template>
 
 <script setup>
-import { ref, toRef, watch, onMounted } from 'vue'
+import { ref, toRef, watch, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
@@ -151,6 +151,9 @@ useFocusTrap(panelRef, toRef(props, 'modelValue'))
 
 const changingPlan = ref(false)
 const tierOrder = { free: 0, basic: 1, pro: 2 }
+
+// 已排定期末取消：Free 方案的「取消」動作要 disable，避免重複送出（後端會 400）
+const cancelScheduled = computed(() => authStore.subscription?.cancel_at_period_end === true)
 
 // 加購額度套餐（一次性購買）— basic/pro 用戶開啟面板時才載入
 const addons = ref([])
@@ -184,16 +187,17 @@ function isDowngrade(planKey) {
   return tierOrder[planKey] < tierOrder[props.currentTier]
 }
 
+// 付費→付費（升級/降級）走 /change，Phase 1 停用 → 按鈕 disable 並標整修中
+function isPlanChangeDisabled(planKey) {
+  return props.currentTier !== 'free' && planKey !== 'free'
+}
+
 function getButtonLabel(planKey) {
   if (changingPlan.value) return $t('userSettings.planPanel.processing')
+  if (planKey === 'free' && cancelScheduled.value) return $t('userSettings.planPanel.cancelScheduled')
   if (props.currentTier === 'free') return $t('userSettings.planPanel.selectPlan')
-  if (isUpgrade(planKey)) return $t('userSettings.planPanel.upgrade')
-  if (isDowngrade(planKey)) {
-    return planKey === 'free'
-      ? $t('userSettings.planPanel.cancelSubscription')
-      : $t('userSettings.planPanel.downgrade')
-  }
-  return $t('userSettings.planPanel.selectPlan')
+  if (planKey === 'free') return $t('userSettings.planPanel.cancelSubscription')  // 付費→免費 = 取消
+  return $t('userSettings.planPanel.maintenanceBadge')  // 付費→付費 = 升降級，Phase 1 整修中
 }
 
 async function selectPlan(planKey) {
@@ -205,41 +209,15 @@ async function selectPlan(planKey) {
   }
 
   if (planKey === 'free') {
+    if (cancelScheduled.value) return  // 已排定取消，不重複送出（避免後端 400）
     emit('update:modelValue', false)
     emit('planChanged', { action: 'cancel' })
     return
   }
 
-  changingPlan.value = true
-  try {
-    const result = await authStore.changePlan(planKey, billing.value)
-
-    if (result.form) {
-      // 升級或降級需要付款：auto-submit 到藍新
-      emit('update:modelValue', false)
-      if (result.action === 'upgrade' && (result.extra_duration_minutes > 0 || result.extra_ai_summaries > 0)) {
-        const durMsg = result.extra_duration_minutes > 0 ? $t('userSettings.planPanel.extraMinutes', { n: result.extra_duration_minutes }) : ''
-        const aiMsg = result.extra_ai_summaries > 0 ? $t('userSettings.planPanel.extraAiSummaries', { n: result.extra_ai_summaries }) : ''
-        const parts = [durMsg, aiMsg].filter(Boolean).join($t('common.listSeparator'))
-        alert($t('userSettings.planPanel.upgradeKeepQuota', { parts }))
-      }
-      if (result.action === 'downgrade') {
-        const msg = result.effective === 'end_of_period'
-          ? $t('userSettings.planPanel.downgradeScheduled', { date: result.scheduled_date, plan: planKey })
-          : $t('userSettings.planPanel.downgradeImmediate')
-        if (!confirm(msg)) {
-          changingPlan.value = false
-          return
-        }
-      }
-      authStore.submitNewebpayForm(result.form)
-    }
-  } catch (err) {
-    const detail = err.response?.data?.detail || $t('userSettings.planPanel.changeFailed')
-    alert(detail)
-  } finally {
-    changingPlan.value = false
-  }
+  // 升級/降級走 /subscriptions/change，Phase 1 後端已停用（501）。
+  // 不呼叫 API，直接顯示整修中友善訊息。
+  alert($t('userSettings.planPanel.changeMaintenance'))
 }
 
 const billing = ref('monthly')

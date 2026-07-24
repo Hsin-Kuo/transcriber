@@ -207,7 +207,7 @@ def build_monthly_cost(punct_rows: list, summary_rows: list, month_list: list) -
 
 
 def summarize_subscriptions(sub_list: list, price_of) -> tuple:
-    """訂閱分佈 + MRR。price_of(tier, cycle)->價格(或 None)，注入以免耦合 NewebpayService。
+    """訂閱分佈 + MRR。price_of(tier, cycle)->價格(或 None)，注入以免耦合金流 provider。
 
     回 (subscriber_count, mrr)。年繳價格 /12 換算成月，未定價 tier 不計入 MRR。
     只追蹤 basic/pro × monthly/yearly 四個 subscriber_count key；其餘 tier 仍計入 MRR。
@@ -463,13 +463,13 @@ class AdminAnalytics:
     async def revenue(self) -> dict:
         """營收 dashboard：MRR / 訂閱分佈 / 總收入 / 近 6 月 / 近期訂單 / 流失指標。"""
         from bson import ObjectId
-        from ..utils.newebpay_service import NewebpayService
+        from ..utils.payments91_service import Payments91APPService
         from ..utils.time_utils import get_utc_timestamp
 
         db = self.db
         now = get_utc_timestamp()
 
-        # 1 訂閱分佈 + MRR（price 注入 → summarize 不耦合 NewebpayService）
+        # 1 訂閱分佈 + MRR（price 注入 → summarize 不耦合金流 provider）
         sub_list = await self._agg(db.users, [
             {"$match": {"subscription.status": "active"}},
             {"$group": {
@@ -477,7 +477,7 @@ class AdminAnalytics:
                 "count": {"$sum": 1},
             }},
         ])
-        subscriber_count, mrr = summarize_subscriptions(sub_list, NewebpayService.get_subscription_price)
+        subscriber_count, mrr = summarize_subscriptions(sub_list, Payments91APPService.get_subscription_price)
 
         # 2 總收入 / 3 額外額度收入
         total = await self._agg(db.orders, [

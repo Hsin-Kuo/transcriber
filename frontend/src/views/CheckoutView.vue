@@ -101,7 +101,37 @@
           </label>
         </div>
 
-        <button class="pay-btn" :disabled="paying" @click="handlePay">
+        <!-- 加購功能整修中（purchase-extra 後端已停用，Phase 1 不走 SDK）-->
+        <div v-if="isAddon" class="maintenance-note">
+          {{ $t('userSettings.checkout.addonMaintenance') }}
+        </div>
+
+        <!-- 訂閱模式：91APP Web SDK 信用卡欄位（tokenize，卡號不經過我方伺服器）-->
+        <div v-else class="card-fields">
+          <h3 class="invoice-title">{{ $t('userSettings.checkout.payment') }}</h3>
+          <div class="form-group">
+            <label>{{ $t('userSettings.checkout.cardNumber') }}</label>
+            <!-- SDK 會在此容器內注入 iframe -->
+            <div id="card-number" class="form-input sdk-field"></div>
+          </div>
+          <div class="card-fields-row">
+            <div class="form-group">
+              <label>{{ $t('userSettings.checkout.expiry') }}</label>
+              <div id="card-expiration-date" class="form-input sdk-field"></div>
+            </div>
+            <div class="form-group">
+              <label>{{ $t('userSettings.checkout.cvc') }}</label>
+              <div id="card-ccv" class="form-input sdk-field"></div>
+            </div>
+          </div>
+        </div>
+
+        <button
+          v-if="!isAddon"
+          class="pay-btn"
+          :disabled="paying || !sdkReady || !cardCanToken"
+          @click="handlePay"
+        >
           <svg v-if="!paying" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
             <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
@@ -124,7 +154,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useI18n } from 'vue-i18n'
@@ -136,6 +166,10 @@ const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 const addonLabel = useAddonLabel()
+
+// 91APP Web SDK 版本；integrity（SRI）尚未取得官方 hash，先不加以免載入失敗。
+// TODO: 取得 SDK 3.9.3 的 sha256 SRI hash 後補上 integrity 屬性。
+const SDK_URL = 'https://checkout.payments.91app.com/sdk/3.9.3/index.js'
 
 const plan = ref(route.query.plan || 'basic')
 const billing = ref(route.query.billing || 'monthly')
@@ -154,9 +188,75 @@ const companyTaxId = ref('')
 const companyName = ref('')
 const saveInvoice = ref(true)
 
+// ===== 91APP SDK 狀態 =====
+const sdkReady = ref(false)      // setupSDK + card.setup 完成
+const cardCanToken = ref(false)  // card 'update' 事件回報可取 token（三欄填妥且有效）
+const orderNo = ref(null)        // 建單後的訂單編號
+let publishableKey = null        // /checkout 回傳（商戶層，跟 order 無關）
+let sdkServerType = 'sandbox'    // 'sandbox' | 'production'
+let cardSdk = null               // Payments91APP.card 實例（非響應式）
+
+function buildInvoiceData() {
+  return {
+    invoice_type: invoiceType.value,
+    carrier_type: invoiceType.value === 'personal' && carrierNum.value ? '1' : '',
+    carrier_num: invoiceType.value === 'personal' ? carrierNum.value : '',
+    company_tax_id: invoiceType.value === 'company' ? companyTaxId.value : '',
+    company_name: invoiceType.value === 'company' ? companyName.value : '',
+    save_invoice: saveInvoice.value,
+  }
+}
+
+// 動態載入 91APP SDK（若已載入則直接 resolve）
+function loadSdk() {
+  return new Promise((resolve, reject) => {
+    if (window.Payments91APP) return resolve(window.Payments91APP)
+    const existing = document.querySelector('script[data-sdk="91app"]')
+    if (existing) {
+      existing.addEventListener('load', () => resolve(window.Payments91APP))
+      existing.addEventListener('error', () => reject(new Error('SDK load failed')))
+      return
+    }
+    const s = document.createElement('script')
+    s.src = SDK_URL
+    s.async = true
+    s.dataset.sdk = '91app'
+    // TODO: 補 s.integrity + s.crossOrigin 一旦取得官方 SRI hash
+    s.onload = () => resolve(window.Payments91APP)
+    s.onerror = () => reject(new Error('SDK load failed'))
+    document.head.appendChild(s)
+  })
+}
+
+// setupSDK + card.setup（三個容器需已 render）
+function setupCard() {
+  const Payments91APP = window.Payments91APP
+  if (!Payments91APP) throw new Error('SDK not available')
+  Payments91APP.setupSDK(publishableKey, sdkServerType)
+  cardSdk = Payments91APP.card
+  cardSdk.setup({
+    enableIcon: false,
+    fields: {
+      number:         { element: '#card-number',          placeholder: $t('userSettings.checkout.cardNumberPlaceholder') },
+      expirationDate: { element: '#card-expiration-date', placeholder: $t('userSettings.checkout.expiryPlaceholder') },
+      ccv:            { element: '#card-ccv',              placeholder: $t('userSettings.checkout.cvcPlaceholder') },
+    },
+    styles: {
+      normal:  { color: 'black' },
+      focus:   { color: 'blue' },
+      error:   { color: 'red' },
+      success: { color: 'green' },
+    },
+  })
+  // SDK 3.4.0+：canGetToken 為 true 才可取 token
+  cardSdk.on('update', (s) => { cardCanToken.value = !!s?.canGetToken })
+  sdkReady.value = true
+}
+
 onMounted(async () => {
   if (isAddon.value) {
-    // 加購模式：載入套餐明細，找不到就退回設定頁
+    // 加購模式：purchase-extra 後端已停用（501），不初始化 SDK，僅顯示整修中訊息。
+    // 仍載入套餐明細以顯示品項/價格；找不到就退回設定頁。
     try {
       const pkgs = await authStore.getPackages()
       addon.value = (pkgs || []).find(p => p._id === addonId.value) || null
@@ -165,9 +265,11 @@ onMounted(async () => {
     }
     if (!addon.value) {
       router.push('/settings')
-      return
     }
-  } else if (plan.value === 'free') {
+    return
+  }
+
+  if (plan.value === 'free') {
     router.push('/settings')
     return
   }
@@ -180,7 +282,25 @@ onMounted(async () => {
     companyTaxId.value = info.company_tax_id || ''
     companyName.value = info.company_name || ''
   }
+
+  // 訂閱模式：先取 SDK 參數（不建單）setupSDK 讓使用者填卡；
+  // 建單延到按付款時一次完成（/checkout 有 30s 建單冷卻，onMounted 建單會導致付款時 429）。
+  try {
+    const cfg = await authStore.getPaymentConfig()
+    publishableKey = cfg.publishable_key
+    sdkServerType = cfg.sdk_server_type || 'sandbox'
+    await loadSdk()
+    await nextTick()   // 確保三個 card 容器已 render
+    setupCard()
+  } catch (err) {
+    errorMsg.value = resolveErr(err)
+  }
 })
+
+function resolveErr(err) {
+  const detail = err?.response?.data?.detail
+  return (typeof detail === 'string' ? detail : detail?.message) || $t('userSettings.checkout.error')
+}
 
 const planLabel = computed(() => ({ basic: 'Basic', pro: 'Pro' })[plan.value] || plan.value)
 
@@ -208,23 +328,33 @@ function decQty() { quantity.value = Math.max(1, effectiveQty.value - 1) }
 function clampQty() { quantity.value = effectiveQty.value }
 
 async function handlePay() {
+  if (isAddon.value) return  // 加購已停用，按鈕不會出現，保險擋一層
   paying.value = true
   errorMsg.value = null
   try {
-    const invoiceData = {
-      invoice_type: invoiceType.value,
-      carrier_type: invoiceType.value === 'personal' && carrierNum.value ? '1' : '',
-      carrier_num: invoiceType.value === 'personal' ? carrierNum.value : '',
-      company_tax_id: invoiceType.value === 'company' ? companyTaxId.value : '',
-      company_name: invoiceType.value === 'company' ? companyName.value : '',
-      save_invoice: saveInvoice.value,
+    // (a) 取 txn token（卡號等敏感資料由 SDK iframe 直送 91APP，不經過我方）
+    const res = await cardSdk.getTxnToken()
+    if (!res || !res.txnToken) throw new Error('txn_token_failed')
+
+    // (b) 以最終發票資訊建單（整個結帳流程只在此建單一次），拿 order_no
+    const session = await authStore.createCheckoutSession(plan.value, billing.value, buildInvoiceData())
+    orderNo.value = session.order_no
+
+    // (c) 發動扣款
+    const pay = await authStore.payOrder(orderNo.value, res.txnToken)
+
+    // (d) 需 3D → 導去 payment_url；否則直接成功導回 return 頁
+    if (pay.payment_url) {
+      window.location.href = pay.payment_url
+      return
     }
-    const result = isAddon.value
-      ? await authStore.purchaseExtraQuota(addonId.value, effectiveQty.value, invoiceData)
-      : await authStore.createCheckoutSession(plan.value, billing.value, invoiceData)
-    authStore.submitNewebpayForm(result.form)
+    if (pay.status === 'success') {
+      router.push({ path: '/payment/return', query: { order_no: orderNo.value } })
+      return
+    }
+    throw new Error('unexpected_pay_response')
   } catch (err) {
-    errorMsg.value = err.response?.data?.detail || $t('userSettings.checkout.error')
+    errorMsg.value = resolveErr(err)
     paying.value = false
   }
 }
@@ -435,6 +565,41 @@ async function handlePay() {
   color: var(--main-text-light);
   cursor: pointer;
   margin-top: 8px;
+}
+
+/* 91APP SDK 信用卡欄位 */
+.card-fields {
+  margin: 20px 0;
+}
+
+.card-fields-row {
+  display: flex;
+  gap: 12px;
+}
+
+.card-fields-row .form-group {
+  flex: 1;
+}
+
+/* SDK 在容器內注入 iframe；給固定高度讓 iframe 有版面 */
+.sdk-field {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+}
+
+/* 加購整修中提示 */
+.maintenance-note {
+  margin: 20px 0 4px;
+  padding: 14px 16px;
+  background: var(--color-bg, #f8f9fa);
+  border: 1px solid var(--color-divider, rgba(163, 177, 198, 0.3));
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--main-text-light);
+  text-align: center;
+  line-height: 1.5;
 }
 
 .pay-btn {

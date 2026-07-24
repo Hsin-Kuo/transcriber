@@ -1,12 +1,11 @@
-"""OrderSettlement 單元測試。
+"""OrderSettlement 單元測試（91APP）。
 
-驗證 deepening 的價值——付款狀態機的每一條 transition 都能用 typed
-PaymentNotification + fake repos 覆蓋，不需要 AES / webhook_repo / Mongo / FastAPI。
+付款狀態機的每一條 transition 都能用 typed PaymentNotification + fake repos 覆蓋，
+不需要真金流 provider / webhook_repo / Mongo / FastAPI。
 """
 import os
 import sys
 from pathlib import Path
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -28,29 +27,25 @@ from src.services.order_settlement import (  # noqa: E402
 )
 
 
-def _make(order=None, user=None, orphans=None):
-    """建一個 OrderSettlement，三個依賴全 fake。"""
+def _make(order=None, user=None):
+    """建一個 OrderSettlement，兩個 repo 全 fake（不再依賴金流 provider）。"""
     order_repo = MagicMock()
     order_repo.get_by_order_no = AsyncMock(return_value=order)
     order_repo.update_by_order_no = AsyncMock(return_value=True)
-    order_repo.find_orphan_contracts = AsyncMock(return_value=orphans or [])
     order_repo.has_recent_pending_order = AsyncMock(return_value=False)
     order_repo.supersede_pending_orders = AsyncMock(return_value=0)
     order_repo.create = AsyncMock(side_effect=lambda d: {**d, "_id": "oid"})
 
     user_repo = MagicMock()
+    user_repo.db = MagicMock()
     user_repo.get_by_id = AsyncMock(return_value=user or {"subscription": {}})
     user_repo.update_subscription = AsyncMock(return_value=True)
     user_repo.update_quota = AsyncMock(return_value=True)
     user_repo.reset_monthly_usage = AsyncMock(return_value=True)
     user_repo.add_extra_quota = AsyncMock(return_value=True)
 
-    newebpay = MagicMock()
-    newebpay.calc_period_end.return_value = datetime(2026, 7, 1)
-    newebpay.terminate_period_contract = AsyncMock(return_value=(True, "OK"))
-
-    s = OrderSettlement(order_repo=order_repo, user_repo=user_repo, newebpay=newebpay)
-    return s, order_repo, user_repo, newebpay
+    s = OrderSettlement(order_repo=order_repo, user_repo=user_repo)
+    return s, order_repo, user_repo
 
 
 def _order(**over):
@@ -70,62 +65,60 @@ def _order(**over):
 
 class TestSubscriptionSettle:
     async def test_first_subscription_activates(self):
-        s, order_repo, user_repo, _ = _make(order=_order())
+        s, order_repo, user_repo = _make(order=_order(card_token="CT1"))
         r = await s.settle(PaymentNotification(
-            order_no="SLSUB1", success=True, is_first_payment=True, period_no="P1", trade_no="T1",
+            order_no="SLSUB1", success=True, is_first_payment=True, trade_id="T1",
         ))
         assert r.outcome == SettleOutcome.ACTIVATED
         sub = user_repo.update_subscription.await_args.args[1]
         assert sub["status"] == "active" and sub["tier"] == "basic"
-        assert sub["active_order_no"] == "SLSUB1" and sub["period_no"] == "P1"
+        assert sub["active_order_no"] == "SLSUB1"
+        assert sub["payment_provider"] == "91app"
+        # cardToken 從 order 搬進 subscription；consumer_id = user_id；next_charge_at 有值
+        assert sub["card_token"] == "CT1"
+        assert sub["merchant_consumer_id"] == "u1"
+        assert isinstance(sub["next_charge_at"], (int, float)) and sub["next_charge_at"] > 0
         user_repo.update_quota.assert_awaited_once_with("u1", build_quota_from_tier("basic"))
         user_repo.reset_monthly_usage.assert_awaited_once()
-        # order 最終標 paid
-        assert any(
-            c.args[1].get("status") == "paid"
-            for c in order_repo.update_by_order_no.await_args_list
-        )
+        # order 記 trade_id + 最終標 paid
+        assert any(c.args[1].get("trade_id") == "T1" for c in order_repo.update_by_order_no.await_args_list)
+        assert any(c.args[1].get("status") == "paid" for c in order_repo.update_by_order_no.await_args_list)
 
     async def test_monthly_renewal_reapplies_latest_quota(self):
-        # D4：月繳續扣 → 重套最新方案額度（短週期，等同每月重新訂閱）
-        user = {"subscription": {"status": "active", "tier": "basic", "created_at": 111}}
-        s, order_repo, user_repo, _ = _make(order=_order(billing_cycle="monthly", status="paid"), user=user)
+        user = {"subscription": {"status": "active", "tier": "basic", "created_at": 111, "card_token": "CT1"}}
+        s, order_repo, user_repo = _make(order=_order(billing_cycle="monthly", status="paid"), user=user)
         r = await s.settle(PaymentNotification(
-            order_no="SLSUB1", success=True, is_first_payment=False, period_no="P2", auth_times=2,
+            order_no="SLSUB1", success=True, is_first_payment=False, trade_id="T2",
         ))
         assert r.outcome == SettleOutcome.RENEWED
-        user_repo.update_subscription.assert_awaited_once()
+        sub = user_repo.update_subscription.await_args.args[1]
+        assert sub["next_charge_at"] > 0  # 續扣滾動下次扣款時間
         user_repo.reset_monthly_usage.assert_awaited_once()
         user_repo.update_quota.assert_awaited_once_with("u1", build_quota_from_tier("basic"))
 
     async def test_yearly_renewal_keeps_quota_frozen(self):
-        # D4：年繳續扣不重套 tier quota，維持繳費當下方案直到換約（週期內由 lazy refill 補額但不改額度）
         user = {"subscription": {"status": "active", "tier": "pro", "created_at": 111}}
-        s, order_repo, user_repo, _ = _make(order=_order(tier="pro", billing_cycle="yearly", status="paid"), user=user)
+        s, order_repo, user_repo = _make(order=_order(tier="pro", billing_cycle="yearly", status="paid"), user=user)
         r = await s.settle(PaymentNotification(
-            order_no="SLSUB1", success=True, is_first_payment=False, period_no="P2", auth_times=2,
+            order_no="SLSUB1", success=True, is_first_payment=False, trade_id="T2",
         ))
         assert r.outcome == SettleOutcome.RENEWED
-        user_repo.update_subscription.assert_awaited_once()
         user_repo.reset_monthly_usage.assert_awaited_once()
         user_repo.update_quota.assert_not_awaited()
 
     async def test_renewal_failure_expires_to_free(self):
         user = {"subscription": {"status": "active", "tier": "pro"}}
-        s, order_repo, user_repo, _ = _make(order=_order(tier="pro", status="paid"), user=user)
+        s, order_repo, user_repo = _make(order=_order(tier="pro", status="paid"), user=user)
         r = await s.settle(PaymentNotification(
             order_no="SLSUB1", success=False, is_first_payment=False,
         ))
         assert r.outcome == SettleOutcome.EXPIRED
-        assert any(
-            c.args[1].get("status") == "failed"
-            for c in order_repo.update_by_order_no.await_args_list
-        )
+        assert any(c.args[1].get("status") == "failed" for c in order_repo.update_by_order_no.await_args_list)
         user_repo.update_quota.assert_awaited_once_with("u1", build_quota_from_tier("free"))
         assert user_repo.update_subscription.await_args.args[1]["status"] == "expired"
 
     async def test_first_payment_failure_does_not_expire(self):
-        s, order_repo, user_repo, _ = _make(order=_order())
+        s, order_repo, user_repo = _make(order=_order())
         r = await s.settle(PaymentNotification(
             order_no="SLSUB1", success=False, is_first_payment=True,
         ))
@@ -133,92 +126,33 @@ class TestSubscriptionSettle:
         user_repo.update_subscription.assert_not_awaited()
 
 
-# ── settle: 升級 / 降級的差異 ────────────────────────────────────────────────
+# ── settle: 升級 / 降級 ──────────────────────────────────────────────────────
 
 class TestUpgradeDowngrade:
-    async def test_upgrade_carries_extra_quota_and_terminates_prev(self):
+    async def test_upgrade_carries_extra_quota(self):
         order = _order(
             merchant_order_no="SLUPG1", type="upgrade_subscription", tier="pro",
-            prev_order_no="SLSUB0", prev_period_no="P0",
+            prev_order_no="SLSUB0",
             extra_duration_minutes=42.5, extra_ai_summaries=3,
         )
-        s, order_repo, user_repo, newebpay = _make(order=order)
+        s, order_repo, user_repo = _make(order=order)
         r = await s.settle(PaymentNotification(
-            order_no="SLUPG1", success=True, is_first_payment=True, period_no="P9",
+            order_no="SLUPG1", success=True, is_first_payment=True, trade_id="T9",
         ))
         assert r.outcome == SettleOutcome.ACTIVATED
         user_repo.add_extra_quota.assert_awaited_once_with("u1", 42.5, 3)
-        newebpay.terminate_period_contract.assert_any_await("SLSUB0", "P0")
 
-    async def test_downgrade_terminates_prev_but_no_carry(self):
+    async def test_downgrade_no_carry(self):
         order = _order(
             merchant_order_no="SLDWN1", type="downgrade_subscription", tier="basic",
-            prev_order_no="SLSUB0", prev_period_no="P0",
+            prev_order_no="SLSUB0",
         )
-        s, order_repo, user_repo, newebpay = _make(order=order)
+        s, order_repo, user_repo = _make(order=order)
         r = await s.settle(PaymentNotification(
-            order_no="SLDWN1", success=True, is_first_payment=True, period_no="P9",
+            order_no="SLDWN1", success=True, is_first_payment=True, trade_id="T9",
         ))
         assert r.outcome == SettleOutcome.ACTIVATED
         user_repo.add_extra_quota.assert_not_awaited()
-        newebpay.terminate_period_contract.assert_any_await("SLSUB0", "P0")
-
-    async def test_scheduled_downgrade_before_first_charge_defers(self):
-        # 排程降級：first-payment Notify 在首扣日「之前」到達（藍新委託建立完成通知），
-        # 應延後——不動 tier / quota，status 不可設 paid。用未來首扣日確保判別為「尚未到期」。
-        order = _order(
-            merchant_order_no="SLDWN1", type="downgrade_subscription", tier="basic",
-            prev_order_no="SLSUB0", prev_period_no="P0", scheduled_date="2099/07/01",
-        )
-        s, order_repo, user_repo, newebpay = _make(order=order)
-        r = await s.settle(PaymentNotification(
-            order_no="SLDWN1", success=True, is_first_payment=True, period_no="P9",
-        ))
-        assert r.outcome == SettleOutcome.SCHEDULED
-        # tier / quota / 用量全部不動，pending_plan_change 保留（未被 update_subscription 清掉）
-        user_repo.update_subscription.assert_not_awaited()
-        user_repo.update_quota.assert_not_awaited()
-        user_repo.reset_monthly_usage.assert_not_awaited()
-        # 舊委託此時不重複終止（checkout 已終止）；絕不可把 order 標成 paid
-        newebpay.terminate_period_contract.assert_not_awaited()
-        assert not any(
-            c.args[1].get("status") == "paid"
-            for c in order_repo.update_by_order_no.await_args_list
-        )
-        # 委託編號仍要記到 order 上（供期末對帳 / 追蹤）
-        assert any(
-            c.args[1].get("period_no") == "P9"
-            for c in order_repo.update_by_order_no.await_args_list
-        )
-
-    async def test_scheduled_downgrade_on_first_charge_applies(self):
-        # 首扣日當天（今日 ≥ 首扣日）到達的 Notify → 此時才真正降級。
-        # 用過去首扣日模擬「已到首扣日」，不依賴 Notify 欄位格式（AuthTimes / AlreadyTimes）。
-        order = _order(
-            merchant_order_no="SLDWN1", type="downgrade_subscription", tier="basic",
-            prev_order_no="SLSUB0", prev_period_no="P0", scheduled_date="2020/01/01",
-        )
-        s, order_repo, user_repo, newebpay = _make(order=order)
-        r = await s.settle(PaymentNotification(
-            order_no="SLDWN1", success=True, is_first_payment=True, period_no="P9",
-        ))
-        assert r.outcome == SettleOutcome.ACTIVATED
-        sub = user_repo.update_subscription.await_args.args[1]
-        assert sub["tier"] == "basic" and sub["pending_plan_change"] is None
-        user_repo.update_quota.assert_awaited_once_with("u1", build_quota_from_tier("basic"))
-
-    async def test_immediate_downgrade_no_scheduled_date_applies(self):
-        # 立即降級分支（剩餘 <2 天，scheduled_date=None）不受延後 gate 影響、仍即時生效。
-        order = _order(
-            merchant_order_no="SLDWN2", type="downgrade_subscription", tier="basic",
-            prev_order_no="SLSUB0", prev_period_no="P0", scheduled_date=None,
-        )
-        s, order_repo, user_repo, newebpay = _make(order=order)
-        r = await s.settle(PaymentNotification(
-            order_no="SLDWN2", success=True, is_first_payment=True, period_no="P9",
-        ))
-        assert r.outcome == SettleOutcome.ACTIVATED
-        user_repo.update_quota.assert_awaited_once_with("u1", build_quota_from_tier("basic"))
 
 
 # ── settle: 重複完成防護 ─────────────────────────────────────────────────────
@@ -227,34 +161,34 @@ class TestDuplicateCompletion:
     async def test_sibling_already_active_is_rejected(self):
         # 既有 active 訂閱，active_order_no 指向別張 → 這張是重複完成
         user = {"subscription": {"status": "active", "active_order_no": "OTHER", "cancel_at_period_end": False}}
-        s, order_repo, user_repo, newebpay = _make(order=_order(), user=user)
+        s, order_repo, user_repo = _make(order=_order(), user=user)
         r = await s.settle(PaymentNotification(
-            order_no="SLSUB1", success=True, is_first_payment=True, period_no="P9",
+            order_no="SLSUB1", success=True, is_first_payment=True, trade_id="T9",
         ))
         assert r.outcome == SettleOutcome.REJECTED_DUPLICATE
-        # 不重複啟用 / 不加值；標 needs_refund + 終止多出來的委託
+        # 不重複啟用 / 不加值；標 needs_refund（91APP 無委託可終止）
         user_repo.update_subscription.assert_not_awaited()
         user_repo.add_extra_quota.assert_not_awaited()
-        newebpay.terminate_period_contract.assert_awaited_once_with("SLSUB1", "P9")
         marked = order_repo.update_by_order_no.await_args.args[1]
         assert marked["needs_refund"] is True and marked["is_duplicate"] is True
 
 
-# ── settle: 額外額度 MPG ─────────────────────────────────────────────────────
+# ── settle: 額外額度 ─────────────────────────────────────────────────────────
 
 class TestExtraQuota:
-    async def test_mpg_success_grants_quota(self):
+    async def test_extra_quota_success_grants_quota(self):
         order = _order(
             merchant_order_no="SLEXT1", type="extra_quota", tier=None, billing_cycle=None,
             extra_duration_minutes=120, extra_ai_summaries=0,
         )
-        s, order_repo, user_repo, _ = _make(order=order)
+        s, order_repo, user_repo = _make(order=order)
         r = await s.settle(PaymentNotification(
-            order_no="SLEXT1", success=True, is_first_payment=True, trade_no="T1",
+            order_no="SLEXT1", success=True, is_first_payment=True, trade_id="T1",
         ))
         assert r.outcome == SettleOutcome.GRANTED
         user_repo.add_extra_quota.assert_awaited_once_with("u1", 120, 0)
-        assert order_repo.update_by_order_no.await_args.args[1]["status"] == "paid"
+        marked = order_repo.update_by_order_no.await_args.args[1]
+        assert marked["status"] == "paid" and marked["trade_id"] == "T1"
 
 
 # ── settle: order 生命週期 idempotency ───────────────────────────────────────
@@ -266,50 +200,24 @@ class TestIdempotency:
         assert r.outcome == SettleOutcome.ORDER_NOT_FOUND
 
     async def test_first_payment_already_paid_short_circuits(self):
-        s, order_repo, user_repo, _ = _make(order=_order(status="paid"))
+        s, order_repo, user_repo = _make(order=_order(status="paid"))
         r = await s.settle(PaymentNotification(order_no="SLSUB1", success=True, is_first_payment=True))
         assert r.outcome == SettleOutcome.ALREADY_PAID
         user_repo.update_subscription.assert_not_awaited()
-
-
-# ── settle: 孤兒委託對帳收斂 ─────────────────────────────────────────────────
-
-class TestOrphanReconciliation:
-    async def test_activation_terminates_orphan_contracts(self):
-        orphans = [{"merchant_order_no": "OLD1", "period_no": "POLD"}]
-        s, order_repo, user_repo, newebpay = _make(order=_order(), orphans=orphans)
-        await s.settle(PaymentNotification(
-            order_no="SLSUB1", success=True, is_first_payment=True, period_no="P9",
-        ))
-        newebpay.terminate_period_contract.assert_any_await("OLD1", "POLD")
-        # 終止成功 → 標記 contract_terminated_at（避免每次啟動重打）
-        assert any(
-            "contract_terminated_at" in c.args[1]
-            for c in order_repo.update_by_order_no.await_args_list
-        )
-
-    async def test_orphan_scan_failure_does_not_break_activation(self):
-        s, order_repo, user_repo, newebpay = _make(order=_order())
-        order_repo.find_orphan_contracts.side_effect = RuntimeError("mongo down")
-        # 啟用已成功，孤兒掃描炸掉不可拖垮整筆 settle
-        r = await s.settle(PaymentNotification(
-            order_no="SLSUB1", success=True, is_first_payment=True, period_no="P9",
-        ))
-        assert r.outcome == SettleOutcome.ACTIVATED
 
 
 # ── open_pending: 付款防重 ───────────────────────────────────────────────────
 
 class TestOpenPending:
     async def test_creates_pending_order(self):
-        s, order_repo, *_ = _make()
+        s, order_repo, _ = _make()
         out = await s.open_pending({"user_id": "u1", "type": "subscription", "status": "pending"})
         assert out["_id"] == "oid"
         order_repo.supersede_pending_orders.assert_awaited_once_with("u1", "subscription")
         order_repo.create.assert_awaited_once()
 
     async def test_cooldown_blocks_with_429(self):
-        s, order_repo, *_ = _make()
+        s, order_repo, _ = _make()
         order_repo.has_recent_pending_order.return_value = True
         with pytest.raises(HTTPException) as ei:
             await s.open_pending({"user_id": "u1", "type": "subscription", "status": "pending"})
@@ -318,7 +226,7 @@ class TestOpenPending:
 
     async def test_concurrent_duplicate_becomes_429(self):
         from src.database.repositories.order_repo import DuplicatePendingOrderError
-        s, order_repo, *_ = _make()
+        s, order_repo, _ = _make()
         order_repo.create.side_effect = DuplicatePendingOrderError("u1", "subscription")
         with pytest.raises(HTTPException) as ei:
             await s.open_pending({"user_id": "u1", "type": "subscription", "status": "pending"})

@@ -3,9 +3,10 @@
     <div class="return-card">
       <!-- 處理中 -->
       <template v-if="status === 'processing'">
-        <div class="spinner"></div>
+        <div v-if="!timedOut" class="spinner"></div>
         <h2>{{ $t('paymentReturn.processing') }}</h2>
-        <p>{{ $t('paymentReturn.processingHint') }}</p>
+        <p>{{ timedOut ? $t('paymentReturn.timeoutHint') : $t('paymentReturn.processingHint') }}</p>
+        <button v-if="timedOut" class="action-btn secondary" @click="$router.push('/settings')">{{ $t('paymentReturn.backToSettings') }}</button>
       </template>
 
       <!-- 成功 -->
@@ -38,71 +39,40 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
-import api from '../utils/api'
 
-const route = useRoute()
 const { t } = useI18n()
 const authStore = useAuthStore()
 
 const status = ref('processing')
+const timedOut = ref(false)
 const successMessage = ref(t('paymentReturn.subscriptionActivated'))
 
-const MAX_POLLS = 10
-const POLL_INTERVAL = 1500
-
-// 藍新 ReturnURL 的 MerchantOrderNo 前綴對應訂單類型
-function detectOrderType(orderNo) {
-  if (!orderNo) return 'subscription'
-  if (orderNo.startsWith('SLEXT')) return 'extra_quota'
-  if (orderNo.startsWith('SLDWN')) return 'downgrade'
-  return 'subscription'
-}
+// 91APP 3D 導回後只帶 order_no，扣款結果由後端 webhook 非同步落地，
+// 因此前端輪詢 /subscriptions/status 直到 active。每 2 秒一次、最多約 30 秒。
+const MAX_POLLS = 15
+const POLL_INTERVAL = 2000
 
 onMounted(async () => {
-  const newebpayStatus = route.query.Status
-  if (newebpayStatus && newebpayStatus !== 'SUCCESS') {
-    status.value = 'failed'
-    return
-  }
-
-  const orderNo = route.query.MerchantOrderNo || ''
-  const orderType = detectOrderType(orderNo)
-  const isExtraQuota = orderType === 'extra_quota'
-
   for (let i = 0; i < MAX_POLLS; i++) {
     await new Promise(r => setTimeout(r, POLL_INTERVAL))
     try {
-      const resp = await api.get('/subscriptions/status')
-      const sub = resp.data
-
-      if (isExtraQuota) {
-        // 額外額度：等 extra_quota 有值或 Notify 延遲後直接成功
-        const hasExtra = (sub.extra_quota?.duration_minutes > 0) || (sub.extra_quota?.ai_summaries > 0)
-        if (hasExtra || i >= 4) {
-          await authStore.fetchCurrentUser()
-          successMessage.value = t('paymentReturn.extraQuotaReady')
-          status.value = 'success'
-          return
-        }
-      } else {
-        // 訂閱類：等 status 變為 active
-        if (sub.status === 'active') {
-          await authStore.fetchCurrentUser()
-          successMessage.value = t('paymentReturn.planActivated', { plan: sub.tier === 'pro' ? 'Pro' : 'Basic' })
-          status.value = 'success'
-          return
-        }
+      const sub = await authStore.getSubscriptionStatus()
+      if (sub.status === 'active') {
+        await authStore.fetchCurrentUser()
+        successMessage.value = t('paymentReturn.planActivated', { plan: sub.tier === 'pro' ? 'Pro' : 'Basic' })
+        status.value = 'success'
+        return
       }
     } catch (e) {
-      // ignore, keep polling
+      // 忽略暫時性錯誤，繼續輪詢
     }
   }
 
+  // 逾時：扣款可能仍在處理，提示稍後於設定頁查看（保留 processing 狀態）
   await authStore.fetchCurrentUser()
-  status.value = 'success'
+  timedOut.value = true
 })
 </script>
 

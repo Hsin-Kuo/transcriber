@@ -194,19 +194,8 @@ function handleCancel() {
 }
 
 async function handleReactivate() {
-  reactivating.value = true
-  try {
-    const result = await authStore.reactivateSubscription()
-    if (result?.form) {
-      authStore.submitNewebpayForm(result.form)
-    } else {
-      emit('cancelled') // reuse event to trigger parent toast
-    }
-  } catch {
-    // silent
-  } finally {
-    reactivating.value = false
-  }
+  // /subscriptions/reactivate Phase 1 已停用（501）：顯示整修中訊息，不呼叫 API。
+  alert($t('userSettings.subscription.reactivateMaintenance'))
 }
 
 async function confirmCancel() {

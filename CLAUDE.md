@@ -20,7 +20,7 @@
 | 想修改本檔（CLAUDE.md）或 `.claude/docs/` 底下任何制度檔 | `.claude/docs/maintenance-protocol.md` |
 | 新 session 第一次接手、或覺得環境狀態怪怪的 | `.claude/docs/letter-to-future-sessions.md` |
 | Persistent vs transient state 劃分、領域詞彙 | `CONTEXT.md` |
-| 部署細節 / staging 規劃 / 金流 API | `docs/DEPLOYMENT.md`、`docs/STAGING_PLAN.md`、`docs/NEWEBPAY_PERIOD_API.md` |
+| 部署細節 / staging 規劃 / 金流 API | `docs/DEPLOYMENT.md`、`docs/STAGING_PLAN.md`、`docs/PAYMENT_91APP_MIGRATION_ASSESSMENT.md`（§12 為實測 API 形狀） |
 
 ## 目錄結構（節選；完整結構直接 `ls` 對應目錄）
 
@@ -34,7 +34,7 @@ src/                  # 後端 FastAPI
                       #   worker_dispatch, progress_store, …）
   services/utils/     # 無狀態 processor（whisper / punctuation / diarization / audio_validator）
   transcription/      # 轉錄 pipeline（orchestrator + audio_source；Web 與 Worker 共用）
-  utils/              # storage_service, config_loader, newebpay_service, email_service, logger…
+  utils/              # storage_service, config_loader, payments91_service, email_service, logger…
   database/repositories/  # MongoDB CRUD
   auth/  models/
 frontend/             # 使用者前端 (Vue3+Vite, dev 3000 / docker 3000)
@@ -67,7 +67,7 @@ API 文件：後端啟動後 http://localhost:8000/docs
 
 關鍵：`MONGODB_URL`、`JWT_SECRET_KEY`（≥32字元）、`GOOGLE_API_KEY_1`（Gemini 標點）、
 `HF_TOKEN`（diarization）、`GOOGLE_CLIENT_ID`、`DEPLOY_ENV`（local|aws）、
-`NEWEBPAY_*`（藍新金流）、`EMAIL_PROVIDER`（生產用 resend，非 SES）。
+`PAYMENTS91_*`（91APP 金流）、`EMAIL_PROVIDER`（生產用 resend，非 SES）。
 AWS 部署另需：`S3_BUCKET`、`SQS_QUEUE_URL`、`WORKER_SECRET`、`APP_ROLE`。
 
 ## 架構重點
