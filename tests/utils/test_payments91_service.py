@@ -24,9 +24,10 @@ def _svc():
 
 class TestSignature:
     def test_sign_matches_phase0_vector(self):
-        # Phase 0 sandbox 實測：shared_secret="testsecret" + '{"a":1}' 的簽章
+        # Phase 0 sandbox 實測：shared_secret="testsecret" + '{"a":1}' 的簽章。
+        # 在 instance 上設 secret，不依賴全域 env（避免跨 test 檔 setdefault 汙染）。
         svc = _svc()
-        assert svc.shared_secret == "testsecret"
+        svc.shared_secret = "testsecret"
         expected = (
             "MGY0YTYwNGE5ZTlhZDE4MjAzNGIzMjI0ZmI2MTcyNGE5ZWYxMjdjMmQ1ZGUz"
             "NTU0OTk1Y2MzMWY5Y2MzYzQ5OQ=="
@@ -36,6 +37,7 @@ class TestSignature:
     def test_sign_is_base64_of_lowercase_hex(self):
         import base64, hashlib, hmac
         svc = _svc()
+        svc.shared_secret = "testsecret"
         payload = '{"merchantOrderId":"SLSUB1"}'
         h = hmac.new(b"testsecret", payload.encode(), hashlib.sha256).hexdigest()
         assert base64.b64decode(svc._sign(payload)).decode() == h  # 還原回小寫 hex
