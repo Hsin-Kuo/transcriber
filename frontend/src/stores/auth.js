@@ -45,6 +45,14 @@ export const useAuthStore = defineStore('auth', () => {
     subscription.value?.status === 'active'
   )
 
+  // Dunning（付款失敗挽回）狀態：權威來源為 /subscriptions/status（含 grace_deadline /
+  // needs_card_update，/auth/me 不保證帶這些欄位）。getSubscriptionStatus() 會寫入此 ref，
+  // 橫幅元件從這裡讀。
+  const subscriptionStatus = ref(null)
+  const isPastDue = computed(() => subscriptionStatus.value?.status === 'past_due')
+  const needsCardUpdate = computed(() => !!subscriptionStatus.value?.needs_card_update)
+  const graceDeadline = computed(() => subscriptionStatus.value?.grace_deadline ?? null)
+
   // 計算配額使用百分比
   const quotaPercentage = computed(() => {
     if (!user.value) return { transcriptions: 0, duration: 0 }
@@ -360,8 +368,18 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   // 訂閱狀態輪詢用（PaymentReturnView 在 3D 導回後輪詢至 active）。
+  // 同時寫入 subscriptionStatus，讓 past_due 橫幅（PastDueBanner）讀到最新狀態。
   async function getSubscriptionStatus() {
     const response = await api.get('/subscriptions/status')
+    subscriptionStatus.value = response.data
+    return response.data
+  }
+
+  // 換卡挽回：僅 past_due 可用。後端建立一張 recovery 單並回
+  // { order_no, amount, publishable_key, sdk_server_type }。
+  // 前端接著用 91APP SDK 取 txn_token → payOrder(order_no, txn_token) 完成扣款。
+  async function updateCard() {
+    const response = await api.post('/subscriptions/update-card')
     return response.data
   }
 
@@ -481,6 +499,10 @@ export const useAuthStore = defineStore('auth', () => {
     preferences,
     subscription,
     hasActiveSubscription,
+    subscriptionStatus,
+    isPastDue,
+    needsCardUpdate,
+    graceDeadline,
     extraQuota,
     // Actions
     register,
@@ -498,6 +520,7 @@ export const useAuthStore = defineStore('auth', () => {
     updatePreferences,
     getPaymentConfig,
     createCheckoutSession,
+    updateCard,
     payOrder,
     getSubscriptionStatus,
     cancelSubscription,

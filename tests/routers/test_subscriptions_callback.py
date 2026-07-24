@@ -22,7 +22,12 @@ from src.routers import subscriptions as subs  # noqa: E402
 from src.services.order_settlement import SettleResult, SettleOutcome  # noqa: E402
 
 
-def _patch(monkeypatch, *, claim_ok=True, settle_outcome=SettleOutcome.ACTIVATED, settle_raises=False):
+def _patch(monkeypatch, *, claim_ok=True, settle_outcome=SettleOutcome.ACTIVATED, settle_raises=False, order=None):
+    # _process_payment_result 會 fetch order 推導 is_first_payment（type=renewal → 續扣）
+    order_repo = MagicMock()
+    order_repo.get_by_order_no = AsyncMock(return_value=order or {"type": "subscription"})
+    monkeypatch.setattr(subs, "OrderRepository", lambda db: order_repo)
+
     webhook_repo = MagicMock()
     webhook_repo.claim = AsyncMock(return_value=claim_ok)
     webhook_repo.release = AsyncMock(return_value=True)
@@ -73,3 +78,13 @@ class TestProcessPaymentResult:
             MagicMock(), trade_id="", record_status="failed", order_no="SLSUB1", success=False,
         )
         assert webhook_repo.claim.await_args.kwargs["natural_id"] == "SLSUB1:failed"
+
+    async def test_first_payment_derived_from_order_type(self, monkeypatch):
+        # type=subscription → 首期；type=renewal（換卡挽回）→ 續扣分支
+        _, settlement = _patch(monkeypatch, order={"type": "subscription"})
+        await subs._process_payment_result(MagicMock(), trade_id="T", record_status="Success", order_no="o", success=True)
+        assert settlement.settle.await_args.args[0].is_first_payment is True
+
+        _, settlement2 = _patch(monkeypatch, order={"type": "renewal"})
+        await subs._process_payment_result(MagicMock(), trade_id="T2", record_status="Success", order_no="o2", success=True)
+        assert settlement2.settle.await_args.args[0].is_first_payment is False

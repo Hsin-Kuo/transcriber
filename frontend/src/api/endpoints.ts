@@ -79,6 +79,7 @@ export const NEW_ENDPOINTS = {
   subscriptions: {
     paymentConfig: '/subscriptions/payment-config',
     checkout: '/subscriptions/checkout',
+    updateCard: '/subscriptions/update-card',
     pay: '/subscriptions/pay',
     status: '/subscriptions/status',
     cancel: '/subscriptions/cancel',

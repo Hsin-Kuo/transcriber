@@ -5,17 +5,33 @@
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="15 18 9 12 15 6"></polyline>
         </svg>
-        {{ $t('userSettings.checkout.backToPlans') }}
+        {{ isRecovery ? $t('common.back') : $t('userSettings.checkout.backToPlans') }}
       </button>
-      <h1>{{ $t('userSettings.checkout.title') }}</h1>
+      <h1>{{ isRecovery ? $t('userSettings.updateCard.title') : $t('userSettings.checkout.title') }}</h1>
     </div>
 
     <div class="checkout-content">
       <div class="summary-card">
-        <h2>{{ $t('userSettings.checkout.orderSummary') }}</h2>
+        <h2>{{ isRecovery ? $t('userSettings.updateCard.summaryTitle') : $t('userSettings.checkout.orderSummary') }}</h2>
+
+        <!-- 換卡挽回模式：說明 + 補扣金額 -->
+        <template v-if="isRecovery">
+          <p class="recovery-note">{{ $t('userSettings.updateCard.intro') }}</p>
+          <div class="summary-plan">
+            <span class="summary-label">{{ $t('userSettings.updateCard.itemLabel') }}</span>
+            <span class="summary-value plan-name">{{ $t('userSettings.updateCard.itemValue') }}</span>
+          </div>
+
+          <div class="summary-divider"></div>
+
+          <div class="summary-row total">
+            <span class="summary-label">{{ $t('userSettings.updateCard.amountLabel') }}</span>
+            <span class="summary-value">NT${{ totalPrice }}</span>
+          </div>
+        </template>
 
         <!-- 加購模式：品項 + 份數 + 單價 -->
-        <template v-if="isAddon">
+        <template v-else-if="isAddon">
           <div class="summary-plan">
             <span class="summary-label">{{ $t('userSettings.checkout.addonItem') }}</span>
             <span class="summary-value plan-name">{{ addonLabel(addon) }}</span>
@@ -60,8 +76,8 @@
           </div>
         </template>
 
-        <!-- 電子發票 -->
-        <div class="invoice-section">
+        <!-- 電子發票（換卡挽回不重填發票，沿用原訂單設定） -->
+        <div v-if="!isRecovery" class="invoice-section">
           <h3 class="invoice-title">{{ $t('userSettings.checkout.invoiceTitle') }}</h3>
           <div class="invoice-type-toggle">
             <button
@@ -136,7 +152,7 @@
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
             <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
           </svg>
-          {{ paying ? $t('userSettings.checkout.processing') : $t('userSettings.checkout.pay') }}
+          {{ paying ? $t('userSettings.checkout.processing') : (isRecovery ? $t('userSettings.updateCard.submit') : $t('userSettings.checkout.pay')) }}
         </button>
 
         <p v-if="errorMsg" class="error-msg">{{ errorMsg }}</p>
@@ -175,6 +191,12 @@ const plan = ref(route.query.plan || 'basic')
 const billing = ref(route.query.billing || 'monthly')
 const paying = ref(false)
 const errorMsg = ref(null)
+
+// 換卡挽回模式（Dunning）：past_due 訂閱更新付款方式。
+// 進頁改呼叫 /subscriptions/update-card（建 recovery 單並回 SDK 參數 + 補扣金額），
+// 其餘 SDK tokenize → /pay → 3D 流程完全重用一般結帳。
+const isRecovery = computed(() => route.query.mode === 'update-card')
+const recoveryAmount = ref(0)
 
 // 加購模式（route.query.addon = package _id）
 const isAddon = computed(() => !!route.query.addon)
@@ -254,6 +276,24 @@ function setupCard() {
 }
 
 onMounted(async () => {
+  if (isRecovery.value) {
+    // 換卡挽回：建 recovery 單，取 SDK 參數 + 補扣金額，然後 setupSDK 讓使用者填卡。
+    // 建單在此一次完成（update-card 由後端保證 past_due 才建，非冷卻型 checkout）。
+    try {
+      const rec = await authStore.updateCard()
+      orderNo.value = rec.order_no
+      recoveryAmount.value = rec.amount
+      publishableKey = rec.publishable_key
+      sdkServerType = rec.sdk_server_type || 'sandbox'
+      await loadSdk()
+      await nextTick()   // 確保三個 card 容器已 render
+      setupCard()
+    } catch (err) {
+      errorMsg.value = resolveErr(err)
+    }
+    return
+  }
+
   if (isAddon.value) {
     // 加購模式：purchase-extra 後端已停用（501），不初始化 SDK，僅顯示整修中訊息。
     // 仍載入套餐明細以顯示品項/價格；找不到就退回設定頁。
@@ -306,6 +346,7 @@ const planLabel = computed(() => ({ basic: 'Basic', pro: 'Pro' })[plan.value] ||
 
 // 安全/扣款揭露文案：加購=一次性；月繳=每月自動扣款；年繳=一次性、到期不自動續訂
 const secureNote = computed(() => {
+  if (isRecovery.value) return $t('userSettings.updateCard.secureNote')
   if (isAddon.value) return $t('userSettings.checkout.oneTimeNote')
   if (billing.value === 'yearly') return $t('userSettings.checkout.subscriptionNoteYearly')
   return $t('userSettings.checkout.subscriptionNote')
@@ -319,6 +360,7 @@ const effectiveQty = computed(() => {
 })
 
 const totalPrice = computed(() => {
+  if (isRecovery.value) return recoveryAmount.value
   if (isAddon.value) return addon.value ? addon.value.price_twd * effectiveQty.value : 0
   return tierPrice(plan.value, billing.value)
 })
@@ -336,11 +378,13 @@ async function handlePay() {
     const res = await cardSdk.getTxnToken()
     if (!res || !res.txnToken) throw new Error('txn_token_failed')
 
-    // (b) 以最終發票資訊建單（整個結帳流程只在此建單一次），拿 order_no
-    const session = await authStore.createCheckoutSession(plan.value, billing.value, buildInvoiceData())
-    orderNo.value = session.order_no
+    // (b) 建單：一般結帳於此建單；換卡挽回的 recovery 單已在 onMounted 建好，直接沿用 orderNo。
+    if (!isRecovery.value) {
+      const session = await authStore.createCheckoutSession(plan.value, billing.value, buildInvoiceData())
+      orderNo.value = session.order_no
+    }
 
-    // (c) 發動扣款
+    // (c) 發動扣款（重用既有 /pay）
     const pay = await authStore.payOrder(orderNo.value, res.txnToken)
 
     // (d) 需 3D → 導去 payment_url；否則直接成功導回 return 頁
@@ -349,7 +393,11 @@ async function handlePay() {
       return
     }
     if (pay.status === 'success') {
-      router.push({ path: '/payment/return', query: { order_no: orderNo.value } })
+      // 換卡成功帶 recovered 旗標，讓 return 頁顯示「訂閱已恢復」文案
+      const query = isRecovery.value
+        ? { order_no: orderNo.value, recovered: '1' }
+        : { order_no: orderNo.value }
+      router.push({ path: '/payment/return', query })
       return
     }
     throw new Error('unexpected_pay_response')
@@ -587,6 +635,14 @@ async function handlePay() {
   display: flex;
   align-items: center;
   padding: 0 10px;
+}
+
+/* 換卡挽回說明 */
+.recovery-note {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--main-text-light);
+  line-height: 1.5;
 }
 
 /* 加購整修中提示 */

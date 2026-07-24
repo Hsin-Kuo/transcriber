@@ -95,6 +95,24 @@ class TestSubscriptionSettle:
         assert sub["next_charge_at"] > 0  # 續扣滾動下次扣款時間
         user_repo.reset_monthly_usage.assert_awaited_once()
         user_repo.update_quota.assert_awaited_once_with("u1", build_quota_from_tier("basic"))
+        # renewal order 標 paid（供付款紀錄）
+        assert any(c.args[1].get("status") == "paid" for c in order_repo.update_by_order_no.await_args_list)
+
+    async def test_renewal_from_past_due_clears_dunning_and_swaps_card(self):
+        # 重試/換卡成功：past_due→active、清 dunning、recovery order 帶新 token → 更新綁定
+        user = {"subscription": {"status": "past_due", "tier": "basic", "created_at": 111,
+                                 "card_token": "OLD", "dunning_attempts": 2, "needs_card_update": True}}
+        order = _order(type="renewal", billing_cycle="monthly", card_token="NEWTOKEN")
+        s, order_repo, user_repo = _make(order=order, user=user)
+        r = await s.settle(PaymentNotification(
+            order_no="SLSUB1", success=True, is_first_payment=False, trade_id="T3",
+        ))
+        assert r.outcome == SettleOutcome.RENEWED
+        sub = user_repo.update_subscription.await_args.args[1]
+        assert sub["status"] == "active"
+        assert sub["dunning_attempts"] == 0 and sub["needs_card_update"] is False
+        assert sub["next_retry_at"] is None and sub["dunning_started_at"] is None
+        assert sub["card_token"] == "NEWTOKEN"  # 換卡搬新 token
 
     async def test_yearly_renewal_keeps_quota_frozen(self):
         user = {"subscription": {"status": "active", "tier": "pro", "created_at": 111}}
@@ -106,16 +124,18 @@ class TestSubscriptionSettle:
         user_repo.reset_monthly_usage.assert_awaited_once()
         user_repo.update_quota.assert_not_awaited()
 
-    async def test_renewal_failure_expires_to_free(self):
+    async def test_renewal_failure_only_marks_failed(self):
+        # Phase 2：續扣失敗不在 settle 即時降 free（改由 renewal_service 的 Dunning 接手）。
+        # settle 僅標記 order failed，不動 subscription/quota。
         user = {"subscription": {"status": "active", "tier": "pro"}}
         s, order_repo, user_repo = _make(order=_order(tier="pro", status="paid"), user=user)
         r = await s.settle(PaymentNotification(
             order_no="SLSUB1", success=False, is_first_payment=False,
         ))
-        assert r.outcome == SettleOutcome.EXPIRED
+        assert r.outcome == SettleOutcome.FAILED
         assert any(c.args[1].get("status") == "failed" for c in order_repo.update_by_order_no.await_args_list)
-        user_repo.update_quota.assert_awaited_once_with("u1", build_quota_from_tier("free"))
-        assert user_repo.update_subscription.await_args.args[1]["status"] == "expired"
+        user_repo.update_quota.assert_not_awaited()
+        user_repo.update_subscription.assert_not_awaited()
 
     async def test_first_payment_failure_does_not_expire(self):
         s, order_repo, user_repo = _make(order=_order())

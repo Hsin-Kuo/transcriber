@@ -214,6 +214,7 @@ class TestMonthlyReset:
             "_id": "507f1f77bcf86cd799439011",
             "subscription": {
                 "status": "active",
+                "cancel_at_period_end": True,  # 已排定取消 → 到期 lapse 為 free（auto-renew 者由排程器續扣不在此降級）
                 "current_period_end": datetime.utcnow() - timedelta(days=2),  # 已到期
             },
             "quota": {"tier": "basic", "max_duration_minutes": 600},

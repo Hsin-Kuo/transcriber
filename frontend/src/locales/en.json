@@ -321,6 +321,24 @@
       "companyName": "Company name",
       "companyNamePlaceholder": "Acme Inc.",
       "saveInvoice": "Remember my invoice info"
+    },
+    "pastDue": {
+      "title": "Subscription payment failed",
+      "titleNeedsCard": "Please update your payment method",
+      "message": "We couldn't process this billing cycle's payment. To avoid interruption, please update your payment method to complete the charge.",
+      "messageNeedsCard": "Your card charge did not go through — it may be expired or have insufficient funds. Please update your card to resume your subscription.",
+      "graceDeadline": "Your service stays active until {date}. Please update before then.",
+      "updateCardCta": "Update payment method"
+    },
+    "updateCard": {
+      "title": "Update Payment Method",
+      "summaryTitle": "Payment Summary",
+      "intro": "Re-enter your card details to settle the outstanding charge. Your subscription resumes immediately once payment succeeds.",
+      "itemLabel": "Item",
+      "itemValue": "Outstanding subscription charge",
+      "amountLabel": "Amount due",
+      "submit": "Confirm & Pay",
+      "secureNote": "Securely processed by 91APP · card details never touch our servers"
     }
   },
   "quotaModal": {
@@ -1111,6 +1129,7 @@
     "failedHint": "Please check your card details and try again, or contact support.",
     "subscriptionActivated": "Your subscription is now active.",
     "extraQuotaReady": "Your extra quota has been credited and is ready to use.",
-    "planActivated": "The {plan} plan is now active."
+    "planActivated": "The {plan} plan is now active.",
+    "subscriptionResumed": "Your payment method has been updated and your subscription is now active."
   }
 }
