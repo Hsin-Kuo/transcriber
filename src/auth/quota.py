@@ -261,10 +261,12 @@ class QuotaManager:
         reset_reason = None
 
         # ── 訂閱到期偵測 ───────────────────────────────────────
-        if sub_status == "active":
+        # 只有「已排定取消」的訂閱到期才 lazy 降 free（使用者主動取消 → 期末 lapse）。
+        # auto-renew 的 active 訂閱過期末不在此降級——交給 renewal_service 續扣（過期→扣款窗內仍視為有效）；
+        # past_due 的寬限期滿降級也由 renewal_service 負責（單一責任，避免雙重降級）。
+        if sub_status == "active" and sub.get("cancel_at_period_end"):
             period_end_dt = _to_datetime(sub.get("current_period_end"))
             if period_end_dt and period_end_dt < now:
-                # 訂閱已到期，降為 free
                 if db is not None:
                     try:
                         await QuotaManager._expire_subscription(db, user)
@@ -274,9 +276,9 @@ class QuotaManager:
                 sub_status = "expired"
 
         # ── 重置判斷 ────────────────────────────────────────────
-        # active/trialing：在「新計費週期開始」或「週期內每跨一個週月」時 refill。
-        #   後者讓年繳訂閱在年度週期內也能每月補額（不必等一年才續扣一次）。
-        if sub_status in ("active", "trialing"):
+        # active/trialing/past_due：在「新計費週期開始」或「週期內每跨一個週月」時 refill。
+        #   past_due 寬限期沿用付費 tier refill（保留服務）；後者讓年繳週期內也能每月補額。
+        if sub_status in ("active", "trialing", "past_due"):
             period_start_dt = _to_datetime(sub.get("current_period_start"))
             if period_start_dt:
                 if period_start_dt > last_reset:
@@ -303,7 +305,7 @@ class QuotaManager:
             #   - 年繳訂閱「週期內」refill 不重套 → 凍結繳費當下的額度直到換約。
             #   - free / 到期降級 / 月繳 → 重套最新，讓 QUOTA_TIERS 調整在下個週期自動生效（免 backfill）。
             yearly_intra_period = (
-                sub_status in ("active", "trialing") and billing_cycle == "yearly"
+                sub_status in ("active", "trialing", "past_due") and billing_cycle == "yearly"
             )
             fresh_quota = None
             if not yearly_intra_period:
@@ -547,10 +549,13 @@ def build_ai_summary_consumption_pipeline(plan_limit: int, now_ts: int) -> list:
 
 
 async def periodic_subscription_expiry_check(db, interval_seconds: int = 3600) -> None:
-    """定期掃描已過期但 status 仍為 active 的訂閱，主動降級為 free。
+    """定期掃描「已排定取消且到期」的訂閱，主動降級為 free。
 
-    解決：用戶訂閱到期但從未登入，DB 中 status 永遠顯示 active 的問題。
+    解決：用戶排定期末取消但從未登入，DB 中 status 永遠顯示 active 的問題。
     現有 lazy 機制（_reset_monthly_quota_if_needed）只在用戶請求時觸發。
+
+    ⚠️ 只處理 cancel_at_period_end 的 lapse。auto-renew 的 active 訂閱過期末由
+    renewal_service 續扣（不在此降級）；past_due 寬限期滿降級也由 renewal_service 負責。
 
     第一次 sweep 在啟動後立即跑（不等 interval），避免 restart 緊接的時段
     沒被 sweep 覆蓋；之後每 interval_seconds 跑一次。
@@ -561,6 +566,7 @@ async def periodic_subscription_expiry_check(db, interval_seconds: int = 3600) -
             cursor = db.users.find(
                 {
                     "subscription.status": "active",
+                    "subscription.cancel_at_period_end": True,
                     "subscription.current_period_end": {"$lt": now_ts},
                 },
                 {"_id": 1, "subscription": 1}

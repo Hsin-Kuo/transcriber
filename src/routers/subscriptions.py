@@ -109,10 +109,14 @@ async def _handle_invoice_save(request_data, user_id: str, user_repo: UserReposi
 # ── 付款結果收斂（/pay 立即成交 與 /callback 共用）──────────────────────────────
 
 async def _process_payment_result(
-    db, *, trade_id: str, record_status: str, order_no: str,
-    success: bool, is_first_payment: bool = True,
+    db, *, trade_id: str, record_status: str, order_no: str, success: bool,
 ) -> str:
-    """claim 去重 → settle。回傳 outcome 字串（或 "duplicate"）。失敗會 release + raise。"""
+    """claim 去重 → settle。回傳 outcome 字串（或 "duplicate"）。失敗會 release + raise。
+
+    is_first_payment 由 order type 推導：type=renewal（換卡挽回/續扣）走續扣分支，其餘為首期。
+    """
+    order = await OrderRepository(db).get_by_order_no(order_no)
+    is_first_payment = not (order and order.get("type") == "renewal")
     webhook_repo = ProcessedWebhookRepository(db)
     natural_id = f"{trade_id or order_no}:{record_status}"
     if not await webhook_repo.claim(
@@ -339,14 +343,25 @@ async def get_subscription_status(
     extra_quota = full_user.get("extra_quota", {}) if full_user else {}
     invoice_info = full_user.get("invoice_info", {}) if full_user else {}
 
+    status = sub.get("status", "free")
+    # past_due（Dunning 寬限期）仍視為有訂閱、保留服務；附寬限截止供前端橫幅
+    grace_deadline = None
+    if status == "past_due" and sub.get("dunning_started_at"):
+        from ..services.renewal_service import GRACE_SECONDS
+        grace_deadline = sub["dunning_started_at"] + GRACE_SECONDS
+
     return {
-        "has_subscription": sub.get("status") == "active",
-        "status": sub.get("status", "free"),
+        "has_subscription": status in ("active", "past_due"),
+        "status": status,
         "tier": sub.get("tier", "free"),
         "billing_cycle": sub.get("billing_cycle"),
         "current_period_end": sub.get("current_period_end"),
         "cancel_at_period_end": sub.get("cancel_at_period_end", False),
         "pending_plan_change": sub.get("pending_plan_change"),
+        # Dunning（付款失敗寬限期）狀態，供前端顯示橫幅 + 換卡 CTA
+        "past_due": status == "past_due",
+        "needs_card_update": sub.get("needs_card_update", False),
+        "grace_deadline": grace_deadline,
         "extra_quota": {
             "duration_minutes": extra_quota.get("duration_minutes", 0),
             "ai_summaries": extra_quota.get("ai_summaries", 0),
@@ -365,7 +380,8 @@ async def cancel_subscription(
     full_user = await user_repo.get_by_id(str(current_user["_id"]))
     sub = full_user.get("subscription", {}) if full_user else {}
 
-    if sub.get("status") != "active":
+    # past_due（付款失敗寬限期）也允許取消——停止續扣重試，寬限滿 lapse 為 free
+    if sub.get("status") not in ("active", "past_due"):
         raise api_error("SUBSCRIPTION_NOT_ACTIVE", "No active subscription", 400)
     if sub.get("cancel_at_period_end"):
         raise api_error("SUBSCRIPTION_ALREADY_SCHEDULED_CANCEL", "Subscription is already scheduled for cancellation", 400)
@@ -376,6 +392,49 @@ async def cancel_subscription(
     await user_repo.update_subscription(str(current_user["_id"]), sub)
 
     return {"message": "訂閱將於目前計費週期結束時取消"}
+
+
+@router.post("/update-card")
+async def update_card(
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database),
+):
+    """past_due 換卡挽回：建 recovery order（type=renewal）回 SDK 參數。
+
+    前端接著用既有 /pay 送新卡 txnToken（request-by-txnToken 綁新卡）→ 3D → /callback →
+    settle 續扣分支（回 active、清 dunning、搬新 card_token）。
+    """
+    user_repo = UserRepository(db)
+    user_id = str(current_user["_id"])
+    full_user = await user_repo.get_by_id(user_id)
+    sub = full_user.get("subscription", {}) if full_user else {}
+
+    if sub.get("status") != "past_due":
+        raise api_error("SUBSCRIPTION_NOT_PAST_DUE", "No payment recovery needed", 400)
+
+    svc = get_payments91_service()
+    amount = svc.get_subscription_price(sub.get("tier"), sub.get("billing_cycle"))
+    if not amount:
+        raise api_error("SUBSCRIPTION_PRICE_NOT_CONFIGURED", "Price is not configured", 500)
+
+    # recovery order 用 type=renewal（與續扣同分支），直接建（非 open_pending，免連點冷卻）
+    order_no = generate_order_no("SLREC")
+    await OrderRepository(db).create({
+        "user_id": user_id,
+        "merchant_order_no": order_no,
+        "type": "renewal",
+        "tier": sub.get("tier"),
+        "billing_cycle": sub.get("billing_cycle"),
+        "amount_twd": amount,
+        "status": "pending",
+        "card_token": None,
+    })
+    return {
+        "order_no": order_no,
+        "amount": amount,
+        "publishable_key": svc.publishable_key,
+        "sdk_server_type": svc.sdk_server_type,
+    }
 
 
 @router.post("/reactivate")

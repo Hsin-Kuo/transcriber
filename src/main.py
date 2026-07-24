@@ -416,11 +416,18 @@ async def startup_event():
             name="periodic_order_cleanup",
         )
 
-        # 5.4 定期訂閱到期掃描（主動降級未登入但已過期的用戶）
+        # 5.4 定期訂閱到期掃描（已排定取消者到期 lapse 為 free）
         from src.auth.quota import periodic_subscription_expiry_check
         create_background_task(
             periodic_subscription_expiry_check(db),
             name="periodic_subscription_expiry_check",
+        )
+
+        # 5.4b 續扣排程器（91APP merchant-initiated：到期自動續扣 + Dunning 重試 + 寬限滿降 free）
+        from src.services.renewal_service import periodic_renewal_check
+        create_background_task(
+            periodic_renewal_check(db),
+            name="periodic_renewal_check",
         )
 
         # 5.5 定期 chunk uploads 清掃（過期 metadata + temp_dir）

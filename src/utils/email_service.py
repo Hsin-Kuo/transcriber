@@ -416,6 +416,48 @@ class EmailService:
             text_content=text_content,
         )
 
+    # dunning 通知文案（zh-TW / en）；不含動態金額/卡號，避免 HTML injection 面
+    _DUNNING_COPY = {
+        "payment_failed": {
+            "zh-TW": ("訂閱續扣失敗", "我們無法完成您本期的訂閱續扣，將於數日內自動重試。請確認您的付款方式是否正常，以免服務中斷。", "更新付款方式"),
+            "en": ("Subscription payment failed", "We couldn't process your subscription renewal. We'll retry automatically over the next few days. Please make sure your payment method is valid.", "Update payment method"),
+        },
+        "final_notice": {
+            "zh-TW": ("續扣持續失敗，服務即將暫停", "您的訂閱續扣多次仍未成功。若在寬限期內仍無法完成付款，您的方案將自動降為免費版。", "更新付款方式"),
+            "en": ("Payment still failing — service at risk", "We've tried several times without success. If payment isn't completed within the grace period, your plan will be downgraded to Free.", "Update payment method"),
+        },
+        "card_update": {
+            "zh-TW": ("請更新您的付款卡片", "您綁定的信用卡似乎已過期或失效，無法自動續扣。請更新卡片以維持您的訂閱。", "更新付款卡片"),
+            "en": ("Please update your card", "Your saved card appears to be expired or invalid, so we couldn't renew your subscription. Please update it to keep your plan.", "Update card"),
+        },
+        "downgraded": {
+            "zh-TW": ("您的訂閱已降為免費版", "由於續扣未能在寬限期內完成，您的方案已降為免費版。您的資料仍完整保留，隨時可重新訂閱。", "重新訂閱"),
+            "en": ("Your subscription was downgraded", "Because renewal couldn't be completed within the grace period, your plan is now Free. Your data is intact and you can re-subscribe anytime.", "Re-subscribe"),
+        },
+    }
+
+    async def send_dunning_email(self, to_email: str, kind: str, lang: str = "zh-TW",
+                                 subscription: Optional[dict] = None) -> bool:
+        """續扣 Dunning 通知（付款失敗 / 最後通知 / 請換卡 / 已降級）。"""
+        variants = self._DUNNING_COPY.get(kind)
+        if not variants:
+            return False
+        heading, body, cta_label = variants.get(lang) or variants["zh-TW"]
+        cta_url = f"{self.frontend_url.rstrip('/')}/settings?panel=plan"
+        html_content = self._render_branded_email(
+            heading=heading,
+            intro_html=f'<p>{html.escape(body)}</p>',
+            cta_label=cta_label,
+            cta_url=cta_url,
+            preheader=body[:80],
+        )
+        text_content = self._render_branded_text(f"{heading}\n\n{body}\n\n{cta_label}: {cta_url}")
+        subject = f"{heading} - SoundLite"
+        return await self._send_email(
+            to_email=to_email, subject=subject,
+            html_content=html_content, text_content=text_content,
+        )
+
     async def send_audio_grace_period_email(
         self,
         to_email: str,

@@ -36,7 +36,7 @@ log = get_logger(__name__)
 # 超過此秒數的舊 pending 單不擋，改由 supersede 取代，讓使用者可立即重試。
 PENDING_COOLDOWN_SECONDS = 30
 
-_SUBSCRIPTION_TYPES = ("subscription", "upgrade_subscription", "downgrade_subscription")
+_SUBSCRIPTION_TYPES = ("subscription", "upgrade_subscription", "downgrade_subscription", "renewal")
 
 
 @dataclass
@@ -126,14 +126,11 @@ class OrderSettlement:
             return SettleResult(SettleOutcome.ALREADY_PAID, n.order_no)
 
         order_type = order.get("type", "subscription")
-        user_id = order["user_id"]
 
         if not n.success:
             await self.order_repo.update_by_order_no(n.order_no, {"status": "failed"})
-            # 續扣失敗（非首期、非一次性）→ 立即降為 free
-            if not n.is_first_payment and order_type in _SUBSCRIPTION_TYPES:
-                await self._expire_to_free(user_id)
-                return SettleResult(SettleOutcome.EXPIRED, n.order_no)
+            # 續扣失敗不在此即時降 free——由 renewal_service 的 dunning 接手（past_due→重試→寬限滿降 free）。
+            # settle 失敗僅標記 order + 回 FAILED。
             log.warning("payment.failed", merchant_order_no=n.order_no, type=order_type)
             return SettleResult(SettleOutcome.FAILED, n.order_no)
 
@@ -158,15 +155,28 @@ class OrderSettlement:
         await self.order_repo.update_by_order_no(n.order_no, {"trade_id": n.trade_id})
 
         if not n.is_first_payment:
-            # 續扣成功：只滾計費週期 + 歸零當期用量
+            # 續扣成功：標 order paid + 滾計費週期 + 歸零當期用量 + 清 dunning（past_due→active）
+            await self.order_repo.update_by_order_no(
+                n.order_no, {"status": "paid", "paid_at": now.timestamp()}
+            )
             full_user = await self.user_repo.get_by_id(user_id)
             sub = full_user.get("subscription", {}) if full_user else {}
             sub.update({
+                "status": "active",  # 若原為 past_due（重試/換卡成功）→ 回 active
                 "current_period_start": now.timestamp(),
                 "current_period_end": period_end.timestamp(),
                 "next_charge_at": period_end.timestamp(),
+                "dunning_attempts": 0,
+                "next_retry_at": None,
+                "dunning_started_at": None,
+                "needs_card_update": False,
+                "last_payment_error": None,
                 "updated_at": now.timestamp(),
             })
+            # 換卡挽回：recovery order 帶新 card_token → 更新綁定
+            new_token = order.get("card_token")
+            if new_token:
+                sub["card_token"] = new_token
             await self.user_repo.update_subscription(user_id, sub)
             await self.user_repo.reset_monthly_usage(user_id, now)
             # D4：月繳續扣 → 套用最新方案額度（短週期，等同每月重新訂閱）。

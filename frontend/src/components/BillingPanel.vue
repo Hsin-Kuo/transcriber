@@ -14,6 +14,9 @@
 
       <div class="billing-panel-body">
 
+        <!-- Dunning：付款失敗（past_due）挽回橫幅 -->
+        <PastDueBanner />
+
         <!-- 取消訂閱 -->
         <div v-if="authStore.hasActiveSubscription" class="billing-section">
           <h3 class="billing-section-title">{{ $t('userSettings.subscription.currentPlan') }}</h3>
@@ -105,6 +108,7 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
 import { useFocusTrap } from '../composables/useFocusTrap'
 import { useDateFormatter } from '../composables/useDateFormatter'
+import PastDueBanner from './PastDueBanner.vue'
 
 const { t: $t } = useI18n()
 const { formatDate: formatDateTz } = useDateFormatter()
@@ -216,6 +220,8 @@ watch(() => props.modelValue, (open) => {
   if (open) {
     skip.value = 0
     fetchOrders(true)
+    // 重新整理 Dunning 狀態，讓 past_due 橫幅反映最新（換卡挽回後應消失）
+    authStore.getSubscriptionStatus().catch(() => {})
   }
 })
 </script>
