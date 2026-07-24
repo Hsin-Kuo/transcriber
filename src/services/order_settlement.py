@@ -161,11 +161,17 @@ class OrderSettlement:
             )
             full_user = await self.user_repo.get_by_id(user_id)
             sub = full_user.get("subscription", {}) if full_user else {}
+            # 方案變更（期末降級 pending_plan_change 生效）：續扣單帶的是「目標 tier」。
+            #   以 tier 判定（quota 由 tier 決定，與 billing_cycle 無關）。
+            plan_changed = sub.get("tier") != tier
             sub.update({
                 "status": "active",  # 若原為 past_due（重試/換卡成功）→ 回 active
+                "tier": tier,                       # 套用續扣單的 tier（降級生效時 = 目標 tier）
+                "billing_cycle": billing_cycle,
                 "current_period_start": now.timestamp(),
                 "current_period_end": period_end.timestamp(),
                 "next_charge_at": period_end.timestamp(),
+                "pending_plan_change": None,         # 已套用 → 清空
                 "dunning_attempts": 0,
                 "next_retry_at": None,
                 "dunning_started_at": None,
@@ -179,11 +185,14 @@ class OrderSettlement:
                 sub["card_token"] = new_token
             await self.user_repo.update_subscription(user_id, sub)
             await self.user_repo.reset_monthly_usage(user_id, now)
-            # D4：月繳續扣 → 套用最新方案額度（短週期，等同每月重新訂閱）。
-            #   年繳續扣不重套，維持繳費當下的方案直到換約（週期內由 lazy refill 補額但不改額度）。
-            if billing_cycle == "monthly":
+            # 方案有變更（升/降級生效）→ 一律重套目標方案額度；否則同 tier 續扣：
+            #   月繳重套最新、年繳凍結（週期內由 lazy refill 補額不改額度）。
+            if plan_changed or billing_cycle == "monthly":
                 await self.user_repo.update_quota(user_id, build_quota_from_tier(tier))
-            log.info("subscription.renewed", user_id=user_id, type=order_type)
+            # 降級生效（新 tier 額度變小）→ 釋放超額釘選音檔進寬限期
+            if plan_changed:
+                await self._reconcile_pinned_audio(user_id, tier)
+            log.info("subscription.renewed", user_id=user_id, type=order_type, plan_changed=plan_changed)
             return SettleResult(SettleOutcome.RENEWED, n.order_no)
 
         # 首期成功

@@ -8,6 +8,7 @@ POST /pay（送 txnToken，後端 request-by-txnToken BindingCard，捕捉 cardT
 import os
 import json
 
+from bson import ObjectId
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
@@ -20,7 +21,7 @@ from ..database.mongodb import get_database
 from ..database.repositories.user_repo import UserRepository
 from ..database.repositories.order_repo import OrderRepository
 from ..database.repositories.processed_webhook_repo import ProcessedWebhookRepository
-from ..models.quota import public_tier_plans
+from ..models.quota import public_tier_plans, is_upgrade, QUOTA_TIERS, QuotaTier
 from ..services.order_settlement import build_order_settlement, PaymentNotification
 from ..utils.payments91_service import get_payments91_service
 from ..utils.billing_period import generate_order_no
@@ -32,9 +33,6 @@ log = get_logger(__name__)
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
-
-# Phase 1 暫停用的端點統一訊息（升降級/加購/reactivate 在 Phase 3 重做）
-_PHASE1_DISABLED = "此功能正在遷移至新金流，暫未開放；如需變更方案請聯繫客服"
 
 
 def _callback_url() -> str:
@@ -80,6 +78,28 @@ class CheckoutRequest(BaseModel):
 class PayRequest(BaseModel):
     order_no: str
     txn_token: str = Field(..., min_length=1)
+
+
+class ChangePlanRequest(BaseModel):
+    tier: str
+    billing: str
+    invoice_type: Optional[str] = None
+    carrier_type: Optional[str] = None
+    carrier_num: Optional[str] = None
+    company_tax_id: Optional[str] = None
+    company_name: Optional[str] = None
+    save_invoice: bool = True
+
+
+class PurchaseExtraRequest(BaseModel):
+    package_id: str
+    quantity: int = Field(default=1, ge=1, le=99)
+    invoice_type: Optional[str] = None
+    carrier_type: Optional[str] = None
+    carrier_num: Optional[str] = None
+    company_tax_id: Optional[str] = None
+    company_name: Optional[str] = None
+    save_invoice: bool = True
 
 
 # ── 發票資訊處理 ─────────────────────────────────────────────────────────────
@@ -438,21 +458,156 @@ async def update_card(
 
 
 @router.post("/reactivate")
-async def reactivate_subscription(current_user: dict = Depends(get_current_user)):
-    """Phase 1 暫停用（Phase 3 依 91APP 續訂模型重做）。"""
-    raise api_error("FEATURE_MIGRATING", _PHASE1_DISABLED, 501)
+async def reactivate_subscription(
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database),
+):
+    """重新啟用已排定取消的訂閱：清 cancel_at_period_end。
+
+    91APP merchant-initiated：取消只是停止排程續扣、未終止任何 gateway 委託，故重啟
+    = 清旗標即可（訂閱仍 active，期末由 renewal_service 續扣），無需重新付款。
+    """
+    user_repo = UserRepository(db)
+    full_user = await user_repo.get_by_id(str(current_user["_id"]))
+    sub = full_user.get("subscription", {}) if full_user else {}
+
+    if sub.get("status") != "active":
+        raise api_error("SUBSCRIPTION_NOT_ACTIVE", "No active subscription", 400)
+    if not sub.get("cancel_at_period_end"):
+        raise api_error("SUBSCRIPTION_NOT_SCHEDULED_CANCEL", "Subscription is not scheduled for cancellation", 400)
+
+    sub["cancel_at_period_end"] = False
+    sub["canceled_at"] = None
+    sub["updated_at"] = get_utc_timestamp()
+    await user_repo.update_subscription(str(current_user["_id"]), sub)
+    return {"message": "訂閱已恢復，將於下個計費週期正常續扣"}
 
 
 @router.post("/change")
-async def change_plan(current_user: dict = Depends(get_current_user)):
-    """Phase 1 暫停用（升降級 Phase 3 重做，含期末降級改本地排程）。"""
-    raise api_error("FEATURE_MIGRATING", _PHASE1_DISABLED, 501)
+async def change_plan(
+    request: ChangePlanRequest,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database),
+):
+    """變更方案。升級：立即付款（SDK），回 SDK 參數。降級：期末生效（寫 pending_plan_change，不扣款）。"""
+    if request.tier not in ("basic", "pro"):
+        raise api_error("SUBSCRIPTION_INVALID_TIER", "Invalid subscription plan", 400)
+    if request.billing not in ("monthly", "yearly"):
+        raise api_error("SUBSCRIPTION_INVALID_BILLING_CYCLE", "Invalid billing cycle", 400)
+
+    user_repo = UserRepository(db)
+    user_id = str(current_user["_id"])
+    full_user = await user_repo.get_by_id(user_id)
+    sub = full_user.get("subscription", {}) if full_user else {}
+
+    if sub.get("status") not in ("active", "past_due"):
+        raise api_error("SUBSCRIPTION_NOT_ACTIVE", "No active subscription", 400)
+    current_tier = sub.get("tier", "free")
+    if request.tier == current_tier and request.billing == sub.get("billing_cycle"):
+        raise api_error("SUBSCRIPTION_NO_CHANGE", "Already on this plan", 400)
+
+    svc = get_payments91_service()
+    amount = svc.get_subscription_price(request.tier, request.billing)
+    if not amount:
+        raise api_error("SUBSCRIPTION_PRICE_NOT_CONFIGURED", "Price is not configured", 500)
+
+    if is_upgrade(current_tier, request.tier):
+        # 升級：立即付款（SDK）。結轉舊方案剩餘額度進 extra_quota。
+        usage = full_user.get("usage", {})
+        quota = full_user.get("quota", {})
+        old_dur = quota.get("max_duration_minutes", QUOTA_TIERS[QuotaTier(current_tier)]["max_duration_minutes"])
+        old_ai = quota.get("max_ai_summaries", QUOTA_TIERS[QuotaTier(current_tier)]["max_ai_summaries"])
+        remaining_dur = round(max(0.0, old_dur - usage.get("duration_minutes", 0)), 1)
+        remaining_ai = max(0, old_ai - usage.get("ai_summaries", 0))
+
+        order_no = generate_order_no("SLUPG")
+        await OrderRepository(db).create({
+            "user_id": user_id,
+            "merchant_order_no": order_no,
+            "type": "upgrade_subscription",
+            "tier": request.tier,
+            "billing_cycle": request.billing,
+            "amount_twd": amount,
+            "status": "pending",
+            "card_token": None,
+            "prev_order_no": sub.get("active_order_no"),
+            "extra_duration_minutes": remaining_dur,
+            "extra_ai_summaries": remaining_ai,
+        })
+        await _handle_invoice_save(request, user_id, user_repo)
+        return {
+            "action": "upgrade",
+            "order_no": order_no,
+            "amount": amount,
+            "publishable_key": svc.publishable_key,
+            "sdk_server_type": svc.sdk_server_type,
+            "extra_duration_minutes": remaining_dur,
+            "extra_ai_summaries": remaining_ai,
+        }
+
+    # 降級（basic←pro；改 free 請用 /cancel）：期末生效，只寫 pending_plan_change，不扣款
+    sub["pending_plan_change"] = {
+        "tier": request.tier,
+        "billing_cycle": request.billing,
+        "requested_at": get_utc_timestamp(),
+    }
+    sub["updated_at"] = get_utc_timestamp()
+    await user_repo.update_subscription(user_id, sub)
+    return {
+        "action": "downgrade",
+        "effective": "end_of_period",
+        "scheduled_date": sub.get("current_period_end"),
+    }
 
 
 @router.post("/purchase-extra")
-async def purchase_extra_quota(current_user: dict = Depends(get_current_user)):
-    """Phase 1 暫停用（加購 Phase 3 重做）。"""
-    raise api_error("FEATURE_MIGRATING", _PHASE1_DISABLED, 501)
+async def purchase_extra_quota(
+    request: PurchaseExtraRequest,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database),
+):
+    """加購額外額度（立即付款，SDK）。需 active 訂閱。回 SDK 參數。"""
+    user_repo = UserRepository(db)
+    user_id = str(current_user["_id"])
+    full_user = await user_repo.get_by_id(user_id)
+    sub = full_user.get("subscription", {}) if full_user else {}
+
+    if sub.get("status") not in ("active", "past_due"):
+        raise api_error("SUBSCRIPTION_REQUIRED_FOR_EXTRA",
+                        "An active paid subscription is required to purchase extra quota", 403)
+
+    try:
+        pkg = await db.packages.find_one({"_id": ObjectId(request.package_id), "active": True})
+    except Exception:
+        pkg = None
+    if not pkg:
+        raise api_error("SUBSCRIPTION_PACKAGE_NOT_FOUND", "Package not found", 404)
+
+    qty = request.quantity
+    total_amount = pkg["price_twd"] * qty
+    unit = pkg.get("amount", 0)
+    svc = get_payments91_service()
+
+    order_no = generate_order_no("SLEXT")
+    await OrderRepository(db).create({
+        "user_id": user_id,
+        "merchant_order_no": order_no,
+        "type": "extra_quota",
+        "tier": None,
+        "billing_cycle": None,
+        "amount_twd": total_amount,
+        "status": "pending",
+        "card_token": None,
+        "extra_duration_minutes": unit * qty if pkg["type"] == "duration" else 0,
+        "extra_ai_summaries": unit * qty if pkg["type"] == "ai_summaries" else 0,
+    })
+    await _handle_invoice_save(request, user_id, user_repo)
+    return {
+        "order_no": order_no,
+        "amount": total_amount,
+        "publishable_key": svc.publishable_key,
+        "sdk_server_type": svc.sdk_server_type,
+    }
 
 
 @router.get("/tiers")

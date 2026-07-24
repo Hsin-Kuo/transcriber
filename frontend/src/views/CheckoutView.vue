@@ -7,7 +7,7 @@
         </svg>
         {{ isRecovery ? $t('common.back') : $t('userSettings.checkout.backToPlans') }}
       </button>
-      <h1>{{ isRecovery ? $t('userSettings.updateCard.title') : $t('userSettings.checkout.title') }}</h1>
+      <h1>{{ headerTitle }}</h1>
     </div>
 
     <div class="checkout-content">
@@ -26,6 +26,29 @@
 
           <div class="summary-row total">
             <span class="summary-label">{{ $t('userSettings.updateCard.amountLabel') }}</span>
+            <span class="summary-value">NT${{ totalPrice }}</span>
+          </div>
+        </template>
+
+        <!-- 升級模式：升級後方案 + 計費週期 + 額度轉存說明（升級單已於進頁時建立） -->
+        <template v-else-if="isUpgrade">
+          <div class="summary-plan">
+            <span class="summary-label">{{ $t('userSettings.checkout.upgradeItem') }}</span>
+            <span class="summary-value plan-name">{{ planLabel }}</span>
+          </div>
+          <div class="summary-row">
+            <span class="summary-label">{{ $t('userSettings.checkout.billingCycle') }}</span>
+            <span class="summary-value">{{ billing === 'yearly' ? $t('userSettings.checkout.yearly') : $t('userSettings.checkout.monthly') }}</span>
+          </div>
+
+          <p v-if="hasCarryover" class="carryover-note">
+            {{ $t('userSettings.planPanel.upgradeKeepQuota', { parts: carryoverParts.join('、') }) }}
+          </p>
+
+          <div class="summary-divider"></div>
+
+          <div class="summary-row total">
+            <span class="summary-label">{{ $t('userSettings.checkout.total') }}</span>
             <span class="summary-value">NT${{ totalPrice }}</span>
           </div>
         </template>
@@ -76,8 +99,9 @@
           </div>
         </template>
 
-        <!-- 電子發票（換卡挽回不重填發票，沿用原訂單設定） -->
-        <div v-if="!isRecovery" class="invoice-section">
+        <!-- 電子發票：僅在按付款時才建單的模式（新訂閱 / 加購）顯示可編輯發票區。
+             換卡挽回、升級的訂單已於進頁時建立，發票沿用已儲存資訊，不重複填寫。 -->
+        <div v-if="showInvoice" class="invoice-section">
           <h3 class="invoice-title">{{ $t('userSettings.checkout.invoiceTitle') }}</h3>
           <div class="invoice-type-toggle">
             <button
@@ -117,13 +141,8 @@
           </label>
         </div>
 
-        <!-- 加購功能整修中（purchase-extra 後端已停用，Phase 1 不走 SDK）-->
-        <div v-if="isAddon" class="maintenance-note">
-          {{ $t('userSettings.checkout.addonMaintenance') }}
-        </div>
-
-        <!-- 訂閱模式：91APP Web SDK 信用卡欄位（tokenize，卡號不經過我方伺服器）-->
-        <div v-else class="card-fields">
+        <!-- 91APP Web SDK 信用卡欄位（tokenize，卡號不經過我方伺服器）。所有需收款的模式共用 -->
+        <div class="card-fields">
           <h3 class="invoice-title">{{ $t('userSettings.checkout.payment') }}</h3>
           <div class="form-group">
             <label>{{ $t('userSettings.checkout.cardNumber') }}</label>
@@ -143,7 +162,6 @@
         </div>
 
         <button
-          v-if="!isAddon"
           class="pay-btn"
           :disabled="paying || !sdkReady || !cardCanToken"
           @click="handlePay"
@@ -192,17 +210,32 @@ const billing = ref(route.query.billing || 'monthly')
 const paying = ref(false)
 const errorMsg = ref(null)
 
-// 換卡挽回模式（Dunning）：past_due 訂閱更新付款方式。
-// 進頁改呼叫 /subscriptions/update-card（建 recovery 單並回 SDK 參數 + 補扣金額），
-// 其餘 SDK tokenize → /pay → 3D 流程完全重用一般結帳。
-const isRecovery = computed(() => route.query.mode === 'update-card')
+// 結帳頁一般化 mode：
+//   'new'（無 mode）  一般新訂閱：按付款時 createCheckoutSession 建單（/checkout 有 30s 冷卻）
+//   'update-card'     換卡挽回（Dunning）：進頁 updateCard() 建 recovery 單，補扣本期款
+//   'upgrade'         升級：進頁 changePlan() 建 upgrade 單，回補價金額 + 轉存額度 + SDK 參數
+//   'extra'           加購：按付款時 purchaseExtra() 建 extra_quota 單（以帶入份數/發票）
+// 四種模式共用同一組 SDK tokenize → /pay → 3D → /payment/return 流程。
+const mode = computed(() => route.query.mode || 'new')
+const isRecovery = computed(() => mode.value === 'update-card')
+const isUpgrade = computed(() => mode.value === 'upgrade')
+const isAddon = computed(() => mode.value === 'extra')
+// 訂單已於進頁時建立（不在按付款時建）→ 換卡挽回 + 升級。
+// 這兩種模式發票沿用已儲存資訊、不提供編輯（訂單此時已成立無法回改）。
+const orderPrebuilt = computed(() => isRecovery.value || isUpgrade.value)
+const showInvoice = computed(() => !orderPrebuilt.value)
+
 const recoveryAmount = ref(0)
 
-// 加購模式（route.query.addon = package _id）
-const isAddon = computed(() => !!route.query.addon)
-const addonId = ref(route.query.addon || null)
+// 升級模式：/change 回傳的補價金額與「轉存為加值額度」的原方案剩餘量
+const upgradeAmount = ref(0)
+const extraDurationMinutes = ref(0)
+const extraAiSummaries = ref(0)
+
+// 加購模式（route.query.package_id = package _id，quantity = 份數）
+const addonId = ref(route.query.package_id || null)
 const addon = ref(null)       // 套餐明細：{ _id, label, price_twd, type, amount }
-const quantity = ref(1)
+const quantity = ref(parseInt(route.query.quantity, 10) > 0 ? parseInt(route.query.quantity, 10) : 1)
 
 const invoiceType = ref('personal')
 const carrierNum = ref('')
@@ -226,6 +259,31 @@ function buildInvoiceData() {
     company_tax_id: invoiceType.value === 'company' ? companyTaxId.value : '',
     company_name: invoiceType.value === 'company' ? companyName.value : '',
     save_invoice: saveInvoice.value,
+  }
+}
+
+// 預填表單發票欄位（新訂閱 / 加購：使用者可再編輯）
+function prefillInvoice() {
+  const info = authStore.user?.invoice_info
+  if (!info) return
+  invoiceType.value = info.type || 'personal'
+  carrierNum.value = info.carrier_num || ''
+  companyTaxId.value = info.company_tax_id || ''
+  companyName.value = info.company_name || ''
+}
+
+// 從已儲存的發票資訊組出送給後端的 invoice payload（升級：進頁建單、不提供編輯）
+function savedInvoiceData() {
+  const info = authStore.user?.invoice_info
+  if (!info) return {}
+  const isCompany = info.type === 'company'
+  return {
+    invoice_type: info.type || 'personal',
+    carrier_type: !isCompany && info.carrier_num ? '1' : '',
+    carrier_num: !isCompany ? (info.carrier_num || '') : '',
+    company_tax_id: isCompany ? (info.company_tax_id || '') : '',
+    company_name: isCompany ? (info.company_name || '') : '',
+    save_invoice: false,
   }
 }
 
@@ -294,9 +352,37 @@ onMounted(async () => {
     return
   }
 
+  if (isUpgrade.value) {
+    // 升級：進頁即呼叫 /change 建 upgrade 單，取回補價金額、轉存額度與 SDK 參數。
+    // 發票沿用已儲存資訊（單已於此建立，故不提供編輯，與換卡挽回一致）。
+    plan.value = route.query.plan || 'pro'
+    billing.value = route.query.billing || 'monthly'
+    try {
+      const res = await authStore.changePlan(plan.value, billing.value, savedInvoiceData())
+      // 目標 tier 非高於現有 → 後端會回 downgrade（不扣款）或 400；此頁只處理升級收款，
+      // 其餘情況導回設定頁，避免在收款頁誤觸發降級/同級。
+      if (res.action !== 'upgrade' || !res.order_no) {
+        router.push('/settings')
+        return
+      }
+      orderNo.value = res.order_no
+      upgradeAmount.value = res.amount
+      extraDurationMinutes.value = res.extra_duration_minutes || 0
+      extraAiSummaries.value = res.extra_ai_summaries || 0
+      publishableKey = res.publishable_key
+      sdkServerType = res.sdk_server_type || 'sandbox'
+      await loadSdk()
+      await nextTick()
+      setupCard()
+    } catch (err) {
+      errorMsg.value = resolveErr(err)
+    }
+    return
+  }
+
   if (isAddon.value) {
-    // 加購模式：purchase-extra 後端已停用（501），不初始化 SDK，僅顯示整修中訊息。
-    // 仍載入套餐明細以顯示品項/價格；找不到就退回設定頁。
+    // 加購：載入套餐明細供顯示（找不到就退回設定頁）。
+    // 建單延到按付款時（purchaseExtra），以帶入使用者調整後的份數與發票資訊。
     try {
       const pkgs = await authStore.getPackages()
       addon.value = (pkgs || []).find(p => p._id === addonId.value) || null
@@ -305,6 +391,19 @@ onMounted(async () => {
     }
     if (!addon.value) {
       router.push('/settings')
+      return
+    }
+    prefillInvoice()
+    // SDK 參數用 payment-config（商戶層，不建單）
+    try {
+      const cfg = await authStore.getPaymentConfig()
+      publishableKey = cfg.publishable_key
+      sdkServerType = cfg.sdk_server_type || 'sandbox'
+      await loadSdk()
+      await nextTick()
+      setupCard()
+    } catch (err) {
+      errorMsg.value = resolveErr(err)
     }
     return
   }
@@ -315,13 +414,7 @@ onMounted(async () => {
   }
 
   // 預填已儲存的發票資訊
-  const info = authStore.user?.invoice_info
-  if (info) {
-    invoiceType.value = info.type || 'personal'
-    carrierNum.value = info.carrier_num || ''
-    companyTaxId.value = info.company_tax_id || ''
-    companyName.value = info.company_name || ''
-  }
+  prefillInvoice()
 
   // 訂閱模式：先取 SDK 參數（不建單）setupSDK 讓使用者填卡；
   // 建單延到按付款時一次完成（/checkout 有 30s 建單冷卻，onMounted 建單會導致付款時 429）。
@@ -344,7 +437,25 @@ function resolveErr(err) {
 
 const planLabel = computed(() => ({ basic: 'Basic', pro: 'Pro' })[plan.value] || plan.value)
 
-// 安全/扣款揭露文案：加購=一次性；月繳=每月自動扣款；年繳=一次性、到期不自動續訂
+// 頁首標題：換卡挽回 / 升級 / 一般結帳
+const headerTitle = computed(() => {
+  if (isRecovery.value) return $t('userSettings.updateCard.title')
+  if (isUpgrade.value) return $t('userSettings.checkout.upgradeTitle')
+  return $t('userSettings.checkout.title')
+})
+
+// 升級「原方案剩餘額度轉為加值額度」的顯示片段（分鐘 / AI 摘要）
+const carryoverParts = computed(() => {
+  const parts = []
+  if (extraDurationMinutes.value > 0)
+    parts.push($t('userSettings.planPanel.extraMinutes', { n: extraDurationMinutes.value }))
+  if (extraAiSummaries.value > 0)
+    parts.push($t('userSettings.planPanel.extraAiSummaries', { n: extraAiSummaries.value }))
+  return parts
+})
+const hasCarryover = computed(() => carryoverParts.value.length > 0)
+
+// 安全/扣款揭露文案：加購=一次性；升級/月繳=每月自動扣款；年繳=一次性、到期不自動續訂
 const secureNote = computed(() => {
   if (isRecovery.value) return $t('userSettings.updateCard.secureNote')
   if (isAddon.value) return $t('userSettings.checkout.oneTimeNote')
@@ -361,6 +472,7 @@ const effectiveQty = computed(() => {
 
 const totalPrice = computed(() => {
   if (isRecovery.value) return recoveryAmount.value
+  if (isUpgrade.value) return upgradeAmount.value
   if (isAddon.value) return addon.value ? addon.value.price_twd * effectiveQty.value : 0
   return tierPrice(plan.value, billing.value)
 })
@@ -370,7 +482,6 @@ function decQty() { quantity.value = Math.max(1, effectiveQty.value - 1) }
 function clampQty() { quantity.value = effectiveQty.value }
 
 async function handlePay() {
-  if (isAddon.value) return  // 加購已停用，按鈕不會出現，保險擋一層
   paying.value = true
   errorMsg.value = null
   try {
@@ -378,10 +489,16 @@ async function handlePay() {
     const res = await cardSdk.getTxnToken()
     if (!res || !res.txnToken) throw new Error('txn_token_failed')
 
-    // (b) 建單：一般結帳於此建單；換卡挽回的 recovery 單已在 onMounted 建好，直接沿用 orderNo。
-    if (!isRecovery.value) {
-      const session = await authStore.createCheckoutSession(plan.value, billing.value, buildInvoiceData())
-      orderNo.value = session.order_no
+    // (b) 建單：換卡挽回 / 升級的訂單已在 onMounted 建好（orderPrebuilt），直接沿用 orderNo。
+    //     新訂閱 → createCheckoutSession；加購 → purchaseExtra（於此帶入份數與發票）。
+    if (!orderPrebuilt.value) {
+      if (isAddon.value) {
+        const s = await authStore.purchaseExtraQuota(addonId.value, effectiveQty.value, buildInvoiceData())
+        orderNo.value = s.order_no
+      } else {
+        const session = await authStore.createCheckoutSession(plan.value, billing.value, buildInvoiceData())
+        orderNo.value = session.order_no
+      }
     }
 
     // (c) 發動扣款（重用既有 /pay）
@@ -393,10 +510,10 @@ async function handlePay() {
       return
     }
     if (pay.status === 'success') {
-      // 換卡成功帶 recovered 旗標，讓 return 頁顯示「訂閱已恢復」文案
-      const query = isRecovery.value
-        ? { order_no: orderNo.value, recovered: '1' }
-        : { order_no: orderNo.value }
+      // 帶模式旗標讓 return 頁顯示對應文案：recovered=換卡恢復；extra=加購入帳
+      const query = { order_no: orderNo.value }
+      if (isRecovery.value) query.recovered = '1'
+      if (isAddon.value) query.extra = '1'
       router.push({ path: '/payment/return', query })
       return
     }
@@ -645,16 +762,14 @@ async function handlePay() {
   line-height: 1.5;
 }
 
-/* 加購整修中提示 */
-.maintenance-note {
-  margin: 20px 0 4px;
-  padding: 14px 16px;
+/* 升級「額度轉存為加值額度」說明 */
+.carryover-note {
+  margin: 8px 0 0;
+  padding: 10px 12px;
   background: var(--color-bg, #f8f9fa);
-  border: 1px solid var(--color-divider, rgba(163, 177, 198, 0.3));
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--main-text-light);
-  text-align: center;
   line-height: 1.5;
 }
 

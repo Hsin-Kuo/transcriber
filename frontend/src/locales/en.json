@@ -222,7 +222,9 @@
       "extraAiSummaries": "+{n} AI summaries",
       "upgradeKeepQuota": "After upgrading, your remaining quota ({parts}) will be kept as extra quota and won't be affected by the monthly reset.",
       "downgradeScheduled": "You can keep your current plan until {date}, then it will switch to {plan} automatically.\n\nPlease complete the payment authorization (you won't be charged immediately).",
-      "downgradeImmediate": "Your plan will switch immediately and you will be charged."
+      "downgradeImmediate": "Your plan will switch immediately and you will be charged.",
+      "downgradeConfirm": "Downgrade to the {plan} plan? The change takes effect at the end of the current period — until then you keep full access to your current plan, and you won't be charged.",
+      "downgradeConfirmDated": "Downgrade to the {plan} plan? You can keep your current plan until {date}, then it switches to {plan} automatically. You won't be charged now."
     },
     "subscription": {
       "currentPlan": "Current Plan",
@@ -320,7 +322,9 @@
       "companyTaxIdPlaceholder": "12345678",
       "companyName": "Company name",
       "companyNamePlaceholder": "Acme Inc.",
-      "saveInvoice": "Remember my invoice info"
+      "saveInvoice": "Remember my invoice info",
+      "upgradeTitle": "Upgrade Plan",
+      "upgradeItem": "Upgrade to"
     },
     "pastDue": {
       "title": "Subscription payment failed",

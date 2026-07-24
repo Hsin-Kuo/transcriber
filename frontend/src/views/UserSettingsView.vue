@@ -635,7 +635,7 @@
         </div>
       </div>
     </div>
-    <BillingPanel v-model="showBillingPanel" @cancelled="showToast($t('userSettings.subscription.cancelSuccess'))" />
+    <BillingPanel v-model="showBillingPanel" @cancelled="showToast($t('userSettings.subscription.cancelSuccess'))" @reactivated="showToast($t('userSettings.subscription.reactivateSuccess'))" />
 
 
     <!-- Toast 提示 -->

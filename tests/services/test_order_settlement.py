@@ -114,6 +114,27 @@ class TestSubscriptionSettle:
         assert sub["next_retry_at"] is None and sub["dunning_started_at"] is None
         assert sub["card_token"] == "NEWTOKEN"  # 換卡搬新 token
 
+    async def test_renewal_applies_pending_downgrade(self):
+        # 期末降級生效：續扣單帶目標 tier(basic) → 套用 basic + 清 pending_plan_change + reconcile
+        user = {"subscription": {"status": "active", "tier": "pro", "billing_cycle": "monthly",
+                                 "created_at": 1, "card_token": "CT",
+                                 "pending_plan_change": {"tier": "basic", "billing_cycle": "monthly"}}}
+        order = _order(type="renewal", tier="basic", billing_cycle="monthly")
+        s, order_repo, user_repo = _make(order=order, user=user)
+        from unittest.mock import AsyncMock as _AM
+        s._reconcile_pinned_audio = _AM()  # 攔截以斷言降級有觸發釘選核對
+        r = await s.settle(PaymentNotification(
+            order_no="SLSUB1", success=True, is_first_payment=False, trade_id="T",
+        ))
+        assert r.outcome == SettleOutcome.RENEWED
+        sub = user_repo.update_subscription.await_args.args[1]
+        assert sub["tier"] == "basic"                    # 降級生效
+        assert sub["pending_plan_change"] is None         # 已套用 → 清空
+        # 方案有變更 → 一律 reapply 目標 tier 額度（不論月/年）
+        user_repo.update_quota.assert_awaited_once_with("u1", build_quota_from_tier("basic"))
+        # 降級生效 → 釋放超額釘選音檔
+        s._reconcile_pinned_audio.assert_awaited_once_with("u1", "basic")
+
     async def test_yearly_renewal_keeps_quota_frozen(self):
         user = {"subscription": {"status": "active", "tier": "pro", "created_at": 111}}
         s, order_repo, user_repo = _make(order=_order(tier="pro", billing_cycle="yearly", status="paid"), user=user)
