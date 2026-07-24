@@ -123,6 +123,12 @@
       </div>
     </div>
   </Teleport>
+
+  <CancelConfirmModal
+    v-model="showCancelConfirm"
+    :period-end-label="cancelPeriodEndLabel"
+    @confirm="onConfirmCancel"
+  />
 </template>
 
 <script setup>
@@ -133,6 +139,7 @@ import { useAuthStore } from '../stores/auth'
 import { useFocusTrap } from '../composables/useFocusTrap'
 import { useAddonLabel } from '../composables/useAddonLabel'
 import { useDateFormatter } from '../composables/useDateFormatter'
+import CancelConfirmModal from './CancelConfirmModal.vue'
 import { TIER_PRICES } from '../constants/pricing'
 
 const { t: $t } = useI18n()
@@ -156,6 +163,18 @@ const tierOrder = { free: 0, basic: 1, pro: 2 }
 
 // 已排定期末取消：Free 方案的「取消」動作要 disable，避免重複送出（後端會 400）
 const cancelScheduled = computed(() => authStore.subscription?.cancel_at_period_end === true)
+
+// 取消訂閱確認 modal（含權益說明）
+const showCancelConfirm = ref(false)
+const cancelPeriodEndLabel = computed(() => {
+  const ts = authStore.subscription?.current_period_end
+  return ts ? formatDateTz(ts) : ''
+})
+function onConfirmCancel() {
+  showCancelConfirm.value = false
+  emit('update:modelValue', false)
+  emit('planChanged', { action: 'cancel' })
+}
 
 // 加購額度套餐（一次性購買）— basic/pro 用戶開啟面板時才載入
 const addons = ref([])
@@ -210,8 +229,7 @@ async function selectPlan(planKey) {
 
   if (planKey === 'free') {
     if (cancelScheduled.value) return  // 已排定取消，不重複送出（避免後端 400）
-    emit('update:modelValue', false)
-    emit('planChanged', { action: 'cancel' })
+    showCancelConfirm.value = true     // 顯示含權益說明的取消確認 modal
     return
   }
 

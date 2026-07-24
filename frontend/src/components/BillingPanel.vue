@@ -87,19 +87,13 @@
     </div>
   </Teleport>
 
-  <!-- 取消確認 Modal -->
-  <div v-if="showCancelConfirm" class="modal-overlay" @click.self="showCancelConfirm = false">
-    <div class="modal-box">
-      <h3 class="modal-title">{{ $t('userSettings.subscription.cancelConfirmTitle') }}</h3>
-      <p class="modal-message">{{ $t('userSettings.subscription.cancelConfirmMessage') }}</p>
-      <div class="modal-actions">
-        <button @click="showCancelConfirm = false" class="btn-cancel">{{ $t('userSettings.cancel') }}</button>
-        <button @click="confirmCancel" class="btn-confirm btn-danger" :disabled="canceling">
-          {{ canceling ? $t('userSettings.processing') : $t('userSettings.subscription.cancelConfirmBtn') }}
-        </button>
-      </div>
-    </div>
-  </div>
+  <!-- 取消確認 Modal（含權益說明，共用元件） -->
+  <CancelConfirmModal
+    v-model="showCancelConfirm"
+    :canceling="canceling"
+    :period-end-label="cancelPeriodEndLabel"
+    @confirm="confirmCancel"
+  />
 </template>
 
 <script setup>
@@ -109,6 +103,7 @@ import { useAuthStore } from '../stores/auth'
 import { useFocusTrap } from '../composables/useFocusTrap'
 import { useDateFormatter } from '../composables/useDateFormatter'
 import PastDueBanner from './PastDueBanner.vue'
+import CancelConfirmModal from './CancelConfirmModal.vue'
 
 const { t: $t } = useI18n()
 const { formatDate: formatDateTz } = useDateFormatter()
@@ -130,6 +125,10 @@ const skip = ref(0)
 const canceling = ref(false)
 const reactivating = ref(false)
 const showCancelConfirm = ref(false)
+const cancelPeriodEndLabel = computed(() => {
+  const ts = authStore.subscription?.current_period_end
+  return ts ? formatDateTz(ts) : ''
+})
 
 const currentTierLabel = computed(() => {
   const tier = authStore.subscription?.tier
