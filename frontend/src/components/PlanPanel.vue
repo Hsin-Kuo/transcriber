@@ -53,7 +53,7 @@
             v-if="currentTier !== plan.key"
             class="plan-select-btn"
             :class="{ 'upgrade-btn': isUpgrade(plan.key), 'downgrade-btn': isDowngrade(plan.key) }"
-            :disabled="changingPlan || (plan.key === 'free' && cancelScheduled) || isPlanChangeDisabled(plan.key)"
+            :disabled="changingPlan || (plan.key === 'free' && cancelScheduled)"
             @click="selectPlan(plan.key)"
           >
             {{ getButtonLabel(plan.key) }}
@@ -132,12 +132,14 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
 import { useFocusTrap } from '../composables/useFocusTrap'
 import { useAddonLabel } from '../composables/useAddonLabel'
+import { useDateFormatter } from '../composables/useDateFormatter'
 import { TIER_PRICES } from '../constants/pricing'
 
 const { t: $t } = useI18n()
 const router = useRouter()
 const authStore = useAuthStore()
 const addonLabel = useAddonLabel()
+const { formatDate: formatDateTz } = useDateFormatter()
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -176,7 +178,8 @@ watch(() => props.modelValue, (open) => {
 
 function buyAddon(addon) {
   emit('update:modelValue', false)
-  router.push({ path: '/checkout', query: { addon: addon._id } })
+  // 加購走一般化的結帳頁（mode=extra），份數預設 1（可於結帳頁調整）
+  router.push({ path: '/checkout', query: { mode: 'extra', package_id: addon._id, quantity: 1 } })
 }
 
 function isUpgrade(planKey) {
@@ -187,17 +190,14 @@ function isDowngrade(planKey) {
   return tierOrder[planKey] < tierOrder[props.currentTier]
 }
 
-// 付費→付費（升級/降級）走 /change，Phase 1 停用 → 按鈕 disable 並標整修中
-function isPlanChangeDisabled(planKey) {
-  return props.currentTier !== 'free' && planKey !== 'free'
-}
-
 function getButtonLabel(planKey) {
   if (changingPlan.value) return $t('userSettings.planPanel.processing')
   if (planKey === 'free' && cancelScheduled.value) return $t('userSettings.planPanel.cancelScheduled')
   if (props.currentTier === 'free') return $t('userSettings.planPanel.selectPlan')
   if (planKey === 'free') return $t('userSettings.planPanel.cancelSubscription')  // 付費→免費 = 取消
-  return $t('userSettings.planPanel.maintenanceBadge')  // 付費→付費 = 升降級，Phase 1 整修中
+  return isUpgrade(planKey)
+    ? $t('userSettings.planPanel.upgrade')   // 付費→更高 tier
+    : $t('userSettings.planPanel.downgrade') // 付費→更低付費 tier
 }
 
 async function selectPlan(planKey) {
@@ -215,9 +215,40 @@ async function selectPlan(planKey) {
     return
   }
 
-  // 升級/降級走 /subscriptions/change，Phase 1 後端已停用（501）。
-  // 不呼叫 API，直接顯示整修中友善訊息。
-  alert($t('userSettings.planPanel.changeMaintenance'))
+  // 付費→更高 tier：升級（需付款）→ 導向一般化結帳頁，於該頁建 upgrade 單並走 SDK 收款
+  if (isUpgrade(planKey)) {
+    emit('update:modelValue', false)
+    router.push({ path: '/checkout', query: { mode: 'upgrade', plan: planKey, billing: billing.value } })
+    return
+  }
+
+  // 付費→更低付費 tier：降級（不扣款、期末生效）。
+  // 先用本地已知的期末日做確認（送出後即由後端排定，故確認須在送出前），
+  // 使用者確認後才呼叫 /change，成功即 emit downgraded（App.vue 顯示 toast）。
+  const periodEnd = authStore.subscription?.current_period_end
+  const dateStr = periodEnd ? formatDateTz(periodEnd, { month: 'long', day: 'numeric' }) : ''
+  const planName = $t('userSettings.planPanel.' + planKey)
+  const confirmMsg = dateStr
+    ? $t('userSettings.planPanel.downgradeConfirmDated', { plan: planName, date: dateStr })
+    : $t('userSettings.planPanel.downgradeConfirm', { plan: planName })
+  if (!window.confirm(confirmMsg)) return
+
+  changingPlan.value = true
+  try {
+    const res = await authStore.changePlan(planKey, billing.value)
+    // 後端降級回 { action:"downgrade", effective:"end_of_period", scheduled_date }
+    if (res.action === 'downgrade' || res.effective === 'end_of_period') {
+      await authStore.fetchCurrentUser()  // 刷新 subscription（pending downgrade 標記）
+      emit('update:modelValue', false)
+      emit('planChanged', { action: 'downgraded' })
+    } else {
+      alert($t('userSettings.planPanel.changeFailed'))
+    }
+  } catch (e) {
+    alert($t('userSettings.planPanel.changeFailed'))
+  } finally {
+    changingPlan.value = false
+  }
 }
 
 const billing = ref('monthly')

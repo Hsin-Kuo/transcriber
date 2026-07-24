@@ -143,6 +143,14 @@ class TestAttemptCharge:
         await rs._attempt_charge(MagicMock(), {"_id": "u1", "subscription": _sub(billing_cycle="yearly")})
         m["settlement"].settle.assert_awaited_once()
 
+    async def test_pending_plan_change_charges_target_tier(self, monkeypatch):
+        # 期末降級：pro→basic 的 pending_plan_change → 續扣單用目標 tier basic
+        m = _patch(monkeypatch, charge_resp={"statusCode": "Success", "tradeId": "T"})
+        sub = _sub(tier="pro", pending_plan_change={"tier": "basic", "billing_cycle": "monthly"})
+        await rs._attempt_charge(MagicMock(), {"_id": "u1", "subscription": sub})
+        created = m["order_repo"].create.await_args.args[0]
+        assert created["tier"] == "basic" and created["type"] == "renewal"
+
 
 class TestDeterministicOrderNo:
     def test_stable_per_attempt(self):

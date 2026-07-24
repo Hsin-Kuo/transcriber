@@ -134,8 +134,14 @@ async def _attempt_charge(db, user: dict) -> None:
         log.info("renewal.attempt.already_claimed", user_id=user_id, order_no=order_no)
         return
 
-    tier = sub["tier"]
-    billing = sub["billing_cycle"]
+    # 期末降級：pending_plan_change 存在 → 本期續扣用「目標 tier」，settle 成功即套用（見 order_settlement）
+    pc = sub.get("pending_plan_change")
+    if pc and pc.get("tier"):
+        tier = pc["tier"]
+        billing = pc.get("billing_cycle") or sub["billing_cycle"]
+    else:
+        tier = sub["tier"]
+        billing = sub["billing_cycle"]
     svc = get_payments91_service()
     amount = svc.get_subscription_price(tier, billing)
     order_repo = OrderRepository(db)

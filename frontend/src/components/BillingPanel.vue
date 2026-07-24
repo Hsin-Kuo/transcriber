@@ -117,7 +117,7 @@ const authStore = useAuthStore()
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
 })
-const emit = defineEmits(['update:modelValue', 'cancelled'])
+const emit = defineEmits(['update:modelValue', 'cancelled', 'reactivated'])
 
 const billingPanelRef = ref(null)
 useFocusTrap(billingPanelRef, toRef(props, 'modelValue'))
@@ -198,8 +198,20 @@ function handleCancel() {
 }
 
 async function handleReactivate() {
-  // /subscriptions/reactivate Phase 1 已停用（501）：顯示整修中訊息，不呼叫 API。
-  alert($t('userSettings.subscription.reactivateMaintenance'))
+  // 重新啟用：清除期末取消排程，不扣款。成功後刷新狀態，讓「已排定取消」徽章消失、
+  // 取消按鈕回復，並由父層（UserSettingsView）顯示成功 toast。
+  if (reactivating.value) return
+  reactivating.value = true
+  try {
+    await authStore.reactivateSubscription()
+    await authStore.fetchCurrentUser()
+    await authStore.getSubscriptionStatus().catch(() => {})
+    emit('reactivated')
+  } catch (e) {
+    // 與取消流程一致：錯誤靜默（不阻斷面板），使用者可重試
+  } finally {
+    reactivating.value = false
+  }
 }
 
 async function confirmCancel() {

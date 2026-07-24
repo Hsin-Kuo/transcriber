@@ -48,12 +48,18 @@ const route = useRoute()
 const authStore = useAuthStore()
 
 // 換卡挽回導回（?recovered=1）：past_due → active 屬「恢復」，用專屬文案。
+// 加購導回（?extra=1）：訂閱狀態不變（本就 active），成功後額度入帳，用專屬文案。
 // 3D 導回由後端控制 URL 不帶此旗標，此時走一般 planActivated 文案，語意仍正確。
 const isRecovered = route.query.recovered === '1'
+const isExtra = route.query.extra === '1'
 
 const status = ref('processing')
 const timedOut = ref(false)
-const successMessage = ref(t(isRecovered ? 'paymentReturn.subscriptionResumed' : 'paymentReturn.subscriptionActivated'))
+const successMessage = ref(t(
+  isExtra ? 'paymentReturn.extraQuotaReady'
+    : isRecovered ? 'paymentReturn.subscriptionResumed'
+    : 'paymentReturn.subscriptionActivated'
+))
 
 // 91APP 3D 導回後只帶 order_no，扣款結果由後端 webhook 非同步落地，
 // 因此前端輪詢 /subscriptions/status 直到 active。每 2 秒一次、最多約 30 秒。
@@ -67,9 +73,11 @@ onMounted(async () => {
       const sub = await authStore.getSubscriptionStatus()
       if (sub.status === 'active') {
         await authStore.fetchCurrentUser()
-        successMessage.value = isRecovered
-          ? t('paymentReturn.subscriptionResumed')
-          : t('paymentReturn.planActivated', { plan: sub.tier === 'pro' ? 'Pro' : 'Basic' })
+        successMessage.value = isExtra
+          ? t('paymentReturn.extraQuotaReady')
+          : isRecovered
+            ? t('paymentReturn.subscriptionResumed')
+            : t('paymentReturn.planActivated', { plan: sub.tier === 'pro' ? 'Pro' : 'Basic' })
         status.value = 'success'
         return
       }
