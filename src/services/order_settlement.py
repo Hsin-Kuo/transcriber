@@ -126,7 +126,6 @@ class OrderSettlement:
             return SettleResult(SettleOutcome.ALREADY_PAID, n.order_no)
 
         order_type = order.get("type", "subscription")
-        user_id = order["user_id"]
 
         if not n.success:
             await self.order_repo.update_by_order_no(n.order_no, {"status": "failed"})
