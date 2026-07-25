@@ -630,6 +630,8 @@ async def purchase_extra_quota(
         "amount_twd": total_amount,
         "status": "pending",
         "card_token": None,
+        "quantity": qty,                      # 收據明細用
+        "unit_price_twd": pkg["price_twd"],    # 單價（收據明細用）
         "extra_duration_minutes": unit * qty if pkg["type"] == "duration" else 0,
         "extra_ai_summaries": unit * qty if pkg["type"] == "ai_summaries" else 0,
     })

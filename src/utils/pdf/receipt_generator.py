@@ -41,8 +41,14 @@ _STR = {
         "buyer": "買受人",
         "invoice": "發票資訊",
         "item": "項目",
+        "qty": "數量",
+        "unit_price": "單價",
         "amount": "金額",
+        "subtotal": "小計",
         "total": "合計",
+        "payment_history": "付款紀錄",
+        "date_col": "日期",
+        "amount_paid_col": "已付金額",
         "payment_label": "付款方式",
         "credit_card": "信用卡",
         "carrier": "手機條碼載具",
@@ -65,9 +71,15 @@ _STR = {
         "trade_no": "Transaction ID",
         "buyer": "Billed To",
         "invoice": "Invoice Info",
-        "item": "Item",
+        "item": "Description",
+        "qty": "Qty",
+        "unit_price": "Unit price",
         "amount": "Amount",
+        "subtotal": "Subtotal",
         "total": "Total",
+        "payment_history": "Payment history",
+        "date_col": "Date",
+        "amount_paid_col": "Amount paid",
         "payment_label": "Payment Method",
         "credit_card": "Credit Card",
         "carrier": "Mobile Barcode Carrier",
@@ -142,29 +154,38 @@ def _item_desc(order: dict, s: dict) -> str:
     tier = (order.get("tier") or "").capitalize()
     cycle = s["yearly"] if order.get("billing_cycle") == "yearly" else s["monthly"]
     if t == "extra_quota":
+        # 顯示「每份」額度，與 Qty/單價欄一致（extra_* 存的是 unit*qty 的總額）
+        q = int(order.get("quantity") or 1) or 1
         dur = order.get("extra_duration_minutes") or 0
         ai = order.get("extra_ai_summaries") or 0
         if dur:
-            return s["extra_dur_fmt"].format(n=dur)
+            return s["extra_dur_fmt"].format(n=dur // q)
         if ai:
-            return s["extra_ai_fmt"].format(n=ai)
+            return s["extra_ai_fmt"].format(n=ai // q)
         return s["extra_generic"]
     if t == "upgrade_subscription":
         return s["upgrade_fmt"].format(tier=tier)
     return s["sub_fmt"].format(tier=tier, cycle=cycle)
 
 
+def _fmt_date(ts) -> str:
+    if not ts:
+        return "-"
+    try:
+        return (datetime.utcfromtimestamp(float(ts)) + _TW_OFFSET).strftime("%Y-%m-%d")
+    except (ValueError, TypeError, OSError):
+        return "-"
+
+
 def _payment_method(order: dict, s: dict) -> str:
-    """付款方式行：有卡別+末四碼 → 「VISA - 8452」；否則「信用卡 / Credit Card」。"""
+    """付款方式：有卡別+末四碼 → 「VISA - 8452」；否則「信用卡 / Credit Card」。"""
     brand = order.get("card_brand")
     last4 = order.get("card_last4")
     if brand and last4:
-        method = f"{brand} - {last4}"
-    elif last4:
-        method = f"•••• {last4}"
-    else:
-        method = s["credit_card"]
-    return f"{s['payment_label']}　{method}"
+        return f"{brand} - {last4}"
+    if last4:
+        return f"•••• {last4}"
+    return s["credit_card"]
 
 
 def _invoice_line(user: dict, s: dict) -> Optional[str]:
@@ -238,37 +259,83 @@ def generate_receipt_pdf(*, order: dict, user: dict, lang: str = "zh-TW") -> byt
     story.append(meta)
     story.append(Spacer(1, 6 * mm))
 
-    # ── 明細 ──
+    # ── 明細（項目 | 數量 | 單價 | 金額）──
+    def money(n):
+        return f"NT$ {int(n or 0):,}"
+
     amt = int(order.get("amount_twd") or 0)
-    amt_str = f"NT$ {amt:,}"
+    qty = int(order.get("quantity") or 1)
+    unit = order.get("unit_price_twd")
+    if unit is None:
+        unit = amt // qty if qty else amt
+    _num_cols = [16 * mm, 32 * mm, 32 * mm]
     items = Table(
         [
-            [Paragraph(s["item"], label), Paragraph(s["amount"], label_r)],
-            [Paragraph(_item_desc(order, s), base), Paragraph(amt_str, amount_r)],
+            [Paragraph(s["item"], label), Paragraph(s["qty"], label_r),
+             Paragraph(s["unit_price"], label_r), Paragraph(s["amount"], label_r)],
+            [Paragraph(_item_desc(order, s), base), Paragraph(str(qty), amount_r),
+             Paragraph(money(unit), amount_r), Paragraph(money(amt), amount_r)],
         ],
-        colWidths=[None, 40 * mm],
+        colWidths=[None] + _num_cols,
     )
     items.setStyle(TableStyle([
         ("LINEBELOW", (0, 0), (-1, 0), 0.5, colors.HexColor("#cccccc")),
         ("LINEBELOW", (0, 1), (-1, 1), 0.5, colors.HexColor("#eeeeee")),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
         ("TOPPADDING", (0, 0), (-1, -1), 6),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
     ]))
     story.append(items)
-    story.append(Spacer(1, 2 * mm))
 
-    # ── 合計 + 付款方式 ──
-    total = Table([[Paragraph(s["total"], total_style), Paragraph(amt_str, total_r)]], colWidths=[None, 40 * mm])
-    total.setStyle(TableStyle([
+    # ── 小計 / 合計（靠右）──
+    totals_inner = Table(
+        [
+            [Paragraph(s["subtotal"], base), Paragraph(money(amt), amount_r)],
+            [Paragraph(s["total"], total_style), Paragraph(money(amt), total_r)],
+        ],
+        colWidths=[None, 32 * mm],
+    )
+    totals_inner.setStyle(TableStyle([
         ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
         ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("LINEABOVE", (0, 1), (-1, 1), 0.5, colors.HexColor("#eeeeee")),
     ]))
-    story.append(total)
+    totals_wrap = Table([["", totals_inner]], colWidths=[None, 78 * mm])
+    totals_wrap.setStyle(TableStyle([
+        ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    story.append(totals_wrap)
+    story.append(Spacer(1, 12 * mm))
+
+    # ── Payment history（付款紀錄）──
+    ph_head = ParagraphStyle("ph_head", parent=base, fontSize=13, leading=18, textColor=colors.black)
+    story.append(Paragraph(s["payment_history"], ph_head))
     story.append(Spacer(1, 2 * mm))
-    story.append(Paragraph(_payment_method(order, s), base))
-    story.append(Spacer(1, 10 * mm))
+    ph = Table(
+        [
+            [Paragraph(s["payment_label"], label), Paragraph(s["date_col"], label),
+             Paragraph(s["amount_paid_col"], label_r), Paragraph(s["receipt_no"], label_r)],
+            [Paragraph(_payment_method(order, s), base),
+             Paragraph(_fmt_date(order.get("paid_at") or order.get("created_at")), base),
+             Paragraph(money(amt), amount_r), Paragraph(order.get("merchant_order_no", "-"), amount_r)],
+        ],
+        colWidths=[None, 30 * mm, 26 * mm, 42 * mm],
+    )
+    ph.setStyle(TableStyle([
+        ("LINEBELOW", (0, 0), (-1, 0), 0.5, colors.HexColor("#cccccc")),
+        ("LINEBELOW", (0, 1), (-1, 1), 0.5, colors.HexColor("#eeeeee")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(ph)
+    story.append(Spacer(1, 12 * mm))
 
     story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#e0e0e0")))
     story.append(Spacer(1, 3 * mm))
