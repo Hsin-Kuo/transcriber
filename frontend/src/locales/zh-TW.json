@@ -213,6 +213,7 @@
       "downgrade": "降級方案",
       "cancelSubscription": "取消訂閱",
       "cancelScheduled": "已排定取消",
+      "changeScheduled": "已排定變更",
       "maintenanceBadge": "整修中",
       "processing": "處理中...",
       "changeFailed": "方案變更失敗，請稍後再試",

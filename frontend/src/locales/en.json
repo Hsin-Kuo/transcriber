@@ -213,6 +213,7 @@
       "downgrade": "Downgrade",
       "cancelSubscription": "Cancel Subscription",
       "cancelScheduled": "Cancellation Scheduled",
+      "changeScheduled": "Change Scheduled",
       "maintenanceBadge": "Under Maintenance",
       "processing": "Processing...",
       "changeFailed": "Failed to change plan, please try again",

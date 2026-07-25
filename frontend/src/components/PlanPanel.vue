@@ -53,7 +53,7 @@
             v-if="currentTier !== plan.key"
             class="plan-select-btn"
             :class="{ 'upgrade-btn': isUpgrade(plan.key), 'downgrade-btn': isDowngrade(plan.key) }"
-            :disabled="changingPlan || (plan.key === 'free' && cancelScheduled)"
+            :disabled="changingPlan || (plan.key === 'free' && cancelScheduled) || plan.key === pendingPlanTier"
             @click="selectPlan(plan.key)"
           >
             {{ getButtonLabel(plan.key) }}
@@ -164,6 +164,9 @@ const tierOrder = { free: 0, basic: 1, pro: 2 }
 // 已排定期末取消：Free 方案的「取消」動作要 disable，避免重複送出（後端會 400）
 const cancelScheduled = computed(() => authStore.subscription?.cancel_at_period_end === true)
 
+// 已排定期末降級：目標方案按鈕要標「已排定變更」且 disable（避免重複送出）
+const pendingPlanTier = computed(() => authStore.subscription?.pending_plan_change?.tier || null)
+
 // 取消訂閱確認 modal（含權益說明）
 const showCancelConfirm = ref(false)
 const cancelPeriodEndLabel = computed(() => {
@@ -211,6 +214,7 @@ function isDowngrade(planKey) {
 
 function getButtonLabel(planKey) {
   if (changingPlan.value) return $t('userSettings.planPanel.processing')
+  if (planKey === pendingPlanTier.value) return $t('userSettings.planPanel.changeScheduled')
   if (planKey === 'free' && cancelScheduled.value) return $t('userSettings.planPanel.cancelScheduled')
   if (props.currentTier === 'free') return $t('userSettings.planPanel.selectPlan')
   if (planKey === 'free') return $t('userSettings.planPanel.cancelSubscription')  // 付費→免費 = 取消
@@ -220,6 +224,7 @@ function getButtonLabel(planKey) {
 }
 
 async function selectPlan(planKey) {
+  if (planKey === pendingPlanTier.value) return  // 已排定變更至此方案，不重複送出
   if (props.currentTier === 'free') {
     if (planKey === 'free') return
     emit('update:modelValue', false)
