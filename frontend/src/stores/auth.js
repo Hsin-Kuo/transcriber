@@ -412,6 +412,12 @@ export const useAuthStore = defineStore('auth', () => {
     return response.data
   }
 
+  // 下載付款收據 PDF → Blob
+  async function getReceipt(orderNo) {
+    const response = await api.get(`/subscriptions/order/${orderNo}/receipt`, { responseType: 'blob' })
+    return response.data
+  }
+
   async function purchaseExtraQuota(packageId, quantity = 1, invoiceData = {}) {
     const response = await api.post('/subscriptions/purchase-extra', { package_id: packageId, quantity, ...invoiceData })
     return response.data  // { form, order_no }
@@ -541,6 +547,7 @@ export const useAuthStore = defineStore('auth', () => {
     changePlan,
     cancelPlanChange,
     getOrder,
+    getReceipt,
     purchaseExtraQuota,
     getPackages,
     getTiers,

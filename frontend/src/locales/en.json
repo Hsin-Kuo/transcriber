@@ -264,6 +264,8 @@
       "ordersEmpty": "No payment records yet",
       "ordersLoadMore": "Load more",
       "orderStatusPaid": "Paid",
+      "receipt": "Receipt",
+      "downloadReceipt": "Download payment receipt PDF",
       "orderStatusFailed": "Failed",
       "orderTypeSubscription": "{tier} plan ({cycle})",
       "orderTypeUpgrade": "Upgrade to {tier} ({cycle})",

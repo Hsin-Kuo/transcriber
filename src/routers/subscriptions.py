@@ -10,7 +10,7 @@ import json
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -649,6 +649,28 @@ async def get_order_status(
         "status": order.get("status"),
         "tier": order.get("tier"),
     }
+
+
+@router.get("/order/{order_no}/receipt")
+async def download_receipt(
+    order_no: str,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database),
+):
+    """下載付款收據 PDF（付款證明，非統一發票）。僅限本人的已付款訂單。"""
+    order = await OrderRepository(db).get_by_order_no(order_no)
+    if not order or order.get("user_id") != str(current_user["_id"]):
+        raise api_error("ORDER_NOT_FOUND", "Order not found", 404)
+    if order.get("status") != "paid":
+        raise api_error("ORDER_NOT_PAID", "Receipt available only for paid orders", 400)
+
+    from ..utils.pdf.receipt_generator import generate_receipt_pdf
+    pdf = generate_receipt_pdf(order=order, user=current_user)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="receipt_{order_no}.pdf"'},
+    )
 
 
 @router.get("/tiers")
