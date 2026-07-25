@@ -1,10 +1,16 @@
-"""訂閱管理路由（藍新金流）"""
+"""訂閱管理路由（91APP Payments）。
+
+首購流程：前端 SDK tokenize → POST /checkout（建 pending 單、回 SDK 參數）→
+POST /pay（送 txnToken，後端 request-by-txnToken BindingCard，捕捉 cardToken）→
+若回 paymentUrl 走 3D，完成後 91APP 打 POST /callback（不信 payload → 回查交易 → settle）。
+續扣（Phase 2）由本地排程器直接呼叫 settle，不經 callback。
+"""
 import os
-from datetime import datetime, date, timedelta
+import json
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, Request, status
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -15,9 +21,10 @@ from ..database.mongodb import get_database
 from ..database.repositories.user_repo import UserRepository
 from ..database.repositories.order_repo import OrderRepository
 from ..database.repositories.processed_webhook_repo import ProcessedWebhookRepository
-from ..models.quota import QuotaTier, QUOTA_TIERS, is_upgrade, public_tier_plans
+from ..models.quota import public_tier_plans, is_upgrade, QUOTA_TIERS, QuotaTier
 from ..services.order_settlement import build_order_settlement, PaymentNotification
-from ..utils.newebpay_service import get_newebpay_service
+from ..utils.payments91_service import get_payments91_service
+from ..utils.billing_period import generate_order_no
 from ..utils.time_utils import get_utc_timestamp
 from ..utils.logger import get_logger
 
@@ -28,18 +35,31 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
 
-# ── 輔助函式 ────────────────────────────────────────────────────────────────
-# 付款狀態機（建單防重、settlement、孤兒收斂、重複完成、tier→quota）已抽到
-# src/services/order_settlement.py 的 OrderSettlement。詳見 CONTEXT.md「金流與訂單」。
+def _callback_url() -> str:
+    return f"{BACKEND_URL}/subscriptions/callback"
 
 
-def _notify_url(path: str) -> str:
-    return f"{BACKEND_URL}/subscriptions/notify/{path}"
+def _redirect_url(order_no: str) -> str:
+    # 3D 完成後 91APP 把瀏覽器導回此後端端點（91APP 要求 redirectUrl 為 https；由後端自有
+    # https 網域掌控最穩），後端再 303 轉回前端 SPA 的 /payment/return。
+    return f"{BACKEND_URL}/subscriptions/payment-return?order_no={order_no}"
 
 
-def _return_url() -> str:
-    # 藍新以 Form POST 導回商店，必須先經過後端解密再 redirect 到前端
-    return f"{BACKEND_URL}/subscriptions/return"
+def _find(obj, key_lower: str):
+    """遞迴找第一個名稱等於 key_lower（小寫比較）的值。用於從 91APP 回應挖 cardToken/paymentUrl/tradeId。"""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k.lower() == key_lower and v not in (None, ""):
+                return v
+            found = _find(v, key_lower)
+            if found not in (None, ""):
+                return found
+    elif isinstance(obj, list):
+        for item in obj:
+            found = _find(item, key_lower)
+            if found not in (None, ""):
+                return found
+    return None
 
 
 # ── Request Models ───────────────────────────────────────────────────────────
@@ -55,6 +75,11 @@ class CheckoutRequest(BaseModel):
     save_invoice: bool = True
 
 
+class PayRequest(BaseModel):
+    order_no: str
+    txn_token: str = Field(..., min_length=1)
+
+
 class ChangePlanRequest(BaseModel):
     tier: str
     billing: str
@@ -68,7 +93,7 @@ class ChangePlanRequest(BaseModel):
 
 class PurchaseExtraRequest(BaseModel):
     package_id: str
-    quantity: int = Field(default=1, ge=1, le=99)  # 購買份數（1–99）
+    quantity: int = Field(default=1, ge=1, le=99)
     invoice_type: Optional[str] = None
     carrier_type: Optional[str] = None
     carrier_num: Optional[str] = None
@@ -101,7 +126,63 @@ async def _handle_invoice_save(request_data, user_id: str, user_repo: UserReposi
         })
 
 
+# ── 付款結果收斂（/pay 立即成交 與 /callback 共用）──────────────────────────────
+
+async def _process_payment_result(
+    db, *, trade_id: str, record_status: str, order_no: str, success: bool,
+) -> str:
+    """claim 去重 → settle。回傳 outcome 字串（或 "duplicate"）。失敗會 release + raise。
+
+    is_first_payment 由 order type 推導：type=renewal（換卡挽回/續扣）走續扣分支，其餘為首期。
+    """
+    order = await OrderRepository(db).get_by_order_no(order_no)
+    is_first_payment = not (order and order.get("type") == "renewal")
+    webhook_repo = ProcessedWebhookRepository(db)
+    natural_id = f"{trade_id or order_no}:{record_status}"
+    if not await webhook_repo.claim(
+        provider="91app",
+        natural_id=natural_id,
+        metadata={"status": record_status, "trade_id": trade_id, "order_no": order_no},
+    ):
+        log.warning("subscription.webhook.duplicate_skipped", natural_id=natural_id)
+        return "duplicate"
+    try:
+        result = await build_order_settlement(db).settle(PaymentNotification(
+            order_no=order_no,
+            success=success,
+            is_first_payment=is_first_payment,
+            trade_id=trade_id or "",
+        ))
+        log.info("subscription.webhook.settled", natural_id=natural_id, outcome=result.outcome.value)
+        return result.outcome.value
+    except Exception as e:
+        await webhook_repo.release(provider="91app", natural_id=natural_id)
+        log.error("subscription.webhook.processing_failed", natural_id=natural_id, error=str(e), exc_info=True)
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("webhook.provider", "91app")
+                scope.set_tag("webhook.order_no", order_no)
+                sentry_sdk.capture_exception(e)
+        except ImportError:
+            pass
+        raise
+
+
 # ── 訂閱端點 ─────────────────────────────────────────────────────────────────
+
+@router.get("/payment-config")
+async def payment_config(current_user: dict = Depends(get_current_user)):
+    """前端 SDK 初始化參數（publishableKey 非機密）。不建單——供結帳頁 onMounted 先 setupSDK。
+
+    分離自 /checkout：建單有 30 秒冷卻（重複建單會 429），故取 SDK 參數不可綁建單。
+    """
+    svc = get_payments91_service()
+    return {
+        "publishable_key": svc.publishable_key,
+        "sdk_server_type": svc.sdk_server_type,
+    }
+
 
 @router.post("/checkout")
 async def create_checkout(
@@ -109,28 +190,27 @@ async def create_checkout(
     current_user: dict = Depends(get_current_user),
     db=Depends(get_database),
 ):
-    """建立新訂閱（定期定額表單）"""
+    """建立新訂閱：建 pending 單，回傳付款所需參數（含 SDK 參數，供不分離取用時使用）。"""
     if request.tier not in ("basic", "pro"):
         raise api_error("SUBSCRIPTION_INVALID_TIER", "Invalid subscription plan", 400)
     if request.billing not in ("monthly", "yearly"):
         raise api_error("SUBSCRIPTION_INVALID_BILLING_CYCLE", "Invalid billing cycle", 400)
 
     user_repo = UserRepository(db)
-    full_user = await user_repo.get_by_id(str(current_user["_id"]))
+    user_id = str(current_user["_id"])
+    full_user = await user_repo.get_by_id(user_id)
     sub = full_user.get("subscription", {}) if full_user else {}
 
     if sub.get("status") in ("active", "trialing"):
         raise api_error("SUBSCRIPTION_ALREADY_ACTIVE",
                         "You already have an active subscription, please use the change plan feature", 400)
 
-    svc = get_newebpay_service()
+    svc = get_payments91_service()
     amount = svc.get_subscription_price(request.tier, request.billing)
     if not amount:
         raise api_error("SUBSCRIPTION_PRICE_NOT_CONFIGURED", "Price is not configured", 500)
 
-    user_id = str(current_user["_id"])
-
-    order_no = svc.generate_order_no("SLSUB")
+    order_no = generate_order_no("SLSUB")
     await build_order_settlement(db).open_pending({
         "user_id": user_id,
         "merchant_order_no": order_no,
@@ -139,26 +219,145 @@ async def create_checkout(
         "billing_cycle": request.billing,
         "amount_twd": amount,
         "status": "pending",
-        "period_no": None,
-        "auth_times": 0,
-        "newebpay_trade_no": None,
+        "trade_id": None,
+        "card_token": None,
         "extra_duration_minutes": 0,
         "extra_ai_summaries": 0,
     })
 
     await _handle_invoice_save(request, user_id, user_repo)
 
-    form = svc.create_period_form(
-        order_no=order_no,
-        amount_twd=amount,
-        billing_cycle=request.billing,
-        prod_desc=f"SoundLite {request.tier.capitalize()} 方案",
-        payer_email=current_user["email"],
-        return_url=_return_url(),
-        notify_url=_notify_url("period"),
-        start_date=date.today(),
+    return {
+        "order_no": order_no,
+        "amount": amount,
+        "publishable_key": svc.publishable_key,
+        "sdk_server_type": svc.sdk_server_type,
+    }
+
+
+@router.post("/pay")
+async def pay(
+    request: PayRequest,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database),
+):
+    """收前端 txnToken，呼叫 91APP request-by-txnToken（BindingCard 首購）。
+
+    回 paymentUrl 表示需 3D（前端導頁，完成後走 /callback）；否則依 statusCode 立即收斂。
+    """
+    user_id = str(current_user["_id"])
+    order_repo = OrderRepository(db)
+    order = await order_repo.get_by_order_no(request.order_no)
+    if not order or order.get("user_id") != user_id:
+        raise api_error("ORDER_NOT_FOUND", "Order not found", 404)
+    if order.get("status") != "pending":
+        raise api_error("ORDER_NOT_PENDING", "Order is not payable", 400)
+
+    svc = get_payments91_service()
+    resp = await svc.create_first_payment(
+        txn_token=request.txn_token,
+        order_no=order["merchant_order_no"],
+        consumer_id=user_id,
+        amount=order["amount_twd"],
+        redirect_url=_redirect_url(order["merchant_order_no"]),
+        callback_url=_callback_url(),
+        prod_name=f"SoundLite {str(order.get('tier', '')).capitalize()} 方案",
     )
-    return {"form": form, "order_no": order_no}
+
+    # 診斷用：91APP 非成功回應記錄 errorCode/message/statusCode（不含卡號等敏感資料）
+    if not resp.get("statusCode") or resp.get("statusCode") != "Success":
+        log.warning(
+            "subscription.pay.provider_response",
+            order_no=order["merchant_order_no"],
+            http_status=resp.get("_http_status"),
+            status_code=resp.get("statusCode"),
+            error_code=resp.get("errorCode"),
+            message=resp.get("message"),
+        )
+
+    # 捕捉 cardToken（僅在 3D 成功後才有效；settle 時才搬進 subscription）+ 卡別/末四碼（收據用）。存於 order。
+    card_token = _find(resp, "cardtoken")
+    order_updates = {}
+    if card_token:
+        order_updates["card_token"] = card_token
+    else:
+        log.warning("subscription.pay.no_card_token", order_no=order["merchant_order_no"])
+    card_brand = _find(resp, "cardbrand")
+    card_last4 = _find(resp, "lastfour")
+    if card_brand:
+        order_updates["card_brand"] = str(card_brand)
+    if card_last4:
+        order_updates["card_last4"] = str(card_last4)
+    if order_updates:
+        await order_repo.update_by_order_no(order["merchant_order_no"], order_updates)
+
+    payment_url = _find(resp, "paymenturl")
+    if payment_url:
+        return {"payment_url": payment_url, "status": "pending_3ds"}
+
+    # 無 3D → 依 statusCode 直接收斂
+    status_code = resp.get("statusCode") or "Unknown"
+    trade_id = _find(resp, "tradeid") or ""
+    success = status_code == "Success"
+    outcome = await _process_payment_result(
+        db, trade_id=trade_id, record_status=status_code,
+        order_no=order["merchant_order_no"], success=success,
+    )
+    return {
+        "payment_url": None,
+        "status": "success" if success else "failed",
+        "outcome": outcome,
+        "message": None if success else (resp.get("message") or status_code),
+    }
+
+
+@router.post("/callback")
+async def payment_callback(request: Request, db=Depends(get_database)):
+    """91APP 交易結果通知（server-to-server）。
+
+    防禦設計：**不信任 payload**，只取 tradeId → 回查 GET /v2/trades/{tradeId} 為準 → settle。
+    """
+    raw = await request.body()
+    try:
+        payload = json.loads(raw)
+    except (ValueError, TypeError):
+        form = await request.form()
+        payload = dict(form)
+
+    trade_id = payload.get("tradeId") or payload.get("TradeId") or ""
+    record_status = payload.get("recordStatus") or payload.get("RecordStatus") or ""
+    if not trade_id:
+        log.warning("subscription.callback.no_trade_id", payload_keys=list(payload.keys()))
+        return {"status": "ignored"}
+
+    svc = get_payments91_service()
+    try:
+        trade = await svc.query_trade(trade_id)
+    except Exception as e:
+        log.error("subscription.callback.query_failed", trade_id=trade_id, error=str(e), exc_info=True)
+        raise  # 回 500 讓 91APP 重送
+
+    order_no = _find(trade, "merchantorderid") or ""
+    status_code = trade.get("statusCode") or ""
+    if not order_no:
+        log.warning("subscription.callback.no_order_no", trade_id=trade_id, status=status_code)
+        return {"status": "ignored"}
+
+    success = status_code == "Success"
+    log.info("subscription.callback.received", trade_id=trade_id, order_no=order_no, status=status_code)
+    await _process_payment_result(
+        db, trade_id=trade_id, record_status=record_status or status_code,
+        order_no=order_no, success=success,
+    )
+    return {"status": "ok"}
+
+
+@router.get("/payment-return")
+async def payment_return(order_no: str = ""):
+    """3D 完成後 91APP 導回的後端端點，303 轉回前端 SPA。實際結算由 /callback 完成。"""
+    return RedirectResponse(
+        url=f"{FRONTEND_URL}/payment/return?order_no={order_no}", status_code=303
+    )
 
 
 @router.get("/status")
@@ -173,14 +372,25 @@ async def get_subscription_status(
     extra_quota = full_user.get("extra_quota", {}) if full_user else {}
     invoice_info = full_user.get("invoice_info", {}) if full_user else {}
 
+    status = sub.get("status", "free")
+    # past_due（Dunning 寬限期）仍視為有訂閱、保留服務；附寬限截止供前端橫幅
+    grace_deadline = None
+    if status == "past_due" and sub.get("dunning_started_at"):
+        from ..services.renewal_service import GRACE_SECONDS
+        grace_deadline = sub["dunning_started_at"] + GRACE_SECONDS
+
     return {
-        "has_subscription": sub.get("status") == "active",
-        "status": sub.get("status", "free"),
+        "has_subscription": status in ("active", "past_due"),
+        "status": status,
         "tier": sub.get("tier", "free"),
         "billing_cycle": sub.get("billing_cycle"),
         "current_period_end": sub.get("current_period_end"),
         "cancel_at_period_end": sub.get("cancel_at_period_end", False),
         "pending_plan_change": sub.get("pending_plan_change"),
+        # Dunning（付款失敗寬限期）狀態，供前端顯示橫幅 + 換卡 CTA
+        "past_due": status == "past_due",
+        "needs_card_update": sub.get("needs_card_update", False),
+        "grace_deadline": grace_deadline,
         "extra_quota": {
             "duration_minutes": extra_quota.get("duration_minutes", 0),
             "ai_summaries": extra_quota.get("ai_summaries", 0),
@@ -194,23 +404,16 @@ async def cancel_subscription(
     current_user: dict = Depends(get_current_user),
     db=Depends(get_database),
 ):
-    """取消訂閱（期末生效）：終止藍新定期定額合約"""
+    """取消訂閱（期末生效）。91APP 商戶自扣：取消 = 停止排程續扣，無 gateway 委託可終止。"""
     user_repo = UserRepository(db)
     full_user = await user_repo.get_by_id(str(current_user["_id"]))
     sub = full_user.get("subscription", {}) if full_user else {}
 
-    if sub.get("status") != "active":
+    # past_due（付款失敗寬限期）也允許取消——停止續扣重試，寬限滿 lapse 為 free
+    if sub.get("status") not in ("active", "past_due"):
         raise api_error("SUBSCRIPTION_NOT_ACTIVE", "No active subscription", 400)
     if sub.get("cancel_at_period_end"):
         raise api_error("SUBSCRIPTION_ALREADY_SCHEDULED_CANCEL", "Subscription is already scheduled for cancellation", 400)
-
-    period_no = sub.get("period_no")
-    active_order_no = sub.get("active_order_no")
-    if period_no and active_order_no:
-        svc = get_newebpay_service()
-        ok, msg = await svc.terminate_period_contract(active_order_no, period_no)
-        if not ok:
-            log.warning("subscription.cancel.contract_terminate_failed", message=msg)
 
     sub["cancel_at_period_end"] = True
     sub["canceled_at"] = get_utc_timestamp()
@@ -220,12 +423,59 @@ async def cancel_subscription(
     return {"message": "訂閱將於目前計費週期結束時取消"}
 
 
+@router.post("/update-card")
+async def update_card(
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database),
+):
+    """past_due 換卡挽回：建 recovery order（type=renewal）回 SDK 參數。
+
+    前端接著用既有 /pay 送新卡 txnToken（request-by-txnToken 綁新卡）→ 3D → /callback →
+    settle 續扣分支（回 active、清 dunning、搬新 card_token）。
+    """
+    user_repo = UserRepository(db)
+    user_id = str(current_user["_id"])
+    full_user = await user_repo.get_by_id(user_id)
+    sub = full_user.get("subscription", {}) if full_user else {}
+
+    if sub.get("status") != "past_due":
+        raise api_error("SUBSCRIPTION_NOT_PAST_DUE", "No payment recovery needed", 400)
+
+    svc = get_payments91_service()
+    amount = svc.get_subscription_price(sub.get("tier"), sub.get("billing_cycle"))
+    if not amount:
+        raise api_error("SUBSCRIPTION_PRICE_NOT_CONFIGURED", "Price is not configured", 500)
+
+    # recovery order 用 type=renewal（與續扣同分支），直接建（非 open_pending，免連點冷卻）
+    order_no = generate_order_no("SLREC")
+    await OrderRepository(db).create({
+        "user_id": user_id,
+        "merchant_order_no": order_no,
+        "type": "renewal",
+        "tier": sub.get("tier"),
+        "billing_cycle": sub.get("billing_cycle"),
+        "amount_twd": amount,
+        "status": "pending",
+        "card_token": None,
+    })
+    return {
+        "order_no": order_no,
+        "amount": amount,
+        "publishable_key": svc.publishable_key,
+        "sdk_server_type": svc.sdk_server_type,
+    }
+
+
 @router.post("/reactivate")
 async def reactivate_subscription(
     current_user: dict = Depends(get_current_user),
     db=Depends(get_database),
 ):
-    """重新啟用已排定取消的訂閱（重建定期定額）"""
+    """重新啟用已排定取消的訂閱：清 cancel_at_period_end。
+
+    91APP merchant-initiated：取消只是停止排程續扣、未終止任何 gateway 委託，故重啟
+    = 清旗標即可（訂閱仍 active，期末由 renewal_service 續扣），無需重新付款。
+    """
     user_repo = UserRepository(db)
     full_user = await user_repo.get_by_id(str(current_user["_id"]))
     sub = full_user.get("subscription", {}) if full_user else {}
@@ -235,44 +485,11 @@ async def reactivate_subscription(
     if not sub.get("cancel_at_period_end"):
         raise api_error("SUBSCRIPTION_NOT_SCHEDULED_CANCEL", "Subscription is not scheduled for cancellation", 400)
 
-    # 由於藍新定期定額已終止，重新啟用需要用戶重新付款
-    # 回傳 checkout 資料讓前端帶用戶重新訂閱
-    tier = sub.get("tier", "basic")
-    billing = sub.get("billing_cycle", "monthly")
-    svc = get_newebpay_service()
-    amount = svc.get_subscription_price(tier, billing)
-    if not amount:
-        raise api_error("SUBSCRIPTION_PRICE_NOT_CONFIGURED", "Price is not configured", 500)
-
-    user_id = str(current_user["_id"])
-
-    order_no = svc.generate_order_no("SLSUB")
-    await build_order_settlement(db).open_pending({
-        "user_id": user_id,
-        "merchant_order_no": order_no,
-        "type": "subscription",
-        "tier": tier,
-        "billing_cycle": billing,
-        "amount_twd": amount,
-        "status": "pending",
-        "period_no": None,
-        "auth_times": 0,
-        "newebpay_trade_no": None,
-        "extra_duration_minutes": 0,
-        "extra_ai_summaries": 0,
-    })
-
-    form = svc.create_period_form(
-        order_no=order_no,
-        amount_twd=amount,
-        billing_cycle=billing,
-        prod_desc=f"SoundLite {tier.capitalize()} 方案（重新啟用）",
-        payer_email=current_user["email"],
-        return_url=_return_url(),
-        notify_url=_notify_url("period"),
-        start_date=date.today(),
-    )
-    return {"form": form, "order_no": order_no, "requires_payment": True}
+    sub["cancel_at_period_end"] = False
+    sub["canceled_at"] = None
+    sub["updated_at"] = get_utc_timestamp()
+    await user_repo.update_subscription(str(current_user["_id"]), sub)
+    return {"message": "訂閱已恢復，將於下個計費週期正常續扣"}
 
 
 @router.post("/change")
@@ -281,49 +498,39 @@ async def change_plan(
     current_user: dict = Depends(get_current_user),
     db=Depends(get_database),
 ):
-    """
-    變更訂閱方案。
-    升級：立即生效，建立新 Pro 定期定額，舊合約於 Notify 確認後取消。
-    降級：期末生效，建立 PeriodStartType=2 的 Basic 定期定額（首扣日=Pro到期日）。
-    """
+    """變更方案。升級：立即付款（SDK），回 SDK 參數。降級：期末生效（寫 pending_plan_change，不扣款）。"""
     if request.tier not in ("basic", "pro"):
         raise api_error("SUBSCRIPTION_INVALID_TIER", "Invalid subscription plan", 400)
     if request.billing not in ("monthly", "yearly"):
         raise api_error("SUBSCRIPTION_INVALID_BILLING_CYCLE", "Invalid billing cycle", 400)
 
     user_repo = UserRepository(db)
-    full_user = await user_repo.get_by_id(str(current_user["_id"]))
+    user_id = str(current_user["_id"])
+    full_user = await user_repo.get_by_id(user_id)
     sub = full_user.get("subscription", {}) if full_user else {}
 
-    if sub.get("status") != "active":
+    if sub.get("status") not in ("active", "past_due"):
         raise api_error("SUBSCRIPTION_NOT_ACTIVE", "No active subscription", 400)
-
     current_tier = sub.get("tier", "free")
-    upgrading = is_upgrade(current_tier, request.tier)
+    if request.tier == current_tier and request.billing == sub.get("billing_cycle"):
+        raise api_error("SUBSCRIPTION_NO_CHANGE", "Already on this plan", 400)
 
-    svc = get_newebpay_service()
+    svc = get_payments91_service()
     amount = svc.get_subscription_price(request.tier, request.billing)
     if not amount:
         raise api_error("SUBSCRIPTION_PRICE_NOT_CONFIGURED", "Price is not configured", 500)
 
-    user_id = str(current_user["_id"])
-    await _handle_invoice_save(request, user_id, user_repo)
-    settlement = build_order_settlement(db)
-
-    if upgrading:
-        # ── 升級：立即付款，Notify 成功後舊合約取消、剩餘額度→extra_quota ──
+    if is_upgrade(current_tier, request.tier):
+        # 升級：立即付款（SDK）。結轉舊方案剩餘額度進 extra_quota。
         usage = full_user.get("usage", {})
         quota = full_user.get("quota", {})
-        QT, QTE = QUOTA_TIERS, QuotaTier
-        old_limit_dur = quota.get("max_duration_minutes", QT[QTE(current_tier)]["max_duration_minutes"])
-        old_limit_ai = quota.get("max_ai_summaries", QT[QTE(current_tier)]["max_ai_summaries"])
-        # usage.duration_minutes 是累積浮點數，相減會出現長尾小數；
-        # 轉為額外額度時四捨五入到小數點後一位（存入 extra_quota 與回傳前端皆用此值）
-        remaining_dur = round(max(0.0, old_limit_dur - usage.get("duration_minutes", 0)), 1)
-        remaining_ai = max(0, old_limit_ai - usage.get("ai_summaries", 0))
+        old_dur = quota.get("max_duration_minutes", QUOTA_TIERS[QuotaTier(current_tier)]["max_duration_minutes"])
+        old_ai = quota.get("max_ai_summaries", QUOTA_TIERS[QuotaTier(current_tier)]["max_ai_summaries"])
+        remaining_dur = round(max(0.0, old_dur - usage.get("duration_minutes", 0)), 1)
+        remaining_ai = max(0, old_ai - usage.get("ai_summaries", 0))
 
-        order_no = svc.generate_order_no("SLUPG")
-        await settlement.open_pending({
+        order_no = generate_order_no("SLUPG")
+        await OrderRepository(db).create({
             "user_id": user_id,
             "merchant_order_no": order_no,
             "type": "upgrade_subscription",
@@ -331,138 +538,58 @@ async def change_plan(
             "billing_cycle": request.billing,
             "amount_twd": amount,
             "status": "pending",
-            "period_no": None,
-            "auth_times": 0,
-            "newebpay_trade_no": None,
+            "card_token": None,
             "prev_order_no": sub.get("active_order_no"),
-            "prev_period_no": sub.get("period_no"),
             "extra_duration_minutes": remaining_dur,
             "extra_ai_summaries": remaining_ai,
         })
-
-        form = svc.create_period_form(
-            order_no=order_no,
-            amount_twd=amount,
-            billing_cycle=request.billing,
-            prod_desc=f"SoundLite {request.tier.capitalize()} 方案（升級）",
-            payer_email=current_user["email"],
-            return_url=_return_url(),
-            notify_url=_notify_url("period"),
-            start_date=date.today(),
-        )
-        return {"form": form, "order_no": order_no, "action": "upgrade", "extra_duration_minutes": remaining_dur, "extra_ai_summaries": remaining_ai}
-
-    else:
-        # ── 降級：PeriodType=D + PeriodStartType=3（指定首扣日）────────────
-        # 注意：PeriodFirstdate 僅在 PeriodType=D + PeriodStartType=3 時有效
-        period_end_ts = sub.get("current_period_end")
-        if period_end_ts:
-            period_end_dt = datetime.utcfromtimestamp(period_end_ts)
-            days_until_end = (period_end_dt.date() - date.today()).days
-        else:
-            days_until_end = 30
-
-        prev_order_no = sub.get("active_order_no")
-        prev_period_no = sub.get("period_no")
-
-        if days_until_end < 2:
-            # 剩餘 < 2 天，改為立即訂閱新方案
-            order_no = svc.generate_order_no("SLDWN")
-            await settlement.open_pending({
-                "user_id": user_id,
-                "merchant_order_no": order_no,
-                "type": "downgrade_subscription",
-                "tier": request.tier,
-                "billing_cycle": request.billing,
-                "amount_twd": amount,
-                "status": "pending",
-                "period_no": None,
-                "auth_times": 0,
-                "newebpay_trade_no": None,
-                "prev_order_no": prev_order_no,
-                "prev_period_no": prev_period_no,
-                "extra_duration_minutes": 0,
-                "extra_ai_summaries": 0,
-                "scheduled_date": None,
-            })
-            form = svc.create_period_form(
-                order_no=order_no,
-                amount_twd=amount,
-                billing_cycle=request.billing,
-                prod_desc=f"SoundLite {request.tier.capitalize()} 方案",
-                payer_email=current_user["email"],
-                return_url=_return_url(),
-                notify_url=_notify_url("period"),
-                start_date=date.today(),
-            )
-            effective = "now"
-            scheduled_date = None
-        else:
-            # 排程降級：用 PeriodType=D 搭配 PeriodFirstdate 指定首扣日
-            first_date_obj = date.today() + timedelta(days=days_until_end)
-            period_first_date = first_date_obj.strftime("%Y/%m/%d")
-
-            order_no = svc.generate_order_no("SLDWN")
-            await settlement.open_pending({
-                "user_id": user_id,
-                "merchant_order_no": order_no,
-                "type": "downgrade_subscription",
-                "tier": request.tier,
-                "billing_cycle": request.billing,
-                "amount_twd": amount,
-                "status": "pending",
-                "period_no": None,
-                "auth_times": 0,
-                "newebpay_trade_no": None,
-                "prev_order_no": prev_order_no,
-                "prev_period_no": prev_period_no,
-                "extra_duration_minutes": 0,
-                "extra_ai_summaries": 0,
-                "scheduled_date": period_first_date,
-                # 排程降級的 pending 單要存活到首扣日才由期末首扣 Notify 收斂，
-                # 不能沿用預設 1 小時 expires_at（否則會被 periodic_order_cleanup 掃成
-                # expired）。設到首扣日 +3 天緩衝：期末順利收斂前不被掃、真沒收到才過期。
-                "expires_at": get_utc_timestamp() + (days_until_end + 3) * 86400,
-            })
-            form = svc.create_period_form_scheduled(
-                order_no=order_no,
-                amount_twd=amount,
-                billing_cycle=request.billing,
-                prod_desc=f"SoundLite {request.tier.capitalize()} 方案（降級）",
-                payer_email=current_user["email"],
-                return_url=_return_url(),
-                notify_url=_notify_url("period"),
-                first_date=period_first_date,
-            )
-            effective = "end_of_period"
-            scheduled_date = period_first_date
-
-        # 立即終止舊 Pro 定期定額，防止到期前再次扣款
-        if prev_order_no and prev_period_no:
-            ok, msg = await svc.terminate_period_contract(prev_order_no, prev_period_no)
-            if ok:
-                log.info("subscription.downgrade.old_contract_terminated", prev_period_no=prev_period_no)
-            else:
-                log.warning("subscription.downgrade.old_contract_terminate_failed", prev_period_no=prev_period_no, message=msg)
-
-        sub["pending_plan_change"] = {
-            "tier": request.tier,
-            "billing_cycle": request.billing,
-            "order_no": order_no,
-            "scheduled_date": scheduled_date,
-            "requested_at": get_utc_timestamp(),
-        }
-        sub["updated_at"] = get_utc_timestamp()
-        await user_repo.update_subscription(user_id, sub)
-
+        await _handle_invoice_save(request, user_id, user_repo)
         return {
-            "form": form,
+            "action": "upgrade",
             "order_no": order_no,
-            "action": "downgrade",
-            "effective": effective,
-            "scheduled_date": scheduled_date,
-            "current_period_end": sub.get("current_period_end"),
+            "amount": amount,
+            "publishable_key": svc.publishable_key,
+            "sdk_server_type": svc.sdk_server_type,
+            "extra_duration_minutes": remaining_dur,
+            "extra_ai_summaries": remaining_ai,
         }
+
+    # 降級（basic←pro；改 free 請用 /cancel）：期末生效，只寫 pending_plan_change，不扣款
+    sub["pending_plan_change"] = {
+        "tier": request.tier,
+        "billing_cycle": request.billing,
+        "requested_at": get_utc_timestamp(),
+    }
+    sub["updated_at"] = get_utc_timestamp()
+    await user_repo.update_subscription(user_id, sub)
+    return {
+        "action": "downgrade",
+        "effective": "end_of_period",
+        "scheduled_date": sub.get("current_period_end"),
+    }
+
+
+@router.post("/cancel-plan-change")
+async def cancel_plan_change(
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database),
+):
+    """取消已排定的期末方案變更（降級）→ 維持目前方案。
+
+    pending_plan_change 尚未扣款（降級到期才扣），故清除即可維持現狀。
+    """
+    user_repo = UserRepository(db)
+    user_id = str(current_user["_id"])
+    full_user = await user_repo.get_by_id(user_id)
+    sub = full_user.get("subscription", {}) if full_user else {}
+
+    if not sub.get("pending_plan_change"):
+        raise api_error("SUBSCRIPTION_NO_PENDING_CHANGE", "No scheduled plan change", 400)
+
+    sub["pending_plan_change"] = None
+    sub["updated_at"] = get_utc_timestamp()
+    await user_repo.update_subscription(user_id, sub)
+    return {"message": "已取消排定的方案變更，維持目前方案"}
 
 
 @router.post("/purchase-extra")
@@ -471,33 +598,30 @@ async def purchase_extra_quota(
     current_user: dict = Depends(get_current_user),
     db=Depends(get_database),
 ):
-    """購買額外額度（一次性 MPG）"""
+    """加購額外額度（立即付款，SDK）。需 active 訂閱。回 SDK 參數。"""
     user_repo = UserRepository(db)
-    full_user = await user_repo.get_by_id(str(current_user["_id"]))
+    user_id = str(current_user["_id"])
+    full_user = await user_repo.get_by_id(user_id)
     sub = full_user.get("subscription", {}) if full_user else {}
 
-    if sub.get("status") != "active":
+    if sub.get("status") not in ("active", "past_due"):
         raise api_error("SUBSCRIPTION_REQUIRED_FOR_EXTRA",
                         "An active paid subscription is required to purchase extra quota", 403)
 
-    # 從 packages collection 取得套餐資訊
-    package = await db.packages.find_one({"_id": ObjectId(request.package_id), "active": True})
-    if not package:
+    try:
+        pkg = await db.packages.find_one({"_id": ObjectId(request.package_id), "active": True})
+    except Exception:
+        pkg = None
+    if not pkg:
         raise api_error("SUBSCRIPTION_PACKAGE_NOT_FOUND", "Package not found", 404)
 
-    user_id = str(current_user["_id"])
-    await _handle_invoice_save(request, user_id, user_repo)
-
-    svc = get_newebpay_service()
-
-    # 份數：總金額與加購額度皆 × quantity
     qty = request.quantity
-    total_amount = package["price_twd"] * qty
-    unit_amount = package.get("amount", 0)
-    item_desc = package["label"] if qty == 1 else f'{package["label"]} ×{qty}'
+    total_amount = pkg["price_twd"] * qty
+    unit = pkg.get("amount", 0)
+    svc = get_payments91_service()
 
-    order_no = svc.generate_order_no("SLEXT")
-    await build_order_settlement(db).open_pending({
+    order_no = generate_order_no("SLEXT")
+    await OrderRepository(db).create({
         "user_id": user_id,
         "merchant_order_no": order_no,
         "type": "extra_quota",
@@ -505,30 +629,66 @@ async def purchase_extra_quota(
         "billing_cycle": None,
         "amount_twd": total_amount,
         "status": "pending",
-        "period_no": None,
-        "auth_times": 0,
-        "newebpay_trade_no": None,
-        "extra_duration_minutes": unit_amount * qty if package["type"] == "duration" else 0,
-        "extra_ai_summaries": unit_amount * qty if package["type"] == "ai_summaries" else 0,
+        "card_token": None,
+        "quantity": qty,                      # 收據明細用
+        "unit_price_twd": pkg["price_twd"],    # 單價（收據明細用）
+        "extra_duration_minutes": unit * qty if pkg["type"] == "duration" else 0,
+        "extra_ai_summaries": unit * qty if pkg["type"] == "ai_summaries" else 0,
     })
-
-    invoice_params = {
-        "carrier_type": request.carrier_type or "",
-        "carrier_num": request.carrier_num or "",
-        "buyer_uni_num": request.company_tax_id or "",
-        "buyer_name": request.company_name or "",
+    await _handle_invoice_save(request, user_id, user_repo)
+    return {
+        "order_no": order_no,
+        "amount": total_amount,
+        "publishable_key": svc.publishable_key,
+        "sdk_server_type": svc.sdk_server_type,
     }
 
-    form = svc.create_mpg_form(
-        order_no=order_no,
-        amount_twd=total_amount,
-        item_desc=item_desc,
-        email=current_user["email"],
-        return_url=_return_url(),
-        notify_url=_notify_url("mpg"),
-        **invoice_params,
+
+@router.get("/order/{order_no}")
+async def get_order_status(
+    order_no: str,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database),
+):
+    """查單一訂單狀態/類型（付款完成頁輪詢用）。只能查自己的單。"""
+    order = await OrderRepository(db).get_by_order_no(order_no)
+    if not order or order.get("user_id") != str(current_user["_id"]):
+        raise api_error("ORDER_NOT_FOUND", "Order not found", 404)
+    return {
+        "order_no": order_no,
+        "type": order.get("type"),
+        "status": order.get("status"),
+        "tier": order.get("tier"),
+    }
+
+
+@router.get("/order/{order_no}/receipt")
+async def download_receipt(
+    order_no: str,
+    lang: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database),
+):
+    """下載付款收據 PDF（付款證明，非統一發票）。僅限本人的已付款訂單。
+
+    lang：'zh-TW' | 'en'；未指定時用使用者語言偏好，預設繁中。
+    """
+    order = await OrderRepository(db).get_by_order_no(order_no)
+    if not order or order.get("user_id") != str(current_user["_id"]):
+        raise api_error("ORDER_NOT_FOUND", "Order not found", 404)
+    if order.get("status") != "paid":
+        raise api_error("ORDER_NOT_PAID", "Receipt available only for paid orders", 400)
+
+    if lang not in ("zh-TW", "en"):
+        lang = (current_user.get("preferences") or {}).get("language", "zh-TW")
+
+    from ..utils.pdf.receipt_generator import generate_receipt_pdf
+    pdf = generate_receipt_pdf(order=order, user=current_user, lang=lang)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="receipt_{order_no}.pdf"'},
     )
-    return {"form": form, "order_no": order_no}
 
 
 @router.get("/tiers")
@@ -570,204 +730,3 @@ async def list_orders(
     for o in orders:
         o["_id"] = str(o["_id"])
     return {"orders": orders, "has_more": has_more}
-
-
-# ── Notify Handler（定期定額） ────────────────────────────────────────────────
-
-@router.post("/notify/period")
-async def period_notify(request: Request, db=Depends(get_database)):
-    """
-    藍新定期定額 Notify（server-to-server）。
-
-    Notify 以 AES 加密的 Period 欄位回傳。
-    初次建立（建立完成）與每期授權（NPA-N050）使用相同端點，
-    以 Result 中是否存在 AlreadyTimes 欄位來區分。
-    """
-    form = await request.form()
-    raw = dict(form)
-
-    svc = get_newebpay_service()
-    payload = svc.decrypt_period_notify(raw)
-    if payload is None:
-        log.warning("newebpay.period_notify.decrypt_failed")
-        return {"status": "error"}
-
-    notify_status = payload.get("Status", "")
-    result = payload.get("Result", {})
-
-    merchant_order_no = result.get("MerchantOrderNo") or result.get("MerOrderNo", "")
-    period_no = result.get("PeriodNo", "")
-    trade_no = result.get("TradeNo", "")
-
-    # 區分初次建立 vs 每期授權：
-    # - 建立完成（4.3.2）：Result 包含 AuthTimes（總期數）
-    # - 每期授權（4.3.3 NPA-N050）：Result 包含 AlreadyTimes（已完成期數）
-    already_times = result.get("AlreadyTimes")
-    if already_times is not None:
-        try:
-            already_times = int(already_times)
-        except (ValueError, TypeError):
-            already_times = 1
-        is_first_payment = (already_times == 1)
-    else:
-        # 初次建立 Notify → 第一次付款
-        is_first_payment = True
-
-    log.info("subscription.webhook.received", merchant_order_no=merchant_order_no, status=notify_status, is_first_payment=is_first_payment)
-
-    # 冪等性 natural_id：
-    # - 每期授權（有 AlreadyTimes）：order + already_times，per-period 唯一——絕不併入
-    #   TradeNo，否則藍新重送若換號會重複滾 period_end / 重置用量。
-    # - 建立完成類（無 AlreadyTimes）：同一 order 的「建約當下」與 type-3「期末首扣」
-    #   可能都是這格式，只用 :init 會撞在一起、後到那封被冪等擋掉 → 排程降級卡住不生效。
-    #   併入 TradeNo（各次授權唯一）區分不同授權事件；藍新重送同一封仍帶同 TradeNo →
-    #   照樣去重。settle() 另有 order 生命週期短路（已 paid），重複套用仍安全。
-    webhook_repo = ProcessedWebhookRepository(db)
-    if already_times is not None:
-        natural_id = f"{merchant_order_no}:{already_times}"
-    else:
-        natural_id = f"{merchant_order_no}:init:{trade_no}"
-    if not await webhook_repo.claim(
-        provider="newebpay-period",
-        natural_id=natural_id,
-        metadata={
-            "status": notify_status,
-            "period_no": period_no,
-            "trade_no": trade_no,
-        },
-    ):
-        log.warning("subscription.webhook.duplicate_skipped", natural_id=natural_id)
-        return {"status": "ok"}
-
-    # 已 claim → 進入處理。若中途失敗：釋放 claim + 送 Sentry，讓藍新重發能重做。
-    # settle() 負責 order 生命週期 idempotency（order_not_found / 已 paid 短路）
-    # 與所有帳號狀態變更——router 只做解密 + claim + 結果記錄。
-    try:
-        settle_result = await build_order_settlement(db).settle(PaymentNotification(
-            order_no=merchant_order_no,
-            success=(notify_status == "SUCCESS"),
-            is_first_payment=is_first_payment,
-            period_no=period_no,
-            trade_no=trade_no,
-            auth_times=already_times,
-        ))
-        log.info("subscription.webhook.settled", natural_id=natural_id, outcome=settle_result.outcome.value)
-        return {"status": "ok"}
-    except Exception as e:
-        # 處理失敗：釋放 claim 讓藍新下次重發能重做；送 Sentry 警示需人工檢查
-        await webhook_repo.release(provider="newebpay-period", natural_id=natural_id)
-        log.error("subscription.webhook.processing_failed", natural_id=natural_id, error=str(e), exc_info=True)
-        try:
-            import sentry_sdk
-            with sentry_sdk.push_scope() as scope:
-                scope.set_tag("webhook.provider", "newebpay-period")
-                scope.set_tag("webhook.order_no", merchant_order_no)
-                scope.set_context("webhook", {
-                    "natural_id": natural_id,
-                    "status": notify_status,
-                    "is_first_payment": is_first_payment,
-                })
-                sentry_sdk.capture_exception(e)
-        except ImportError:
-            pass
-        # 回 500 讓藍新重試
-        raise
-
-
-# ── Notify Handler（MPG 一次性） ─────────────────────────────────────────────
-
-@router.post("/notify/mpg")
-async def mpg_notify(request: Request, db=Depends(get_database)):
-    """藍新 MPG Notify（額外額度購買）"""
-    form = await request.form()
-    trade_info = form.get("TradeInfo", "")
-    trade_sha = form.get("TradeSha", "")
-
-    svc = get_newebpay_service()
-    data = svc.verify_and_decrypt_mpg_notify(trade_info, trade_sha)
-    if data is None:
-        log.warning("newebpay.mpg_notify.verify_failed")
-        return {"status": "error"}
-
-    merchant_order_no = data.get("MerchantOrderNo", "")
-    result = data.get("Status", "")
-    trade_no = data.get("TradeNo", "")
-
-    log.info("payment.webhook.received", merchant_order_no=merchant_order_no, status=result)
-
-    # 冪等性：一次性付款 natural_id 就是訂單號
-    webhook_repo = ProcessedWebhookRepository(db)
-    if not await webhook_repo.claim(
-        provider="newebpay-mpg",
-        natural_id=merchant_order_no,
-        metadata={"status": result, "trade_no": trade_no},
-    ):
-        log.warning("payment.webhook.duplicate_skipped", merchant_order_no=merchant_order_no)
-        return {"status": "ok"}
-
-    try:
-        # MPG 一次性付款一律視為 first；settle() 處理 order_not_found / 已 paid 短路與加值
-        settle_result = await build_order_settlement(db).settle(PaymentNotification(
-            order_no=merchant_order_no,
-            success=(result == "SUCCESS"),
-            is_first_payment=True,
-            trade_no=trade_no,
-        ))
-        log.info("payment.webhook.settled", merchant_order_no=merchant_order_no, outcome=settle_result.outcome.value)
-        return {"status": "ok"}
-    except Exception as e:
-        await webhook_repo.release(provider="newebpay-mpg", natural_id=merchant_order_no)
-        log.error("payment.webhook.processing_failed", merchant_order_no=merchant_order_no, error=str(e), exc_info=True)
-        try:
-            import sentry_sdk
-            with sentry_sdk.push_scope() as scope:
-                scope.set_tag("webhook.provider", "newebpay-mpg")
-                scope.set_tag("webhook.order_no", merchant_order_no)
-                sentry_sdk.capture_exception(e)
-        except ImportError:
-            pass
-        raise
-
-
-# ── Return URL ────────────────────────────────────────────────────────────────
-
-@router.post("/return")
-async def payment_return(request: Request):
-    """
-    藍新付款後以 Form POST 導回此端點。
-    解密 Period 欄位，提取 Status 和 MerchantOrderNo，
-    再以 GET redirect 帶 query params 導向前端。
-    """
-    form = await request.form()
-    raw = dict(form)
-
-    # 別用 `status` 當變數名：會 shadow 從 fastapi import 的 status enum
-    notify_status = "UNKNOWN"
-    merchant_order_no = ""
-
-    period_enc = raw.get("Period", "")
-    if period_enc:
-        svc = get_newebpay_service()
-        payload = svc.decrypt_period_notify(raw)
-        if payload:
-            notify_status = payload.get("Status", "UNKNOWN")
-            result = payload.get("Result", {})
-            merchant_order_no = (
-                result.get("MerchantOrderNo") or result.get("MerOrderNo", "")
-            )
-    else:
-        # MPG ReturnURL 也可能走這裡（TradeInfo + TradeSha）
-        trade_info = raw.get("TradeInfo", "")
-        trade_sha = raw.get("TradeSha", "")
-        if trade_info and trade_sha:
-            svc = get_newebpay_service()
-            data = svc.verify_and_decrypt_mpg_notify(trade_info, trade_sha)
-            if data:
-                notify_status = data.get("Status", "UNKNOWN")
-                merchant_order_no = data.get("MerchantOrderNo", "")
-
-    query = f"Status={notify_status}&MerchantOrderNo={merchant_order_no}"
-    return RedirectResponse(
-        url=f"{FRONTEND_URL}/payment/return?{query}",
-        status_code=303  # 303 See Other：POST → GET redirect
-    )

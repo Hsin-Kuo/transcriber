@@ -108,9 +108,12 @@
             </div>
           </div>
         </div>
+        <!-- Dunning：付款失敗（past_due）挽回橫幅 -->
+        <PastDueBanner />
+
         <div class="plan-indicator-actions">
           <button class="plan-btn plan-btn-outline" @click="openPricing">{{ $t('userSettings.showPlan') }}</button>
-          <button class="plan-btn plan-btn-primary" @click="uiStore.openPlanPanel()"><svg class="plan-btn-icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M8,1 A7,7 0 1,0 8,15 A7,7 0 1,0 8,1 Z M8,6.5 A1.5,1.5 0 1,1 8,9.5 A1.5,1.5 0 1,1 8,6.5 Z M7.5,1 L8.5,1 L8.5,5.5 L7.5,5.5 Z" fill="currentColor" fill-rule="evenodd" /></svg>{{ $t('userSettings.upgrade') }}</button>
+          <button class="plan-btn plan-btn-primary" @click="uiStore.openPlanPanel()"><svg class="plan-btn-icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M8,1 A7,7 0 1,0 8,15 A7,7 0 1,0 8,1 Z M8,6.5 A1.5,1.5 0 1,1 8,9.5 A1.5,1.5 0 1,1 8,6.5 Z M7.5,1 L8.5,1 L8.5,5.5 L7.5,5.5 Z" fill="currentColor" fill-rule="evenodd" /></svg>{{ currentTier === 'free' ? $t('userSettings.upgrade') : $t('userSettings.managePlan') }}</button>
         </div>
 
         <!-- Subscription management (only for paid users) -->
@@ -632,7 +635,7 @@
         </div>
       </div>
     </div>
-    <BillingPanel v-model="showBillingPanel" @cancelled="showToast($t('userSettings.subscription.cancelSuccess'))" />
+    <BillingPanel v-model="showBillingPanel" @cancelled="showToast($t('userSettings.subscription.cancelSuccess'))" @reactivated="showToast($t('userSettings.subscription.reactivateSuccess'))" />
 
 
     <!-- Toast 提示 -->
@@ -655,6 +658,7 @@ import api from '../utils/api'
 import { detectTimezone, detectTheme } from '../utils/defaults'
 import GoogleSignInButton from '../components/GoogleSignInButton.vue'
 import BillingPanel from '../components/BillingPanel.vue'
+import PastDueBanner from '../components/PastDueBanner.vue'
 import { useUiStore } from '../stores/ui'
 
 const router = useRouter()
@@ -1015,6 +1019,14 @@ onMounted(async () => {
   } else {
     // 進頁一律重抓，確保時數/額度反映最近完成的轉錄（否則需手動 refresh 才更新）
     await authStore.fetchCurrentUser()
+  }
+
+  // 取得 Dunning 狀態（past_due / grace_deadline / needs_card_update）供橫幅顯示。
+  // 失敗不阻擋頁面（非 past_due 也可能回一般狀態）。
+  try {
+    await authStore.getSubscriptionStatus()
+  } catch (e) {
+    // 忽略：橫幅在 subscriptionStatus 為空時本就不渲染
   }
 
   // 外部連結帶升級意圖（intent=upgrade）→ 守衛轉址成 ?panel=plan，這裡開面板並清 query

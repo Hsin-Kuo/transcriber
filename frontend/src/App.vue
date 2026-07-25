@@ -57,11 +57,25 @@ const uiStore = useUiStore()
 const uploadStore = useUploadStore()
 const currentTier = computed(() => authStore.quota?.tier || 'free')
 
-function handlePlanChanged(event) {
+async function handlePlanChanged(event) {
   if (event.action === 'upgraded') {
     notificationToast.value?.addNotification({ title: $t('userSettings.subscription.upgradedSuccess'), type: 'success' })
   } else if (event.action === 'downgraded') {
     notificationToast.value?.addNotification({ title: $t('userSettings.subscription.downgradedSuccess'), type: 'success' })
+  } else if (event.action === 'cancel') {
+    // 從方案面板選 Free = 取消訂閱（期末生效）。呼叫 API 並刷新狀態。
+    try {
+      await authStore.cancelSubscription()
+      notificationToast.value?.addNotification({ title: $t('userSettings.subscription.cancelSuccess'), type: 'success' })
+    } catch (e) {
+      // 已排定取消 → 視為已完成（非錯誤）；其餘才報錯
+      const code = e?.response?.data?.detail?.code
+      if (code === 'SUBSCRIPTION_ALREADY_SCHEDULED_CANCEL') {
+        notificationToast.value?.addNotification({ title: $t('userSettings.subscription.cancelSuccess'), type: 'success' })
+      } else {
+        notificationToast.value?.addNotification({ title: $t('userSettings.subscription.cancelFailed'), type: 'error' })
+      }
+    }
   }
 }
 

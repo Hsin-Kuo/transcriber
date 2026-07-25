@@ -41,6 +41,7 @@
     "extraAiSummary": "+ {value} extra quota",
     "showPlan": "Show Plan",
     "upgrade": "Upgrade",
+    "managePlan": "Manage Plan",
     "storage": "Storage",
     "remaining": "Remaining",
     "minutes": "minutes",
@@ -212,14 +213,23 @@
       "upgrade": "Upgrade Now",
       "downgrade": "Downgrade",
       "cancelSubscription": "Cancel Subscription",
+      "cancelScheduled": "Cancellation Scheduled",
+      "changeScheduled": "Change Scheduled",
+      "pendingChange": "Scheduled to change to {plan} at period end.",
+      "pendingChangeDated": "Scheduled to change to {plan} on {date}.",
+      "cancelChangeBtn": "Cancel change, keep current plan",
+      "maintenanceBadge": "Under Maintenance",
       "processing": "Processing...",
       "changeFailed": "Failed to change plan, please try again",
+      "changeMaintenance": "Plan upgrades and downgrades are temporarily unavailable while under maintenance.",
       "perMonthYearly": "/mo (billed yearly)",
       "extraMinutes": "+{n} min",
       "extraAiSummaries": "+{n} AI summaries",
       "upgradeKeepQuota": "After upgrading, your remaining quota ({parts}) will be kept as extra quota and won't be affected by the monthly reset.",
       "downgradeScheduled": "You can keep your current plan until {date}, then it will switch to {plan} automatically.\n\nPlease complete the payment authorization (you won't be charged immediately).",
-      "downgradeImmediate": "Your plan will switch immediately and you will be charged."
+      "downgradeImmediate": "Your plan will switch immediately and you will be charged.",
+      "downgradeConfirm": "Downgrade to the {plan} plan? The change takes effect at the end of the current period — until then you keep full access to your current plan, and you won't be charged.",
+      "downgradeConfirmDated": "Downgrade to the {plan} plan? You can keep your current plan until {date}, then it switches to {plan} automatically. You won't be charged now."
     },
     "subscription": {
       "currentPlan": "Current Plan",
@@ -235,9 +245,15 @@
       "billingHistoryBtn": "Order History",
       "cancelConfirmTitle": "Cancel subscription?",
       "cancelConfirmMessage": "Your plan will remain active until the end of the current billing period. No refunds will be issued.",
+      "cancelConfirmPeriodEnd": "Cancellation takes effect at period end — you keep full access to your current plan until {date}.",
+      "cancelConfirmPeriodEndNoDate": "Cancellation takes effect at period end — you keep full access to your current plan until the current billing period ends.",
+      "cancelConfirmRevert": "After that, your plan reverts to Free: transcription minutes and AI summaries drop to the Free limits, and pinned audio beyond the Free limit will be unpinned (deleted after a grace period).",
+      "cancelConfirmNote": "No refunds. You can resume your subscription anytime before period end.",
       "cancelConfirmBtn": "Confirm Cancel",
+      "keepPlanBtn": "Keep plan",
       "cancelSuccess": "Subscription cancellation scheduled",
       "reactivateSuccess": "Subscription reactivated",
+      "reactivateMaintenance": "Subscription reactivation is temporarily unavailable while under maintenance.",
       "upgradedSuccess": "Plan upgraded immediately!",
       "downgradedSuccess": "Plan will downgrade at end of billing period",
       "checkoutSuccess": "Payment successful! Plan updated",
@@ -248,6 +264,8 @@
       "ordersEmpty": "No payment records yet",
       "ordersLoadMore": "Load more",
       "orderStatusPaid": "Paid",
+      "receipt": "Receipt",
+      "downloadReceipt": "Download payment receipt PDF",
       "orderStatusFailed": "Failed",
       "orderTypeSubscription": "{tier} plan ({cycle})",
       "orderTypeUpgrade": "Upgrade to {tier} ({cycle})",
@@ -302,9 +320,10 @@
       "increaseQty": "Increase quantity",
       "addonDurationLabel": "{n} min transcription credit",
       "addonAiLabel": "{n} AI summaries",
-      "oneTimeNote": "Securely processed by NewebPay · one-time payment",
-      "subscriptionNote": "Securely processed by NewebPay · billed monthly, cancel anytime",
-      "subscriptionNoteYearly": "Securely processed by NewebPay · one-year term, one-time payment, does not auto-renew",
+      "oneTimeNote": "Securely processed by 91APP · one-time payment",
+      "subscriptionNote": "Securely processed by 91APP · billed monthly, cancel anytime",
+      "subscriptionNoteYearly": "Securely processed by 91APP · one-year term, one-time payment, does not auto-renew",
+      "addonMaintenance": "Add-on purchases are temporarily unavailable while under maintenance.",
       "invoiceTitle": "E-Invoice",
       "invoicePersonal": "Personal",
       "invoiceCompany": "Company",
@@ -315,7 +334,27 @@
       "companyTaxIdPlaceholder": "12345678",
       "companyName": "Company name",
       "companyNamePlaceholder": "Acme Inc.",
-      "saveInvoice": "Remember my invoice info"
+      "saveInvoice": "Remember my invoice info",
+      "upgradeTitle": "Upgrade Plan",
+      "upgradeItem": "Upgrade to"
+    },
+    "pastDue": {
+      "title": "Subscription payment failed",
+      "titleNeedsCard": "Please update your payment method",
+      "message": "We couldn't process this billing cycle's payment. To avoid interruption, please update your payment method to complete the charge.",
+      "messageNeedsCard": "Your card charge did not go through — it may be expired or have insufficient funds. Please update your card to resume your subscription.",
+      "graceDeadline": "Your service stays active until {date}. Please update before then.",
+      "updateCardCta": "Update payment method"
+    },
+    "updateCard": {
+      "title": "Update Payment Method",
+      "summaryTitle": "Payment Summary",
+      "intro": "Re-enter your card details to settle the outstanding charge. Your subscription resumes immediately once payment succeeds.",
+      "itemLabel": "Item",
+      "itemValue": "Outstanding subscription charge",
+      "amountLabel": "Amount due",
+      "submit": "Confirm & Pay",
+      "secureNote": "Securely processed by 91APP · card details never touch our servers"
     }
   },
   "quotaModal": {
@@ -1099,12 +1138,14 @@
   "paymentReturn": {
     "processing": "Processing payment",
     "processingHint": "Please wait while we confirm your payment...",
+    "timeoutHint": "Your payment is still being processed. Please check your subscription status in Settings shortly.",
     "success": "Payment successful!",
     "backToSettings": "Back to Settings",
     "failed": "Payment failed",
     "failedHint": "Please check your card details and try again, or contact support.",
     "subscriptionActivated": "Your subscription is now active.",
     "extraQuotaReady": "Your extra quota has been credited and is ready to use.",
-    "planActivated": "The {plan} plan is now active."
+    "planActivated": "The {plan} plan is now active.",
+    "subscriptionResumed": "Your payment method has been updated and your subscription is now active."
   }
 }

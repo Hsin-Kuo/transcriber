@@ -41,6 +41,7 @@
     "extraAiSummary": "+ {value} 個額外額度",
     "showPlan": "檢視方案",
     "upgrade": "升級",
+    "managePlan": "調整方案",
     "storage": "儲存空間",
     "remaining": "剩餘",
     "minutes": "分鐘",
@@ -212,14 +213,23 @@
       "upgrade": "立即升級",
       "downgrade": "降級方案",
       "cancelSubscription": "取消訂閱",
+      "cancelScheduled": "已排定取消",
+      "changeScheduled": "已排定變更",
+      "pendingChange": "已排定期末變更為 {plan} 方案。",
+      "pendingChangeDated": "已排定於 {date} 變更為 {plan} 方案。",
+      "cancelChangeBtn": "取消變更，維持目前方案",
+      "maintenanceBadge": "整修中",
       "processing": "處理中...",
       "changeFailed": "方案變更失敗，請稍後再試",
+      "changeMaintenance": "方案升降級功能整修中，暫時無法變更，敬請見諒。",
       "perMonthYearly": "/月（年繳）",
       "extraMinutes": "+{n} 分鐘",
       "extraAiSummaries": "+{n} 次 AI 摘要",
       "upgradeKeepQuota": "升級後，剩餘額度（{parts}）將保留為額外額度，不受每月重置影響。",
       "downgradeScheduled": "降級後仍可使用目前方案直到 {date}，屆時自動切換為 {plan} 方案。\n\n請完成付款授權（不會立即扣款）。",
-      "downgradeImmediate": "將立即切換為新方案並扣款。"
+      "downgradeImmediate": "將立即切換為新方案並扣款。",
+      "downgradeConfirm": "確定要降級為 {plan} 方案嗎？降級將於本期結束時生效，在此之前你仍可使用目前方案的完整額度，且不會產生任何費用。",
+      "downgradeConfirmDated": "確定要降級為 {plan} 方案嗎？你可繼續使用目前方案直到 {date}，屆時自動切換為 {plan}，不會立即扣款。"
     },
     "subscription": {
       "currentPlan": "目前方案",
@@ -235,9 +245,15 @@
       "billingHistoryBtn": "訂單記錄",
       "cancelConfirmTitle": "確定要取消訂閱嗎？",
       "cancelConfirmMessage": "取消後，您的方案將在目前計費週期結束時失效，不會退費。",
+      "cancelConfirmPeriodEnd": "取消為期末生效：在 {date} 前，您仍可正常使用目前方案的所有功能。",
+      "cancelConfirmPeriodEndNoDate": "取消為期末生效：目前計費週期結束前，您仍可正常使用目前方案的所有功能。",
+      "cancelConfirmRevert": "週期結束後方案將降為免費版——轉錄時數與 AI 摘要額度會回到免費方案上限，超過免費保留數量的音檔將被取消保留（寬限期後刪除）。",
+      "cancelConfirmNote": "不會退費；期末前可隨時「恢復訂閱」。",
       "cancelConfirmBtn": "確定取消",
+      "keepPlanBtn": "繼續使用",
       "cancelSuccess": "訂閱已排定取消",
       "reactivateSuccess": "訂閱已重新啟用",
+      "reactivateMaintenance": "重新啟用功能整修中，暫時無法使用，敬請見諒。",
       "upgradedSuccess": "方案已立即升級！",
       "downgradedSuccess": "方案將於計費週期結束時降級",
       "checkoutSuccess": "付款成功！方案已更新",
@@ -248,6 +264,8 @@
       "ordersEmpty": "尚無付款紀錄",
       "ordersLoadMore": "載入更多",
       "orderStatusPaid": "已付款",
+      "receipt": "帳單",
+      "downloadReceipt": "下載付款收據 PDF",
       "orderStatusFailed": "失敗",
       "orderTypeSubscription": "{tier} 方案（{cycle}）",
       "orderTypeUpgrade": "升級至 {tier}（{cycle}）",
@@ -302,9 +320,10 @@
       "increaseQty": "增加份數",
       "addonDurationLabel": "{n} 分鐘轉錄額度",
       "addonAiLabel": "{n} 次 AI 摘要",
-      "oneTimeNote": "由藍新金流安全處理，單筆一次性付款",
-      "subscriptionNote": "由藍新金流安全處理，月繳每月自動扣款，可隨時取消",
-      "subscriptionNoteYearly": "由藍新金流安全處理，年繳為一年期一次性付款，到期不自動續訂",
+      "oneTimeNote": "由 91APP 安全處理，單筆一次性付款",
+      "subscriptionNote": "由 91APP 安全處理，月繳每月自動扣款，可隨時取消",
+      "subscriptionNoteYearly": "由 91APP 安全處理，年繳為一年期一次性付款，到期不自動續訂",
+      "addonMaintenance": "加購功能整修中，暫時無法購買，敬請見諒。",
       "invoiceTitle": "電子發票",
       "invoicePersonal": "個人",
       "invoiceCompany": "公司",
@@ -315,7 +334,27 @@
       "companyTaxIdPlaceholder": "12345678",
       "companyName": "公司名稱",
       "companyNamePlaceholder": "某某股份有限公司",
-      "saveInvoice": "記住我的發票資訊"
+      "saveInvoice": "記住我的發票資訊",
+      "upgradeTitle": "升級方案",
+      "upgradeItem": "升級至"
+    },
+    "pastDue": {
+      "title": "訂閱付款失敗",
+      "titleNeedsCard": "請更新您的付款方式",
+      "message": "我們無法完成本期訂閱扣款。為避免服務中斷，請更新付款方式以完成扣款。",
+      "messageNeedsCard": "您的信用卡扣款未成功，可能已過期或額度不足。請更新卡片以恢復訂閱。",
+      "graceDeadline": "服務將保留至 {date}，請於期限前完成更新。",
+      "updateCardCta": "更新付款方式"
+    },
+    "updateCard": {
+      "title": "更新付款方式",
+      "summaryTitle": "付款摘要",
+      "intro": "請重新輸入信用卡資訊以完成本期補扣，成功後訂閱將立即恢復。",
+      "itemLabel": "項目",
+      "itemValue": "訂閱補扣款",
+      "amountLabel": "補扣金額",
+      "submit": "確認更新並付款",
+      "secureNote": "由 91APP 安全處理，卡號不經過我方伺服器"
     }
   },
   "quotaModal": {
@@ -1099,12 +1138,14 @@
   "paymentReturn": {
     "processing": "付款處理中",
     "processingHint": "請稍候，正在確認付款狀態...",
+    "timeoutHint": "付款仍在處理中，請稍後至設定頁確認訂閱狀態。",
     "success": "付款成功！",
     "backToSettings": "返回設定頁",
     "failed": "付款失敗",
     "failedHint": "請確認信用卡資訊後重試，或聯繫客服。",
     "subscriptionActivated": "您的訂閱已成功啟用。",
     "extraQuotaReady": "額外額度已入帳，可立即使用。",
-    "planActivated": "{plan} 方案已啟用。"
+    "planActivated": "{plan} 方案已啟用。",
+    "subscriptionResumed": "付款方式已更新，您的訂閱已恢復。"
   }
 }
