@@ -412,9 +412,10 @@ export const useAuthStore = defineStore('auth', () => {
     return response.data
   }
 
-  // 下載付款收據 PDF → Blob
-  async function getReceipt(orderNo) {
-    const response = await api.get(`/subscriptions/order/${orderNo}/receipt`, { responseType: 'blob' })
+  // 下載付款收據 PDF → Blob（lang: 'zh-TW' | 'en'，未指定用使用者語言偏好）
+  async function getReceipt(orderNo, lang) {
+    const q = lang ? `?lang=${encodeURIComponent(lang)}` : ''
+    const response = await api.get(`/subscriptions/order/${orderNo}/receipt${q}`, { responseType: 'blob' })
     return response.data
   }
 

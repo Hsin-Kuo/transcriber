@@ -1,11 +1,16 @@
-"""付款收據 PDF 產生器測試（不比對像素，驗證產出有效 PDF + 項目描述邏輯）。"""
+"""付款收據 PDF 產生器測試（中英雙語）。不比對像素，驗證有效 PDF + 項目描述邏輯。"""
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from src.utils.pdf.receipt_generator import generate_receipt_pdf, _item_desc, _invoice_line  # noqa: E402
+from src.utils.pdf.receipt_generator import (  # noqa: E402
+    generate_receipt_pdf, _item_desc, _invoice_line, _lang,
+)
+
+ZH = _lang("zh-TW")
+EN = _lang("en")
 
 
 def _order(**over):
@@ -18,46 +23,54 @@ def _order(**over):
 
 
 class TestItemDesc:
-    def test_subscription(self):
-        assert "Pro" in _item_desc(_order(tier="pro", billing_cycle="monthly"))
-        assert "月繳" in _item_desc(_order(billing_cycle="monthly"))
-        assert "年繳" in _item_desc(_order(billing_cycle="yearly"))
+    def test_subscription_zh(self):
+        d = _item_desc(_order(tier="pro", billing_cycle="monthly"), ZH)
+        assert "Pro" in d and "月繳" in d
+        assert "年繳" in _item_desc(_order(billing_cycle="yearly"), ZH)
+
+    def test_subscription_en(self):
+        d = _item_desc(_order(tier="pro", billing_cycle="monthly"), EN)
+        assert "Pro Plan" in d and "Monthly" in d and "Subscription" in d
+        assert "Yearly" in _item_desc(_order(billing_cycle="yearly"), EN)
 
     def test_upgrade(self):
-        assert "升級" in _item_desc(_order(type="upgrade_subscription", tier="pro"))
+        assert "升級" in _item_desc(_order(type="upgrade_subscription"), ZH)
+        assert "Upgrade" in _item_desc(_order(type="upgrade_subscription"), EN)
 
-    def test_extra_duration(self):
-        assert "60 分鐘" in _item_desc(_order(type="extra_quota", tier=None, billing_cycle=None, extra_duration_minutes=60))
-
-    def test_extra_ai(self):
-        assert "10 次" in _item_desc(_order(type="extra_quota", tier=None, billing_cycle=None, extra_ai_summaries=10))
+    def test_extra(self):
+        o = _order(type="extra_quota", tier=None, billing_cycle=None, extra_duration_minutes=60)
+        assert "60 分鐘" in _item_desc(o, ZH)
+        assert "+60 transcription minutes" in _item_desc(o, EN)
+        o2 = _order(type="extra_quota", tier=None, billing_cycle=None, extra_ai_summaries=10)
+        assert "10 次" in _item_desc(o2, ZH)
+        assert "+10 AI summaries" in _item_desc(o2, EN)
 
 
 class TestInvoiceLine:
-    def test_personal_carrier(self):
-        assert "/ABC1234" in _invoice_line({"invoice_info": {"type": "personal", "carrier_num": "/ABC1234"}})
+    def test_personal(self):
+        assert "/ABC1234" in _invoice_line({"invoice_info": {"type": "personal", "carrier_num": "/ABC1234"}}, ZH)
 
     def test_company(self):
-        line = _invoice_line({"invoice_info": {"type": "company", "company_tax_id": "12345678", "company_name": "測試公司"}})
-        assert "12345678" in line and "測試公司" in line
+        line = _invoice_line({"invoice_info": {"type": "company", "company_tax_id": "12345678", "company_name": "測試"}}, EN)
+        assert "12345678" in line and "Tax ID" in line
 
     def test_none(self):
-        assert _invoice_line({}) is None
+        assert _invoice_line({}, ZH) is None
 
 
 class TestGeneratePdf:
-    def test_produces_valid_pdf(self):
-        pdf = generate_receipt_pdf(order=_order(), user={"email": "u@x.com", "invoice_info": {"type": "personal", "carrier_num": "/ABC1234"}})
-        assert pdf[:5] == b"%PDF-"       # PDF magic
-        assert len(pdf) > 2000
+    def test_zh(self):
+        pdf = generate_receipt_pdf(order=_order(), user={"email": "u@x.com"}, lang="zh-TW")
+        assert pdf[:5] == b"%PDF-" and len(pdf) > 2000
 
-    def test_extra_quota_pdf(self):
-        pdf = generate_receipt_pdf(
-            order=_order(type="extra_quota", tier=None, billing_cycle=None, amount_twd=39, extra_duration_minutes=60),
-            user={"email": "u@x.com"},
-        )
+    def test_en(self):
+        pdf = generate_receipt_pdf(order=_order(), user={"email": "u@x.com"}, lang="en")
+        assert pdf[:5] == b"%PDF-" and len(pdf) > 2000
+
+    def test_default_lang(self):
+        pdf = generate_receipt_pdf(order=_order(), user={"email": "u@x.com"})
         assert pdf[:5] == b"%PDF-"
 
     def test_missing_fields_no_crash(self):
-        pdf = generate_receipt_pdf(order={"merchant_order_no": "X", "amount_twd": 0}, user={})
+        pdf = generate_receipt_pdf(order={"merchant_order_no": "X", "amount_twd": 0}, user={}, lang="en")
         assert pdf[:5] == b"%PDF-"

@@ -115,7 +115,7 @@ import { useDateFormatter } from '../composables/useDateFormatter'
 import PastDueBanner from './PastDueBanner.vue'
 import CancelConfirmModal from './CancelConfirmModal.vue'
 
-const { t: $t } = useI18n()
+const { t: $t, locale } = useI18n()
 const { formatDate: formatDateTz } = useDateFormatter()
 const authStore = useAuthStore()
 
@@ -145,7 +145,7 @@ async function downloadReceipt(order) {
   const orderNo = order.merchant_order_no
   downloadingReceipt.value = orderNo
   try {
-    const blob = await authStore.getReceipt(orderNo)
+    const blob = await authStore.getReceipt(orderNo, locale.value)
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url

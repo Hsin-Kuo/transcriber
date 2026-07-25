@@ -654,18 +654,25 @@ async def get_order_status(
 @router.get("/order/{order_no}/receipt")
 async def download_receipt(
     order_no: str,
+    lang: Optional[str] = None,
     current_user: dict = Depends(get_current_user),
     db=Depends(get_database),
 ):
-    """下載付款收據 PDF（付款證明，非統一發票）。僅限本人的已付款訂單。"""
+    """下載付款收據 PDF（付款證明，非統一發票）。僅限本人的已付款訂單。
+
+    lang：'zh-TW' | 'en'；未指定時用使用者語言偏好，預設繁中。
+    """
     order = await OrderRepository(db).get_by_order_no(order_no)
     if not order or order.get("user_id") != str(current_user["_id"]):
         raise api_error("ORDER_NOT_FOUND", "Order not found", 404)
     if order.get("status") != "paid":
         raise api_error("ORDER_NOT_PAID", "Receipt available only for paid orders", 400)
 
+    if lang not in ("zh-TW", "en"):
+        lang = (current_user.get("preferences") or {}).get("language", "zh-TW")
+
     from ..utils.pdf.receipt_generator import generate_receipt_pdf
-    pdf = generate_receipt_pdf(order=order, user=current_user)
+    pdf = generate_receipt_pdf(order=order, user=current_user, lang=lang)
     return Response(
         content=pdf,
         media_type="application/pdf",
