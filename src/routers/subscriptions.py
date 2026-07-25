@@ -633,6 +633,24 @@ async def purchase_extra_quota(
     }
 
 
+@router.get("/order/{order_no}")
+async def get_order_status(
+    order_no: str,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database),
+):
+    """查單一訂單狀態/類型（付款完成頁輪詢用）。只能查自己的單。"""
+    order = await OrderRepository(db).get_by_order_no(order_no)
+    if not order or order.get("user_id") != str(current_user["_id"]):
+        raise api_error("ORDER_NOT_FOUND", "Order not found", 404)
+    return {
+        "order_no": order_no,
+        "type": order.get("type"),
+        "status": order.get("status"),
+        "tier": order.get("tier"),
+    }
+
+
 @router.get("/tiers")
 async def list_tiers():
     """方案功能與額度（feature flags + limits）的唯一真實來源，供前端方案頁顯示。

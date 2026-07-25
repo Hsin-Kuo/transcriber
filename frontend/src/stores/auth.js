@@ -406,6 +406,12 @@ export const useAuthStore = defineStore('auth', () => {
     return response.data
   }
 
+  // 查單一訂單狀態/類型（付款完成頁輪詢用）→ { order_no, type, status, tier }
+  async function getOrder(orderNo) {
+    const response = await api.get(`/subscriptions/order/${orderNo}`)
+    return response.data
+  }
+
   async function purchaseExtraQuota(packageId, quantity = 1, invoiceData = {}) {
     const response = await api.post('/subscriptions/purchase-extra', { package_id: packageId, quantity, ...invoiceData })
     return response.data  // { form, order_no }
@@ -534,6 +540,7 @@ export const useAuthStore = defineStore('auth', () => {
     reactivateSubscription,
     changePlan,
     cancelPlanChange,
+    getOrder,
     purchaseExtraQuota,
     getPackages,
     getTiers,
