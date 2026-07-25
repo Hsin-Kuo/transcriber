@@ -180,6 +180,15 @@ async def _attempt_charge(db, user: dict) -> None:
 
     status_code = resp.get("statusCode")
     if status_code == "Success":
+        # 存卡別/末四碼供收據用（request-by-cardToken 回應含 cardInfo）
+        ci = resp.get("cardInfo") or {}
+        card_updates = {}
+        if ci.get("cardBrand"):
+            card_updates["card_brand"] = str(ci["cardBrand"])
+        if ci.get("lastFour"):
+            card_updates["card_last4"] = str(ci["lastFour"])
+        if card_updates:
+            await order_repo.update_by_order_no(order_no, card_updates)
         await build_order_settlement(db).settle(PaymentNotification(
             order_no=order_no, success=True, is_first_payment=False,
             trade_id=resp.get("tradeId") or "",

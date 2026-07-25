@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from src.utils.pdf.receipt_generator import (  # noqa: E402
-    generate_receipt_pdf, _item_desc, _invoice_line, _lang,
+    generate_receipt_pdf, _item_desc, _invoice_line, _payment_method, _lang,
 )
 
 ZH = _lang("zh-TW")
@@ -56,6 +56,19 @@ class TestInvoiceLine:
 
     def test_none(self):
         assert _invoice_line({}, ZH) is None
+
+
+class TestPaymentMethod:
+    def test_brand_and_last4(self):
+        assert _payment_method({"card_brand": "VISA", "card_last4": "8452"}, ZH).endswith("VISA - 8452")
+        assert _payment_method({"card_brand": "MasterCard", "card_last4": "1234"}, EN).endswith("MasterCard - 1234")
+
+    def test_last4_only(self):
+        assert "•••• 8452" in _payment_method({"card_last4": "8452"}, ZH)
+
+    def test_fallback(self):
+        assert "信用卡" in _payment_method({}, ZH)
+        assert "Credit Card" in _payment_method({}, EN)
 
 
 class TestGeneratePdf:

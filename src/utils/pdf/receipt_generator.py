@@ -43,7 +43,8 @@ _STR = {
         "item": "項目",
         "amount": "金額",
         "total": "合計",
-        "payment": "付款方式　信用卡",
+        "payment_label": "付款方式",
+        "credit_card": "信用卡",
         "carrier": "手機條碼載具",
         "uni_no": "統一編號",
         "disclaimer": "本收據為付款證明，非統一發票；統一發票將另行開立。",
@@ -67,7 +68,8 @@ _STR = {
         "item": "Item",
         "amount": "Amount",
         "total": "Total",
-        "payment": "Payment Method   Credit Card",
+        "payment_label": "Payment Method",
+        "credit_card": "Credit Card",
         "carrier": "Mobile Barcode Carrier",
         "uni_no": "Tax ID",
         "disclaimer": "This is a payment receipt, not an official tax invoice (GUI); a tax invoice will be issued separately.",
@@ -150,6 +152,19 @@ def _item_desc(order: dict, s: dict) -> str:
     if t == "upgrade_subscription":
         return s["upgrade_fmt"].format(tier=tier)
     return s["sub_fmt"].format(tier=tier, cycle=cycle)
+
+
+def _payment_method(order: dict, s: dict) -> str:
+    """付款方式行：有卡別+末四碼 → 「VISA - 8452」；否則「信用卡 / Credit Card」。"""
+    brand = order.get("card_brand")
+    last4 = order.get("card_last4")
+    if brand and last4:
+        method = f"{brand} - {last4}"
+    elif last4:
+        method = f"•••• {last4}"
+    else:
+        method = s["credit_card"]
+    return f"{s['payment_label']}　{method}"
 
 
 def _invoice_line(user: dict, s: dict) -> Optional[str]:
@@ -252,7 +267,7 @@ def generate_receipt_pdf(*, order: dict, user: dict, lang: str = "zh-TW") -> byt
     ]))
     story.append(total)
     story.append(Spacer(1, 2 * mm))
-    story.append(Paragraph(s["payment"], base))
+    story.append(Paragraph(_payment_method(order, s), base))
     story.append(Spacer(1, 10 * mm))
 
     story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#e0e0e0")))

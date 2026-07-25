@@ -275,12 +275,21 @@ async def pay(
             message=resp.get("message"),
         )
 
-    # 捕捉 cardToken（僅在 3D 成功後才有效；settle 時才搬進 subscription）。存於 order。
+    # 捕捉 cardToken（僅在 3D 成功後才有效；settle 時才搬進 subscription）+ 卡別/末四碼（收據用）。存於 order。
     card_token = _find(resp, "cardtoken")
+    order_updates = {}
     if card_token:
-        await order_repo.update_by_order_no(order["merchant_order_no"], {"card_token": card_token})
+        order_updates["card_token"] = card_token
     else:
         log.warning("subscription.pay.no_card_token", order_no=order["merchant_order_no"])
+    card_brand = _find(resp, "cardbrand")
+    card_last4 = _find(resp, "lastfour")
+    if card_brand:
+        order_updates["card_brand"] = str(card_brand)
+    if card_last4:
+        order_updates["card_last4"] = str(card_last4)
+    if order_updates:
+        await order_repo.update_by_order_no(order["merchant_order_no"], order_updates)
 
     payment_url = _find(resp, "paymenturl")
     if payment_url:
