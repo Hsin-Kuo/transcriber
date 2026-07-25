@@ -412,6 +412,13 @@ export const useAuthStore = defineStore('auth', () => {
     return response.data
   }
 
+  // 下載付款收據 PDF → Blob（lang: 'zh-TW' | 'en'，未指定用使用者語言偏好）
+  async function getReceipt(orderNo, lang) {
+    const q = lang ? `?lang=${encodeURIComponent(lang)}` : ''
+    const response = await api.get(`/subscriptions/order/${orderNo}/receipt${q}`, { responseType: 'blob' })
+    return response.data
+  }
+
   async function purchaseExtraQuota(packageId, quantity = 1, invoiceData = {}) {
     const response = await api.post('/subscriptions/purchase-extra', { package_id: packageId, quantity, ...invoiceData })
     return response.data  // { form, order_no }
@@ -541,6 +548,7 @@ export const useAuthStore = defineStore('auth', () => {
     changePlan,
     cancelPlanChange,
     getOrder,
+    getReceipt,
     purchaseExtraQuota,
     getPackages,
     getTiers,

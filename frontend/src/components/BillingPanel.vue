@@ -69,6 +69,16 @@
                 <span class="order-status" :class="order.status === 'paid' ? 'status-paid' : 'status-failed'">
                   {{ order.status === 'paid' ? $t('userSettings.subscription.orderStatusPaid') : $t('userSettings.subscription.orderStatusFailed') }}
                 </span>
+                <button
+                  v-if="order.status === 'paid'"
+                  class="receipt-btn"
+                  :disabled="downloadingReceipt === order.merchant_order_no"
+                  :title="$t('userSettings.subscription.downloadReceipt')"
+                  @click="downloadReceipt(order)"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                  {{ $t('userSettings.subscription.receipt') }}
+                </button>
               </div>
             </div>
           </div>
@@ -105,7 +115,7 @@ import { useDateFormatter } from '../composables/useDateFormatter'
 import PastDueBanner from './PastDueBanner.vue'
 import CancelConfirmModal from './CancelConfirmModal.vue'
 
-const { t: $t } = useI18n()
+const { t: $t, locale } = useI18n()
 const { formatDate: formatDateTz } = useDateFormatter()
 const authStore = useAuthStore()
 
@@ -125,10 +135,31 @@ const skip = ref(0)
 const canceling = ref(false)
 const reactivating = ref(false)
 const showCancelConfirm = ref(false)
+const downloadingReceipt = ref(null)
 const cancelPeriodEndLabel = computed(() => {
   const ts = authStore.subscription?.current_period_end
   return ts ? formatDateTz(ts) : ''
 })
+
+async function downloadReceipt(order) {
+  const orderNo = order.merchant_order_no
+  downloadingReceipt.value = orderNo
+  try {
+    const blob = await authStore.getReceipt(orderNo, locale.value)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `receipt_${orderNo}.pdf`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    // best-effort：失敗不阻斷
+  } finally {
+    downloadingReceipt.value = null
+  }
+}
 
 const currentTierLabel = computed(() => {
   const tier = authStore.subscription?.tier
@@ -469,6 +500,25 @@ watch(() => props.modelValue, (open) => {
   background: rgba(220, 53, 69, 0.1);
   color: var(--color-danger, #dc3545);
 }
+
+.receipt-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: transparent;
+  border: 1px solid var(--color-divider, rgba(163, 177, 198, 0.35));
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--main-text-light);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.receipt-btn:hover:not(:disabled) {
+  border-color: var(--main-primary);
+  color: var(--main-primary);
+}
+.receipt-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .load-more-btn {
   margin-top: 12px;

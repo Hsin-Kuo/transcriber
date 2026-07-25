@@ -10,7 +10,7 @@ import json
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -275,12 +275,21 @@ async def pay(
             message=resp.get("message"),
         )
 
-    # 捕捉 cardToken（僅在 3D 成功後才有效；settle 時才搬進 subscription）。存於 order。
+    # 捕捉 cardToken（僅在 3D 成功後才有效；settle 時才搬進 subscription）+ 卡別/末四碼（收據用）。存於 order。
     card_token = _find(resp, "cardtoken")
+    order_updates = {}
     if card_token:
-        await order_repo.update_by_order_no(order["merchant_order_no"], {"card_token": card_token})
+        order_updates["card_token"] = card_token
     else:
         log.warning("subscription.pay.no_card_token", order_no=order["merchant_order_no"])
+    card_brand = _find(resp, "cardbrand")
+    card_last4 = _find(resp, "lastfour")
+    if card_brand:
+        order_updates["card_brand"] = str(card_brand)
+    if card_last4:
+        order_updates["card_last4"] = str(card_last4)
+    if order_updates:
+        await order_repo.update_by_order_no(order["merchant_order_no"], order_updates)
 
     payment_url = _find(resp, "paymenturl")
     if payment_url:
@@ -621,6 +630,8 @@ async def purchase_extra_quota(
         "amount_twd": total_amount,
         "status": "pending",
         "card_token": None,
+        "quantity": qty,                      # 收據明細用
+        "unit_price_twd": pkg["price_twd"],    # 單價（收據明細用）
         "extra_duration_minutes": unit * qty if pkg["type"] == "duration" else 0,
         "extra_ai_summaries": unit * qty if pkg["type"] == "ai_summaries" else 0,
     })
@@ -649,6 +660,35 @@ async def get_order_status(
         "status": order.get("status"),
         "tier": order.get("tier"),
     }
+
+
+@router.get("/order/{order_no}/receipt")
+async def download_receipt(
+    order_no: str,
+    lang: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database),
+):
+    """下載付款收據 PDF（付款證明，非統一發票）。僅限本人的已付款訂單。
+
+    lang：'zh-TW' | 'en'；未指定時用使用者語言偏好，預設繁中。
+    """
+    order = await OrderRepository(db).get_by_order_no(order_no)
+    if not order or order.get("user_id") != str(current_user["_id"]):
+        raise api_error("ORDER_NOT_FOUND", "Order not found", 404)
+    if order.get("status") != "paid":
+        raise api_error("ORDER_NOT_PAID", "Receipt available only for paid orders", 400)
+
+    if lang not in ("zh-TW", "en"):
+        lang = (current_user.get("preferences") or {}).get("language", "zh-TW")
+
+    from ..utils.pdf.receipt_generator import generate_receipt_pdf
+    pdf = generate_receipt_pdf(order=order, user=current_user, lang=lang)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="receipt_{order_no}.pdf"'},
+    )
 
 
 @router.get("/tiers")

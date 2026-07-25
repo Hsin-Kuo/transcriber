@@ -264,6 +264,8 @@
       "ordersEmpty": "尚無付款紀錄",
       "ordersLoadMore": "載入更多",
       "orderStatusPaid": "已付款",
+      "receipt": "帳單",
+      "downloadReceipt": "下載付款收據 PDF",
       "orderStatusFailed": "失敗",
       "orderTypeSubscription": "{tier} 方案（{cycle}）",
       "orderTypeUpgrade": "升級至 {tier}（{cycle}）",
