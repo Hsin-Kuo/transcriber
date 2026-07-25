@@ -13,6 +13,7 @@ from typing import Optional
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas as _canvas
 from reportlab.platypus import (
     HRFlowable,
     Image,
@@ -47,6 +48,7 @@ _STR = {
         "uni_no": "統一編號",
         "disclaimer": "本收據為付款證明，非統一發票；統一發票將另行開立。",
         "brand": "SoundLite　語音轉文字平台　soundlite.app",
+        "page_fmt": "第 {page} 頁，共 {total} 頁",
         "monthly": "月繳",
         "yearly": "年繳",
         "sub_fmt": "{tier} 方案（{cycle}）訂閱",
@@ -70,6 +72,7 @@ _STR = {
         "uni_no": "Tax ID",
         "disclaimer": "This is a payment receipt, not an official tax invoice (GUI); a tax invoice will be issued separately.",
         "brand": "SoundLite   Speech-to-Text Platform   soundlite.app",
+        "page_fmt": "Page {page} of {total}",
         "monthly": "Monthly",
         "yearly": "Yearly",
         "sub_fmt": "{tier} Plan ({cycle}) Subscription",
@@ -83,6 +86,43 @@ _STR = {
 
 def _lang(lang: Optional[str]) -> dict:
     return _STR.get(lang or "zh-TW", _STR["zh-TW"])
+
+
+def _make_numbered_canvas(page_fmt: str):
+    """回傳一個 Canvas 子類：兩趟繪製，於每頁底部畫分隔線 + 「Page X of Y」（需總頁數）。"""
+    class _NumberedCanvas(_canvas.Canvas):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._saved_states = []
+
+        def showPage(self):
+            self._saved_states.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            total = len(self._saved_states)
+            for state in self._saved_states:
+                self.__dict__.update(state)
+                self._draw_page_footer(total)
+                super().showPage()
+            super().save()
+
+        def _draw_page_footer(self, total):
+            w, _ = self._pagesize
+            gray = colors.HexColor("#aaaaaa")
+            # 分隔線（與上方頁尾內容區隔）
+            self.setStrokeColor(gray)
+            self.setLineWidth(0.5)
+            self.line(22 * mm, 14 * mm, w - 22 * mm, 14 * mm)
+            # 頁碼
+            self.setFont(FONT_TC, 8)
+            self.setFillColor(gray)
+            self.drawCentredString(
+                w / 2, 9 * mm,
+                page_fmt.format(page=self._pageNumber, total=total),
+            )
+
+    return _NumberedCanvas
 
 
 def _fmt_dt(ts) -> str:
@@ -220,5 +260,5 @@ def generate_receipt_pdf(*, order: dict, user: dict, lang: str = "zh-TW") -> byt
     story.append(Paragraph(s["disclaimer"], footer))
     story.append(Paragraph(s["brand"], footer))
 
-    doc.build(story)
+    doc.build(story, canvasmaker=_make_numbered_canvas(s["page_fmt"]))
     return buf.getvalue()
