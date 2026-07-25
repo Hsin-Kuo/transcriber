@@ -399,6 +399,13 @@ export const useAuthStore = defineStore('auth', () => {
     return response.data  // { form, order_no, action, ... }
   }
 
+  // 取消已排定的期末方案變更（降級）→ 維持目前方案
+  async function cancelPlanChange() {
+    const response = await api.post('/subscriptions/cancel-plan-change')
+    await fetchCurrentUser()
+    return response.data
+  }
+
   async function purchaseExtraQuota(packageId, quantity = 1, invoiceData = {}) {
     const response = await api.post('/subscriptions/purchase-extra', { package_id: packageId, quantity, ...invoiceData })
     return response.data  // { form, order_no }
@@ -526,6 +533,7 @@ export const useAuthStore = defineStore('auth', () => {
     cancelSubscription,
     reactivateSubscription,
     changePlan,
+    cancelPlanChange,
     purchaseExtraQuota,
     getPackages,
     getTiers,

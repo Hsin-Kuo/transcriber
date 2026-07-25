@@ -33,6 +33,14 @@
         </button>
       </div>
 
+      <!-- 已排定期末方案變更（降級）：提示 + 取消排定 -->
+      <div v-if="pendingPlanTier" class="pending-change-notice">
+        <span class="pending-change-text">{{ pendingChangeText }}</span>
+        <button class="pending-change-undo" :disabled="cancelingChange" @click="onCancelPlanChange">
+          {{ cancelingChange ? $t('userSettings.planPanel.processing') : $t('userSettings.planPanel.cancelChangeBtn') }}
+        </button>
+      </div>
+
       <!-- Plans -->
       <div class="plans-grid">
         <div
@@ -166,6 +174,27 @@ const cancelScheduled = computed(() => authStore.subscription?.cancel_at_period_
 
 // 已排定期末降級：目標方案按鈕要標「已排定變更」且 disable（避免重複送出）
 const pendingPlanTier = computed(() => authStore.subscription?.pending_plan_change?.tier || null)
+const cancelingChange = ref(false)
+const pendingChangeText = computed(() => {
+  const t = pendingPlanTier.value
+  if (!t) return ''
+  const planName = $t('userSettings.planPanel.' + t)
+  const periodEnd = authStore.subscription?.current_period_end
+  const dateStr = periodEnd ? formatDateTz(periodEnd, { month: 'long', day: 'numeric' }) : ''
+  return dateStr
+    ? $t('userSettings.planPanel.pendingChangeDated', { plan: planName, date: dateStr })
+    : $t('userSettings.planPanel.pendingChange', { plan: planName })
+})
+async function onCancelPlanChange() {
+  cancelingChange.value = true
+  try {
+    await authStore.cancelPlanChange()  // store 內已 fetchCurrentUser
+  } catch (e) {
+    // 靜默：banner 會依 store 狀態自動更新
+  } finally {
+    cancelingChange.value = false
+  }
+}
 
 // 取消訂閱確認 modal（含權益說明）
 const showCancelConfirm = ref(false)
@@ -405,6 +434,35 @@ function getPrice(plan) {
 }
 
 /* Plans grid */
+.pending-change-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 28px 16px;
+  padding: 12px 16px;
+  background: #fff3cd;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  color: #856404;
+  font-size: 13px;
+}
+.pending-change-text { flex: 1; min-width: 200px; }
+.pending-change-undo {
+  padding: 6px 14px;
+  border: 1px solid #b8762d;
+  border-radius: 6px;
+  background: transparent;
+  color: #b8762d;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pending-change-undo:hover:not(:disabled) { background: rgba(184, 118, 45, 0.1); }
+.pending-change-undo:disabled { opacity: 0.6; cursor: not-allowed; }
+
 .plans-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

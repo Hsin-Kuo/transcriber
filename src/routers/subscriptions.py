@@ -560,6 +560,29 @@ async def change_plan(
     }
 
 
+@router.post("/cancel-plan-change")
+async def cancel_plan_change(
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database),
+):
+    """取消已排定的期末方案變更（降級）→ 維持目前方案。
+
+    pending_plan_change 尚未扣款（降級到期才扣），故清除即可維持現狀。
+    """
+    user_repo = UserRepository(db)
+    user_id = str(current_user["_id"])
+    full_user = await user_repo.get_by_id(user_id)
+    sub = full_user.get("subscription", {}) if full_user else {}
+
+    if not sub.get("pending_plan_change"):
+        raise api_error("SUBSCRIPTION_NO_PENDING_CHANGE", "No scheduled plan change", 400)
+
+    sub["pending_plan_change"] = None
+    sub["updated_at"] = get_utc_timestamp()
+    await user_repo.update_subscription(user_id, sub)
+    return {"message": "已取消排定的方案變更，維持目前方案"}
+
+
 @router.post("/purchase-extra")
 async def purchase_extra_quota(
     request: PurchaseExtraRequest,

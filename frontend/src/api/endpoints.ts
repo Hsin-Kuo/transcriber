@@ -85,6 +85,7 @@ export const NEW_ENDPOINTS = {
     cancel: '/subscriptions/cancel',
     reactivate: '/subscriptions/reactivate',
     change: '/subscriptions/change',
+    cancelPlanChange: '/subscriptions/cancel-plan-change',
     purchaseExtra: '/subscriptions/purchase-extra',
     packages: '/subscriptions/packages',
     tiers: '/subscriptions/tiers',
