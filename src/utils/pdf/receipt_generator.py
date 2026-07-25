@@ -35,7 +35,7 @@ _TW_OFFSET = timedelta(hours=8)  # Asia/Taipei（無 DST）
 _STR = {
     "zh-TW": {
         "title": "付款收據",
-        "receipt_no": "收據編號",
+        "receipt_no": "訂單編號",
         "date": "付款日期",
         "trade_no": "交易序號",
         "buyer": "買受人",
@@ -66,7 +66,7 @@ _STR = {
     },
     "en": {
         "title": "Payment Receipt",
-        "receipt_no": "Receipt No.",
+        "receipt_no": "Order No.",
         "date": "Payment Date",
         "trade_no": "Transaction ID",
         "buyer": "Billed To",
@@ -216,6 +216,7 @@ def generate_receipt_pdf(*, order: dict, user: dict, lang: str = "zh-TW") -> byt
     label_r = ParagraphStyle("label_r", parent=label, alignment=2)
     footer = ParagraphStyle("footer", parent=base, fontSize=8.5, leading=13, textColor=colors.HexColor("#888888"))
     amount_r = ParagraphStyle("amt", parent=base, alignment=2)
+    order_no_r = ParagraphStyle("orderno", parent=base, alignment=2, fontSize=9, leading=12)
     total_style = ParagraphStyle("total", parent=base, fontSize=13, leading=18, textColor=colors.black)
     total_r = ParagraphStyle("totalr", parent=total_style, alignment=2)
 
@@ -321,9 +322,9 @@ def generate_receipt_pdf(*, order: dict, user: dict, lang: str = "zh-TW") -> byt
              Paragraph(s["amount_paid_col"], label_r), Paragraph(s["receipt_no"], label_r)],
             [Paragraph(_payment_method(order, s), base),
              Paragraph(_fmt_date(order.get("paid_at") or order.get("created_at")), base),
-             Paragraph(money(amt), amount_r), Paragraph(order.get("merchant_order_no", "-"), amount_r)],
+             Paragraph(money(amt), amount_r), Paragraph(order.get("merchant_order_no", "-"), order_no_r)],
         ],
-        colWidths=[None, 30 * mm, 26 * mm, 42 * mm],
+        colWidths=[None, 24 * mm, 24 * mm, 54 * mm],
     )
     ph.setStyle(TableStyle([
         ("LINEBELOW", (0, 0), (-1, 0), 0.5, colors.HexColor("#cccccc")),
