@@ -560,6 +560,29 @@ async def change_plan(
     }
 
 
+@router.post("/cancel-plan-change")
+async def cancel_plan_change(
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database),
+):
+    """取消已排定的期末方案變更（降級）→ 維持目前方案。
+
+    pending_plan_change 尚未扣款（降級到期才扣），故清除即可維持現狀。
+    """
+    user_repo = UserRepository(db)
+    user_id = str(current_user["_id"])
+    full_user = await user_repo.get_by_id(user_id)
+    sub = full_user.get("subscription", {}) if full_user else {}
+
+    if not sub.get("pending_plan_change"):
+        raise api_error("SUBSCRIPTION_NO_PENDING_CHANGE", "No scheduled plan change", 400)
+
+    sub["pending_plan_change"] = None
+    sub["updated_at"] = get_utc_timestamp()
+    await user_repo.update_subscription(user_id, sub)
+    return {"message": "已取消排定的方案變更，維持目前方案"}
+
+
 @router.post("/purchase-extra")
 async def purchase_extra_quota(
     request: PurchaseExtraRequest,
@@ -607,6 +630,24 @@ async def purchase_extra_quota(
         "amount": total_amount,
         "publishable_key": svc.publishable_key,
         "sdk_server_type": svc.sdk_server_type,
+    }
+
+
+@router.get("/order/{order_no}")
+async def get_order_status(
+    order_no: str,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database),
+):
+    """查單一訂單狀態/類型（付款完成頁輪詢用）。只能查自己的單。"""
+    order = await OrderRepository(db).get_by_order_no(order_no)
+    if not order or order.get("user_id") != str(current_user["_id"]):
+        raise api_error("ORDER_NOT_FOUND", "Order not found", 404)
+    return {
+        "order_no": order_no,
+        "type": order.get("type"),
+        "status": order.get("status"),
+        "tier": order.get("tier"),
     }
 
 

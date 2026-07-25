@@ -113,7 +113,7 @@
 
         <div class="plan-indicator-actions">
           <button class="plan-btn plan-btn-outline" @click="openPricing">{{ $t('userSettings.showPlan') }}</button>
-          <button class="plan-btn plan-btn-primary" @click="uiStore.openPlanPanel()"><svg class="plan-btn-icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M8,1 A7,7 0 1,0 8,15 A7,7 0 1,0 8,1 Z M8,6.5 A1.5,1.5 0 1,1 8,9.5 A1.5,1.5 0 1,1 8,6.5 Z M7.5,1 L8.5,1 L8.5,5.5 L7.5,5.5 Z" fill="currentColor" fill-rule="evenodd" /></svg>{{ $t('userSettings.upgrade') }}</button>
+          <button class="plan-btn plan-btn-primary" @click="uiStore.openPlanPanel()"><svg class="plan-btn-icon" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M8,1 A7,7 0 1,0 8,15 A7,7 0 1,0 8,1 Z M8,6.5 A1.5,1.5 0 1,1 8,9.5 A1.5,1.5 0 1,1 8,6.5 Z M7.5,1 L8.5,1 L8.5,5.5 L7.5,5.5 Z" fill="currentColor" fill-rule="evenodd" /></svg>{{ currentTier === 'free' ? $t('userSettings.upgrade') : $t('userSettings.managePlan') }}</button>
         </div>
 
         <!-- Subscription management (only for paid users) -->
