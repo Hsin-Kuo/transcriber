@@ -205,6 +205,10 @@ invoice_snapshot: {
 
 repository：`order_repo` 加 admin 全域分頁查詢。
 
+PR-B 實作註記（PR-A 複審遺留）：
+- `invoice_service.reissue()` 對非法狀態/查無 order 會 `raise ValueError`——admin router 要對映成 4xx，別讓它變 500。
+- 上線前跑一次 prod 檢查：`users` 裡 `invoice_info.type=="company"` 且 `company_tax_id` 或 `company_name` 為空的筆數（存量髒資料會在開票時走 needs_manual 分流，量大要先清）。
+
 ### 7.2 admin-frontend
 
 - Router 加 `/orders`；AdminNav 加 `v-if="authStore.can(PERM.BILLING_READ)"`。

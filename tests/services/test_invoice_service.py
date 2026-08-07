@@ -453,6 +453,35 @@ class TestSweep:
         assert counts["order_missing"] == 1
         attempt.assert_not_awaited()
 
+    async def test_poison_doc_does_not_stall_the_whole_sweep(self, monkeypatch):
+        """finding #3 回歸測試：iter_due_for_retry 沒有 sort，若一筆炸掉的 doc 不推進
+        next_retry_at，它會每輪都排最前面、擋住後面所有筆。這裡讓第一筆 order_repo 查詢
+        直接丟例外（模擬任何一步炸掉），驗證第二筆仍被處理，且第一筆被標記 failed 並排入
+        下一個 backoff（不再卡在最前面）。
+        """
+        now = get_utc_timestamp()
+        good_order = {"merchant_order_no": "O2"}
+        repo, order_repo, attempt, alert = self._patch(monkeypatch, orders={"O2": good_order})
+        order_repo.get_by_order_no = AsyncMock(side_effect=[RuntimeError("db hiccup"), good_order])
+        await repo.create({"order_no": "O1", "user_id": "u1", "data_id": "d1", "status": "failed",
+                            "buyer": {}, "amount_twd": 1, "attempts": 0,
+                            "next_retry_at": now - 10, "deadline_at": now + 999999,
+                            "first_attempt_at": now})
+        await repo.create({"order_no": "O2", "user_id": "u1", "data_id": "d2", "status": "failed",
+                            "buyer": {}, "amount_twd": 1,
+                            "next_retry_at": now - 10, "deadline_at": now + 999999,
+                            "first_attempt_at": now})
+        counts = await isvc.run_invoice_retry_sweep(MagicMock())
+        assert counts["errored"] == 1
+        assert counts["retried"] == 1  # 第二筆仍正常處理，沒被第一筆拖垮
+        attempt.assert_awaited_once()
+
+        poisoned = await repo.get_by_id(next(d["_id"] for d in repo.collection.docs.values() if d["order_no"] == "O1"))
+        assert poisoned["status"] == "failed"
+        assert poisoned["attempts"] == 1
+        assert poisoned["next_retry_at"] > now  # 已推進到下一個 backoff，不再排最前面
+        assert poisoned["claimed_until"] is None
+
 
 # ── _attempt_issue：分類分流 + 降級重開 + -10072 + 網路例外 ───────────────────
 
@@ -559,6 +588,47 @@ class TestAttemptIssue:
         saved = await repo.get_by_id(doc["_id"])
         assert saved["status"] == "needs_manual"
 
+    async def test_local_carrier_format_error_also_degrades_not_needs_manual(self, monkeypatch):
+        """finding #2 回歸測試：本地 sanity check（build_invoice_fields）抓到的載具格式錯，
+        要跟 SmilePay 回 -10056 一樣走自動降級，不是就地 needs_manual——本地檢查根本沒送出
+        API 呼叫，第一次 issue_invoice 呼叫就該是降級後、不帶載具的版本。
+        """
+        repo, _ = _repo()
+        svc = MagicMock()
+        svc.issue_invoice = AsyncMock(return_value={
+            "Status": "0", "InvoiceNumber": "AB00000002", "RandomNumber": "9999", "InvoiceType": "B2C",
+        })
+        monkeypatch.setattr(isvc, "get_smilepay_service", lambda: svc)
+        # carrier_num 本地格式就不合法（"BAD" 不符 /[0-9A-Z+\-.]{7}），build_invoice_fields
+        # 會直接拋 InvoiceFieldError("carrier_bad", ...)，不曾送出 API。
+        doc = await self._doc(repo, buyer={"invoice_type": "personal", "carrier_num": "BAD"})
+        await isvc._attempt_issue(MagicMock(), repo, doc, _order(), {"email": "a@b.com"})
+        # 只呼叫一次 API：本地檢查失敗後直接降級重試，降級後的欄位合法可一次成功
+        assert svc.issue_invoice.await_count == 1
+        sent_fields = svc.issue_invoice.await_args.kwargs
+        assert "CarrierType" not in sent_fields  # 降級後才送出的請求不帶載具
+        saved = await repo.get_by_id(doc["_id"])
+        assert saved["status"] == "issued"
+        assert saved["data_id"] == "SL-O1-B2C"
+        assert saved["buyer"]["carrier_num"] is None
+
+    async def test_company_carrier_bad_from_api_does_not_degrade(self, monkeypatch):
+        """finding #7 護欄：company（B2B）買受人若從 API 收到載具類錯誤碼，不可自動降級成
+        無統編 B2C（企業要統編抵稅）——直接 needs_manual。正常情況 B2B 請求根本不帶
+        CarrierType，這裡模擬 API 端異常回應，驗證保守防線確實生效。
+        """
+        repo, _ = _repo()
+        svc = MagicMock()
+        svc.issue_invoice = AsyncMock(return_value={"Status": "-10052", "Desc": "carrier bad"})
+        monkeypatch.setattr(isvc, "get_smilepay_service", lambda: svc)
+        doc = await self._doc(repo, buyer={"invoice_type": "company", "company_tax_id": "12345678",
+                                           "company_name": "測試公司"})
+        await isvc._attempt_issue(MagicMock(), repo, doc, _order(), {"email": "a@b.com"})
+        assert svc.issue_invoice.await_count == 1  # 沒有降級重試的第二次呼叫
+        saved = await repo.get_by_id(doc["_id"])
+        assert saved["status"] == "needs_manual"
+        assert saved["buyer"]["invoice_type"] == "company"  # 未被改成 personal
+
     async def test_read_timeout_needs_manual(self, monkeypatch):
         repo, _ = _repo()
         self._svc(monkeypatch, side_effect=httpx.ReadTimeout("timeout"))
@@ -586,13 +656,14 @@ class TestIssueForOrder:
         called = {"upsert": False}
 
         repo = MagicMock()
-        repo.get_issued_by_order_no = AsyncMock(return_value={"status": "issued"})
+        repo.get_active_by_order_no = AsyncMock(return_value={"status": "issued"})
 
         async def _upsert(**kw):
             called["upsert"] = True
 
         repo.upsert_initial = _upsert
         monkeypatch.setattr(isvc, "InvoiceRepository", lambda db: repo)
+        monkeypatch.setattr(isvc, "UserRepository", lambda db: MagicMock(get_by_id=AsyncMock(return_value={"email": "a@b.com"})))
         attempt = AsyncMock()
         monkeypatch.setattr(isvc, "_attempt_issue", attempt)
 
@@ -600,9 +671,9 @@ class TestIssueForOrder:
         assert called["upsert"] is False
         attempt.assert_not_awaited()
 
-    async def test_builds_doc_and_attempts(self, monkeypatch):
+    async def test_builds_doc_and_attempts_when_none_exists(self, monkeypatch):
         repo = MagicMock()
-        repo.get_issued_by_order_no = AsyncMock(return_value=None)
+        repo.get_active_by_order_no = AsyncMock(return_value=None)
         repo.upsert_initial = AsyncMock(return_value={"_id": "iid1"})
         monkeypatch.setattr(isvc, "InvoiceRepository", lambda db: repo)
         monkeypatch.setattr(isvc, "UserRepository", lambda db: MagicMock(get_by_id=AsyncMock(return_value={"email": "a@b.com"})))
@@ -613,6 +684,44 @@ class TestIssueForOrder:
         attempt.assert_awaited_once()
         kwargs = repo.upsert_initial.await_args.kwargs
         assert kwargs["data_id"] == "SL-SLSUB1234567890"
+
+    async def test_reuses_existing_non_voided_doc_instead_of_upserting(self, monkeypatch):
+        """finding #4 回歸測試：重入（settle 重入或 sweep 二次觸發）不可用固定 data_id
+        重新 upsert——若該 doc 已被降級改過 data_id，會插出第二筆並在下次降級時撞
+        unique index。重入時必須沿用 get_active_by_order_no 找到的既有 doc（原樣，含
+        它可能已經被改過的 data_id）。
+        """
+        existing_doc = {"_id": "iid-existing", "status": "pending", "data_id": "SL-SLSUB1234567890-B2C"}
+        repo = MagicMock()
+        repo.get_active_by_order_no = AsyncMock(return_value=existing_doc)
+        repo.upsert_initial = AsyncMock(side_effect=AssertionError("不該呼叫 upsert_initial"))
+        monkeypatch.setattr(isvc, "InvoiceRepository", lambda db: repo)
+        monkeypatch.setattr(isvc, "UserRepository", lambda db: MagicMock(get_by_id=AsyncMock(return_value={"email": "a@b.com"})))
+        attempt = AsyncMock()
+        monkeypatch.setattr(isvc, "_attempt_issue", attempt)
+
+        await isvc.issue_for_order(MagicMock(), _order())
+        repo.upsert_initial.assert_not_called()
+        attempt.assert_awaited_once()
+        # 傳給 _attempt_issue 的必須是原本那顆 doc（保留其已被改過的 data_id）
+        passed_doc = attempt.await_args.args[2]
+        assert passed_doc["data_id"] == "SL-SLSUB1234567890-B2C"
+
+    async def test_deadline_at_uses_order_paid_at_not_issue_time(self, monkeypatch):
+        """finding #9：deadline 要用 order.paid_at 當基準，不是開票嘗試當下——否則補開
+        舊單（sweep 重試 issue_for_order）算出的 deadline 會被無限往後推，告警永不觸發。
+        """
+        repo = MagicMock()
+        repo.get_active_by_order_no = AsyncMock(return_value=None)
+        repo.upsert_initial = AsyncMock(return_value={"_id": "iid1"})
+        monkeypatch.setattr(isvc, "InvoiceRepository", lambda db: repo)
+        monkeypatch.setattr(isvc, "UserRepository", lambda db: MagicMock(get_by_id=AsyncMock(return_value={"email": "a@b.com"})))
+        monkeypatch.setattr(isvc, "_attempt_issue", AsyncMock())
+
+        paid_at = get_utc_timestamp() - 10000  # 早於「現在」很久（模擬補開舊單）
+        await isvc.issue_for_order(MagicMock(), _order(paid_at=paid_at))
+        kwargs = repo.upsert_initial.await_args.kwargs
+        assert kwargs["deadline_at"] == pytest.approx(paid_at + isvc._DEADLINE_SECONDS_B2C, abs=2)
 
 
 # ── void / reissue ───────────────────────────────────────────────────────────
@@ -647,6 +756,24 @@ class TestVoidAndReissue:
     async def test_reissue_rejects_wrong_status(self):
         with pytest.raises(ValueError):
             await isvc.reissue(MagicMock(), {"status": "issued"})
+
+    async def test_reissue_rejects_when_order_not_found(self, monkeypatch):
+        """finding #6 回歸測試：order 查無時必須拒絕，不可 `order or {}` 續跑——那會用
+        amount_twd=0 組出零元發票送 SmilePay。且不該有任何新 invoice doc 被建立。
+        """
+        repo, _ = _repo()
+        monkeypatch.setattr(isvc, "InvoiceRepository", lambda db: repo)
+        order_repo = MagicMock()
+        order_repo.get_by_order_no = AsyncMock(return_value=None)
+        monkeypatch.setattr(isvc, "OrderRepository", lambda db: order_repo)
+        attempt = AsyncMock()
+        monkeypatch.setattr(isvc, "_attempt_issue", attempt)
+
+        invoice = {"status": "voided", "order_no": "GONE", "user_id": "u1", "amount_twd": 1, "buyer": {}}
+        with pytest.raises(ValueError):
+            await isvc.reissue(MagicMock(), invoice, admin_id="admin1")
+        attempt.assert_not_awaited()
+        assert repo.collection.docs == {}  # 沒有孤兒 invoice doc 被建立
 
     async def test_reissue_concurrent_data_id_collision_retries(self, monkeypatch):
         repo, _ = _repo()

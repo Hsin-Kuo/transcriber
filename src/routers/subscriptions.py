@@ -11,7 +11,7 @@ import json
 from bson import ObjectId
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import RedirectResponse, Response
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional
 
 from ..utils.api_errors import api_error
@@ -74,11 +74,28 @@ def _find(obj, key_lower: str):
 _TAX_ID_PATTERN = r"^\d{8}$"
 _CARRIER_PATTERN = r"^/[0-9A-Z+\-.]{7}$"
 
+# 前端 CheckoutView.buildInvoiceData() 對「未選中那組」欄位固定送 `''`（不是 null/省略，
+# 見 frontend/src/views/CheckoutView.vue）。Optional[str] + Field(pattern=...) 只在值為
+# None 時跳過檢查——空字串仍會進 pattern 比對而 422（string_pattern_mismatch）。
+# 必須在 pattern 檢查「之前」（mode="before"）把空白字串正規化成 None。
+def _blank_to_none(v):
+    if isinstance(v, str) and not v.strip():
+        return None
+    return v
 
-def _require_company_name_if_company(model):
-    """invoice_type=company 時 company_name 必填（設計 §3.3.1）。"""
-    if model.invoice_type == "company" and not (model.company_name or "").strip():
-        raise ValueError("company_name is required when invoice_type is 'company'")
+
+def _require_company_fields_if_company(model):
+    """invoice_type=company 時 company_tax_id + company_name 皆必填（設計 §3.3.1）。
+
+    只驗 company_name 不夠：{invoice_type:"company", company_name:"X"}（缺統編）過去會
+    通過 request 驗證，直到付款成功後開票層才因統編格式錯炸 buyer_bad——應該在建單當下
+    就擋下，不要讓使用者付完錢才發現。
+    """
+    if model.invoice_type == "company":
+        if not (model.company_tax_id or "").strip():
+            raise ValueError("company_tax_id is required when invoice_type is 'company'")
+        if not (model.company_name or "").strip():
+            raise ValueError("company_name is required when invoice_type is 'company'")
     return model
 
 
@@ -92,9 +109,14 @@ class CheckoutRequest(BaseModel):
     company_name: Optional[str] = None
     save_invoice: bool = True
 
+    @field_validator("carrier_type", "carrier_num", "company_tax_id", "company_name", mode="before")
+    @classmethod
+    def _normalize_blank(cls, v):
+        return _blank_to_none(v)
+
     @model_validator(mode="after")
     def _validate_invoice(self) -> "CheckoutRequest":
-        return _require_company_name_if_company(self)
+        return _require_company_fields_if_company(self)
 
 
 class PayRequest(BaseModel):
@@ -112,9 +134,14 @@ class ChangePlanRequest(BaseModel):
     company_name: Optional[str] = None
     save_invoice: bool = True
 
+    @field_validator("carrier_type", "carrier_num", "company_tax_id", "company_name", mode="before")
+    @classmethod
+    def _normalize_blank(cls, v):
+        return _blank_to_none(v)
+
     @model_validator(mode="after")
     def _validate_invoice(self) -> "ChangePlanRequest":
-        return _require_company_name_if_company(self)
+        return _require_company_fields_if_company(self)
 
 
 class PurchaseExtraRequest(BaseModel):
@@ -127,9 +154,14 @@ class PurchaseExtraRequest(BaseModel):
     company_name: Optional[str] = None
     save_invoice: bool = True
 
+    @field_validator("carrier_type", "carrier_num", "company_tax_id", "company_name", mode="before")
+    @classmethod
+    def _normalize_blank(cls, v):
+        return _blank_to_none(v)
+
     @model_validator(mode="after")
     def _validate_invoice(self) -> "PurchaseExtraRequest":
-        return _require_company_name_if_company(self)
+        return _require_company_fields_if_company(self)
 
 
 # ── 發票資訊處理 ─────────────────────────────────────────────────────────────

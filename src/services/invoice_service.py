@@ -102,6 +102,15 @@ def _deadline_seconds(buyer: Dict[str, Any]) -> int:
     return _DEADLINE_SECONDS_B2B if (buyer or {}).get("invoice_type") == "company" else _DEADLINE_SECONDS_B2C
 
 
+def _deadline_at(order: Dict[str, Any], buyer: Dict[str, Any], now: float) -> float:
+    """deadline 基準用 order.paid_at（付款成功時刻），不是「開票嘗試當下」——否則補開
+    舊單（sweep 重試、reissue）算出的 deadline 會被無限往後推，告警永遠不會觸發。
+    沒有 paid_at（理論上不會發生）才 fallback 用 now。
+    """
+    base = order.get("paid_at") or now
+    return base + _deadline_seconds(buyer)
+
+
 # ── 文字清洗（設計 §5：禁 | 與符號，避免打壞明細對齊）──────────────────────────
 
 _SANITIZE_STRIP_RE = re.compile(r"[^\w\s()（）]", re.UNICODE)
@@ -116,10 +125,9 @@ def sanitize_item_text(text: Optional[str], max_len: int = 256) -> str:
     return cleaned[:max_len]
 
 
-def _clean_buyer_name(name: Optional[str], email: Optional[str]) -> str:
-    cleaned = sanitize_item_text(name, 30)
-    if cleaned:
-        return cleaned
+def _b2c_buyer_name(email: Optional[str]) -> str:
+    """B2C 買受人姓名：users schema 目前沒有顯示名欄位（純 email 帳號體系），
+    直接用 email local-part（去符號、截 30 字、空值 fallback "customer"）。"""
     local = (email or "").split("@")[0]
     return sanitize_item_text(local, 30) or "customer"
 
@@ -263,7 +271,7 @@ def build_invoice_fields(order: Dict[str, Any], buyer: Dict[str, Any], user: Opt
         fields["CompanyName"] = company_name
         fields["UnitTAX"] = "Y"
     else:
-        fields["Name"] = _clean_buyer_name(user.get("name") or user.get("display_name"), email)
+        fields["Name"] = _b2c_buyer_name(email)
         if carrier_num:
             fields["CarrierType"] = "3J0002"
             fields["CarrierID"] = carrier_num
@@ -323,6 +331,13 @@ async def _attempt_issue(db, invoice_repo: InvoiceRepository, invoice_doc: Dict[
     try:
         fields = build_invoice_fields(order, buyer, user, data_id=claimed["data_id"])
     except InvoiceFieldError as e:
+        # 本地 sanity check 抓到的載具格式錯，比照 SmilePay 回 -10056 類的處置：
+        # 自動降級（設計 §4.2），不要就地丟 needs_manual（build_invoice_fields 只在
+        # invoice_type=personal 分支才會拋 carrier_bad，company 買受人不會走到這裡）。
+        if e.kind == "carrier_bad" and not _degraded:
+            await _degrade_and_reopen(db, invoice_repo, claimed, order, user,
+                                       {"status": "carrier_format", "desc": e.reason})
+            return
         await _finalize_needs_manual(invoice_repo, claimed, kind=e.kind, desc=e.reason)
         return
 
@@ -386,11 +401,14 @@ async def _attempt_issue(db, invoice_repo: InvoiceRepository, invoice_doc: Dict[
         })
         return
 
-    if category == "carrier_bad" and not _degraded:
+    # 載具自動降級僅限個人戶（B2C）；公司戶（B2B）不可擅自降級成無統編發票（設計 §4.2：
+    # 企業要統編抵稅），理論上 B2B 請求不會帶 CarrierType 也就不會撞這幾個碼，這裡仍加保守防線。
+    if category == "carrier_bad" and not _degraded and buyer.get("invoice_type") != "company":
         await _degrade_and_reopen(db, invoice_repo, claimed, order, user, last_error)
         return
 
-    # buyer_bad / unknown（含降級後仍載具錯的保守 fallback）→ needs_manual + alert
+    # buyer_bad / unknown（含降級後仍載具錯、或 company 買受人的 carrier_bad 保守 fallback）
+    # → needs_manual + alert
     await _finalize_needs_manual(invoice_repo, claimed, kind=category, desc=resp.get("Desc", ""),
                                   attempts=attempts, last_error=last_error)
 
@@ -429,6 +447,13 @@ async def issue_for_order(db, order: Dict[str, Any]) -> None:
     """settle() 成功（ACTIVATED/RENEWED/GRANTED）觸發的背景開票入口。
 
     settle 重入防護第一層：該 order 已有 issued 發票 → 跳過。
+
+    重入時沿用既有的「非 voided」doc（無論其現有 data_id 是不是已被 `_degrade_and_reopen`
+    改過），只有完全沒有任何 invoice doc 時才用 `upsert_initial` 建新的。★這是修過的 bug：
+    舊版每次都用固定的 `data_id=f"SL-{order_no}"` 呼叫 upsert_initial，降級後該 doc 的
+    data_id 已經被改成 `..-B2C`，下次 settle 重入（或 sweep 重試觸發二次 issue_for_order）
+    會因為找不到 `SL-{order_no}` 而插出第二筆 doc，且該筆之後降級時的 `$set data_id` 還會撞
+    第一筆的 unique index → DuplicateKeyError。
     """
     order_no = order.get("merchant_order_no")
     if not order_no:
@@ -436,22 +461,25 @@ async def issue_for_order(db, order: Dict[str, Any]) -> None:
         return
 
     invoice_repo = InvoiceRepository(db)
-    existing_issued = await invoice_repo.get_issued_by_order_no(order_no)
-    if existing_issued:
-        log.info("invoice.issue.skip_already_issued", order_no=order_no)
-        return
-
     user = await UserRepository(db).get_by_id(order.get("user_id"))
-    buyer = resolve_buyer_snapshot(order, user)
-    now = get_utc_timestamp()
-    doc = await invoice_repo.upsert_initial(
-        order_no=order_no,
-        user_id=order.get("user_id"),
-        data_id=f"SL-{order_no}",
-        buyer=buyer,
-        amount_twd=order.get("amount_twd", 0),
-        deadline_at=now + _deadline_seconds(buyer),
-    )
+
+    existing = await invoice_repo.get_active_by_order_no(order_no)
+    if existing:
+        if existing.get("status") == "issued":
+            log.info("invoice.issue.skip_already_issued", order_no=order_no)
+            return
+        doc = existing
+    else:
+        buyer = resolve_buyer_snapshot(order, user)
+        now = get_utc_timestamp()
+        doc = await invoice_repo.upsert_initial(
+            order_no=order_no,
+            user_id=order.get("user_id"),
+            data_id=f"SL-{order_no}",
+            buyer=buyer,
+            amount_twd=order.get("amount_twd", 0),
+            deadline_at=_deadline_at(order, buyer, now),
+        )
     await _attempt_issue(db, invoice_repo, doc, order, user)
 
 
@@ -500,8 +528,13 @@ async def reissue(db, invoice: Dict[str, Any], corrected_buyer: Optional[Dict[st
     if invoice.get("status") not in ("voided", "needs_manual"):
         raise ValueError(f"invoice status {invoice.get('status')!r} 不允許 reissue")
 
-    invoice_repo = InvoiceRepository(db)
     order_no = invoice["order_no"]
+    order = await OrderRepository(db).get_by_order_no(order_no)
+    if not order:
+        # 不可 `order or {}` 續跑——那會用 amount_twd=0 組出零元發票送 SmilePay。
+        raise ValueError(f"reissue 找不到對應訂單，拒絕重開：order_no={order_no}")
+
+    invoice_repo = InvoiceRepository(db)
     buyer = corrected_buyer or invoice.get("buyer") or {}
 
     if corrected_buyer:
@@ -528,7 +561,7 @@ async def reissue(db, invoice: Dict[str, Any], corrected_buyer: Optional[Dict[st
                 "amount_twd": invoice.get("amount_twd", 0),
                 "first_attempt_at": now,
                 "next_retry_at": now,
-                "deadline_at": now + _deadline_seconds(buyer),
+                "deadline_at": _deadline_at(order, buyer, now),
             })
             break
         except DuplicateKeyError:
@@ -536,9 +569,8 @@ async def reissue(db, invoice: Dict[str, Any], corrected_buyer: Optional[Dict[st
     else:
         raise DuplicateKeyError(f"reissue data_id 撞號重算失敗：order_no={order_no}")
 
-    order = await OrderRepository(db).get_by_order_no(order_no)
     user = await UserRepository(db).get_by_id(invoice["user_id"])
-    await _attempt_issue(db, invoice_repo, new_doc, order or {}, user)
+    await _attempt_issue(db, invoice_repo, new_doc, order, user)
     log.info("invoice.reissue", order_no=order_no, data_id=data_id, admin_id=admin_id)
     return await invoice_repo.get_by_id(new_doc["_id"])
 
@@ -561,7 +593,7 @@ async def run_invoice_retry_sweep(db) -> Dict[str, int]:
     order_repo = OrderRepository(db)
     user_repo = UserRepository(db)
     now = get_utc_timestamp()
-    counts = {"retried": 0, "cross_period_blocked": 0, "deadline_warned": 0, "order_missing": 0}
+    counts = {"retried": 0, "cross_period_blocked": 0, "deadline_warned": 0, "order_missing": 0, "errored": 0}
 
     # deadline 告警：不依附 retry 條件，超過 deadline 仍照常重試開立（只在此告警記錄稅務日期差異）。
     async for inv in invoice_repo.iter_deadline_warnings(now, DEADLINE_WARNING_SECONDS):
@@ -570,27 +602,52 @@ async def run_invoice_retry_sweep(db) -> Dict[str, int]:
         await invoice_repo.mark_deadline_alerted(inv["_id"])
         counts["deadline_warned"] += 1
 
-    async for inv in invoice_repo.iter_due_for_retry(now):
-        first_attempt_at = inv.get("first_attempt_at") or now
-        if _period_key(now) != _period_key(first_attempt_at):
-            # data_id 防重複開票的效力只在同期別內 → 跨期後停止自動重試，轉人工。
-            await invoice_repo.update(inv["_id"], {
-                "status": "needs_manual",
-                "last_error": {"status": "cross_period", "desc": "已跨期別，停止自動重試"},
-            })
-            _capture_invoice_alert(inv, "cross_period", "已跨期別，需人工確認是否已開立")
-            counts["cross_period_blocked"] += 1
-            continue
+    # ★物化成 list：這個迴圈每筆都可能觸發 _attempt_issue → httpx 呼叫（up to 30s timeout），
+    # 若沿用 async for 直接吃 motor cursor，長時間掛在迴圈中會撞 Mongo cursor idle timeout。
+    # 撈單當下就把資料全拉進記憶體，之後的網路 I/O 不再依賴這顆 cursor 存活。
+    due = [inv async for inv in invoice_repo.iter_due_for_retry(now)]
 
-        order = await order_repo.get_by_order_no(inv.get("order_no"))
-        if not order:
-            log.warning("invoice.sweep.order_missing", order_no=inv.get("order_no"))
-            counts["order_missing"] += 1
-            continue
+    for inv in due:
+        try:
+            first_attempt_at = inv.get("first_attempt_at") or now
+            if _period_key(now) != _period_key(first_attempt_at):
+                # data_id 防重複開票的效力只在同期別內 → 跨期後停止自動重試，轉人工。
+                await invoice_repo.update(inv["_id"], {
+                    "status": "needs_manual",
+                    "last_error": {"status": "cross_period", "desc": "已跨期別，停止自動重試"},
+                })
+                _capture_invoice_alert(inv, "cross_period", "已跨期別，需人工確認是否已開立")
+                counts["cross_period_blocked"] += 1
+                continue
 
-        user = await user_repo.get_by_id(inv.get("user_id"))
-        await _attempt_issue(db, invoice_repo, inv, order, user)
-        counts["retried"] += 1
+            order = await order_repo.get_by_order_no(inv.get("order_no"))
+            if not order:
+                log.warning("invoice.sweep.order_missing", order_no=inv.get("order_no"))
+                counts["order_missing"] += 1
+                continue
+
+            user = await user_repo.get_by_id(inv.get("user_id"))
+            await _attempt_issue(db, invoice_repo, inv, order, user)
+            counts["retried"] += 1
+        except Exception as e:
+            # 單筆炸掉不可讓整輪 sweep 停擺——iter_due_for_retry 沒有 sort，同一顆 poison doc
+            # 若不推進 next_retry_at，會卡在查詢結果最前面，之後每一輪都優先撈到它、其餘全撈不到。
+            counts["errored"] += 1
+            log.error("invoice.sweep.item_failed", order_no=inv.get("order_no"), error=str(e), exc_info=True)
+            try:
+                attempts = int(inv.get("attempts", 0)) + 1
+                # 只在 doc 仍是 pending/failed 時 recovery——例外若發生在 _attempt_issue
+                # 已寫入終局狀態（issued/needs_manual）之後，不可把它打回 failed 重送
+                await invoice_repo.update_if_status(inv["_id"], ["pending", "failed"], {
+                    "status": "failed",
+                    "attempts": attempts,
+                    "next_retry_at": now + _next_retry_delay(attempts),
+                    "last_error": {"status": "sweep_exception", "desc": str(e)[:200]},
+                    "claimed_until": None,
+                })
+            except Exception:
+                log.error("invoice.sweep.item_failed.recovery_failed",
+                          order_no=inv.get("order_no"), exc_info=True)
 
     if any(counts.values()):
         log.info("invoice.sweep.completed", **counts)

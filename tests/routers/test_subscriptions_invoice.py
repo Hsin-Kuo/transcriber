@@ -54,9 +54,71 @@ class TestCheckoutRequestValidation:
             subs.CheckoutRequest(tier="pro", billing="monthly", invoice_type="company",
                                   company_tax_id="12345678")
 
+    def test_company_without_tax_id_rejected(self):
+        """finding #5 回歸測試：過去只驗 company_name，缺統編的 payload 會被 ACCEPTED，
+        直到付款成功後開票層才炸 buyer_bad。統編跟抬頭一樣必填。"""
+        with pytest.raises(ValidationError):
+            subs.CheckoutRequest(tier="pro", billing="monthly", invoice_type="company",
+                                  company_name="測試公司")
+
     def test_no_invoice_fields_is_fine(self):
         req = subs.CheckoutRequest(tier="pro", billing="monthly")
         assert req.invoice_type is None
+
+
+class TestBlankStringNormalization:
+    """finding #1 回歸測試：前端 CheckoutView.buildInvoiceData() 對未選中那組欄位固定送
+    `''`（不是 null/省略），Optional[str]+Field(pattern=...) 過去會讓空字串撞 pattern
+    422（string_pattern_mismatch）→ 所有結帳/升級/加購全斷。驗證修法（mode="before"
+    正規化）確實在 pattern 檢查前把空字串轉成 None，且不影響前端真實送出的完整組合。
+    """
+
+    def test_personal_payload_exactly_as_frontend_sends_it(self):
+        # 對應 buildInvoiceData()：invoice_type=personal 時 carrier 相關看 carrierNum 是否
+        # 有值決定 carrier_type，但 company_tax_id/company_name 一律送 ''。
+        req = subs.CheckoutRequest(
+            tier="pro", billing="monthly", invoice_type="personal",
+            carrier_type="", carrier_num="", company_tax_id="", company_name="",
+            save_invoice=True,
+        )
+        assert req.carrier_type is None
+        assert req.carrier_num is None
+        assert req.company_tax_id is None
+        assert req.company_name is None
+
+    def test_personal_with_carrier_payload_exactly_as_frontend_sends_it(self):
+        req = subs.CheckoutRequest(
+            tier="pro", billing="monthly", invoice_type="personal",
+            carrier_type="1", carrier_num="/AB12345", company_tax_id="", company_name="",
+            save_invoice=True,
+        )
+        assert req.carrier_num == "/AB12345"
+        assert req.company_tax_id is None and req.company_name is None
+
+    def test_company_payload_exactly_as_frontend_sends_it(self):
+        req = subs.CheckoutRequest(
+            tier="pro", billing="monthly", invoice_type="company",
+            carrier_type="", carrier_num="", company_tax_id="12345678", company_name="測試公司",
+            save_invoice=True,
+        )
+        assert req.carrier_type is None and req.carrier_num is None
+        assert req.company_tax_id == "12345678"
+
+    def test_whitespace_only_also_normalized(self):
+        req = subs.CheckoutRequest(tier="pro", billing="monthly", invoice_type="personal",
+                                    carrier_num="   ")
+        assert req.carrier_num is None
+
+    def test_change_plan_request_same_normalization(self):
+        req = subs.ChangePlanRequest(tier="pro", billing="monthly", invoice_type="personal",
+                                      carrier_type="", carrier_num="", company_tax_id="", company_name="")
+        assert req.carrier_num is None and req.company_tax_id is None
+
+    def test_purchase_extra_request_same_normalization(self):
+        req = subs.PurchaseExtraRequest(package_id="p1", invoice_type="company",
+                                         carrier_type="", carrier_num="",
+                                         company_tax_id="12345678", company_name="測試公司")
+        assert req.carrier_num is None and req.company_tax_id == "12345678"
 
 
 class TestPurchaseExtraRequestValidation:

@@ -106,8 +106,28 @@ class InvoiceRepository:
     async def get_by_data_id(self, data_id: str) -> Optional[Dict[str, Any]]:
         return await self.collection.find_one({"data_id": data_id})
 
-    async def get_issued_by_order_no(self, order_no: str) -> Optional[Dict[str, Any]]:
-        return await self.collection.find_one({"order_no": order_no, "status": "issued"})
+    async def get_active_by_order_no(self, order_no: str) -> Optional[Dict[str, Any]]:
+        """該 order 目前「非 voided」的 invoice doc（issued/pending/failed/needs_manual）。
+
+        issue_for_order 重入時要沿用同一顆 doc（含其現有 data_id，可能已被
+        `_degrade_and_reopen` 改過），不能每次都用固定 data_id 去 upsert——否則會在
+        降級後的重入路徑上意外插出第二顆 doc（見 invoice_service.issue_for_order 的說明）。
+        voided 的舊發票要排除：作廢後應該走 `reissue()` 開一顆全新的 doc。
+        """
+        # reissue 後同一 order 會有 needs_manual 舊 doc + pending 新 doc，取最新的那顆
+        return await self.collection.find_one(
+            {"order_no": order_no, "status": {"$ne": "voided"}},
+            sort=[("created_at", -1)],
+        )
+
+    async def update_if_status(self, invoice_id, allowed_statuses: list, updates: Dict[str, Any]) -> bool:
+        """只在現值 status 仍屬 allowed_statuses 時更新（防 recovery 路徑覆蓋已終局的狀態）。"""
+        updates = {**updates, "updated_at": get_utc_timestamp()}
+        result = await self.collection.update_one(
+            {"_id": invoice_id, "status": {"$in": allowed_statuses}},
+            {"$set": updates},
+        )
+        return result.modified_count > 0
 
     async def list_by_order_no(self, order_no: str) -> List[Dict[str, Any]]:
         cursor = self.collection.find({"order_no": order_no}).sort("created_at", 1)
