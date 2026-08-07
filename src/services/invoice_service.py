@@ -461,11 +461,18 @@ async def void_invoice_for(db, invoice: Dict[str, Any], reason: str, admin_id: s
     """作廢發票（types=Cancel）。-2008（附 Nowstatus）/-2009 原样回給呼叫端（admin router 用）。"""
     invoice_repo = InvoiceRepository(db)
     svc = get_smilepay_service()
-    resp = await svc.void_invoice(
-        invoice_number=invoice.get("invoice_number"),
-        invoice_date=invoice.get("invoice_date"),
-        reason=(reason or "")[:20],
-    )
+    try:
+        resp = await svc.void_invoice(
+            invoice_number=invoice.get("invoice_number"),
+            invoice_date=invoice.get("invoice_date"),
+            reason=(reason or "")[:20],
+        )
+    except httpx.HTTPError as e:
+        # transport 失敗回結構化錯誤（不讓例外帶著 _post 的 frame locals 往上竄）
+        log.warning("invoice.void.transport_error", order_no=invoice.get("order_no"),
+                    error=type(e).__name__)
+        return {"success": False, "status_code": "-9999",
+                "desc": f"連線失敗（{type(e).__name__}），請稍後重試", "now_status": None}
     status_code = str(resp.get("Status", ""))
     if status_code == "0":
         await invoice_repo.update(invoice["_id"], {

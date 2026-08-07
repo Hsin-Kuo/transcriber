@@ -40,10 +40,26 @@ def _scrub(value):
     return value
 
 
+def _scrub_stacktrace_vars(section) -> None:
+    """遮蔽例外/thread 堆疊裡的 frame local variables。
+
+    include_local_variables 預設開啟，frame 的區域變數（含持有憑證的 dict，
+    如 smilepay_service._post 的 body）會整包進 event["exception"]，
+    而 SDK 內建 EventScrubber 只比對頂層變數名、不遞迴，擋不住巢狀的敏感 key。
+    """
+    for entry in (section or {}).get("values") or []:
+        for frame in (entry.get("stacktrace") or {}).get("frames") or []:
+            if "vars" in frame:
+                frame["vars"] = _scrub(frame["vars"])
+
+
 def _before_send(event, hint):
     for key in ("request", "extra", "contexts"):
         if key in event:
             event[key] = _scrub(event[key])
+    for key in ("exception", "threads"):
+        if key in event:
+            _scrub_stacktrace_vars(event[key])
     return event
 
 
