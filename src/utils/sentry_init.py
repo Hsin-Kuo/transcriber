@@ -18,6 +18,7 @@ _SENSITIVE_SUBSTRINGS = (
     "hash_key", "hash_iv",
     "authorization", "cookie",
     "hf_token",
+    "verify_key",  # SmilePay 電子發票商家憑證（Grvc 搭配的驗證碼）
 )
 
 
@@ -44,6 +45,14 @@ def _before_send(event, hint):
         if key in event:
             event[key] = _scrub(event[key])
     return event
+
+
+def _before_breadcrumb(crumb, hint):
+    # httpx/logging 等 auto-instrumentation 可能把 request body/params 塞進 breadcrumb data；
+    # before_send 只掃 event 本身掃不到 breadcrumb，故另掛一個 hook（見 SmilePay Verify_key 需求）。
+    if "data" in crumb:
+        crumb["data"] = _scrub(crumb["data"])
+    return crumb
 
 
 def init_sentry(component: str = "server") -> None:
@@ -86,6 +95,7 @@ def init_sentry(component: str = "server") -> None:
         profiles_sample_rate=profiles_sample_rate,
         send_default_pii=False,
         before_send=_before_send,
+        before_breadcrumb=_before_breadcrumb,
         attach_stacktrace=True,
     )
     sentry_sdk.set_tag("component", component)
