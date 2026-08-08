@@ -9,7 +9,7 @@ import os
 import json
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional
@@ -21,6 +21,7 @@ from ..database.mongodb import get_database
 from ..database.repositories.user_repo import UserRepository
 from ..database.repositories.order_repo import OrderRepository
 from ..database.repositories.processed_webhook_repo import ProcessedWebhookRepository
+from ..database.repositories.invoice_repo import InvoiceRepository, pick_user_facing_invoice
 from ..models.quota import public_tier_plans, is_upgrade, QUOTA_TIERS, QuotaTier
 from ..services.invoice_service import (
     build_invoice_snapshot_from_request,
@@ -807,8 +808,10 @@ async def list_packages(db=Depends(get_database)):
 
 @router.get("/orders")
 async def list_orders(
-    limit: int = 6,
-    skip: int = 0,
+    # le=50：發票 join 用 order_no $in 批查（invoice_repo.list_by_order_nos，
+    # to_list 上限 1000），limit 無上限會讓超大頁靜默截斷發票欄位
+    limit: int = Query(6, ge=1, le=50),
+    skip: int = Query(0, ge=0),
     current_user: dict = Depends(get_current_user),
     db=Depends(get_database),
 ):
@@ -822,6 +825,17 @@ async def list_orders(
     )
     has_more = len(orders) > limit
     orders = orders[:limit]
+
+    # 附掛發票摘要（設計 §4.3）：一次 `$in` 撈這一頁全部訂單的 invoices，記憶體組裝，
+    # 避免每筆訂單各查一次的 N+1（使用者的訂單數量少，不需要 aggregation）。
+    order_nos = [o["merchant_order_no"] for o in orders if o.get("merchant_order_no")]
+    invoices_by_order: dict = {}
+    if order_nos:
+        invoice_repo = InvoiceRepository(db)
+        for inv in await invoice_repo.list_by_order_nos(order_nos):
+            invoices_by_order.setdefault(inv["order_no"], []).append(inv)
+
     for o in orders:
         o["_id"] = str(o["_id"])
+        o["invoice"] = pick_user_facing_invoice(invoices_by_order.get(o.get("merchant_order_no"), []))
     return {"orders": orders, "has_more": has_more}

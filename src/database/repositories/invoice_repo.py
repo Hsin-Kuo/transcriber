@@ -135,6 +135,15 @@ class InvoiceRepository:
         cursor = self.collection.find({"order_no": order_no}).sort("created_at", 1)
         return await cursor.to_list(length=100)
 
+    async def list_by_order_nos(self, order_nos: List[str]) -> List[Dict[str, Any]]:
+        """批次查多個 order 的全部 invoices（使用者付款紀錄 join 用；一次 `$in`
+        避免每筆訂單各查一次的 N+1——使用者的訂單數量少，記憶體組裝即可，見設計 §4.3）。
+        """
+        if not order_nos:
+            return []
+        cursor = self.collection.find({"order_no": {"$in": list(set(order_nos))}})
+        return await cursor.to_list(length=1000)
+
     async def next_reissue_seq(self, order_no: str) -> int:
         """回傳該 order 現有 invoices 中最大的 R{n} 序號 + 1（無重開紀錄則為 1）。"""
         docs = await self.list_by_order_no(order_no)
@@ -244,3 +253,35 @@ class InvoiceRepository:
             {"_id": _oid(invoice_id)},
             {"$set": {"deadline_alerted": True, "updated_at": get_utc_timestamp()}},
         )
+
+
+# ── 使用者付款紀錄 join（PR-C，設計 §4.3）────────────────────────────────────
+
+def pick_user_facing_invoice(invoices: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """使用者付款紀錄要附掛的發票摘要：語意比照 admin 的 `_invoice_lookup_stages`，
+    但使用者端只認 issued/voided——pending/failed/needs_manual 一律回 None，
+    不對使用者暴露開票中/失敗等內部狀態。
+
+    一個 order 可能有多筆 invoice（作廢重開）：優先取最新一筆 status=issued；
+    若無 issued，退而取最新一筆 voided；其他情況（doc 全非 issued/voided，或
+    完全沒有 invoice）回 None。
+
+    回傳欄位白名單化，只有 invoice_number/random_number/invoice_date/
+    invoice_status 四個——絕不透出 data_id/last_error/attempts/buyer 等內部欄位。
+    """
+    issued = [d for d in invoices if d.get("status") == "issued"]
+    if issued:
+        return _user_facing_fields(max(issued, key=lambda d: d.get("created_at") or 0))
+    voided = [d for d in invoices if d.get("status") == "voided"]
+    if voided:
+        return _user_facing_fields(max(voided, key=lambda d: d.get("created_at") or 0))
+    return None
+
+
+def _user_facing_fields(doc: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "invoice_number": doc.get("invoice_number"),
+        "random_number": doc.get("random_number"),
+        "invoice_date": doc.get("invoice_date"),
+        "invoice_status": doc.get("status"),
+    }

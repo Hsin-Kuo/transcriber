@@ -153,7 +153,7 @@ invoice_snapshot: {
 
 ### 4.3 使用者端 API
 
-- 付款紀錄／`/subscriptions/status` 附掛 `{invoice_number, random_number, invoice_date, invoice_status}`（只回 issued/voided）。
+- 付款紀錄（`GET /subscriptions/orders`）附掛 `{invoice_number, random_number, invoice_date, invoice_status}`（只回 issued/voided）。`/subscriptions/status` 是訂閱摘要、無訂單列表，**刻意不附掛**（PR-C 定案 2026-08-08）。
 - `BillingPanel.vue` 付款紀錄加發票欄（voided 顯示「已作廢」）；i18n zh-TW/en。
 - 使用者端 PDF 下載：待 §9 spike；第一版先只顯示號碼資訊。
 

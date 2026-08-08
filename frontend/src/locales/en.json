@@ -274,7 +274,10 @@
       "orderCycleMonthly": "monthly",
       "orderCycleYearly": "yearly",
       "orderExtraDuration": "+{n} min",
-      "orderExtraAi": "+{n} AI summaries"
+      "orderExtraAi": "+{n} AI summaries",
+      "invoiceVoided": "Voided",
+      "invoiceNone": "–",
+      "invoiceTooltip": "Random code {random} | Issued {date}"
     },
     "checkout": {
       "title": "Checkout",
