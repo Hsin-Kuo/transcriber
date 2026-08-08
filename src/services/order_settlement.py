@@ -17,6 +17,7 @@ PaymentNotification dataclass。詳見 CONTEXT.md「金流與訂單」。
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from typing import Any, Awaitable, Callable, Optional
 
 from fastapi import HTTPException
 
@@ -27,10 +28,24 @@ from ..database.repositories.order_repo import (
 from ..database.repositories.user_repo import UserRepository
 from ..models.quota import build_quota_from_tier
 from ..utils.billing_period import calc_period_end
+from ..utils.sentry_helpers import create_background_task
 from ..utils.time_utils import get_utc_timestamp
 from ..utils.logger import get_logger
 
 log = get_logger(__name__)
+
+# settle() 開票白名單：付款成功且帳號狀態已生效的 outcome 才觸發開票
+# （REJECTED_DUPLICATE / FAILED / ALREADY_PAID / EXPIRED / ORDER_NOT_FOUND 都不開票）。
+_INVOICE_TRIGGER_OUTCOMES = frozenset({"activated", "renewed", "granted"})
+
+
+async def _default_invoice_issuer(db, order: dict) -> None:
+    """lazy import：避免 order_settlement（純 test surface）無條件拉進 httpx/defusedxml 等
+    invoice_service 的 transport 依賴，比照既有 `_reconcile_pinned_audio` 的 lazy import 慣例。
+    """
+    from .invoice_service import issue_for_order
+    await issue_for_order(db, order)
+
 
 # 防連點冷卻秒數：同類型付款在這個秒數內重複送出才擋（防誤觸 / 連點）；
 # 超過此秒數的舊 pending 單不擋，改由 supersede 取代，讓使用者可立即重試。
@@ -76,9 +91,12 @@ class OrderSettlement:
         *,
         order_repo: OrderRepository,
         user_repo: UserRepository,
+        invoice_issuer: Optional[Callable[[Any, dict], Awaitable[None]]] = None,
     ):
         self.order_repo = order_repo
         self.user_repo = user_repo
+        # 注入點：測試可傳 fake issuer；生產預設 lazy-import 真正的 invoice_service.issue_for_order。
+        self._invoice_issuer = invoice_issuer or _default_invoice_issuer
 
     # ── 建單（checkout 入口）────────────────────────────────────────────────
 
@@ -135,12 +153,35 @@ class OrderSettlement:
             return SettleResult(SettleOutcome.FAILED, n.order_no)
 
         if order_type in _SUBSCRIPTION_TYPES:
-            return await self._settle_subscription(order, n)
-        if order_type == "extra_quota":
-            return await self._settle_extra_quota(order, n)
+            result = await self._settle_subscription(order, n)
+        elif order_type == "extra_quota":
+            result = await self._settle_extra_quota(order, n)
+        else:
+            log.warning("payment.unknown_order_type", merchant_order_no=n.order_no, type=order_type)
+            return SettleResult(SettleOutcome.FAILED, n.order_no)
 
-        log.warning("payment.unknown_order_type", merchant_order_no=n.order_no, type=order_type)
-        return SettleResult(SettleOutcome.FAILED, n.order_no)
+        if result.outcome.value in _INVOICE_TRIGGER_OUTCOMES:
+            await self._trigger_invoice(n.order_no)
+        return result
+
+    async def _trigger_invoice(self, order_no: str) -> None:
+        """開票背景觸發（91APP 付款成功後自動開立電子發票）。
+
+        create_background_task 本身已用 done-callback 把例外送 Sentry + log（不影響呼叫端），
+        這裡再包一層 try/except 是防禦「組 coroutine / 讀 order」這段同步過程本身出錯
+        （例如 order 已被刪除）——絕不可讓開票掛掉拖累 settle() 的回傳。
+        """
+        try:
+            order = await self.order_repo.get_by_order_no(order_no)
+            if not order:
+                log.warning("invoice.trigger.order_not_found", order_no=order_no)
+                return
+            create_background_task(
+                self._invoice_issuer(self.user_repo.db, order),
+                name=f"invoice_issue:{order_no}",
+            )
+        except Exception as e:
+            log.error("invoice.trigger.failed", order_no=order_no, error=str(e), exc_info=True)
 
     # ── 訂閱（subscription / upgrade / downgrade）─────────────────────────────
 
@@ -338,9 +379,17 @@ class OrderSettlement:
             pass
 
 
-def build_order_settlement(db) -> OrderSettlement:
-    """以 request-scoped db 組出 OrderSettlement（repos 從 db 建；不再依賴金流 provider）。"""
+def build_order_settlement(
+    db, *, invoice_issuer: Optional[Callable[[Any, dict], Awaitable[None]]] = None
+) -> OrderSettlement:
+    """以 request-scoped db 組出 OrderSettlement（repos 從 db 建；不再依賴金流 provider）。
+
+    invoice_issuer：測試注入用（見 tests/services/test_order_settlement.py 的開票 hook 測試）；
+    省略時預設走真正的 invoice_service.issue_for_order，既有呼叫點（renewal_service 等）
+    不需改動即自動套用。
+    """
     return OrderSettlement(
         order_repo=OrderRepository(db),
         user_repo=UserRepository(db),
+        invoice_issuer=invoice_issuer,
     )

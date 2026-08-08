@@ -18,6 +18,7 @@ _SENSITIVE_SUBSTRINGS = (
     "hash_key", "hash_iv",
     "authorization", "cookie",
     "hf_token",
+    "verify_key",  # SmilePay 電子發票商家憑證（Grvc 搭配的驗證碼）
 )
 
 
@@ -39,11 +40,35 @@ def _scrub(value):
     return value
 
 
+def _scrub_stacktrace_vars(section) -> None:
+    """遮蔽例外/thread 堆疊裡的 frame local variables。
+
+    include_local_variables 預設開啟，frame 的區域變數（含持有憑證的 dict，
+    如 smilepay_service._post 的 body）會整包進 event["exception"]，
+    而 SDK 內建 EventScrubber 只比對頂層變數名、不遞迴，擋不住巢狀的敏感 key。
+    """
+    for entry in (section or {}).get("values") or []:
+        for frame in (entry.get("stacktrace") or {}).get("frames") or []:
+            if "vars" in frame:
+                frame["vars"] = _scrub(frame["vars"])
+
+
 def _before_send(event, hint):
     for key in ("request", "extra", "contexts"):
         if key in event:
             event[key] = _scrub(event[key])
+    for key in ("exception", "threads"):
+        if key in event:
+            _scrub_stacktrace_vars(event[key])
     return event
+
+
+def _before_breadcrumb(crumb, hint):
+    # httpx/logging 等 auto-instrumentation 可能把 request body/params 塞進 breadcrumb data；
+    # before_send 只掃 event 本身掃不到 breadcrumb，故另掛一個 hook（見 SmilePay Verify_key 需求）。
+    if "data" in crumb:
+        crumb["data"] = _scrub(crumb["data"])
+    return crumb
 
 
 def init_sentry(component: str = "server") -> None:
@@ -86,6 +111,7 @@ def init_sentry(component: str = "server") -> None:
         profiles_sample_rate=profiles_sample_rate,
         send_default_pii=False,
         before_send=_before_send,
+        before_breadcrumb=_before_breadcrumb,
         attach_stacktrace=True,
     )
     sentry_sdk.set_tag("component", component)

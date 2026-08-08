@@ -313,6 +313,10 @@ async def startup_event():
     order_repo_init = OrderRepository(db)
     await _safe_create("orders", order_repo_init.create_indexes())
 
+    from src.database.repositories.invoice_repo import InvoiceRepository
+    invoice_repo_init = InvoiceRepository(db)
+    await _safe_create("invoices", invoice_repo_init.create_indexes())
+
     from src.database.repositories.reservation_repo import ReservationRepository
     reservation_repo_init = ReservationRepository(db)
     await _safe_create("reservations", reservation_repo_init.create_indexes())
@@ -428,6 +432,13 @@ async def startup_event():
         create_background_task(
             periodic_renewal_check(db),
             name="periodic_renewal_check",
+        )
+
+        # 5.4c SmilePay 發票補救 sweep（每 10 分鐘：到期重試 + deadline 告警 + 跨期 gate）
+        from src.services.invoice_service import periodic_invoice_retry
+        create_background_task(
+            periodic_invoice_retry(db),
+            name="periodic_invoice_retry",
         )
 
         # 5.5 定期 chunk uploads 清掃（過期 metadata + temp_dir）

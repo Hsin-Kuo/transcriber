@@ -9,9 +9,9 @@ import os
 import json
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import RedirectResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional
 
 from ..utils.api_errors import api_error
@@ -21,9 +21,14 @@ from ..database.mongodb import get_database
 from ..database.repositories.user_repo import UserRepository
 from ..database.repositories.order_repo import OrderRepository
 from ..database.repositories.processed_webhook_repo import ProcessedWebhookRepository
+from ..database.repositories.invoice_repo import InvoiceRepository, pick_user_facing_invoice
 from ..models.quota import public_tier_plans, is_upgrade, QUOTA_TIERS, QuotaTier
+from ..services.invoice_service import (
+    build_invoice_snapshot_from_request,
+    build_invoice_snapshot_from_user_invoice_info,
+)
 from ..services.order_settlement import build_order_settlement, PaymentNotification
-from ..utils.payments91_service import get_payments91_service
+from ..utils.payments91_service import get_payments91_service, interpret_record_status
 from ..utils.billing_period import generate_order_no
 from ..utils.time_utils import get_utc_timestamp
 from ..utils.logger import get_logger
@@ -64,15 +69,55 @@ def _find(obj, key_lower: str):
 
 # ── Request Models ───────────────────────────────────────────────────────────
 
+# 統編 8 碼數字；手機條碼載具 `/` + 7 碼（數字/大寫英文/+-.）。後端也要驗（非瀏覽器 client
+# 會繞過前端），與 invoice_service 的開票前 sanity check（build_invoice_fields 入口）共用同一組
+# pattern，避免兩處定義飄移（設計 §3.3.1/§3.3.3）。
+_TAX_ID_PATTERN = r"^\d{8}$"
+_CARRIER_PATTERN = r"^/[0-9A-Z+\-.]{7}$"
+
+# 前端 CheckoutView.buildInvoiceData() 對「未選中那組」欄位固定送 `''`（不是 null/省略，
+# 見 frontend/src/views/CheckoutView.vue）。Optional[str] + Field(pattern=...) 只在值為
+# None 時跳過檢查——空字串仍會進 pattern 比對而 422（string_pattern_mismatch）。
+# 必須在 pattern 檢查「之前」（mode="before"）把空白字串正規化成 None。
+def _blank_to_none(v):
+    if isinstance(v, str) and not v.strip():
+        return None
+    return v
+
+
+def _require_company_fields_if_company(model):
+    """invoice_type=company 時 company_tax_id + company_name 皆必填（設計 §3.3.1）。
+
+    只驗 company_name 不夠：{invoice_type:"company", company_name:"X"}（缺統編）過去會
+    通過 request 驗證，直到付款成功後開票層才因統編格式錯炸 buyer_bad——應該在建單當下
+    就擋下，不要讓使用者付完錢才發現。
+    """
+    if model.invoice_type == "company":
+        if not (model.company_tax_id or "").strip():
+            raise ValueError("company_tax_id is required when invoice_type is 'company'")
+        if not (model.company_name or "").strip():
+            raise ValueError("company_name is required when invoice_type is 'company'")
+    return model
+
+
 class CheckoutRequest(BaseModel):
     tier: str       # "basic" | "pro"
     billing: str    # "monthly" | "yearly"
     invoice_type: Optional[str] = None   # "personal" | "company"
     carrier_type: Optional[str] = None   # "1"=手機條碼
-    carrier_num: Optional[str] = None
-    company_tax_id: Optional[str] = None
+    carrier_num: Optional[str] = Field(default=None, pattern=_CARRIER_PATTERN)
+    company_tax_id: Optional[str] = Field(default=None, pattern=_TAX_ID_PATTERN)
     company_name: Optional[str] = None
     save_invoice: bool = True
+
+    @field_validator("carrier_type", "carrier_num", "company_tax_id", "company_name", mode="before")
+    @classmethod
+    def _normalize_blank(cls, v):
+        return _blank_to_none(v)
+
+    @model_validator(mode="after")
+    def _validate_invoice(self) -> "CheckoutRequest":
+        return _require_company_fields_if_company(self)
 
 
 class PayRequest(BaseModel):
@@ -85,10 +130,19 @@ class ChangePlanRequest(BaseModel):
     billing: str
     invoice_type: Optional[str] = None
     carrier_type: Optional[str] = None
-    carrier_num: Optional[str] = None
-    company_tax_id: Optional[str] = None
+    carrier_num: Optional[str] = Field(default=None, pattern=_CARRIER_PATTERN)
+    company_tax_id: Optional[str] = Field(default=None, pattern=_TAX_ID_PATTERN)
     company_name: Optional[str] = None
     save_invoice: bool = True
+
+    @field_validator("carrier_type", "carrier_num", "company_tax_id", "company_name", mode="before")
+    @classmethod
+    def _normalize_blank(cls, v):
+        return _blank_to_none(v)
+
+    @model_validator(mode="after")
+    def _validate_invoice(self) -> "ChangePlanRequest":
+        return _require_company_fields_if_company(self)
 
 
 class PurchaseExtraRequest(BaseModel):
@@ -96,32 +150,46 @@ class PurchaseExtraRequest(BaseModel):
     quantity: int = Field(default=1, ge=1, le=99)
     invoice_type: Optional[str] = None
     carrier_type: Optional[str] = None
-    carrier_num: Optional[str] = None
-    company_tax_id: Optional[str] = None
+    carrier_num: Optional[str] = Field(default=None, pattern=_CARRIER_PATTERN)
+    company_tax_id: Optional[str] = Field(default=None, pattern=_TAX_ID_PATTERN)
     company_name: Optional[str] = None
     save_invoice: bool = True
+
+    @field_validator("carrier_type", "carrier_num", "company_tax_id", "company_name", mode="before")
+    @classmethod
+    def _normalize_blank(cls, v):
+        return _blank_to_none(v)
+
+    @model_validator(mode="after")
+    def _validate_invoice(self) -> "PurchaseExtraRequest":
+        return _require_company_fields_if_company(self)
 
 
 # ── 發票資訊處理 ─────────────────────────────────────────────────────────────
 
 async def _handle_invoice_save(request_data, user_id: str, user_repo: UserRepository):
-    """若 save_invoice=True，將發票資訊存入 user document"""
+    """若 save_invoice=True，將發票資訊整包覆蓋寫入 user document（設計 §3.3.2）。
+
+    整包覆蓋語意：只要指定了 invoice_type 就整段覆蓋（含清空另一型態的舊值），不論本次
+    是否帶 carrier_num/company_tax_id——修正舊版「只在有值時才寫入、切換型態不清舊值」
+    的殘留值問題（公司改回個人後仍被開 B2B）。
+    """
     if not request_data.save_invoice:
         return
-    if request_data.invoice_type == "personal" and request_data.carrier_num:
+    if request_data.invoice_type == "personal":
         await user_repo.update_invoice_info(user_id, {
             "type": "personal",
             "carrier_type": request_data.carrier_type or "1",
-            "carrier_num": request_data.carrier_num,
+            "carrier_num": request_data.carrier_num or "",
             "company_tax_id": "",
             "company_name": "",
         })
-    elif request_data.invoice_type == "company" and request_data.company_tax_id:
+    elif request_data.invoice_type == "company":
         await user_repo.update_invoice_info(user_id, {
             "type": "company",
             "carrier_type": "",
             "carrier_num": "",
-            "company_tax_id": request_data.company_tax_id,
+            "company_tax_id": request_data.company_tax_id or "",
             "company_name": request_data.company_name or "",
         })
 
@@ -223,6 +291,7 @@ async def create_checkout(
         "card_token": None,
         "extra_duration_minutes": 0,
         "extra_ai_summaries": 0,
+        "invoice_snapshot": build_invoice_snapshot_from_request(request),
     })
 
     await _handle_invoice_save(request, user_id, user_repo)
@@ -316,6 +385,10 @@ async def payment_callback(request: Request, db=Depends(get_database)):
     """91APP 交易結果通知（server-to-server）。
 
     防禦設計：**不信任 payload**，只取 tradeId → 回查 GET /v2/trades/{tradeId} 為準 → settle。
+
+    🔴 成交判定以回查的 **recordStatus**（付款結果）為準，**不是** statusCode——後者在回查回應
+    是「查詢是否成功」（trade 存在即 Success），誤用會讓任何 callback 一律判成功。
+    綁卡類（BindingCard）另需 payload 的 bindingStatus=Succeeded，否則即使付款成功也無可續扣的卡。
     """
     raw = await request.body()
     try:
@@ -325,7 +398,6 @@ async def payment_callback(request: Request, db=Depends(get_database)):
         payload = dict(form)
 
     trade_id = payload.get("tradeId") or payload.get("TradeId") or ""
-    record_status = payload.get("recordStatus") or payload.get("RecordStatus") or ""
     if not trade_id:
         log.warning("subscription.callback.no_trade_id", payload_keys=list(payload.keys()))
         return {"status": "ignored"}
@@ -338,15 +410,33 @@ async def payment_callback(request: Request, db=Depends(get_database)):
         raise  # 回 500 讓 91APP 重送
 
     order_no = _find(trade, "merchantorderid") or ""
-    status_code = trade.get("statusCode") or ""
+    record_status = _find(trade, "recordstatus")  # 權威付款狀態（整數）；勿用 trade.statusCode
     if not order_no:
-        log.warning("subscription.callback.no_order_no", trade_id=trade_id, status=status_code)
+        log.warning("subscription.callback.no_order_no", trade_id=trade_id, record_status=record_status)
         return {"status": "ignored"}
 
-    success = status_code == "Success"
-    log.info("subscription.callback.received", trade_id=trade_id, order_no=order_no, status=status_code)
+    outcome = interpret_record_status(record_status)
+    if outcome == "pending":
+        # 尚未定案（待付款/處理中）→ 不結算，回 200 待 91APP 下次通知（3D 卡片實務多同步定案）
+        log.info("subscription.callback.pending", trade_id=trade_id, order_no=order_no, record_status=record_status)
+        return {"status": "pending"}
+    success = outcome == "success"
+
+    # 綁卡類（首購/升級走 BindingCard）：付款成功但綁卡失敗 → 沒有可續扣的卡 → 整筆判失敗。
+    # bindingStatus 只在 callback payload（回查回應不含），用作負向 gate（僅出現失敗值才擋，安全）。
+    if success:
+        order = await OrderRepository(db).get_by_order_no(order_no)
+        if order and order.get("type") in ("subscription", "upgrade_subscription"):
+            binding_status = payload.get("bindingStatus") or payload.get("BindingStatus")
+            if binding_status and binding_status != "Succeeded":
+                log.warning("subscription.callback.binding_failed", trade_id=trade_id,
+                            order_no=order_no, binding_status=binding_status, record_status=record_status)
+                success = False
+
+    log.info("subscription.callback.received", trade_id=trade_id, order_no=order_no,
+             record_status=record_status, success=success)
     await _process_payment_result(
-        db, trade_id=trade_id, record_status=record_status or status_code,
+        db, trade_id=trade_id, record_status=str(record_status),
         order_no=order_no, success=success,
     )
     return {"status": "ok"}
@@ -457,6 +547,8 @@ async def update_card(
         "amount_twd": amount,
         "status": "pending",
         "card_token": None,
+        # 換卡挽回沒有 request model 帶發票欄位，快照當下 user.invoice_info（經 key 對映）。
+        "invoice_snapshot": build_invoice_snapshot_from_user_invoice_info(full_user.get("invoice_info")),
     })
     return {
         "order_no": order_no,
@@ -542,6 +634,7 @@ async def change_plan(
             "prev_order_no": sub.get("active_order_no"),
             "extra_duration_minutes": remaining_dur,
             "extra_ai_summaries": remaining_ai,
+            "invoice_snapshot": build_invoice_snapshot_from_request(request),
         })
         await _handle_invoice_save(request, user_id, user_repo)
         return {
@@ -632,8 +725,11 @@ async def purchase_extra_quota(
         "card_token": None,
         "quantity": qty,                      # 收據明細用
         "unit_price_twd": pkg["price_twd"],    # 單價（收據明細用）
+        "sku": pkg.get("sku"),                 # 發票 Description 來源（建單時落庫，不反推）
+        "label": pkg.get("label"),
         "extra_duration_minutes": unit * qty if pkg["type"] == "duration" else 0,
         "extra_ai_summaries": unit * qty if pkg["type"] == "ai_summaries" else 0,
+        "invoice_snapshot": build_invoice_snapshot_from_request(request),
     })
     await _handle_invoice_save(request, user_id, user_repo)
     return {
@@ -712,8 +808,10 @@ async def list_packages(db=Depends(get_database)):
 
 @router.get("/orders")
 async def list_orders(
-    limit: int = 6,
-    skip: int = 0,
+    # le=50：發票 join 用 order_no $in 批查（invoice_repo.list_by_order_nos，
+    # to_list 上限 1000），limit 無上限會讓超大頁靜默截斷發票欄位
+    limit: int = Query(6, ge=1, le=50),
+    skip: int = Query(0, ge=0),
     current_user: dict = Depends(get_current_user),
     db=Depends(get_database),
 ):
@@ -727,6 +825,17 @@ async def list_orders(
     )
     has_more = len(orders) > limit
     orders = orders[:limit]
+
+    # 附掛發票摘要（設計 §4.3）：一次 `$in` 撈這一頁全部訂單的 invoices，記憶體組裝，
+    # 避免每筆訂單各查一次的 N+1（使用者的訂單數量少，不需要 aggregation）。
+    order_nos = [o["merchant_order_no"] for o in orders if o.get("merchant_order_no")]
+    invoices_by_order: dict = {}
+    if order_nos:
+        invoice_repo = InvoiceRepository(db)
+        for inv in await invoice_repo.list_by_order_nos(order_nos):
+            invoices_by_order.setdefault(inv["order_no"], []).append(inv)
+
     for o in orders:
         o["_id"] = str(o["_id"])
+        o["invoice"] = pick_user_facing_invoice(invoices_by_order.get(o.get("merchant_order_no"), []))
     return {"orders": orders, "has_more": has_more}

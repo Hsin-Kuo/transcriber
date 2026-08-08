@@ -7,6 +7,7 @@ import UserDetailView from '../views/UserDetailView.vue'
 import AdminTasksView from '../views/AdminTasksView.vue'
 import AdminTaskDetailView from '../views/AdminTaskDetailView.vue'
 import AiCostView from '../views/AiCostView.vue'
+import AdminOrdersView from '../views/AdminOrdersView.vue'
 import LoginView from '../views/auth/LoginView.vue'
 
 const routes = [
@@ -70,6 +71,15 @@ const routes = [
     component: AuditLogsView,
     meta: {
       title: '操作記錄',
+      requiresAuth: true
+    }
+  },
+  {
+    path: '/orders',
+    name: 'admin-orders',
+    component: AdminOrdersView,
+    meta: {
+      title: '訂單 / 發票',
       requiresAuth: true
     }
   },
