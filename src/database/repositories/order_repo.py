@@ -1,6 +1,6 @@
 """訂單資料存取層"""
 import asyncio
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 
@@ -155,6 +155,115 @@ class OrderRepository:
             query["status"] = {"$in": statuses}
         cursor = self.collection.find(query).sort("created_at", -1).skip(skip).limit(limit)
         return await cursor.to_list(length=limit)
+
+    # ── Admin 全域分頁查詢（PR-B，設計文件 §7.1）─────────────────────────────
+
+    @staticmethod
+    def _invoice_lookup_stages() -> List[Dict[str, Any]]:
+        """`$lookup` invoices（依 order_no）並算出摘要規則（設計 §7.1）：取最新一筆
+        「非 voided」的 invoice；若全部都是 voided（或沒有 invoice），取最新一筆 voided；
+        完全沒有 invoice 則 `_invoice_doc` 為 None。抽成獨立方法給兩條查詢路徑共用
+        （見 `admin_list_with_invoices` 的效能註記）。
+        """
+        return [
+            {"$lookup": {
+                "from": "invoices",
+                "let": {"order_no": "$merchant_order_no"},
+                "pipeline": [
+                    {"$match": {"$expr": {"$eq": ["$order_no", "$$order_no"]}}},
+                    {"$sort": {"created_at": -1}},
+                ],
+                "as": "_invoices",
+            }},
+            {"$addFields": {
+                "_non_voided": {
+                    "$filter": {
+                        "input": "$_invoices", "as": "inv",
+                        "cond": {"$ne": ["$$inv.status", "voided"]},
+                    }
+                },
+            }},
+            {"$addFields": {
+                "_invoice_doc": {
+                    "$cond": [
+                        {"$gt": [{"$size": "$_non_voided"}, 0]},
+                        {"$arrayElemAt": ["$_non_voided", 0]},
+                        {"$arrayElemAt": ["$_invoices", 0]},
+                    ]
+                },
+            }},
+            {"$addFields": {"_invoice_status": {"$ifNull": ["$_invoice_doc.status", None]}}},
+        ]
+
+    @staticmethod
+    def _attach_invoice_summary(doc: Dict[str, Any]) -> Dict[str, Any]:
+        inv_doc = doc.pop("_invoice_doc", None)
+        doc.pop("_invoices", None)
+        doc.pop("_non_voided", None)
+        doc.pop("_invoice_status", None)
+        invoice = None
+        if inv_doc:
+            invoice = {
+                "status": inv_doc.get("status"),
+                "invoice_number": inv_doc.get("invoice_number"),
+                "invoice_date": inv_doc.get("invoice_date"),
+            }
+        doc["invoice"] = invoice
+        return doc
+
+    async def admin_list_with_invoices(
+        self,
+        mongo_filter: Dict[str, Any],
+        invoice_status: Optional[str],
+        skip: int,
+        limit: int,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """管理後台訂單列表：附掛「摘要發票」一筆（規則見 `_invoice_lookup_stages`）。
+
+        效能（PR-B 驗收 finding #10）：`invoice_status` 是衍生欄位，只能在 `$lookup`
+        之後才能拿來 `$match`，篩它的時候沒得選，只能整批 `$lookup` 完再 `$facet`
+        分頁/計數。但這是少數情境——常見的「不篩發票狀態」路徑改成先用 `count_documents`
+        算 total、再 `$match/$sort/$skip/$limit` truncate 到當頁之後才 `$lookup`，
+        避免訂單量大時整張表都跑一次 `$lookup`（撞 aggregation 100MB 記憶體上限的風險）。
+        """
+        if not invoice_status:
+            return await self._admin_list_page_then_lookup(mongo_filter, skip, limit)
+        return await self._admin_list_lookup_then_filter(mongo_filter, invoice_status, skip, limit)
+
+    async def _admin_list_page_then_lookup(
+        self, mongo_filter: Dict[str, Any], skip: int, limit: int,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        total = await self.collection.count_documents(mongo_filter)
+        pipeline: List[Dict[str, Any]] = [
+            {"$match": mongo_filter},
+            {"$sort": {"created_at": -1}},
+            {"$skip": skip},
+            {"$limit": limit},
+        ] + self._invoice_lookup_stages()
+        docs = await self.collection.aggregate(pipeline).to_list(length=limit)
+        return [self._attach_invoice_summary(d) for d in docs], total
+
+    async def _admin_list_lookup_then_filter(
+        self, mongo_filter: Dict[str, Any], invoice_status: str, skip: int, limit: int,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        pipeline: List[Dict[str, Any]] = [{"$match": mongo_filter}] + self._invoice_lookup_stages()
+        match_value = None if invoice_status == "none" else invoice_status
+        pipeline.append({"$match": {"_invoice_status": match_value}})
+        pipeline.append({
+            "$facet": {
+                "data": [
+                    {"$sort": {"created_at": -1}},
+                    {"$skip": skip},
+                    {"$limit": limit},
+                ],
+                "total": [{"$count": "count"}],
+            }
+        })
+
+        result = await self.collection.aggregate(pipeline).to_list(length=1)
+        facet = result[0] if result else {"data": [], "total": []}
+        total = facet["total"][0]["count"] if facet["total"] else 0
+        return [self._attach_invoice_summary(d) for d in facet["data"]], total
 
     async def update(self, order_id: str, updates: Dict[str, Any]) -> bool:
         updates["updated_at"] = get_utc_timestamp()

@@ -759,7 +759,8 @@ class TestVoidAndReissue:
 
     async def test_reissue_rejects_when_order_not_found(self, monkeypatch):
         """finding #6 回歸測試：order 查無時必須拒絕，不可 `order or {}` 續跑——那會用
-        amount_twd=0 組出零元發票送 SmilePay。且不該有任何新 invoice doc 被建立。
+        amount_twd=0 組出零元發票送 SmilePay。且不該有任何新 invoice doc 被建立
+        （只有原本那顆來源 invoice，reissue 失敗後其 reissue lease 也要被釋放）。
         """
         repo, _ = _repo()
         monkeypatch.setattr(isvc, "InvoiceRepository", lambda db: repo)
@@ -769,14 +770,20 @@ class TestVoidAndReissue:
         attempt = AsyncMock()
         monkeypatch.setattr(isvc, "_attempt_issue", attempt)
 
-        invoice = {"status": "voided", "order_no": "GONE", "user_id": "u1", "amount_twd": 1, "buyer": {}}
+        invoice = await repo.create({"order_no": "GONE", "user_id": "u1", "data_id": "SL-GONE",
+                                      "status": "voided", "buyer": {}, "amount_twd": 1})
         with pytest.raises(ValueError):
             await isvc.reissue(MagicMock(), invoice, admin_id="admin1")
         attempt.assert_not_awaited()
-        assert repo.collection.docs == {}  # 沒有孤兒 invoice doc 被建立
+        assert len(repo.collection.docs) == 1  # 沒有孤兒 invoice doc 被建立，只有原本那顆
+        saved = await repo.get_by_id(invoice["_id"])
+        assert saved["reissue_claimed_until"] is None  # finally 有釋放搶佔
 
     async def test_reissue_concurrent_data_id_collision_retries(self, monkeypatch):
         repo, _ = _repo()
+        # 來源 invoice（真的要被 reissue 的那顆，需要真 _id 才能走 claim_for_reissue）。
+        invoice = await repo.create({"order_no": "O1", "user_id": "u1", "data_id": "SL-O1",
+                                      "status": "voided", "buyer": {}, "amount_twd": 1})
         # 預先塞一筆 R1，模擬併發：next_reissue_seq 先回 1（撞號）、重算後回 2（成功）。
         await repo.create({"order_no": "O1", "user_id": "u1", "data_id": "SL-O1-R1",
                             "status": "voided", "buyer": {}, "amount_twd": 1})
@@ -789,7 +796,6 @@ class TestVoidAndReissue:
         attempt = AsyncMock()
         monkeypatch.setattr(isvc, "_attempt_issue", attempt)
 
-        invoice = {"status": "voided", "order_no": "O1", "user_id": "u1", "amount_twd": 1, "buyer": {}}
         result = await isvc.reissue(MagicMock(), invoice, admin_id="admin1")
         assert result["data_id"] == "SL-O1-R2"
         attempt.assert_awaited_once()
@@ -807,9 +813,75 @@ class TestVoidAndReissue:
         attempt = AsyncMock()
         monkeypatch.setattr(isvc, "_attempt_issue", attempt)
 
-        invoice = {"status": "needs_manual", "order_no": "O1", "user_id": "u1", "amount_twd": 1, "buyer": {}}
+        invoice = await repo.create({"order_no": "O1", "user_id": "u1", "data_id": "SL-O1",
+                                      "status": "needs_manual", "buyer": {}, "amount_twd": 1})
         corrected = {"invoice_type": "company", "company_tax_id": "12345678", "company_name": "新公司"}
         await isvc.reissue(MagicMock(), invoice, corrected_buyer=corrected, admin_id="admin1")
         user_repo.update_invoice_info.assert_awaited_once()
         saved_info = user_repo.update_invoice_info.await_args.args[1]
         assert saved_info["type"] == "company" and saved_info["company_tax_id"] == "12345678"
+
+    async def test_reissue_claim_conflict_when_already_in_flight(self, monkeypatch):
+        """finding #2 回歸測試：來源 invoice 的 reissue lease 還沒過期時（模擬另一個
+        admin/雙擊正在處理中），第二次呼叫必須被 ReissueConflictError 擋下，不可各自
+        算出不同 R{n} 都成功送出。"""
+        repo, _ = _repo()
+        monkeypatch.setattr(isvc, "InvoiceRepository", lambda db: repo)
+        attempt = AsyncMock()
+        monkeypatch.setattr(isvc, "_attempt_issue", attempt)
+
+        invoice = await repo.create({"order_no": "O1", "user_id": "u1", "data_id": "SL-O1",
+                                      "status": "voided", "buyer": {}, "amount_twd": 1})
+        # 模擬已被搶佔（lease 尚未過期）
+        await repo.update(invoice["_id"], {"reissue_claimed_until": get_utc_timestamp() + 60})
+
+        with pytest.raises(isvc.ReissueConflictError):
+            await isvc.reissue(MagicMock(), invoice, admin_id="admin2")
+        attempt.assert_not_awaited()
+        assert len(repo.collection.docs) == 1  # 沒有第二筆 invoice 被建立
+
+    async def test_reissue_blocked_when_order_already_has_open_invoice(self, monkeypatch):
+        """複核 N1 回歸測試：lease 只擋「同時飛」；重開成功後來源 doc 仍是 voided，
+        前後兩次按重開若不查該 order 既有 issued/進行中發票，會開出兩張真發票。"""
+        repo, _ = _repo()
+        monkeypatch.setattr(isvc, "InvoiceRepository", lambda db: repo)
+        attempt = AsyncMock()
+        monkeypatch.setattr(isvc, "_attempt_issue", attempt)
+
+        source = await repo.create({"order_no": "O1", "user_id": "u1", "data_id": "SL-O1",
+                                     "status": "voided", "buyer": {}, "amount_twd": 1})
+        # 第一次重開已成功：同 order 存在 issued 的新發票
+        await repo.create({"order_no": "O1", "user_id": "u1", "data_id": "SL-O1-R2",
+                            "status": "issued", "buyer": {}, "amount_twd": 1})
+
+        with pytest.raises(isvc.ReissueConflictError):
+            await isvc.reissue(MagicMock(), source, admin_id="admin1")
+        attempt.assert_not_awaited()
+        assert len(repo.collection.docs) == 2  # 沒有第三筆
+        # lease 已釋放（finally），之後合法的重開（如 issued 那張被作廢後）不會被卡死
+        assert (await repo.get_by_id(source["_id"])).get("reissue_claimed_until") is None
+
+    async def test_reissue_allowed_when_other_invoices_all_voided(self, monkeypatch):
+        """對照組：同 order 其他發票全是 voided（無 issued/pending/failed）→ 重開放行。"""
+        repo, _ = _repo()
+        monkeypatch.setattr(isvc, "InvoiceRepository", lambda db: repo)
+        attempt = AsyncMock(return_value=True)
+        monkeypatch.setattr(isvc, "_attempt_issue", attempt)
+        order_repo = MagicMock()
+        order_repo.get_by_order_no = AsyncMock(return_value={
+            "merchant_order_no": "O1", "amount_twd": 299, "tier": "basic",
+            "billing_cycle": "monthly", "type": "subscription", "paid_at": get_utc_timestamp(),
+        })
+        monkeypatch.setattr(isvc, "OrderRepository", lambda db: order_repo)
+        user_repo = MagicMock()
+        user_repo.get_by_id = AsyncMock(return_value={"email": "a@b.c"})
+        monkeypatch.setattr(isvc, "UserRepository", lambda db: user_repo)
+
+        source = await repo.create({"order_no": "O1", "user_id": "u1", "data_id": "SL-O1",
+                                     "status": "voided", "buyer": {}, "amount_twd": 299})
+        await repo.create({"order_no": "O1", "user_id": "u1", "data_id": "SL-O1-R2",
+                            "status": "voided", "buyer": {}, "amount_twd": 299})
+
+        result = await isvc.reissue(MagicMock(), source, admin_id="admin1")
+        assert result is not None
+        attempt.assert_awaited_once()

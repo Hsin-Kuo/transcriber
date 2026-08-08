@@ -40,6 +40,7 @@ class InvoiceRepository:
         invoice_data.setdefault("created_at", now)
         invoice_data.setdefault("updated_at", now)
         invoice_data.setdefault("claimed_until", None)
+        invoice_data.setdefault("reissue_claimed_until", None)
         invoice_data.setdefault("attempts", 0)
         invoice_data.setdefault("last_error", None)
         invoice_data.setdefault("allowance_numbers", [])
@@ -72,6 +73,7 @@ class InvoiceRepository:
                     "data_id": data_id,
                     "status": "pending",
                     "claimed_until": None,
+                    "reissue_claimed_until": None,
                     "invoice_type": None,
                     "invoice_number": None,
                     "random_number": None,
@@ -162,6 +164,45 @@ class InvoiceRepository:
         await self.collection.update_one(
             {"_id": _oid(invoice_id)},
             {"$set": {"claimed_until": None, "updated_at": get_utc_timestamp()}},
+        )
+
+    async def find_reissue_conflict(self, order_no: str) -> Optional[Dict[str, Any]]:
+        """該 order 是否已有「開立成功或進行中」的發票（issued/pending/failed）。
+
+        reissue 的 lease 只擋「同時飛」的請求；重開成功之後來源 doc 仍是 voided/
+        needs_manual，若不查這個，admin 前後兩次按重開會開出兩張真發票。
+        """
+        return await self.collection.find_one(
+            {"order_no": order_no, "status": {"$in": ["issued", "pending", "failed"]}}
+        )
+
+    async def claim_for_reissue(self, invoice_id, lease_seconds: int = 180) -> Optional[Dict[str, Any]]:
+        """reissue 專用的獨立 lease（欄位 `reissue_claimed_until`，不與 `claimed_until`
+        共用——那個是 sweep/issue 的 processing lease，語意不同，混用會互相誤擋）。
+
+        只有 status ∈ {voided, needs_manual} 且沒有其他人正在 reissue 中才搶得到；
+        拿不到回 None（PR-B 驗收 finding #2：防雙擊/兩 admin 併發重開出兩張真發票）。
+        lease 180s：期間內要做 next_reissue_seq + create + SmilePay 呼叫（httpx timeout
+        30s，載具降級時兩次）——60s 在 SmilePay 慢時可能過期，讓第二個請求搶進來。
+        """
+        now = get_utc_timestamp()
+        return await self.collection.find_one_and_update(
+            {
+                "_id": _oid(invoice_id),
+                "status": {"$in": ["voided", "needs_manual"]},
+                "$or": [
+                    {"reissue_claimed_until": None},
+                    {"reissue_claimed_until": {"$lt": now}},
+                ],
+            },
+            {"$set": {"reissue_claimed_until": now + lease_seconds, "updated_at": now}},
+            return_document=True,
+        )
+
+    async def release_reissue_claim(self, invoice_id) -> None:
+        await self.collection.update_one(
+            {"_id": _oid(invoice_id)},
+            {"$set": {"reissue_claimed_until": None, "updated_at": get_utc_timestamp()}},
         )
 
     # ── 更新 ───────────────────────────────────────────────────────────────
