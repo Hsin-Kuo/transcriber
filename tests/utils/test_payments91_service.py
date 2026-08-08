@@ -155,3 +155,35 @@ class TestRequestBodies:
         out = await svc.query_trade("PT123")
         assert captured["path"] == "/v2/trades/PT123"
         assert out["merchantOrderId"] == "SLSUB1"
+
+
+class TestQueryTradeTradeIdValidation:
+    """🔴 P1-8：trade_id 來自未認證 callback payload，直接嵌入 path 前需驗證格式（避免注入）。"""
+
+    async def test_invalid_trade_id_raises_without_calling_get(self):
+        svc = _svc()
+        svc._get = AsyncMock()
+        with pytest.raises(ValueError):
+            await svc.query_trade("X?merchantOrderId=victim")
+        svc._get.assert_not_awaited()
+
+    @pytest.mark.parametrize("non_string_trade_id", [12345, True, ["PT1"], {"x": "PT1"}, None])
+    async def test_non_string_trade_id_raises_without_calling_get(self, non_string_trade_id):
+        # F2 回歸：query_trade 自身也要守 isinstance，不能只靠 router 那層檢查。
+        svc = _svc()
+        svc._get = AsyncMock()
+        with pytest.raises(ValueError):
+            await svc.query_trade(non_string_trade_id)
+        svc._get.assert_not_awaited()
+
+    async def test_valid_trade_id_is_quoted_into_path(self):
+        svc = _svc()
+        captured = {}
+
+        async def fake_get(path_with_query):
+            captured["path"] = path_with_query
+            return {"statusCode": "Success"}
+
+        svc._get = fake_get
+        await svc.query_trade("PT0260724700004T")
+        assert captured["path"] == "/v2/trades/PT0260724700004T"

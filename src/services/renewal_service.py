@@ -11,7 +11,7 @@ import asyncio
 import os
 from typing import Optional
 
-from ..database.repositories.order_repo import OrderRepository
+from ..database.repositories.order_repo import DuplicatePendingOrderError, OrderRepository
 from ..database.repositories.processed_webhook_repo import ProcessedWebhookRepository
 from ..database.repositories.user_repo import UserRepository
 from .invoice_service import build_invoice_snapshot_from_user_invoice_info
@@ -62,9 +62,15 @@ async def periodic_renewal_check(db, interval_seconds: int = RENEWAL_INTERVAL_SE
 
 
 async def run_renewal_sweep(db) -> dict:
-    """一輪掃描：到期續扣 / past_due 重試 / 寬限滿降 free。回傳計數（測試用）。"""
+    """一輪掃描：到期續扣 / past_due 重試 / 寬限滿降 free。回傳計數（測試用）。
+
+    🔴 sweep 隔離：每個迴圈先把 cursor 物化成 list（理由同 invoice_service.py 的
+    run_invoice_retry_sweep——迴圈體有長 I/O(91APP API 呼叫)，沿用 async for 直接吃
+    motor cursor 會在長時間掛在迴圈中時撞 Mongo cursor idle timeout），逐筆處理並
+    包 try/except，避免單筆例外癱瘓整輪掃描、留下其他到期用戶未被處理。
+    """
     now_ts = get_utc_timestamp()
-    counts = {"charged": 0, "retried": 0, "expired": 0}
+    counts = {"charged": 0, "retried": 0, "expired": 0, "errored": 0, "skipped_duplicate": 0}
 
     # 1) 到期續扣：active、未排定取消、next_charge_at 到期
     cursor = db.users.find(
@@ -75,9 +81,17 @@ async def run_renewal_sweep(db) -> dict:
         },
         {"_id": 1, "subscription": 1, "invoice_info": 1},
     )
-    async for user in cursor:
-        await _attempt_charge(db, user)
-        counts["charged"] += 1
+    users = [u async for u in cursor]
+    for user in users:
+        try:
+            result = await _attempt_charge(db, user)
+            if result == "skipped_duplicate":
+                counts["skipped_duplicate"] += 1
+            else:
+                counts["charged"] += 1
+        except Exception as e:
+            counts["errored"] += 1
+            log.error("renewal.sweep.item_failed", user_id=str(user.get("_id")), error=str(e), exc_info=True)
 
     # 2) past_due 重試：非 needs_card_update、到重試時間
     cursor = db.users.find(
@@ -89,9 +103,17 @@ async def run_renewal_sweep(db) -> dict:
         },
         {"_id": 1, "subscription": 1, "invoice_info": 1},
     )
-    async for user in cursor:
-        await _attempt_charge(db, user)
-        counts["retried"] += 1
+    users = [u async for u in cursor]
+    for user in users:
+        try:
+            result = await _attempt_charge(db, user)
+            if result == "skipped_duplicate":
+                counts["skipped_duplicate"] += 1
+            else:
+                counts["retried"] += 1
+        except Exception as e:
+            counts["errored"] += 1
+            log.error("renewal.sweep.item_failed", user_id=str(user.get("_id")), error=str(e), exc_info=True)
 
     # 3) 寬限期滿（含 needs_card_update 未換卡者）→ 降 free
     grace_cutoff = now_ts - GRACE_SECONDS
@@ -102,9 +124,14 @@ async def run_renewal_sweep(db) -> dict:
         },
         {"_id": 1, "subscription": 1},
     )
-    async for user in cursor:
-        await _expire_after_grace(db, user)
-        counts["expired"] += 1
+    users = [u async for u in cursor]
+    for user in users:
+        try:
+            await _expire_after_grace(db, user)
+            counts["expired"] += 1
+        except Exception as e:
+            counts["errored"] += 1
+            log.error("renewal.sweep.item_failed", user_id=str(user.get("_id")), error=str(e), exc_info=True)
 
     if any(counts.values()):
         log.info("renewal.sweep.completed", **counts)
@@ -113,8 +140,12 @@ async def run_renewal_sweep(db) -> dict:
 
 # ── 單筆處理 ────────────────────────────────────────────────────────────────
 
-async def _attempt_charge(db, user: dict) -> None:
-    """對單一到期/待重試訂閱發動續扣（claim 去重 + 依結果走成功/Dunning）。"""
+async def _attempt_charge(db, user: dict) -> Optional[str]:
+    """對單一到期/待重試訂閱發動續扣（claim 去重 + 依結果走成功/Dunning）。
+
+    回傳 "skipped_duplicate" 表示撞到 DuplicatePendingOrderError（使用者走 /update-card
+    建了 in-flight pending 單，非錯誤）；其餘路徑回傳 None，呼叫端（sweep）依此分計數。
+    """
     user_id = str(user["_id"])
     sub = user.get("subscription", {})
 
@@ -135,35 +166,48 @@ async def _attempt_charge(db, user: dict) -> None:
         log.info("renewal.attempt.already_claimed", user_id=user_id, order_no=order_no)
         return
 
-    # 期末降級：pending_plan_change 存在 → 本期續扣用「目標 tier」，settle 成功即套用（見 order_settlement）
-    pc = sub.get("pending_plan_change")
-    if pc and pc.get("tier"):
-        tier = pc["tier"]
-        billing = pc.get("billing_cycle") or sub["billing_cycle"]
-    else:
-        tier = sub["tier"]
-        billing = sub["billing_cycle"]
-    svc = get_payments91_service()
-    amount = svc.get_subscription_price(tier, billing)
-    order_repo = OrderRepository(db)
+    try:
+        # 期末降級：pending_plan_change 存在 → 本期續扣用「目標 tier」，settle 成功即套用（見 order_settlement）
+        pc = sub.get("pending_plan_change")
+        if pc and pc.get("tier"):
+            tier = pc["tier"]
+            billing = pc.get("billing_cycle") or sub["billing_cycle"]
+        else:
+            tier = sub["tier"]
+            billing = sub["billing_cycle"]
+        svc = get_payments91_service()
+        amount = svc.get_subscription_price(tier, billing)
+        order_repo = OrderRepository(db)
 
-    # deterministic order_no：若前次中斷已建同號單，續用（靠 idempotency key 去重）
-    existing = await order_repo.get_by_order_no(order_no)
-    if existing and existing.get("status") == "paid":
-        return  # 已成功，勿重扣
-    if not existing:
-        await order_repo.create({
-            "user_id": user_id,
-            "merchant_order_no": order_no,
-            "type": "renewal",
-            "tier": tier,
-            "billing_cycle": billing,
-            "amount_twd": amount,
-            "status": "pending",
-            "card_token": sub.get("card_token"),
-            # 取 user.invoice_info 當下值（經 key 對映 `type`→`invoice_type`）快照。
-            "invoice_snapshot": build_invoice_snapshot_from_user_invoice_info(user.get("invoice_info")),
-        })
+        # deterministic order_no：若前次中斷已建同號單，續用（靠 idempotency key 去重）
+        existing = await order_repo.get_by_order_no(order_no)
+        if existing and existing.get("status") == "paid":
+            return  # 已成功，勿重扣
+        if not existing:
+            await order_repo.create({
+                "user_id": user_id,
+                "merchant_order_no": order_no,
+                "type": "renewal",
+                "tier": tier,
+                "billing_cycle": billing,
+                "amount_twd": amount,
+                "status": "pending",
+                "card_token": sub.get("card_token"),
+                # 取 user.invoice_info 當下值（經 key 對映 `type`→`invoice_type`）快照。
+                "invoice_snapshot": build_invoice_snapshot_from_user_invoice_info(user.get("invoice_info")),
+            })
+    except DuplicatePendingOrderError:
+        # 預期情況：使用者走 /update-card 建了 in-flight 的 pending recovery 單。
+        # release claim，下輪 sweep 待該單解決/過期後可重試，不算錯誤，也不算「已扣款」。
+        await webhook_repo.release(provider="91app-renewal", natural_id=order_no)
+        log.warning("renewal.attempt.duplicate_pending_order", user_id=user_id, order_no=order_no)
+        return "skipped_duplicate"
+    except Exception as e:
+        # 孤兒 claim 修復：建單前置作業（定價/查單）炸掉也要 release，否則此 (user, period, attempt)
+        # 永久卡死、下輪 sweep 再也撈不到它。re-raise 讓上層 sweep 隔離層計入 errored。
+        await webhook_repo.release(provider="91app-renewal", natural_id=order_no)
+        log.error("renewal.attempt.setup_failed", user_id=user_id, order_no=order_no, error=str(e), exc_info=True)
+        raise
 
     try:
         resp = await svc.charge_renewal(

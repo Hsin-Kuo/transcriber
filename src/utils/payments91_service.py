@@ -12,11 +12,17 @@ import hashlib
 import hmac
 import json
 import os
+import re
 from typing import Optional, Dict
+from urllib.parse import quote
 
 import httpx
 
 from .config_loader import get_parameter
+
+# callback 收到的 tradeId 未認證，直接嵌入 query path 前先驗證格式（體檢 P1-8）。
+# 91APP tradeId 觀察形狀為半形英數，保守放行底線/連字號；router 亦會 import 此常數做早退檢查。
+TRADE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 class Payments91APPService:
@@ -170,7 +176,10 @@ class Payments91APPService:
     # ── 交易回查（callback 防禦：不信 payload，以此為準）────────────
 
     async def query_trade(self, trade_id: str) -> Dict:
-        return await self._get(f"/v2/trades/{trade_id}")
+        if not isinstance(trade_id, str) or not TRADE_ID_RE.fullmatch(trade_id):
+            # 訊息不回帶原值：trade_id 來自未認證的 callback payload，避免注入內容進 log/Sentry。
+            raise ValueError("invalid trade_id format")
+        return await self._get(f"/v2/trades/{quote(trade_id, safe='')}")
 
     # ── 定價 ─────────────────────────────────────────────────────
 
