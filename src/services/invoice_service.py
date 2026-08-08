@@ -23,6 +23,7 @@ import httpx
 from pymongo.errors import DuplicateKeyError
 
 from ..database.repositories.invoice_repo import InvoiceRepository
+from ..database.repositories.job_lease_repo import JobLeaseRepository
 from ..database.repositories.order_repo import OrderRepository
 from ..database.repositories.user_repo import UserRepository
 from ..utils.smilepay_service import get_smilepay_service
@@ -647,12 +648,25 @@ async def reissue(db, invoice: Dict[str, Any], corrected_buyer: Optional[Dict[st
 # ── 背景 sweep（比照 renewal_service 形狀）───────────────────────────────────
 
 async def periodic_invoice_retry(db, interval_seconds: int = INVOICE_RETRY_INTERVAL_SECONDS) -> None:
-    """啟動立即跑一次，之後每 interval 掃描。受 main.py 的 RUN_BACKGROUND_JOBS 保護。"""
+    """啟動嘗試搶當前時間窗執行權，搶到才立即跑一次；搶不到等下一輪。之後每 interval
+    掃描。受 main.py 的 RUN_BACKGROUND_JOBS 保護。
+
+    🔴 P0-2(a)：prod 兩個 uvicorn worker 都跑這個背景任務，用 JobLeaseRepository 對本輪
+    時間窗搶執行權，避免同一輪重試/告警被跑兩次。lease 檢查失敗（DB 例外）fail-open，
+    照跑本輪並記警告——sweep 本身冪等，寧可偶發重跑也不要發票補救 sweep 全停。
+    """
+    lease_repo = JobLeaseRepository(db)
     while True:
+        should_run = True
         try:
-            await run_invoice_retry_sweep(db)
+            should_run = await lease_repo.claim_window("invoice_retry", interval_seconds)
         except Exception as e:
-            log.error("invoice.sweep.failed", error=str(e), exc_info=True)
+            log.warning("invoice.sweep.lease_check_failed", error=str(e))
+        if should_run:
+            try:
+                await run_invoice_retry_sweep(db)
+            except Exception as e:
+                log.error("invoice.sweep.failed", error=str(e), exc_info=True)
         await asyncio.sleep(interval_seconds)
 
 

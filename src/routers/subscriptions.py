@@ -9,7 +9,7 @@ import os
 import json
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional
@@ -202,11 +202,31 @@ async def _process_payment_result(
     """claim 去重 → settle。回傳 outcome 字串（或 "duplicate"）。失敗會 release + raise。
 
     is_first_payment 由 order type 推導：type=renewal（換卡挽回/續扣）走續扣分支，其餘為首期。
+
+    natural_id（P0-1 金流體檢）：只用 trade_id（缺 trade_id 時 fallback order_no），
+    不再併入 record_status。舊版 `f"{trade_id}:{record_status}"` 會讓同一筆 trade 的
+    recordStatus 演進（例如 91APP 4→5）或 /pay 立即成交與 /callback 兩條路徑各自帶不同
+    record_status 打進來時，被當成「不同封 webhook」各自 claim 一次成功——去重形同虛設。
+    現在同一 trade_id（或同一 order_no）只有一次 claim 會贏，record_status 的演進交給
+    order 狀態機（claim_paid 的 status!=paid→paid）判斷，不再靠 natural_id 分岔。
+    record_status 仍保留在 claim metadata 供觀測。
+
+    F10（第二意見審查）：失敗通知額外加 ":fail" 後綴分鍵——同一筆 trade 若先收到一封
+    失敗通知（先佔走 trade_id 主鍵），之後同一 trade 的成功 callback 用同一把鍵會被
+    claim 擋成 duplicate，變成「扣款其實成功但訂閱從未啟用」。分鍵後成功/失敗各自
+    claim 一次；mark_failed_unless_paid 本身在 DB 層已是 idempotent 的 `$ne paid` 條件式
+    寫入，失敗鍵重複 claim 不會造成覆寫風險，分鍵零成本。
+    ⚠️ 退款 callback（91APP recordStatus 6/7）：interpret_record_status 目前把 6/7 歸為
+    "failed"（success=False）→ 走 ":fail" 鍵，並不會被 trade_id 主鍵 dedup；真正攔下它
+    的是 settle 的 status=="paid" ALREADY_PAID 快路徑（已付款單不受失敗通知改動）。
+    另注意：部分退款(6)與全額退款(7)同 trade 會撞同一把 ":fail" 鍵，第二封被 dedup。
+    退款分支屬 P1-5 範圍，屆時需依 record_status 另開獨立 claim 鍵（例如
+    "refund:{record_status}"），不能沿用這裡的 natural_id。
     """
     order = await OrderRepository(db).get_by_order_no(order_no)
     is_first_payment = not (order and order.get("type") == "renewal")
     webhook_repo = ProcessedWebhookRepository(db)
-    natural_id = f"{trade_id or order_no}:{record_status}"
+    natural_id = (trade_id or order_no) + ("" if success else ":fail")
     if not await webhook_repo.claim(
         provider="91app",
         natural_id=natural_id,
@@ -541,10 +561,21 @@ async def cancel_subscription(
     if sub.get("cancel_at_period_end"):
         raise api_error("SUBSCRIPTION_ALREADY_SCHEDULED_CANCEL", "Subscription is already scheduled for cancellation", 400)
 
-    sub["cancel_at_period_end"] = True
-    sub["canceled_at"] = get_utc_timestamp()
-    sub["updated_at"] = get_utc_timestamp()
-    await user_repo.update_subscription(str(current_user["_id"]), sub)
+    # P0-2(b)（第二意見審查 F2）：dotted $set + guard，不再整包覆寫。guard 用
+    # next_charge_at 當版本 token——期末 sweep 若剛好續扣成功會推進它，若使用者手上這份
+    # 快照已經過期，寧可回 409 讓前端重新整理，也不能把續扣後的新狀態整包蓋掉。
+    ok = await user_repo.update_subscription_fields(
+        str(current_user["_id"]),
+        {"cancel_at_period_end": True, "canceled_at": get_utc_timestamp(),
+         "updated_at": get_utc_timestamp()},
+        guard={"subscription.next_charge_at": sub.get("next_charge_at")},
+    )
+    if not ok:
+        raise api_error(
+            "SUBSCRIPTION_CONCURRENT_UPDATE",
+            "Subscription state has changed, please refresh and try again",
+            status.HTTP_409_CONFLICT,
+        )
 
     return {"message": "訂閱將於目前計費週期結束時取消"}
 
@@ -613,10 +644,19 @@ async def reactivate_subscription(
     if not sub.get("cancel_at_period_end"):
         raise api_error("SUBSCRIPTION_NOT_SCHEDULED_CANCEL", "Subscription is not scheduled for cancellation", 400)
 
-    sub["cancel_at_period_end"] = False
-    sub["canceled_at"] = None
-    sub["updated_at"] = get_utc_timestamp()
-    await user_repo.update_subscription(str(current_user["_id"]), sub)
+    # P0-2(b)（F2）：dotted $set + guard，理由同 /cancel。
+    ok = await user_repo.update_subscription_fields(
+        str(current_user["_id"]),
+        {"cancel_at_period_end": False, "canceled_at": None,
+         "updated_at": get_utc_timestamp()},
+        guard={"subscription.next_charge_at": sub.get("next_charge_at")},
+    )
+    if not ok:
+        raise api_error(
+            "SUBSCRIPTION_CONCURRENT_UPDATE",
+            "Subscription state has changed, please refresh and try again",
+            status.HTTP_409_CONFLICT,
+        )
     return {"message": "訂閱已恢復，將於下個計費週期正常續扣"}
 
 
@@ -684,13 +724,26 @@ async def change_plan(
         }
 
     # 降級（basic←pro；改 free 請用 /cancel）：期末生效，只寫 pending_plan_change，不扣款
-    sub["pending_plan_change"] = {
-        "tier": request.tier,
-        "billing_cycle": request.billing,
-        "requested_at": get_utc_timestamp(),
-    }
-    sub["updated_at"] = get_utc_timestamp()
-    await user_repo.update_subscription(user_id, sub)
+    # P0-2(b)（F2）：dotted $set + guard。失敗場景舉例（F2 審查意見）：使用者在這裡讀到
+    # 舊快照，同時期末 sweep 續扣成功把 tier/billing_cycle/next_charge_at 都推進到新一期
+    # → 若整包覆寫，會把 tier 退回舊方案、next_charge_at 退回過去，變成「付新方案的錢
+    # 卻享舊方案、且永遠不再被排入續扣」。guard 命中 next_charge_at 版本 token 不符時
+    # 回 409，讓前端重新整理拿最新狀態再送一次。
+    ok = await user_repo.update_subscription_fields(
+        user_id,
+        {"pending_plan_change": {
+            "tier": request.tier,
+            "billing_cycle": request.billing,
+            "requested_at": get_utc_timestamp(),
+        }, "updated_at": get_utc_timestamp()},
+        guard={"subscription.next_charge_at": sub.get("next_charge_at")},
+    )
+    if not ok:
+        raise api_error(
+            "SUBSCRIPTION_CONCURRENT_UPDATE",
+            "Subscription state has changed, please refresh and try again",
+            status.HTTP_409_CONFLICT,
+        )
     return {
         "action": "downgrade",
         "effective": "end_of_period",
@@ -715,9 +768,18 @@ async def cancel_plan_change(
     if not sub.get("pending_plan_change"):
         raise api_error("SUBSCRIPTION_NO_PENDING_CHANGE", "No scheduled plan change", 400)
 
-    sub["pending_plan_change"] = None
-    sub["updated_at"] = get_utc_timestamp()
-    await user_repo.update_subscription(user_id, sub)
+    # P0-2(b)（F2）：dotted $set + guard，理由同 /change 降級分支。
+    ok = await user_repo.update_subscription_fields(
+        user_id,
+        {"pending_plan_change": None, "updated_at": get_utc_timestamp()},
+        guard={"subscription.next_charge_at": sub.get("next_charge_at")},
+    )
+    if not ok:
+        raise api_error(
+            "SUBSCRIPTION_CONCURRENT_UPDATE",
+            "Subscription state has changed, please refresh and try again",
+            status.HTTP_409_CONFLICT,
+        )
     return {"message": "已取消排定的方案變更，維持目前方案"}
 
 

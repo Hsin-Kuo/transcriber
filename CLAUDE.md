@@ -83,7 +83,7 @@ AWS 部署另需：`S3_BUCKET`、`SQS_QUEUE_URL`、`WORKER_SECRET`、`APP_ROLE`�
 ### MongoDB collections（一行速查）
 `users`(帳號/配額/訂閱) `tasks`(persistent state) `task_progress`(transient, TTL 6h)
 `transcriptions` `segments` `tags` `summaries` `audit_logs` `orders`
-`processed_webhooks`(idempotency) `rate_limits` `reservations`(配額預留)
+`processed_webhooks`(idempotency) `job_leases`(背景job window-lease) `rate_limits` `reservations`(配額預留)
 `chunk_uploads`(分片上傳, 3h sweep) `worker_heartbeats`(GPU keep-alive)
 
 ## AWS 生產環境速查（ap-northeast-1）

@@ -281,6 +281,41 @@ class OrderRepository:
         )
         return result.modified_count > 0
 
+    async def claim_paid(
+        self, merchant_order_no: str, extra_updates: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """原子搶單：只有 status != paid 時才寫入 paid + paid_at（含 extra_updates）。
+
+        這是 settle() 的權威重入防線（P0-1/P0-3）：不論首購或續扣、不論走 /callback
+        webhook 或 renewal sweep，同一張 order 只有一個呼叫者能把 status 從非 paid
+        翻成 paid——回傳 True 才代表「這次呼叫贏得了施加權益的權利」。搶不到（False）
+        代表已有別的 worker/路徑結算過這張單，caller 應回 ALREADY_PAID、不再施加任何
+        權益副作用（$inc 配額、展期等），避免同一筆付款被重放成雙倍權益。
+        """
+        now = get_utc_timestamp()
+        updates: Dict[str, Any] = {"status": "paid", "paid_at": now, "updated_at": now}
+        if extra_updates:
+            updates.update(extra_updates)
+        result = await self.collection.update_one(
+            {"merchant_order_no": merchant_order_no, "status": {"$ne": "paid"}},
+            {"$set": updates},
+        )
+        return result.modified_count == 1
+
+    async def mark_failed_unless_paid(self, merchant_order_no: str, updates: Dict[str, Any]) -> bool:
+        """標記失敗，但不得覆寫已 paid 的單。
+
+        遲到的舊 trade 失敗通知（例如重試中的某一封先被結算成功，另一封較舊的失敗
+        通知才姍姍來遲）不能把已經付款成功的單打成 failed。回傳是否真的寫入。
+        """
+        updates = dict(updates)
+        updates["updated_at"] = get_utc_timestamp()
+        result = await self.collection.update_one(
+            {"merchant_order_no": merchant_order_no, "status": {"$ne": "paid"}},
+            {"$set": updates},
+        )
+        return result.modified_count == 1
+
     async def sweep_expired_pending_orders(self) -> int:
         """將過期的 pending 訂單標記為 expired（保留記錄便於審計）"""
         now = get_utc_timestamp()
@@ -303,11 +338,25 @@ class OrderRepository:
 
 
 async def periodic_order_cleanup(db, interval_seconds: int = 300) -> None:
-    """定期清掃過期未付款訂單（背景任務，由 main.py startup 啟動）"""
+    """定期清掃過期未付款訂單（背景任務，由 main.py startup 啟動）。
+
+    🔴 P0-2(a)：prod 兩個 uvicorn worker 都跑這個背景任務，用 JobLeaseRepository 對
+    本輪時間窗搶執行權，避免同一輪清掃被跑兩次。lease 檢查本身失敗（DB 例外）採
+    fail-open，照跑本輪並記警告——sweep 冪等，寧可偶發重跑也不要背景任務全停。
+    """
+    from .job_lease_repo import JobLeaseRepository
     order_repo = OrderRepository(db)
+    lease_repo = JobLeaseRepository(db)
     while True:
+        await asyncio.sleep(interval_seconds)
+        should_run = True
         try:
-            await asyncio.sleep(interval_seconds)
+            should_run = await lease_repo.claim_window("order_cleanup", interval_seconds)
+        except Exception as e:
+            log.warning("order.sweep.lease_check_failed", error=str(e))
+        if not should_run:
+            continue
+        try:
             expired = await order_repo.sweep_expired_pending_orders()
             purged = await order_repo.purge_old_superseded_orders()
             if expired or purged:

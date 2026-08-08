@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 from fastapi import HTTPException, status
 
+from src.database.repositories.job_lease_repo import JobLeaseRepository
 from src.models.quota import QUOTA_TIERS, QuotaTier, tier_default, build_quota_from_tier
 from src.utils.time_utils import get_utc_timestamp, timestamp_to_datetime
 from src.utils.logger import get_logger
@@ -557,10 +558,23 @@ async def periodic_subscription_expiry_check(db, interval_seconds: int = 3600) -
     ⚠️ 只處理 cancel_at_period_end 的 lapse。auto-renew 的 active 訂閱過期末由
     renewal_service 續扣（不在此降級）；past_due 寬限期滿降級也由 renewal_service 負責。
 
-    第一次 sweep 在啟動後立即跑（不等 interval），避免 restart 緊接的時段
-    沒被 sweep 覆蓋；之後每 interval_seconds 跑一次。
+    啟動嘗試搶當前時間窗執行權，搶到才立即跑第一次（不等 interval），避免 restart
+    緊接的時段沒被 sweep 覆蓋；搶不到就等下一輪。之後每 interval_seconds 跑一次。
+
+    🔴 P0-2(a)：prod 兩個 uvicorn worker 都跑這個背景任務，用 JobLeaseRepository 對本輪
+    時間窗搶執行權，避免同一輪 lapse 掃描被跑兩次。lease 檢查失敗（DB 例外）fail-open，
+    照跑本輪並記警告——sweep 冪等，寧可偶發重跑也不要背景任務全停。
     """
+    lease_repo = JobLeaseRepository(db)
     while True:
+        should_run = True
+        try:
+            should_run = await lease_repo.claim_window("subscription_expiry", interval_seconds)
+        except Exception as e:
+            log.warning("subscription.expiry_sweep.lease_check_failed", error=str(e))
+        if not should_run:
+            await asyncio.sleep(interval_seconds)
+            continue
         try:
             now_ts = get_utc_timestamp()
             cursor = db.users.find(
