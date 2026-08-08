@@ -835,7 +835,18 @@ async def list_orders(
         for inv in await invoice_repo.list_by_order_nos(order_nos):
             invoices_by_order.setdefault(inv["order_no"], []).append(inv)
 
+    # 欄位白名單：不可整包 order doc 下發——內含 card_token（91APP 免 CVV 續扣憑證，
+    # 洩進瀏覽器/前端等於擴大可扣款憑證的暴露面）與 trade_id 等內部欄位。
+    # 比照 admin 詳情的 _ORDER_DETAIL_FIELDS 手法（PR-B 驗收 finding #1，同因）。
+    _USER_ORDER_FIELDS = (
+        "merchant_order_no", "type", "tier", "billing_cycle", "amount_twd",
+        "status", "created_at", "paid_at", "card_brand", "card_last4",
+        "quantity", "unit_price_twd", "extra_duration_minutes", "extra_ai_summaries",
+    )
+    result = []
     for o in orders:
-        o["_id"] = str(o["_id"])
-        o["invoice"] = pick_user_facing_invoice(invoices_by_order.get(o.get("merchant_order_no"), []))
-    return {"orders": orders, "has_more": has_more}
+        row = {k: o.get(k) for k in _USER_ORDER_FIELDS if k in o}
+        row["_id"] = str(o["_id"])
+        row["invoice"] = pick_user_facing_invoice(invoices_by_order.get(o.get("merchant_order_no"), []))
+        result.append(row)
+    return {"orders": result, "has_more": has_more}
