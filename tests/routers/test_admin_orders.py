@@ -21,6 +21,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from bson import ObjectId
 from fastapi import HTTPException
+from pydantic import ValidationError
 from pymongo.errors import DuplicateKeyError
 
 os.environ.setdefault(
@@ -405,12 +406,12 @@ class TestVoidInvoice:
         assert exc.value.status_code == 400
 
     def test_reason_empty_rejected_by_pydantic(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             admin_router.VoidInvoiceRequest(reason="")
 
     def test_reason_all_whitespace_rejected_by_pydantic(self):
         """finding #7：全空白理應視同「沒填」，strip 後空字串要撞 min_length=1。"""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             admin_router.VoidInvoiceRequest(reason="    ")
 
     def test_reason_is_stripped(self):
@@ -598,11 +599,11 @@ class TestReissueInvoice:
         assert exc.value.status_code == 404
 
     def test_corrected_buyer_company_missing_tax_id_rejected(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             admin_router.CorrectedBuyerModel(invoice_type="company", company_name="X")
 
     def test_corrected_buyer_invalid_carrier_format_rejected(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             admin_router.CorrectedBuyerModel(invoice_type="personal", carrier_num="bad-format")
 
     async def test_conflict_when_already_being_reissued_returns_409(self, seeded_db):
