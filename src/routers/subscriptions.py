@@ -28,7 +28,7 @@ from ..services.invoice_service import (
     build_invoice_snapshot_from_user_invoice_info,
 )
 from ..services.order_settlement import build_order_settlement, PaymentNotification
-from ..utils.payments91_service import get_payments91_service, interpret_record_status
+from ..utils.payments91_service import get_payments91_service, interpret_record_status, TRADE_ID_RE
 from ..utils.billing_period import generate_order_no
 from ..utils.time_utils import get_utc_timestamp
 from ..utils.logger import get_logger
@@ -388,7 +388,12 @@ async def payment_callback(request: Request, db=Depends(get_database)):
 
     🔴 成交判定以回查的 **recordStatus**（付款結果）為準，**不是** statusCode——後者在回查回應
     是「查詢是否成功」（trade 存在即 Success），誤用會讓任何 callback 一律判成功。
-    綁卡類（BindingCard）另需 payload 的 bindingStatus=Succeeded，否則即使付款成功也無可續扣的卡。
+    綁卡類（BindingCard）的成敗以回查回應（`trade`，我方簽章保護的通道）的 bindingStatus 為準，
+    採負向 gate（欄位不存在＝不擋，fail-open）；payload 的 bindingStatus 未認證，僅記 log 不判定。
+    order 缺 card_token 時同樣 fail-open（不判失敗）——cardToken 可能在 3D 完成「之後」才產生
+    （見 docs/PAYMENT_91APP_ADMIN_BACKEND_REFERENCE.md），/pay 同步 response 拿不到不代表沒綁卡
+    成功；改用回查回應補救寫回 order，寫不到則告警，續扣時 renewal_service 的 NoCardToken →
+    needs_card_update dunning 是既有兜底（體檢 P1-8/第二意見 F1）。
     """
     raw = await request.body()
     try:
@@ -400,6 +405,11 @@ async def payment_callback(request: Request, db=Depends(get_database)):
     trade_id = payload.get("tradeId") or payload.get("TradeId") or ""
     if not trade_id:
         log.warning("subscription.callback.no_trade_id", payload_keys=list(payload.keys()))
+        return {"status": "ignored"}
+
+    if not isinstance(trade_id, str) or not TRADE_ID_RE.fullmatch(trade_id):
+        # 未認證 payload 的 tradeId 會直接嵌入回查 path，型別不符/格式不符一律拒絕（不 log 原值）。
+        log.warning("subscription.callback.invalid_trade_id", trade_id_type=type(trade_id).__name__)
         return {"status": "ignored"}
 
     svc = get_payments91_service()
@@ -422,16 +432,42 @@ async def payment_callback(request: Request, db=Depends(get_database)):
         return {"status": "pending"}
     success = outcome == "success"
 
-    # 綁卡類（首購/升級走 BindingCard）：付款成功但綁卡失敗 → 沒有可續扣的卡 → 整筆判失敗。
-    # bindingStatus 只在 callback payload（回查回應不含），用作負向 gate（僅出現失敗值才擋，安全）。
-    if success:
-        order = await OrderRepository(db).get_by_order_no(order_no)
-        if order and order.get("type") in ("subscription", "upgrade_subscription"):
-            binding_status = payload.get("bindingStatus") or payload.get("BindingStatus")
-            if binding_status and binding_status != "Succeeded":
-                log.warning("subscription.callback.binding_failed", trade_id=trade_id,
-                            order_no=order_no, binding_status=binding_status, record_status=record_status)
-                success = False
+    # 綁卡類（首購/升級走 BindingCard）：判定來源一律用回查回應（trade，我方簽章保護的通道），
+    # 不用 payload——payload 未認證，其 bindingStatus 僅記 log 供比對，不參與判定。
+    # gate 僅限綁卡型訂單：續扣（MIT）/加購交易不綁卡，回查若帶非成功 bindingStatus 不得誤殺。
+    order_repo = OrderRepository(db)
+    order = await order_repo.get_by_order_no(order_no) if success else None
+    qb_binding = _find(trade, "bindingstatus")
+    payload_binding_status = payload.get("bindingStatus") or payload.get("BindingStatus")
+    is_binding_order = bool(order) and order.get("type") in ("subscription", "upgrade_subscription")
+    if success and is_binding_order and qb_binding is not None \
+            and str(qb_binding).lower() not in ("succeeded", "success"):
+        # 負向 gate：只有回查回應明確帶出非成功值才擋；欄位不存在＝不擋（fail-open）。
+        log.warning("subscription.callback.binding_failed", trade_id=trade_id, order_no=order_no,
+                    query_binding_status=qb_binding, payload_binding_status=payload_binding_status,
+                    record_status=record_status)
+        success = False
+
+    # order 缺 card_token 不再判失敗（cardToken 可能在 3D 完成「之後」才產生，/pay 同步 response
+    # 拿不到不代表沒綁卡成功）：fail-open，先試著從回查回應（可信）補救寫回，寫不到就告警，
+    # 續扣時 renewal_service 的 NoCardToken → needs_card_update dunning 是既有兜底。
+    # type 白名單含 "renewal"：/update-card 換卡挽回單建單時 card_token 為空，須由此補上新卡
+    # token；排程續扣單建單時已從 subscription 帶 token，不會落入此分支。
+    if success and order and not order.get("card_token") \
+            and order.get("type") in ("subscription", "upgrade_subscription", "renewal"):
+        qb_token = _find(trade, "cardtoken") or _find(trade, "bindingtoken")
+        if qb_token:
+            await order_repo.update_by_order_no(order_no, {"card_token": str(qb_token)})
+        else:
+            log.warning("subscription.callback.no_card_token_captured", trade_id=trade_id, order_no=order_no)
+            try:
+                import sentry_sdk
+                with sentry_sdk.push_scope() as scope:
+                    scope.set_tag("webhook.order_no", order_no)
+                    sentry_sdk.capture_message(
+                        "subscription.callback.no_card_token_captured", level="warning")
+            except ImportError:
+                pass
 
     log.info("subscription.callback.received", trade_id=trade_id, order_no=order_no,
              record_status=record_status, success=success)

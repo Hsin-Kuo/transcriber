@@ -104,13 +104,20 @@ class _FakeRequest:
 
 
 def _patch_callback(monkeypatch, *, trade: dict, order=None):
-    """換掉 query_trade / _process_payment_result / OrderRepository，回傳被捕捉的 settle 參數。"""
+    """換掉 query_trade / _process_payment_result / OrderRepository。
+
+    回傳 (captured, order_repo)：captured 是被捕捉的 settle 參數；order_repo 供斷言
+    update_by_order_no（F1 補救寫回 card_token）等呼叫細節。
+    """
     svc = MagicMock()
     svc.query_trade = AsyncMock(return_value=trade)
     monkeypatch.setattr(subs, "get_payments91_service", lambda: svc)
 
     order_repo = MagicMock()
-    order_repo.get_by_order_no = AsyncMock(return_value=order or {"type": "subscription"})
+    # 預設帶 card_token：多數測試聚焦 recordStatus 判讀而非綁卡 gate（P1-8），
+    # 沒指定 order 時視為已在 /pay 當下捕捉到可續扣的卡，避免被 gate 誤擋。
+    order_repo.get_by_order_no = AsyncMock(return_value=order or {"type": "subscription", "card_token": "CT1"})
+    order_repo.update_by_order_no = AsyncMock(return_value=True)
     monkeypatch.setattr(subs, "OrderRepository", lambda db: order_repo)
 
     captured = {}
@@ -120,14 +127,14 @@ def _patch_callback(monkeypatch, *, trade: dict, order=None):
         return "activated" if success else "failed"
 
     monkeypatch.setattr(subs, "_process_payment_result", fake_process)
-    return captured
+    return captured, order_repo
 
 
 class TestCallbackSuccessDerivation:
     """🔴 /callback 以回查的 recordStatus（付款結果）判定成敗，而非查詢層的 statusCode。"""
 
     async def test_record_status_paid_settles_success(self, monkeypatch):
-        cap = _patch_callback(monkeypatch, trade={
+        cap, _ = _patch_callback(monkeypatch, trade={
             "merchantOrderId": "SLSUB1", "recordStatus": 4, "statusCode": "Success",
         })
         out = await subs.payment_callback(_FakeRequest({"tradeId": "PT1", "recordStatus": 4}), db=MagicMock())
@@ -137,48 +144,131 @@ class TestCallbackSuccessDerivation:
 
     async def test_record_status_failed_settles_failure(self, monkeypatch):
         # 關鍵回歸：statusCode=Success（查詢成功）但 recordStatus=2（付款失敗）→ 必須判失敗
-        cap = _patch_callback(monkeypatch, trade={
+        cap, _ = _patch_callback(monkeypatch, trade={
             "merchantOrderId": "SLSUB1", "recordStatus": 2, "statusCode": "Success",
         })
         await subs.payment_callback(_FakeRequest({"tradeId": "PT1", "recordStatus": 2}), db=MagicMock())
         assert cap["success"] is False
 
     async def test_pending_does_not_settle(self, monkeypatch):
-        cap = _patch_callback(monkeypatch, trade={
+        cap, _ = _patch_callback(monkeypatch, trade={
             "merchantOrderId": "SLSUB1", "recordStatus": 8, "statusCode": "Success",
         })
         out = await subs.payment_callback(_FakeRequest({"tradeId": "PT1"}), db=MagicMock())
         assert out == {"status": "pending"}
         assert cap == {}  # 未定案 → 不進 settle
 
-    async def test_binding_failed_blocks_activation(self, monkeypatch):
-        # 付款成功（recordStatus=4）但綁卡失敗（bindingStatus=Failed）→ 無可續扣的卡 → 判失敗
-        cap = _patch_callback(monkeypatch, trade={
-            "merchantOrderId": "SLUPG1", "recordStatus": 4,
-        }, order={"type": "upgrade_subscription"})
-        await subs.payment_callback(
-            _FakeRequest({"tradeId": "PT1", "bindingStatus": "Failed"}), db=MagicMock())
+    async def test_binding_failed_via_query_response_blocks_activation(self, monkeypatch):
+        # (a) 付款成功（recordStatus=4）但回查回應（可信通道）帶 bindingStatus=Failed → 判失敗。
+        cap, _ = _patch_callback(monkeypatch, trade={
+            "merchantOrderId": "SLUPG1", "recordStatus": 4, "bindingStatus": "Failed",
+        }, order={"type": "upgrade_subscription", "card_token": "CT1"})
+        await subs.payment_callback(_FakeRequest({"tradeId": "PT1"}), db=MagicMock())
         assert cap["success"] is False
 
-    async def test_binding_succeeded_allows_activation(self, monkeypatch):
-        cap = _patch_callback(monkeypatch, trade={
+    async def test_missing_binding_field_and_no_card_token_fail_open(self, monkeypatch):
+        # (b) 回查回應無 bindingStatus 欄位（fail-open，不擋）；order 也沒有 card_token
+        # （cardToken 可能在 3D 完成之後才產生，/pay 同步 response 拿不到不代表沒綁卡成功）→
+        # 仍判成功，且缺 token 的告警/Sentry 路徑不能讓 callback 炸掉。
+        cap, order_repo = _patch_callback(monkeypatch, trade={
             "merchantOrderId": "SLSUB1", "recordStatus": 4,
-        }, order={"type": "subscription"})
+        }, order={"type": "subscription"})  # 無 card_token、無 bindingStatus
+        out = await subs.payment_callback(_FakeRequest({"tradeId": "PT1"}), db=MagicMock())
+        assert out == {"status": "ok"}
+        assert cap["success"] is True
+        order_repo.update_by_order_no.assert_not_awaited()  # 回查也沒給 cardToken，補不了
+
+    async def test_forged_payload_binding_status_ignored_when_query_lacks_field(self, monkeypatch):
+        # (c) 偽造 payload 帶 bindingStatus=Failed，但回查回應沒有這個欄位 → 不影響判定
+        # （payload 未認證，僅記 log；判定只看回查回應）。
+        cap, _ = _patch_callback(monkeypatch, trade={
+            "merchantOrderId": "SLSUB1", "recordStatus": 4,
+        }, order={"type": "subscription", "card_token": "CT1"})
         await subs.payment_callback(
-            _FakeRequest({"tradeId": "PT1", "bindingStatus": "Succeeded"}), db=MagicMock())
+            _FakeRequest({"tradeId": "PT1", "bindingStatus": "Failed"}), db=MagicMock())
         assert cap["success"] is True
 
+    async def test_query_response_card_token_gets_persisted(self, monkeypatch):
+        # (d) order 缺 card_token，但回查回應（可信）帶出 cardToken → 補救寫回 order。
+        cap, order_repo = _patch_callback(monkeypatch, trade={
+            "merchantOrderId": "SLSUB1", "recordStatus": 4, "cardToken": "CT-RECOVERED",
+        }, order={"type": "subscription"})  # 無 card_token
+        await subs.payment_callback(_FakeRequest({"tradeId": "PT1"}), db=MagicMock())
+        assert cap["success"] is True
+        order_repo.update_by_order_no.assert_awaited_once_with("SLSUB1", {"card_token": "CT-RECOVERED"})
+
     async def test_extra_quota_ignores_binding(self, monkeypatch):
-        # 加購為一次性，不需綁卡；綁卡失敗不影響其成交
-        cap = _patch_callback(monkeypatch, trade={
-            "merchantOrderId": "SLEXT1", "recordStatus": 4,
+        # 加購為一次性，不綁卡；即使回查回應帶出非成功 bindingStatus（形狀未實測，防禦性假設）
+        # 也不得誤殺——gate 僅限綁卡型訂單（subscription/upgrade_subscription）。
+        cap, _ = _patch_callback(monkeypatch, trade={
+            "merchantOrderId": "SLEXT1", "recordStatus": 4, "bindingStatus": "NotBinding",
         }, order={"type": "extra_quota"})
         await subs.payment_callback(
             _FakeRequest({"tradeId": "PT1", "bindingStatus": "Failed"}), db=MagicMock())
         assert cap["success"] is True
 
+    async def test_renewal_ignores_binding_gate(self, monkeypatch):
+        # 排程續扣（MIT）不綁卡；回查回應帶非成功 bindingStatus 不得把成功的續扣判失敗
+        # （否則錢已扣卻被推進 dunning）。
+        cap, _ = _patch_callback(monkeypatch, trade={
+            "merchantOrderId": "REN1", "recordStatus": 4, "bindingStatus": "NotBinding",
+        }, order={"type": "renewal", "card_token": "CT1"})
+        await subs.payment_callback(_FakeRequest({"tradeId": "PT1"}), db=MagicMock())
+        assert cap["success"] is True
+
+    async def test_recovery_renewal_card_token_gets_persisted(self, monkeypatch):
+        # /update-card 換卡挽回單（type=renewal）建單時 card_token 為空；回查回應帶出新卡
+        # cardToken 必須補救寫回，否則 settle 會沿用訂閱上的舊死卡。
+        cap, order_repo = _patch_callback(monkeypatch, trade={
+            "merchantOrderId": "REN2", "recordStatus": 4, "cardToken": "CT-NEWCARD",
+        }, order={"type": "renewal"})  # 無 card_token
+        await subs.payment_callback(_FakeRequest({"tradeId": "PT1"}), db=MagicMock())
+        assert cap["success"] is True
+        order_repo.update_by_order_no.assert_awaited_once_with("REN2", {"card_token": "CT-NEWCARD"})
+
     async def test_no_order_no_ignored(self, monkeypatch):
-        cap = _patch_callback(monkeypatch, trade={"recordStatus": 4})
+        cap, _ = _patch_callback(monkeypatch, trade={"recordStatus": 4})
         out = await subs.payment_callback(_FakeRequest({"tradeId": "PT1"}), db=MagicMock())
         assert out == {"status": "ignored"}
         assert cap == {}
+
+
+class TestTradeIdValidation:
+    """🔴 P1-8：tradeId 來自未認證 payload，直接嵌入回查 path 前需格式驗證，否則可注入。"""
+
+    @pytest.mark.parametrize("bad_trade_id", [
+        "X?merchantOrderId=victim",
+        "../../etc",
+        "A" * 65,        # 超過 64 字
+        "PT01 26 07",    # 帶空白字元
+        "PT<script>",
+    ])
+    async def test_malformed_trade_id_ignored_without_querying(self, monkeypatch, bad_trade_id):
+        svc = MagicMock()
+        svc.query_trade = AsyncMock(return_value={"merchantOrderId": "SLSUB1", "recordStatus": 4})
+        monkeypatch.setattr(subs, "get_payments91_service", lambda: svc)
+
+        out = await subs.payment_callback(_FakeRequest({"tradeId": bad_trade_id}), db=MagicMock())
+        assert out == {"status": "ignored"}
+        svc.query_trade.assert_not_awaited()
+
+    @pytest.mark.parametrize("non_string_trade_id", [12345, True, ["PT1"], {"x": "PT1"}])
+    async def test_non_string_trade_id_ignored_without_500(self, monkeypatch, non_string_trade_id):
+        # F2 回歸：非字串 tradeId（int/bool/list/dict）過了 `if not trade_id` 後直接丟進
+        # TRADE_ID_RE.fullmatch 會 TypeError → 500；isinstance 守門後應正常回 ignored。
+        svc = MagicMock()
+        svc.query_trade = AsyncMock(return_value={"merchantOrderId": "SLSUB1", "recordStatus": 4})
+        monkeypatch.setattr(subs, "get_payments91_service", lambda: svc)
+
+        out = await subs.payment_callback(_FakeRequest({"tradeId": non_string_trade_id}), db=MagicMock())
+        assert out == {"status": "ignored"}
+        svc.query_trade.assert_not_awaited()
+
+    async def test_legit_trade_id_proceeds_normally(self, monkeypatch):
+        cap, _ = _patch_callback(monkeypatch, trade={
+            "merchantOrderId": "SLSUB1", "recordStatus": 4,
+        }, order={"type": "subscription", "card_token": "CT1"})
+        out = await subs.payment_callback(
+            _FakeRequest({"tradeId": "PT0260724700004T"}), db=MagicMock())
+        assert out == {"status": "ok"}
+        assert cap["success"] is True

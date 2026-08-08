@@ -16,8 +16,32 @@ for k in ("PAYMENTS91_API_KEY", "PAYMENTS91_SHARED_SECRET", "PAYMENTS91_PUBLISHA
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from src.database.repositories.order_repo import DuplicatePendingOrderError  # noqa: E402
 from src.services import renewal_service as rs  # noqa: E402
 from src.services.order_settlement import SettleResult, SettleOutcome  # noqa: E402
+
+
+class FakeCursor:
+    """比照 test_invoice_service.py 的形狀：db.users.find(...) 回傳的 motor cursor 替身。"""
+
+    def __init__(self, docs):
+        self.docs = docs
+
+    def sort(self, *a, **kw):
+        return self
+
+    async def to_list(self, length=None):
+        return self.docs[:length] if length else list(self.docs)
+
+    def __aiter__(self):
+        self._it = iter(self.docs)
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._it)
+        except StopIteration:
+            raise StopAsyncIteration
 
 
 def _sub(**over):
@@ -94,6 +118,7 @@ class TestAttemptCharge:
         m = _patch(monkeypatch, existing_order={"status": "paid"})
         await rs._attempt_charge(MagicMock(), {"_id": "u1", "subscription": _sub()})
         m["svc"].charge_renewal.assert_not_awaited()  # deterministic order 已成功 → 不重扣
+        m["webhook"].release.assert_not_awaited()  # 已 paid 早退：claim 留著防重扣，不 release
 
     async def test_retryable_failure_sets_past_due(self, monkeypatch):
         m = _patch(monkeypatch, charge_resp={"statusCode": "RefuseTrade", "message": "decline"})
@@ -150,6 +175,63 @@ class TestAttemptCharge:
         await rs._attempt_charge(MagicMock(), {"_id": "u1", "subscription": sub})
         created = m["order_repo"].create.await_args.args[0]
         assert created["tier"] == "basic" and created["type"] == "renewal"
+
+
+class TestSweep:
+    """run_renewal_sweep 隔離層（P1-7）：單筆例外不擋整輪 + 孤兒 claim 修復。
+
+    比照 test_invoice_service.py 的 TestSweep 形狀：poison-doc 測試用 FakeCursor 餵
+    db.users.find() 的三次序列呼叫（到期續扣/past_due重試/寬限降級），聚焦排程隔離
+    本身；orphan-claim 兩測直接對 _attempt_charge 下手（沿用既有 _patch helper），
+    聚焦 claim 是否正確 release，不重複測整輪 sweep。
+    """
+
+    def _db_with_cursors(self, *cursor_docs):
+        """cursor_docs 依序對應 sweep 內三個 db.users.find() 呼叫。"""
+        db = MagicMock()
+        db.users.find = MagicMock(side_effect=[FakeCursor(docs) for docs in cursor_docs])
+        return db
+
+    async def test_poison_user_does_not_stall_the_whole_sweep(self, monkeypatch):
+        u1 = {"_id": "u1", "subscription": _sub()}
+        u2 = {"_id": "u2", "subscription": _sub()}
+        db = self._db_with_cursors([u1, u2], [], [])
+
+        attempt = AsyncMock(side_effect=[RuntimeError("boom"), None])
+        monkeypatch.setattr(rs, "_attempt_charge", attempt)
+
+        counts = await rs.run_renewal_sweep(db)
+        assert counts == {"charged": 1, "retried": 0, "expired": 0, "errored": 1, "skipped_duplicate": 0}
+        assert attempt.await_count == 2  # 第一筆炸掉不擋第二筆被處理
+
+    async def test_duplicate_pending_order_releases_claim_and_continues(self, monkeypatch):
+        # 使用者走 /update-card 建了 in-flight pending recovery 單 → DuplicatePendingOrderError
+        # 是預期情況，不是錯誤：release claim、不繼續扣款、也不向上拋例外。
+        m = _patch(monkeypatch)
+        m["order_repo"].create = AsyncMock(side_effect=DuplicatePendingOrderError("u1", "renewal"))
+        result = await rs._attempt_charge(MagicMock(), {"_id": "u1", "subscription": _sub()})
+        assert result == "skipped_duplicate"
+        m["webhook"].release.assert_awaited_once()
+        m["svc"].charge_renewal.assert_not_awaited()
+
+    async def test_sweep_counts_duplicate_pending_as_skipped_not_charged(self, monkeypatch):
+        # F6：DuplicatePendingOrderError 不是「已扣款」也不是「錯誤」，sweep 該計入
+        # skipped_duplicate，不能落進 charged/retried。
+        u1 = {"_id": "u1", "subscription": _sub()}
+        db = self._db_with_cursors([u1], [], [])
+        monkeypatch.setattr(rs, "_attempt_charge", AsyncMock(return_value="skipped_duplicate"))
+        counts = await rs.run_renewal_sweep(db)
+        assert counts == {"charged": 0, "retried": 0, "expired": 0, "errored": 0, "skipped_duplicate": 1}
+
+    async def test_setup_exception_releases_claim_and_raises(self, monkeypatch):
+        # 建單前置作業（定價/查單）任何非預期例外都要 release 孤兒 claim，並向上拋
+        # 讓 sweep 層（run_renewal_sweep 的 try/except）接住、計入 errored。
+        m = _patch(monkeypatch)
+        m["svc"].get_subscription_price = MagicMock(side_effect=RuntimeError("price lookup failed"))
+        with pytest.raises(RuntimeError):
+            await rs._attempt_charge(MagicMock(), {"_id": "u1", "subscription": _sub()})
+        m["webhook"].release.assert_awaited_once()
+        m["svc"].charge_renewal.assert_not_awaited()
 
 
 class TestDeterministicOrderNo:
