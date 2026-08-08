@@ -27,7 +27,7 @@ from ..services.invoice_service import (
     build_invoice_snapshot_from_user_invoice_info,
 )
 from ..services.order_settlement import build_order_settlement, PaymentNotification
-from ..utils.payments91_service import get_payments91_service
+from ..utils.payments91_service import get_payments91_service, interpret_record_status
 from ..utils.billing_period import generate_order_no
 from ..utils.time_utils import get_utc_timestamp
 from ..utils.logger import get_logger
@@ -384,6 +384,10 @@ async def payment_callback(request: Request, db=Depends(get_database)):
     """91APP 交易結果通知（server-to-server）。
 
     防禦設計：**不信任 payload**，只取 tradeId → 回查 GET /v2/trades/{tradeId} 為準 → settle。
+
+    🔴 成交判定以回查的 **recordStatus**（付款結果）為準，**不是** statusCode——後者在回查回應
+    是「查詢是否成功」（trade 存在即 Success），誤用會讓任何 callback 一律判成功。
+    綁卡類（BindingCard）另需 payload 的 bindingStatus=Succeeded，否則即使付款成功也無可續扣的卡。
     """
     raw = await request.body()
     try:
@@ -393,7 +397,6 @@ async def payment_callback(request: Request, db=Depends(get_database)):
         payload = dict(form)
 
     trade_id = payload.get("tradeId") or payload.get("TradeId") or ""
-    record_status = payload.get("recordStatus") or payload.get("RecordStatus") or ""
     if not trade_id:
         log.warning("subscription.callback.no_trade_id", payload_keys=list(payload.keys()))
         return {"status": "ignored"}
@@ -406,15 +409,33 @@ async def payment_callback(request: Request, db=Depends(get_database)):
         raise  # 回 500 讓 91APP 重送
 
     order_no = _find(trade, "merchantorderid") or ""
-    status_code = trade.get("statusCode") or ""
+    record_status = _find(trade, "recordstatus")  # 權威付款狀態（整數）；勿用 trade.statusCode
     if not order_no:
-        log.warning("subscription.callback.no_order_no", trade_id=trade_id, status=status_code)
+        log.warning("subscription.callback.no_order_no", trade_id=trade_id, record_status=record_status)
         return {"status": "ignored"}
 
-    success = status_code == "Success"
-    log.info("subscription.callback.received", trade_id=trade_id, order_no=order_no, status=status_code)
+    outcome = interpret_record_status(record_status)
+    if outcome == "pending":
+        # 尚未定案（待付款/處理中）→ 不結算，回 200 待 91APP 下次通知（3D 卡片實務多同步定案）
+        log.info("subscription.callback.pending", trade_id=trade_id, order_no=order_no, record_status=record_status)
+        return {"status": "pending"}
+    success = outcome == "success"
+
+    # 綁卡類（首購/升級走 BindingCard）：付款成功但綁卡失敗 → 沒有可續扣的卡 → 整筆判失敗。
+    # bindingStatus 只在 callback payload（回查回應不含），用作負向 gate（僅出現失敗值才擋，安全）。
+    if success:
+        order = await OrderRepository(db).get_by_order_no(order_no)
+        if order and order.get("type") in ("subscription", "upgrade_subscription"):
+            binding_status = payload.get("bindingStatus") or payload.get("BindingStatus")
+            if binding_status and binding_status != "Succeeded":
+                log.warning("subscription.callback.binding_failed", trade_id=trade_id,
+                            order_no=order_no, binding_status=binding_status, record_status=record_status)
+                success = False
+
+    log.info("subscription.callback.received", trade_id=trade_id, order_no=order_no,
+             record_status=record_status, success=success)
     await _process_payment_result(
-        db, trade_id=trade_id, record_status=record_status or status_code,
+        db, trade_id=trade_id, record_status=str(record_status),
         order_no=order_no, success=success,
     )
     return {"status": "ok"}

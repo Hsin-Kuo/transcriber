@@ -15,7 +15,33 @@ os.environ.setdefault("PAYMENTS91_SHARED_SECRET", "testsecret")
 os.environ.setdefault("PAYMENTS91_PUBLISHABLE_KEY", "test-pk")
 os.environ.setdefault("PAYMENTS91_STORE_CODE", "STORE01")
 
-from src.utils.payments91_service import Payments91APPService  # noqa: E402
+from src.utils.payments91_service import (  # noqa: E402
+    Payments91APPService,
+    interpret_record_status,
+)
+
+
+class TestInterpretRecordStatus:
+    """recordStatus（付款結果）判讀——別誤用查詢層的 statusCode。"""
+
+    def test_success_states(self):
+        assert interpret_record_status(4) == "success"   # 付款成功
+        assert interpret_record_status(5) == "success"   # 請款成功
+        assert interpret_record_status("4") == "success"  # 字串亦可
+
+    def test_failed_states(self):
+        assert interpret_record_status(2) == "failed"    # 付款失敗（3D 失敗）
+        assert interpret_record_status(3) == "failed"    # 付款取消
+        assert interpret_record_status(7) == "failed"    # 全部退款
+
+    def test_pending_states(self):
+        assert interpret_record_status(1) == "pending"   # 待付款
+        assert interpret_record_status(8) == "pending"   # 處理中
+
+    def test_unknown_is_failed(self):
+        assert interpret_record_status(None) == "failed"
+        assert interpret_record_status("") == "failed"
+        assert interpret_record_status("Success") == "failed"  # 誤把查詢 statusCode 丟進來 → 保守判失敗
 
 
 def _svc():
