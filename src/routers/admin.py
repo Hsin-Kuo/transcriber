@@ -1,11 +1,12 @@
 """
 管理後台 API - 用戶管理、任務管理、統計、審計日誌
 """
-from typing import Optional, List
+from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from bson import ObjectId
+from pymongo.errors import DuplicateKeyError
 
 from ..auth.dependencies import get_current_admin, get_database, require_permission
 from ..auth.rbac import AdminRole, Permission, permissions_for, resolve_admin_role
@@ -22,6 +23,9 @@ from ..database.repositories.summary_log_repo import SummaryLogRepository
 from ..database.repositories.presence_repo import PresenceRepository, PRESENCE_TTL_SECONDS
 from ..database.repositories.presence_rollup_repo import PresenceRollupRepository
 from ..database.repositories.daily_active_repo import DailyActiveRepository
+from ..database.repositories.order_repo import OrderRepository
+from ..database.repositories.invoice_repo import InvoiceRepository
+from ..services import invoice_service
 from ..models.quota import QuotaTier, QUOTA_TIERS
 from ..utils.time_utils import get_utc_timestamp
 from ..utils.audit_logger import log_admin_action
@@ -102,6 +106,74 @@ class BatchDeleteTasksRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     """重設用戶密碼請求"""
     new_password: str
+
+
+# 統編 8 碼數字；手機條碼載具 `/` + 7 碼——同 subscriptions.py 的 pattern（設計
+# docs/INVOICE_SMILEPAY_INTEGRATION_PLAN.md §3.3.1/§7.1），故意在本檔重複定義而非
+# 跨 router import：兩檔的驗證規則各自獨立成一份小 model，符合本檔既有的自足慣例。
+_ADMIN_TAX_ID_PATTERN = r"^\d{8}$"
+_ADMIN_CARRIER_PATTERN = r"^/[0-9A-Z+\-.]{7}$"
+
+
+def _blank_to_none(v):
+    if isinstance(v, str) and not v.strip():
+        return None
+    return v
+
+
+class VoidInvoiceRequest(BaseModel):
+    """作廢發票請求（設計 §7.1）。reason 先 strip 再驗非空（比照 subscriptions.py
+    `_blank_to_none` 慣例——全空白 "   " 不該算「有填」，PR-B 驗收 finding #7）；
+    超過 20 字改在 endpoint 內回結構化 400（而非 422），與設計文件 §7.1 表格的
+    錯誤碼期望一致。"""
+    reason: str = Field(..., min_length=1)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def _strip_reason(cls, v):
+        return v.strip() if isinstance(v, str) else v
+
+
+class CorrectedBuyerModel(BaseModel):
+    """重開發票時可選的買受人修正（設計 §3.3.1，同 subscriptions.py 發票欄位驗證）。"""
+    invoice_type: Optional[str] = None   # "personal" | "company"
+    carrier_type: Optional[str] = None
+    carrier_num: Optional[str] = Field(default=None, pattern=_ADMIN_CARRIER_PATTERN)
+    company_tax_id: Optional[str] = Field(default=None, pattern=_ADMIN_TAX_ID_PATTERN)
+    company_name: Optional[str] = None
+
+    @field_validator("carrier_type", "carrier_num", "company_tax_id", "company_name", mode="before")
+    @classmethod
+    def _normalize_blank(cls, v):
+        return _blank_to_none(v)
+
+    @model_validator(mode="after")
+    def _validate(self) -> "CorrectedBuyerModel":
+        if self.invoice_type not in (None, "personal", "company"):
+            raise ValueError("invoice_type must be 'personal' or 'company'")
+        if self.invoice_type == "company":
+            if not (self.company_tax_id or "").strip():
+                raise ValueError("company_tax_id is required when invoice_type is 'company'")
+            if not (self.company_name or "").strip():
+                raise ValueError("company_name is required when invoice_type is 'company'")
+        return self
+
+    def to_buyer_snapshot(self) -> Dict[str, Any]:
+        """轉成 invoice_service.reissue() 期望的 buyer snapshot 形狀。"""
+        if self.invoice_type == "company":
+            return {
+                "invoice_type": "company", "carrier_type": None, "carrier_num": None,
+                "company_tax_id": self.company_tax_id, "company_name": self.company_name,
+            }
+        return {
+            "invoice_type": "personal", "carrier_type": self.carrier_type,
+            "carrier_num": self.carrier_num, "company_tax_id": None, "company_name": None,
+        }
+
+
+class ReissueInvoiceRequest(BaseModel):
+    """重開發票請求（設計 §7.1）。corrected_buyer 留空代表沿用原 buyer。"""
+    corrected_buyer: Optional[CorrectedBuyerModel] = None
 
 
 # ========== 當前管理員 ==========
@@ -1231,6 +1303,338 @@ async def get_ai_cost_stats(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             error=str(e),
         )
+
+
+# ========== 訂單 / 發票管理 API（PR-B，設計 docs/INVOICE_SMILEPAY_INTEGRATION_PLAN.md §7）==========
+
+def _date_str_to_epoch(date_str: str, *, end_of_day: bool = False) -> Optional[float]:
+    """"YYYY-MM-DD" → epoch 秒（台北時區當天 00:00:00 或 23:59:59）。格式錯誤回 None（忽略該邊界，不 500）。"""
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=TZ_UTC8)
+        if end_of_day:
+            dt = dt.replace(hour=23, minute=59, second=59)
+        return dt.timestamp()
+    except ValueError:
+        return None
+
+
+async def _build_order_filter(
+    db,
+    *,
+    email: Optional[str] = None,
+    status: Optional[str] = None,
+    type: Optional[str] = None,
+    tier: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """把查詢參數組成 orders 的 mongo filter（照 `_build_audit_filter` 模式）。
+
+    email 先解析成 user_id（照 /tasks 既有 user_email 篩選的做法）；查無對應用戶時
+    回傳 meta.email_not_found，呼叫端據此短路回空結果，不必送一個注定 0 筆的查詢。
+    date_from/date_to 篩 order.created_at（建單時間，epoch 秒）。
+    """
+    mongo: Dict[str, Any] = {}
+    meta: Dict[str, Any] = {}
+
+    if email:
+        user = await UserRepository(db).get_by_email(email.strip())
+        if not user:
+            meta["email_not_found"] = True
+            return mongo, meta
+        mongo["user_id"] = str(user["_id"])
+
+    if status:
+        mongo["status"] = status
+    if type:
+        mongo["type"] = type
+    if tier:
+        mongo["tier"] = tier
+
+    if date_from:
+        ts = _date_str_to_epoch(date_from)
+        if ts is not None:
+            mongo.setdefault("created_at", {})["$gte"] = ts
+    if date_to:
+        ts = _date_str_to_epoch(date_to, end_of_day=True)
+        if ts is not None:
+            mongo.setdefault("created_at", {})["$lte"] = ts
+
+    return mongo, meta
+
+
+def _serialize_invoice(invoice: Dict[str, Any]) -> Dict[str, Any]:
+    doc = dict(invoice)
+    doc["_id"] = str(doc["_id"])
+    return doc
+
+
+# 訂單詳情回應欄位白名單（PR-B 驗收 finding #1）：`dict(order)` 整包下發會外洩
+# `card_token`（91APP 免 CVV 續扣憑證）——BILLING_READ（含 read_only 角色）就能拿到
+# 可扣款 token，等同金流憑證外洩。trade_id 是 91APP 對帳交易序號、非可扣款憑證，保留
+# 供 admin 對帳；card_last4 只是末四碼，本來就是給人看的，非敏感資料。
+_ORDER_DETAIL_FIELDS = (
+    "merchant_order_no", "user_id", "type", "tier", "billing_cycle",
+    "amount_twd", "status", "trade_id", "card_last4",
+    "quantity", "unit_price_twd", "sku", "label",
+    "extra_duration_minutes", "extra_ai_summaries",
+    "invoice_snapshot", "is_duplicate", "needs_refund",
+    "created_at", "updated_at", "paid_at", "expires_at",
+)
+
+
+def _serialize_order_detail(order: Dict[str, Any], user_email: str) -> Dict[str, Any]:
+    out = {field: order[field] for field in _ORDER_DETAIL_FIELDS if field in order}
+    out["_id"] = str(order["_id"])
+    out["user_email"] = user_email
+    return out
+
+
+async def _resolve_user_emails(db, user_ids: List[str]) -> Dict[str, str]:
+    """批次查 email，去識別化已刪除帳號（照 admin_analytics.build_admin_report 的既有做法）。"""
+    email_map: Dict[str, str] = {}
+    valid_oids = [ObjectId(uid) for uid in set(user_ids) if uid and ObjectId.is_valid(uid)]
+    if not valid_oids:
+        return email_map
+    async for u in db.users.find({"_id": {"$in": valid_oids}}, {"email": 1, "deleted_at": 1}):
+        uid = str(u["_id"])
+        email_map[uid] = user_email_or_label(u.get("email"), uid, deleted=bool(u.get("deleted_at")))
+    return email_map
+
+
+@router.get("/orders")
+async def list_orders(
+    email: Optional[str] = Query(None, description="篩選用戶 email"),
+    status: Optional[str] = Query(None, description="訂單狀態"),
+    type: Optional[str] = Query(None, description="訂單類型"),
+    tier: Optional[str] = Query(None, description="方案 tier"),
+    date_from: Optional[str] = Query(None, description="建單日期起 (YYYY-MM-DD)"),
+    date_to: Optional[str] = Query(None, description="建單日期迄 (YYYY-MM-DD)"),
+    invoice_status: Optional[str] = Query(
+        None, description="發票狀態；'none' 代表尚無 invoice"
+    ),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    admin: dict = Depends(require_permission(Permission.BILLING_READ)),
+    db=Depends(get_database),
+):
+    """管理後台訂單列表：篩選 + 分頁 + 附掛發票摘要（見 order_repo.admin_list_with_invoices）。"""
+    mongo_filter, meta = await _build_order_filter(
+        db, email=email, status=status, type=type, tier=tier,
+        date_from=date_from, date_to=date_to,
+    )
+    if meta.get("email_not_found"):
+        return {"orders": [], "total": 0, "skip": skip, "limit": limit}
+
+    orders, total = await OrderRepository(db).admin_list_with_invoices(
+        mongo_filter, invoice_status, skip, limit,
+    )
+
+    email_map = await _resolve_user_emails(db, [o.get("user_id") for o in orders])
+
+    result = []
+    for o in orders:
+        uid = o.get("user_id")
+        result.append({
+            "order_no": o.get("merchant_order_no"),
+            "user_id": uid,
+            "user_email": email_map.get(uid, ""),
+            "type": o.get("type"),
+            "tier": o.get("tier"),
+            "billing_cycle": o.get("billing_cycle"),
+            "amount_twd": o.get("amount_twd"),
+            "status": o.get("status"),
+            "paid_at": o.get("paid_at"),
+            "created_at": o.get("created_at"),
+            "invoice": o.get("invoice"),
+        })
+
+    return {"orders": result, "total": total, "skip": skip, "limit": limit}
+
+
+@router.get("/orders/{order_no}")
+async def get_order_detail(
+    order_no: str,
+    admin: dict = Depends(require_permission(Permission.BILLING_READ)),
+    db=Depends(get_database),
+):
+    """訂單詳情 + 該單全部 invoice 歷史（含 voided/last_error）+ user email。"""
+    order = await OrderRepository(db).get_by_order_no(order_no)
+    if not order:
+        raise api_error("ADMIN_ORDER_NOT_FOUND", "Order not found", status.HTTP_404_NOT_FOUND)
+
+    invoices = await InvoiceRepository(db).list_by_order_no(order_no)
+
+    email_map = await _resolve_user_emails(db, [order.get("user_id")])
+    order_out = _serialize_order_detail(order, email_map.get(order.get("user_id"), ""))
+
+    return {
+        "order": order_out,
+        "invoices": [_serialize_invoice(inv) for inv in invoices],
+    }
+
+
+@router.post("/invoices/{invoice_id}/void")
+async def void_invoice(
+    invoice_id: str,
+    body: VoidInvoiceRequest,
+    http_request: Request,
+    admin: dict = Depends(require_permission(Permission.BILLING_WRITE)),
+    db=Depends(get_database),
+):
+    """作廢發票（SmilePay types=Cancel）。SmilePay 拒絕（success=False）回 400，帶原始
+    status_code/desc/now_status 供 admin 判讀（設計 §7.1，實測 -2008/-2009 見設計 §9）。"""
+    if len(body.reason) > 20:
+        raise api_error("ADMIN_INVOICE_VOID_REASON_TOO_LONG",
+                        "reason must be at most 20 characters", status.HTTP_400_BAD_REQUEST)
+
+    invoice_repo = InvoiceRepository(db)
+    invoice = await invoice_repo.get_by_id(invoice_id)
+    if not invoice:
+        raise api_error("ADMIN_INVOICE_NOT_FOUND", "Invoice not found", status.HTTP_404_NOT_FOUND)
+
+    # 只有真的 issued 且有 invoice_number 的發票才能作廢——否則會拿空字串
+    # invoice_number 打 SmilePay 正式作廢 API（PR-B 驗收 finding #3）。
+    if invoice.get("status") != "issued" or not invoice.get("invoice_number"):
+        raise api_error(
+            "ADMIN_INVOICE_VOID_INVALID_STATUS",
+            "Only an issued invoice with an invoice_number can be voided",
+            status.HTTP_409_CONFLICT,
+            status=invoice.get("status"),
+        )
+
+    before_status = invoice.get("status")
+    result = await invoice_service.void_invoice_for(db, invoice, body.reason, str(admin["_id"]))
+    if not result.get("success"):
+        raise api_error(
+            "ADMIN_INVOICE_VOID_REJECTED", "SmilePay rejected the void request",
+            status.HTTP_400_BAD_REQUEST,
+            smilepay_status_code=result.get("status_code"), desc=result.get("desc"),
+            now_status=result.get("now_status"),
+        )
+
+    await log_admin_action(
+        admin_id=str(admin["_id"]),
+        action="void_invoice",
+        resource_type="invoice",
+        resource_id=invoice_id,
+        details={"order_no": invoice.get("order_no"), "reason": body.reason, "before_status": before_status},
+        request=http_request,
+    )
+
+    updated = await invoice_repo.get_by_id(invoice_id)
+    return {"success": True, "invoice": _serialize_invoice(updated)}
+
+
+@router.post("/invoices/{invoice_id}/retry")
+async def retry_invoice(
+    invoice_id: str,
+    http_request: Request,
+    admin: dict = Depends(require_permission(Permission.BILLING_WRITE)),
+    db=Depends(get_database),
+):
+    """重試開票，僅允許 status ∈ {failed, pending}（其餘 409）。"""
+    invoice_repo = InvoiceRepository(db)
+    invoice = await invoice_repo.get_by_id(invoice_id)
+    if not invoice:
+        raise api_error("ADMIN_INVOICE_NOT_FOUND", "Invoice not found", status.HTTP_404_NOT_FOUND)
+
+    current_status = invoice.get("status")
+    if current_status not in ("failed", "pending"):
+        raise api_error(
+            "ADMIN_INVOICE_RETRY_INVALID_STATUS",
+            "Invoice status '{status}' cannot be retried", status.HTTP_409_CONFLICT,
+            status=current_status,
+        )
+
+    try:
+        updated = await invoice_service.admin_retry(db, invoice)
+    except invoice_service.RetryInFlightError:
+        # 搶不到 processing lease（多半是背景 sweep 正好在處理）——回 409，不當成功、
+        # 不寫 audit（PR-B 驗收 finding #4：先前版本會靜默回 success 還寫一筆假的稽核紀錄）。
+        raise api_error(
+            "ADMIN_INVOICE_RETRY_IN_FLIGHT",
+            "Invoice is currently being processed by another operation, please retry shortly",
+            status.HTTP_409_CONFLICT,
+        )
+    except ValueError as e:
+        # 目前唯一會在通過上面狀態閘門後仍拋出的情形：查無對應 order（設計文件
+        # PR-B 實作註記——別讓 invoice_service 的 ValueError 變成 500）。
+        raise api_error("ADMIN_ORDER_NOT_FOUND", str(e), status.HTTP_404_NOT_FOUND)
+
+    await log_admin_action(
+        admin_id=str(admin["_id"]),
+        action="retry_invoice",
+        resource_type="invoice",
+        resource_id=invoice_id,
+        details={"order_no": invoice.get("order_no"), "before_status": current_status},
+        request=http_request,
+    )
+    return {"success": True, "invoice": _serialize_invoice(updated)}
+
+
+@router.post("/invoices/{invoice_id}/reissue")
+async def reissue_invoice(
+    invoice_id: str,
+    body: ReissueInvoiceRequest,
+    http_request: Request,
+    admin: dict = Depends(require_permission(Permission.BILLING_WRITE)),
+    db=Depends(get_database),
+):
+    """重開發票，僅允許 status ∈ {voided, needs_manual}（其餘 409）。可選 corrected_buyer
+    修正買受人；留空沿用原 buyer。invoice_service.reissue() 對非法狀態/查無 order 會
+    raise ValueError——這裡必須 except 轉 4xx，不可漏成 500（設計文件 PR-B 實作註記）。"""
+    invoice_repo = InvoiceRepository(db)
+    invoice = await invoice_repo.get_by_id(invoice_id)
+    if not invoice:
+        raise api_error("ADMIN_INVOICE_NOT_FOUND", "Invoice not found", status.HTTP_404_NOT_FOUND)
+
+    current_status = invoice.get("status")
+    if current_status not in ("voided", "needs_manual"):
+        raise api_error(
+            "ADMIN_INVOICE_REISSUE_INVALID_STATUS",
+            "Invoice status '{status}' cannot be reissued", status.HTTP_409_CONFLICT,
+            status=current_status,
+        )
+
+    corrected_buyer = body.corrected_buyer.to_buyer_snapshot() if body.corrected_buyer else None
+    try:
+        new_invoice = await invoice_service.reissue(
+            db, invoice, corrected_buyer=corrected_buyer, admin_id=str(admin["_id"]),
+        )
+    except invoice_service.ReissueConflictError:
+        # 搶不到 reissue lease：狀態已變更，或另一個 admin 正在重開同一張（PR-B 驗收
+        # finding #2）——不能讓雙擊/併發各自成功送出，變出兩張真發票。
+        raise api_error(
+            "ADMIN_INVOICE_REISSUE_CONFLICT",
+            "Invoice is currently being reissued elsewhere or its status has changed",
+            status.HTTP_409_CONFLICT,
+        )
+    except DuplicateKeyError:
+        # 撞號重算一次後仍失敗（極端併發）——回 409 讓 admin 重試，不可讓它變 500
+        # （PR-B 驗收 finding #5）。
+        raise api_error(
+            "ADMIN_INVOICE_REISSUE_DATA_ID_COLLISION",
+            "Could not allocate a unique reissue sequence, please retry",
+            status.HTTP_409_CONFLICT,
+        )
+    except ValueError as e:
+        # 通過上面狀態閘門後，reissue() 內部仍可能因查無對應 order 而 raise ValueError。
+        raise api_error("ADMIN_ORDER_NOT_FOUND", str(e), status.HTTP_404_NOT_FOUND)
+
+    await log_admin_action(
+        admin_id=str(admin["_id"]),
+        action="reissue_invoice",
+        resource_type="invoice",
+        resource_id=invoice_id,
+        details={
+            "order_no": invoice.get("order_no"),
+            "before_status": current_status,
+            "corrected_buyer": bool(corrected_buyer),
+        },
+        request=http_request,
+    )
+    return {"success": True, "invoice": _serialize_invoice(new_invoice)}
 
 
 # ========== 審計日誌 API ==========

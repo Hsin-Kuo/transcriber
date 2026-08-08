@@ -8,7 +8,7 @@
 呼叫鏈：
 - OrderSettlement.settle() 白名單 outcome → create_background_task(issue_for_order(...))
 - 背景 sweep（periodic_invoice_retry）每 10 分鐘：撈到期重試 + 獨立 deadline 告警 + 跨期 gate
-- reissue() / void_invoice_for()：admin 後台（PR-B）呼叫的服務層入口，本 PR 只實作+測試
+- reissue() / void_invoice_for() / admin_retry()：admin 後台（PR-B）呼叫的服務層入口
 
 🔴 Verify_key 絕不可進 log／Sentry breadcrumb（smilepay_service 已確保不進 URL；本檔一律
 只 log 業務欄位如 order_no/data_id/status_code，不觸碰 Verify_key）。動到 payment 相關 diff
@@ -64,6 +64,21 @@ class InvoiceFieldError(Exception):
         self.kind = kind  # "buyer_bad" | "carrier_bad" | "calc_error"
         self.reason = reason
         super().__init__(reason)
+
+
+class RetryInFlightError(Exception):
+    """admin_retry 搶不到 processing lease（sweep 或另一請求正在處理同一張發票）——
+    admin router 轉 409，不視為失敗、不寫 audit（PR-B 驗收 finding #4）。"""
+    pass
+
+
+class ReissueConflictError(Exception):
+    """reissue 搶不到 reissue lease（狀態已變更，或另一個 admin 正在重開同一張發票）——
+    admin router 轉 409（PR-B 驗收 finding #2：防雙擊/併發重開出兩張真發票）。"""
+
+    def __init__(self, invoice_id):
+        self.invoice_id = invoice_id
+        super().__init__(f"invoice {invoice_id} 目前無法重開：狀態已變更或有其他操作正在進行")
 
 
 # ── 錯誤分類（純函數，比照 renewal_service.classify_failure）───────────────────
@@ -320,12 +335,18 @@ async def _finalize_needs_manual(invoice_repo: InvoiceRepository, invoice: Dict[
 # ── 開立（單筆嘗試：claim → 呼叫 → 依結果落庫）─────────────────────────────────
 
 async def _attempt_issue(db, invoice_repo: InvoiceRepository, invoice_doc: Dict[str, Any],
-                          order: Dict[str, Any], user: Optional[Dict[str, Any]], *, _degraded: bool = False) -> None:
+                          order: Dict[str, Any], user: Optional[Dict[str, Any]], *, _degraded: bool = False) -> bool:
+    """回傳是否真的搶到 lease 並跑了一次嘗試（False = claim-miss，另一個 process 正在處理）。
+
+    回傳值目前只有 `admin_retry()` 在用（fresh-context 驗收 finding #4：admin 手動重試
+    若跟背景 sweep 撞在一起搶不到 lease，要能分辨出來回 409，不能靜默當成功）；其餘呼叫端
+    （issue_for_order/sweep/_degrade_and_reopen）沿用舊行為，不看回傳值。
+    """
     invoice_id = invoice_doc["_id"]
     claimed = await invoice_repo.claim_for_processing(invoice_id)
     if not claimed:
         log.info("invoice.issue.claim_missed", order_no=invoice_doc.get("order_no"))
-        return
+        return False
 
     buyer = claimed.get("buyer") or {}
     try:
@@ -337,9 +358,9 @@ async def _attempt_issue(db, invoice_repo: InvoiceRepository, invoice_doc: Dict[
         if e.kind == "carrier_bad" and not _degraded:
             await _degrade_and_reopen(db, invoice_repo, claimed, order, user,
                                        {"status": "carrier_format", "desc": e.reason})
-            return
+            return True
         await _finalize_needs_manual(invoice_repo, claimed, kind=e.kind, desc=e.reason)
-        return
+        return True
 
     svc = get_smilepay_service()
     try:
@@ -349,7 +370,7 @@ async def _attempt_issue(db, invoice_repo: InvoiceRepository, invoice_doc: Dict[
         # 不賭 -10072，人工核對速買配後台最安全（設計 §4.2/§6）。
         await _finalize_needs_manual(invoice_repo, claimed, kind="response_lost",
                                       desc="read timeout，結果不明，需人工核對速買配後台")
-        return
+        return True
     except httpx.HTTPError:
         # connect error（請求未送出）：安全重試。
         attempts = int(claimed.get("attempts", 0)) + 1
@@ -360,7 +381,7 @@ async def _attempt_issue(db, invoice_repo: InvoiceRepository, invoice_doc: Dict[
             "last_error": {"status": "connect_error", "desc": "連線失敗，請求可能未送達"},
             "claimed_until": None,
         })
-        return
+        return True
 
     status_code = str(resp.get("Status", ""))
     attempts = int(claimed.get("attempts", 0)) + 1
@@ -378,7 +399,7 @@ async def _attempt_issue(db, invoice_repo: InvoiceRepository, invoice_doc: Dict[
         })
         log.info("invoice.issue.success", order_no=claimed.get("order_no"),
                  invoice_number=resp.get("InvoiceNumber"))
-        return
+        return True
 
     if status_code == _DATA_ID_DUPLICATE:
         await _finalize_needs_manual(
@@ -386,7 +407,7 @@ async def _attempt_issue(db, invoice_repo: InvoiceRepository, invoice_doc: Dict[
             desc="data_id 重複，前次可能已成功但號碼取不回，需上速買配後台人工回填",
             attempts=attempts, last_error={"status": status_code, "desc": resp.get("Desc", "")},
         )
-        return
+        return True
 
     category = classify_invoice_error(status_code)
     last_error = {"status": status_code, "desc": resp.get("Desc", "")}
@@ -399,18 +420,19 @@ async def _attempt_issue(db, invoice_repo: InvoiceRepository, invoice_doc: Dict[
             "last_error": last_error,
             "claimed_until": None,
         })
-        return
+        return True
 
     # 載具自動降級僅限個人戶（B2C）；公司戶（B2B）不可擅自降級成無統編發票（設計 §4.2：
     # 企業要統編抵稅），理論上 B2B 請求不會帶 CarrierType 也就不會撞這幾個碼，這裡仍加保守防線。
     if category == "carrier_bad" and not _degraded and buyer.get("invoice_type") != "company":
         await _degrade_and_reopen(db, invoice_repo, claimed, order, user, last_error)
-        return
+        return True
 
     # buyer_bad / unknown（含降級後仍載具錯、或 company 買受人的 carrier_bad 保守 fallback）
     # → needs_manual + alert
     await _finalize_needs_manual(invoice_repo, claimed, kind=category, desc=resp.get("Desc", ""),
                                   attempts=attempts, last_error=last_error)
+    return True
 
 
 async def _degrade_and_reopen(db, invoice_repo: InvoiceRepository, claimed: Dict[str, Any],
@@ -520,59 +542,106 @@ async def void_invoice_for(db, invoice: Dict[str, Any], reason: str, admin_id: s
 
 # ── 重開（作廢後/needs_manual 後）────────────────────────────────────────────
 
+async def admin_retry(db, invoice: Dict[str, Any]) -> Dict[str, Any]:
+    """Admin 後台手動重試（PR-B）：立即嘗試一次，不等 next_retry_at backoff。
+
+    呼叫端（admin router）負責 status ∈ {pending, failed} 的 409 gate；這裡只信任
+    傳入的 invoice doc、查對應 order/user 後直接丟給 `_attempt_issue`（與 sweep 同一條路徑，
+    claim_for_processing 仍會擋掉「同時有另一個 process 在處理」的情況）。
+    查無 order 比照 reissue() 的做法拋 ValueError，讓 router 轉 4xx 而不是 500。
+
+    `_attempt_issue` 回傳 False 代表搶不到 lease（多半是背景 sweep 正好在處理同一張）——
+    這裡轉成 `RetryInFlightError` 而不是靜默當成功回傳，router 才能回 409 且不寫 audit
+    （PR-B 驗收 finding #4：先前版本會把「其實什麼都沒做」誤記成一次成功的重試）。
+    """
+    invoice_repo = InvoiceRepository(db)
+    order = await OrderRepository(db).get_by_order_no(invoice.get("order_no"))
+    if not order:
+        raise ValueError(f"admin_retry 找不到對應訂單：order_no={invoice.get('order_no')}")
+    user = await UserRepository(db).get_by_id(invoice.get("user_id"))
+    claimed_ok = await _attempt_issue(db, invoice_repo, invoice, order, user)
+    if not claimed_ok:
+        raise RetryInFlightError(f"invoice {invoice.get('_id')} 目前正被其他流程處理中")
+    return await invoice_repo.get_by_id(invoice["_id"])
+
+
 async def reissue(db, invoice: Dict[str, Any], corrected_buyer: Optional[Dict[str, Any]] = None,
                    admin_id: str = "") -> Dict[str, Any]:
     """允許 status ∈ {voided, needs_manual}。新 data_id = SL-{order_no}-R{n}；
     併發撞號由 data_id unique index 擋，DuplicateKeyError 重算一次。
+
+    併發保護（PR-B 驗收 finding #2）：雙擊或兩個 admin 同時對同一張 voided/needs_manual
+    發票按重開，若只憑呼叫端傳入的（可能已過期）status 判斷，會各自算出不同 R{n} 都送出
+    成功 → 一張舊發票變出兩張真發票。修法：動作前對來源 invoice 做原子搶佔
+    （`claim_for_reissue`，手法同 `claim_for_processing` 但欄位獨立，不影響 sweep 的
+    `claimed_until` lease 語意）。搶不到 → `ReissueConflictError`（router 轉 409）。
+    無論成功或失敗，都在 `finally` 釋放搶佔，避免卡死之後的重開嘗試。
     """
     if invoice.get("status") not in ("voided", "needs_manual"):
         raise ValueError(f"invoice status {invoice.get('status')!r} 不允許 reissue")
 
-    order_no = invoice["order_no"]
-    order = await OrderRepository(db).get_by_order_no(order_no)
-    if not order:
-        # 不可 `order or {}` 續跑——那會用 amount_twd=0 組出零元發票送 SmilePay。
-        raise ValueError(f"reissue 找不到對應訂單，拒絕重開：order_no={order_no}")
-
     invoice_repo = InvoiceRepository(db)
-    buyer = corrected_buyer or invoice.get("buyer") or {}
+    claimed = await invoice_repo.claim_for_reissue(invoice["_id"])
+    if not claimed:
+        raise ReissueConflictError(invoice.get("_id"))
 
-    if corrected_buyer:
-        user_repo = UserRepository(db)
-        await user_repo.update_invoice_info(invoice["user_id"], {
-            "type": buyer.get("invoice_type"),
-            "carrier_type": buyer.get("carrier_type") or "",
-            "carrier_num": buyer.get("carrier_num") or "",
-            "company_tax_id": buyer.get("company_tax_id") or "",
-            "company_name": buyer.get("company_name") or "",
-        })
+    try:
+        order_no = claimed["order_no"]
+        # lease 只擋「同時飛」；重開成功後來源 doc 仍是 voided/needs_manual，
+        # 不查既有 issued/進行中的發票，前後兩次按重開會開出兩張真發票（複核 N1）。
+        conflict = await invoice_repo.find_reissue_conflict(order_no)
+        if conflict:
+            raise ReissueConflictError(
+                f"order {order_no} 已有 {conflict.get('status')} 狀態的發票"
+                f"（{conflict.get('data_id')}），不可重開"
+            )
+        order = await OrderRepository(db).get_by_order_no(order_no)
+        if not order:
+            # 不可 `order or {}` 續跑——那會用 amount_twd=0 組出零元發票送 SmilePay。
+            raise ValueError(f"reissue 找不到對應訂單，拒絕重開：order_no={order_no}")
 
-    now = get_utc_timestamp()
-    for _ in range(2):  # 撞號重算一次
-        seq = await invoice_repo.next_reissue_seq(order_no)
-        data_id = f"SL-{order_no}-R{seq}"
-        try:
-            new_doc = await invoice_repo.create({
-                "order_no": order_no,
-                "user_id": invoice["user_id"],
-                "data_id": data_id,
-                "status": "pending",
-                "buyer": buyer,
-                "amount_twd": invoice.get("amount_twd", 0),
-                "first_attempt_at": now,
-                "next_retry_at": now,
-                "deadline_at": _deadline_at(order, buyer, now),
+        buyer = corrected_buyer or claimed.get("buyer") or {}
+
+        if corrected_buyer:
+            user_repo = UserRepository(db)
+            await user_repo.update_invoice_info(claimed["user_id"], {
+                "type": buyer.get("invoice_type"),
+                "carrier_type": buyer.get("carrier_type") or "",
+                "carrier_num": buyer.get("carrier_num") or "",
+                "company_tax_id": buyer.get("company_tax_id") or "",
+                "company_name": buyer.get("company_name") or "",
             })
-            break
-        except DuplicateKeyError:
-            continue
-    else:
-        raise DuplicateKeyError(f"reissue data_id 撞號重算失敗：order_no={order_no}")
 
-    user = await UserRepository(db).get_by_id(invoice["user_id"])
-    await _attempt_issue(db, invoice_repo, new_doc, order, user)
-    log.info("invoice.reissue", order_no=order_no, data_id=data_id, admin_id=admin_id)
-    return await invoice_repo.get_by_id(new_doc["_id"])
+        now = get_utc_timestamp()
+        new_doc = None
+        data_id = None
+        for _ in range(2):  # 撞號重算一次
+            seq = await invoice_repo.next_reissue_seq(order_no)
+            data_id = f"SL-{order_no}-R{seq}"
+            try:
+                new_doc = await invoice_repo.create({
+                    "order_no": order_no,
+                    "user_id": claimed["user_id"],
+                    "data_id": data_id,
+                    "status": "pending",
+                    "buyer": buyer,
+                    "amount_twd": claimed.get("amount_twd", 0),
+                    "first_attempt_at": now,
+                    "next_retry_at": now,
+                    "deadline_at": _deadline_at(order, buyer, now),
+                })
+                break
+            except DuplicateKeyError:
+                continue
+        else:
+            raise DuplicateKeyError(f"reissue data_id 撞號重算失敗：order_no={order_no}")
+
+        user = await UserRepository(db).get_by_id(claimed["user_id"])
+        await _attempt_issue(db, invoice_repo, new_doc, order, user)
+        log.info("invoice.reissue", order_no=order_no, data_id=data_id, admin_id=admin_id)
+        return await invoice_repo.get_by_id(new_doc["_id"])
+    finally:
+        await invoice_repo.release_reissue_claim(invoice["_id"])
 
 
 # ── 背景 sweep（比照 renewal_service 形狀）───────────────────────────────────
