@@ -3,6 +3,7 @@
 付款狀態機的每一條 transition 都能用 typed PaymentNotification + fake repos 覆蓋，
 不需要真金流 provider / webhook_repo / Mongo / FastAPI。
 """
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -27,8 +28,14 @@ from src.services.order_settlement import (  # noqa: E402
 )
 
 
-def _make(order=None, user=None):
-    """建一個 OrderSettlement，兩個 repo 全 fake（不再依賴金流 provider）。"""
+def _make(order=None, user=None, invoice_issuer=None):
+    """建一個 OrderSettlement，兩個 repo 全 fake（不再依賴金流 provider）。
+
+    invoice_issuer 預設是 no-op AsyncMock：settle() 白名單 outcome 會透過
+    create_background_task 觸發它，不 inject 的話會 fire 到真正的
+    invoice_service.issue_for_order（打真 InvoiceRepository/UserRepository，在這裡的
+    fake db 上會噴 TypeError），污染測試 stderr。開票 hook 本身的行為見 TestInvoiceTrigger。
+    """
     order_repo = MagicMock()
     order_repo.get_by_order_no = AsyncMock(return_value=order)
     order_repo.update_by_order_no = AsyncMock(return_value=True)
@@ -44,7 +51,10 @@ def _make(order=None, user=None):
     user_repo.reset_monthly_usage = AsyncMock(return_value=True)
     user_repo.add_extra_quota = AsyncMock(return_value=True)
 
-    s = OrderSettlement(order_repo=order_repo, user_repo=user_repo)
+    s = OrderSettlement(
+        order_repo=order_repo, user_repo=user_repo,
+        invoice_issuer=invoice_issuer or AsyncMock(),
+    )
     return s, order_repo, user_repo
 
 
@@ -272,3 +282,89 @@ class TestOpenPending:
         with pytest.raises(HTTPException) as ei:
             await s.open_pending({"user_id": "u1", "type": "subscription", "status": "pending"})
         assert ei.value.status_code == 429
+
+
+# ── settle: 開票 hook（91APP 付款成功 → 自動開立電子發票，設計 §4.2）─────────────
+
+class TestInvoiceTrigger:
+    """settle() 尾端白名單 outcome 觸發背景開票；create_background_task 是 fire-and-forget，
+    故每個測試在 settle() 後 `await asyncio.sleep(0)` 讓 event loop 跑到那顆背景 task。
+    """
+
+    async def test_activated_triggers_invoice_issuer(self):
+        issuer = AsyncMock()
+        s, order_repo, _ = _make(order=_order(card_token="CT1"), invoice_issuer=issuer)
+        r = await s.settle(PaymentNotification(
+            order_no="SLSUB1", success=True, is_first_payment=True, trade_id="T1",
+        ))
+        assert r.outcome == SettleOutcome.ACTIVATED
+        await asyncio.sleep(0)
+        issuer.assert_awaited_once()
+        db_arg, order_arg = issuer.await_args.args
+        assert order_arg["merchant_order_no"] == "SLSUB1"
+
+    async def test_renewed_triggers_invoice_issuer(self):
+        issuer = AsyncMock()
+        user = {"subscription": {"status": "active", "tier": "basic", "created_at": 111, "card_token": "CT1"}}
+        s, order_repo, _ = _make(order=_order(billing_cycle="monthly", status="paid"), user=user,
+                                  invoice_issuer=issuer)
+        r = await s.settle(PaymentNotification(order_no="SLSUB1", success=True, is_first_payment=False, trade_id="T2"))
+        assert r.outcome == SettleOutcome.RENEWED
+        await asyncio.sleep(0)
+        issuer.assert_awaited_once()
+
+    async def test_granted_triggers_invoice_issuer(self):
+        issuer = AsyncMock()
+        order = _order(merchant_order_no="SLEXT1", type="extra_quota", tier=None, billing_cycle=None,
+                       extra_duration_minutes=120, extra_ai_summaries=0)
+        s, order_repo, _ = _make(order=order, invoice_issuer=issuer)
+        r = await s.settle(PaymentNotification(order_no="SLEXT1", success=True, is_first_payment=True, trade_id="T1"))
+        assert r.outcome == SettleOutcome.GRANTED
+        await asyncio.sleep(0)
+        issuer.assert_awaited_once()
+
+    async def test_failed_does_not_trigger_invoice(self):
+        issuer = AsyncMock()
+        s, order_repo, _ = _make(order=_order(), invoice_issuer=issuer)
+        r = await s.settle(PaymentNotification(order_no="SLSUB1", success=False, is_first_payment=True))
+        assert r.outcome == SettleOutcome.FAILED
+        await asyncio.sleep(0)
+        issuer.assert_not_awaited()
+
+    async def test_already_paid_does_not_trigger_invoice(self):
+        issuer = AsyncMock()
+        s, order_repo, _ = _make(order=_order(status="paid"), invoice_issuer=issuer)
+        r = await s.settle(PaymentNotification(order_no="SLSUB1", success=True, is_first_payment=True))
+        assert r.outcome == SettleOutcome.ALREADY_PAID
+        await asyncio.sleep(0)
+        issuer.assert_not_awaited()
+
+    async def test_rejected_duplicate_does_not_trigger_invoice(self):
+        issuer = AsyncMock()
+        user = {"subscription": {"status": "active", "active_order_no": "OTHER", "cancel_at_period_end": False}}
+        s, order_repo, _ = _make(order=_order(), user=user, invoice_issuer=issuer)
+        r = await s.settle(PaymentNotification(order_no="SLSUB1", success=True, is_first_payment=True))
+        assert r.outcome == SettleOutcome.REJECTED_DUPLICATE
+        await asyncio.sleep(0)
+        issuer.assert_not_awaited()
+
+    async def test_issuer_exception_is_swallowed_settle_still_returns(self):
+        """create_background_task 本身已把例外導去 Sentry/log；settle() 的回傳不受影響。"""
+        issuer = AsyncMock(side_effect=RuntimeError("smilepay down"))
+        s, order_repo, _ = _make(order=_order(card_token="CT1"), invoice_issuer=issuer)
+        r = await s.settle(PaymentNotification(order_no="SLSUB1", success=True, is_first_payment=True, trade_id="T1"))
+        assert r.outcome == SettleOutcome.ACTIVATED  # settle 本身完全不受開票失敗影響
+        await asyncio.sleep(0)
+        issuer.assert_awaited_once()
+
+    async def test_default_issuer_lazy_imports_invoice_service(self):
+        """不注入 invoice_issuer 時（build_order_settlement/OrderSettlement 建構皆同），
+        預設走真正的 invoice_service.issue_for_order（lazy import）——驗證『有真的接上』，
+        實際開票邏輯由 test_invoice_service.py 覆蓋。`_make()` 測試 helper 為避免其他測試
+        噴噪音一律注入 fake issuer，這裡改直接建構 OrderSettlement 驗證真正的預設值。
+        """
+        from src.services.order_settlement import OrderSettlement, _default_invoice_issuer, build_order_settlement
+        s = OrderSettlement(order_repo=MagicMock(), user_repo=MagicMock())
+        assert s._invoice_issuer is _default_invoice_issuer
+        s2 = build_order_settlement(MagicMock())
+        assert s2._invoice_issuer is _default_invoice_issuer

@@ -46,6 +46,12 @@ jinja2
 # Resend (Email 服務)
 resend
 
+# 91APP 金流 / SmilePay 發票的 HTTP client（先前靠 openai SDK 傳遞依賴撿到，顯式列出）
+httpx
+
+# SmilePay 電子發票：回應是 XML，用 defusedxml 解析（防 XXE）
+defusedxml
+
 # AWS SDK
 boto3
 

@@ -277,6 +277,9 @@ function savedInvoiceData() {
   const info = authStore.user?.invoice_info
   if (!info) return {}
   const isCompany = info.type === 'company'
+  // 存量髒資料防護：company 缺統編或抬頭會被後端必填驗證 422，而升級頁進頁即建單、
+  // 不提供編輯，使用者無從自救。資料不完整就不帶發票欄位（開票時走後端 sanity check 分流）。
+  if (isCompany && (!info.company_tax_id || !info.company_name)) return {}
   return {
     invoice_type: info.type || 'personal',
     carrier_type: !isCompany && info.carrier_num ? '1' : '',

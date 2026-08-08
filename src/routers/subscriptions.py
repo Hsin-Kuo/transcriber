@@ -11,7 +11,7 @@ import json
 from bson import ObjectId
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import RedirectResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional
 
 from ..utils.api_errors import api_error
@@ -22,6 +22,10 @@ from ..database.repositories.user_repo import UserRepository
 from ..database.repositories.order_repo import OrderRepository
 from ..database.repositories.processed_webhook_repo import ProcessedWebhookRepository
 from ..models.quota import public_tier_plans, is_upgrade, QUOTA_TIERS, QuotaTier
+from ..services.invoice_service import (
+    build_invoice_snapshot_from_request,
+    build_invoice_snapshot_from_user_invoice_info,
+)
 from ..services.order_settlement import build_order_settlement, PaymentNotification
 from ..utils.payments91_service import get_payments91_service, interpret_record_status
 from ..utils.billing_period import generate_order_no
@@ -64,15 +68,55 @@ def _find(obj, key_lower: str):
 
 # ── Request Models ───────────────────────────────────────────────────────────
 
+# 統編 8 碼數字；手機條碼載具 `/` + 7 碼（數字/大寫英文/+-.）。後端也要驗（非瀏覽器 client
+# 會繞過前端），與 invoice_service 的開票前 sanity check（build_invoice_fields 入口）共用同一組
+# pattern，避免兩處定義飄移（設計 §3.3.1/§3.3.3）。
+_TAX_ID_PATTERN = r"^\d{8}$"
+_CARRIER_PATTERN = r"^/[0-9A-Z+\-.]{7}$"
+
+# 前端 CheckoutView.buildInvoiceData() 對「未選中那組」欄位固定送 `''`（不是 null/省略，
+# 見 frontend/src/views/CheckoutView.vue）。Optional[str] + Field(pattern=...) 只在值為
+# None 時跳過檢查——空字串仍會進 pattern 比對而 422（string_pattern_mismatch）。
+# 必須在 pattern 檢查「之前」（mode="before"）把空白字串正規化成 None。
+def _blank_to_none(v):
+    if isinstance(v, str) and not v.strip():
+        return None
+    return v
+
+
+def _require_company_fields_if_company(model):
+    """invoice_type=company 時 company_tax_id + company_name 皆必填（設計 §3.3.1）。
+
+    只驗 company_name 不夠：{invoice_type:"company", company_name:"X"}（缺統編）過去會
+    通過 request 驗證，直到付款成功後開票層才因統編格式錯炸 buyer_bad——應該在建單當下
+    就擋下，不要讓使用者付完錢才發現。
+    """
+    if model.invoice_type == "company":
+        if not (model.company_tax_id or "").strip():
+            raise ValueError("company_tax_id is required when invoice_type is 'company'")
+        if not (model.company_name or "").strip():
+            raise ValueError("company_name is required when invoice_type is 'company'")
+    return model
+
+
 class CheckoutRequest(BaseModel):
     tier: str       # "basic" | "pro"
     billing: str    # "monthly" | "yearly"
     invoice_type: Optional[str] = None   # "personal" | "company"
     carrier_type: Optional[str] = None   # "1"=手機條碼
-    carrier_num: Optional[str] = None
-    company_tax_id: Optional[str] = None
+    carrier_num: Optional[str] = Field(default=None, pattern=_CARRIER_PATTERN)
+    company_tax_id: Optional[str] = Field(default=None, pattern=_TAX_ID_PATTERN)
     company_name: Optional[str] = None
     save_invoice: bool = True
+
+    @field_validator("carrier_type", "carrier_num", "company_tax_id", "company_name", mode="before")
+    @classmethod
+    def _normalize_blank(cls, v):
+        return _blank_to_none(v)
+
+    @model_validator(mode="after")
+    def _validate_invoice(self) -> "CheckoutRequest":
+        return _require_company_fields_if_company(self)
 
 
 class PayRequest(BaseModel):
@@ -85,10 +129,19 @@ class ChangePlanRequest(BaseModel):
     billing: str
     invoice_type: Optional[str] = None
     carrier_type: Optional[str] = None
-    carrier_num: Optional[str] = None
-    company_tax_id: Optional[str] = None
+    carrier_num: Optional[str] = Field(default=None, pattern=_CARRIER_PATTERN)
+    company_tax_id: Optional[str] = Field(default=None, pattern=_TAX_ID_PATTERN)
     company_name: Optional[str] = None
     save_invoice: bool = True
+
+    @field_validator("carrier_type", "carrier_num", "company_tax_id", "company_name", mode="before")
+    @classmethod
+    def _normalize_blank(cls, v):
+        return _blank_to_none(v)
+
+    @model_validator(mode="after")
+    def _validate_invoice(self) -> "ChangePlanRequest":
+        return _require_company_fields_if_company(self)
 
 
 class PurchaseExtraRequest(BaseModel):
@@ -96,32 +149,46 @@ class PurchaseExtraRequest(BaseModel):
     quantity: int = Field(default=1, ge=1, le=99)
     invoice_type: Optional[str] = None
     carrier_type: Optional[str] = None
-    carrier_num: Optional[str] = None
-    company_tax_id: Optional[str] = None
+    carrier_num: Optional[str] = Field(default=None, pattern=_CARRIER_PATTERN)
+    company_tax_id: Optional[str] = Field(default=None, pattern=_TAX_ID_PATTERN)
     company_name: Optional[str] = None
     save_invoice: bool = True
+
+    @field_validator("carrier_type", "carrier_num", "company_tax_id", "company_name", mode="before")
+    @classmethod
+    def _normalize_blank(cls, v):
+        return _blank_to_none(v)
+
+    @model_validator(mode="after")
+    def _validate_invoice(self) -> "PurchaseExtraRequest":
+        return _require_company_fields_if_company(self)
 
 
 # ── 發票資訊處理 ─────────────────────────────────────────────────────────────
 
 async def _handle_invoice_save(request_data, user_id: str, user_repo: UserRepository):
-    """若 save_invoice=True，將發票資訊存入 user document"""
+    """若 save_invoice=True，將發票資訊整包覆蓋寫入 user document（設計 §3.3.2）。
+
+    整包覆蓋語意：只要指定了 invoice_type 就整段覆蓋（含清空另一型態的舊值），不論本次
+    是否帶 carrier_num/company_tax_id——修正舊版「只在有值時才寫入、切換型態不清舊值」
+    的殘留值問題（公司改回個人後仍被開 B2B）。
+    """
     if not request_data.save_invoice:
         return
-    if request_data.invoice_type == "personal" and request_data.carrier_num:
+    if request_data.invoice_type == "personal":
         await user_repo.update_invoice_info(user_id, {
             "type": "personal",
             "carrier_type": request_data.carrier_type or "1",
-            "carrier_num": request_data.carrier_num,
+            "carrier_num": request_data.carrier_num or "",
             "company_tax_id": "",
             "company_name": "",
         })
-    elif request_data.invoice_type == "company" and request_data.company_tax_id:
+    elif request_data.invoice_type == "company":
         await user_repo.update_invoice_info(user_id, {
             "type": "company",
             "carrier_type": "",
             "carrier_num": "",
-            "company_tax_id": request_data.company_tax_id,
+            "company_tax_id": request_data.company_tax_id or "",
             "company_name": request_data.company_name or "",
         })
 
@@ -223,6 +290,7 @@ async def create_checkout(
         "card_token": None,
         "extra_duration_minutes": 0,
         "extra_ai_summaries": 0,
+        "invoice_snapshot": build_invoice_snapshot_from_request(request),
     })
 
     await _handle_invoice_save(request, user_id, user_repo)
@@ -478,6 +546,8 @@ async def update_card(
         "amount_twd": amount,
         "status": "pending",
         "card_token": None,
+        # 換卡挽回沒有 request model 帶發票欄位，快照當下 user.invoice_info（經 key 對映）。
+        "invoice_snapshot": build_invoice_snapshot_from_user_invoice_info(full_user.get("invoice_info")),
     })
     return {
         "order_no": order_no,
@@ -563,6 +633,7 @@ async def change_plan(
             "prev_order_no": sub.get("active_order_no"),
             "extra_duration_minutes": remaining_dur,
             "extra_ai_summaries": remaining_ai,
+            "invoice_snapshot": build_invoice_snapshot_from_request(request),
         })
         await _handle_invoice_save(request, user_id, user_repo)
         return {
@@ -653,8 +724,11 @@ async def purchase_extra_quota(
         "card_token": None,
         "quantity": qty,                      # 收據明細用
         "unit_price_twd": pkg["price_twd"],    # 單價（收據明細用）
+        "sku": pkg.get("sku"),                 # 發票 Description 來源（建單時落庫，不反推）
+        "label": pkg.get("label"),
         "extra_duration_minutes": unit * qty if pkg["type"] == "duration" else 0,
         "extra_ai_summaries": unit * qty if pkg["type"] == "ai_summaries" else 0,
+        "invoice_snapshot": build_invoice_snapshot_from_request(request),
     })
     await _handle_invoice_save(request, user_id, user_repo)
     return {

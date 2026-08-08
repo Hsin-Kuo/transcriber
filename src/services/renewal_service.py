@@ -14,6 +14,7 @@ from typing import Optional
 from ..database.repositories.order_repo import OrderRepository
 from ..database.repositories.processed_webhook_repo import ProcessedWebhookRepository
 from ..database.repositories.user_repo import UserRepository
+from .invoice_service import build_invoice_snapshot_from_user_invoice_info
 from .order_settlement import build_order_settlement, PaymentNotification
 from ..utils.payments91_service import get_payments91_service
 from ..utils.time_utils import get_utc_timestamp
@@ -72,7 +73,7 @@ async def run_renewal_sweep(db) -> dict:
             "subscription.cancel_at_period_end": {"$ne": True},
             "subscription.next_charge_at": {"$lte": now_ts},
         },
-        {"_id": 1, "subscription": 1},
+        {"_id": 1, "subscription": 1, "invoice_info": 1},
     )
     async for user in cursor:
         await _attempt_charge(db, user)
@@ -86,7 +87,7 @@ async def run_renewal_sweep(db) -> dict:
             "subscription.needs_card_update": {"$ne": True},
             "subscription.next_retry_at": {"$lte": now_ts},
         },
-        {"_id": 1, "subscription": 1},
+        {"_id": 1, "subscription": 1, "invoice_info": 1},
     )
     async for user in cursor:
         await _attempt_charge(db, user)
@@ -160,6 +161,8 @@ async def _attempt_charge(db, user: dict) -> None:
             "amount_twd": amount,
             "status": "pending",
             "card_token": sub.get("card_token"),
+            # 取 user.invoice_info 當下值（經 key 對映 `type`→`invoice_type`）快照。
+            "invoice_snapshot": build_invoice_snapshot_from_user_invoice_info(user.get("invoice_info")),
         })
 
     try:

@@ -49,5 +49,8 @@ google-generativeai
 pycryptodome
 httpx
 
+# SmilePay 電子發票：回應是 XML，外部輸入用 defusedxml 較安全（防 XXE 等）
+defusedxml
+
 # Error tracking
 sentry-sdk[fastapi]
