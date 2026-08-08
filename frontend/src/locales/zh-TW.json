@@ -274,7 +274,10 @@
       "orderCycleMonthly": "月繳",
       "orderCycleYearly": "年繳",
       "orderExtraDuration": "+{n} 分鐘",
-      "orderExtraAi": "+{n} 次 AI 摘要"
+      "orderExtraAi": "+{n} 次 AI 摘要",
+      "invoiceVoided": "已作廢",
+      "invoiceNone": "–",
+      "invoiceTooltip": "隨機碼 {random}｜開立日 {date}"
     },
     "checkout": {
       "title": "結帳",

@@ -69,6 +69,19 @@
                 <span class="order-status" :class="order.status === 'paid' ? 'status-paid' : 'status-failed'">
                   {{ order.status === 'paid' ? $t('userSettings.subscription.orderStatusPaid') : $t('userSettings.subscription.orderStatusFailed') }}
                 </span>
+                <span
+                  v-if="order.invoice?.invoice_status === 'issued'"
+                  class="invoice-badge invoice-issued"
+                  :title="$t('userSettings.subscription.invoiceTooltip', { random: order.invoice.random_number, date: order.invoice.invoice_date })"
+                >
+                  {{ order.invoice.invoice_number }}
+                </span>
+                <span v-else-if="order.invoice?.invoice_status === 'voided'" class="invoice-badge invoice-voided">
+                  {{ $t('userSettings.subscription.invoiceVoided') }}
+                </span>
+                <span v-else class="invoice-badge invoice-none">
+                  {{ $t('userSettings.subscription.invoiceNone') }}
+                </span>
                 <button
                   v-if="order.status === 'paid'"
                   class="receipt-btn"
@@ -476,6 +489,8 @@ watch(() => props.modelValue, (open) => {
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .order-amount {
@@ -499,6 +514,30 @@ watch(() => props.modelValue, (open) => {
 .status-failed {
   background: rgba(220, 53, 69, 0.1);
   color: var(--color-danger, #dc3545);
+}
+
+.invoice-badge {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.invoice-issued {
+  background: rgba(163, 177, 198, 0.15);
+  color: var(--main-text-light);
+  cursor: help;
+}
+
+.invoice-voided {
+  background: rgba(163, 177, 198, 0.15);
+  color: var(--main-text-light);
+  text-decoration: line-through;
+}
+
+.invoice-none {
+  color: var(--main-text-light);
 }
 
 .receipt-btn {
