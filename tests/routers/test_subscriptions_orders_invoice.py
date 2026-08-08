@@ -133,10 +133,12 @@ async def seeded_db():
     user = {"_id": ObjectId()}
 
     await db.orders.insert_many([
-        # O-ISSUED：有一張 issued 發票
+        # O-ISSUED：有一張 issued 發票（含 card_token/trade_id，驗證回傳白名單會濾掉）
         {"merchant_order_no": "O-ISSUED", "type": "subscription", "tier": "pro",
          "billing_cycle": "monthly", "status": "paid", "amount_twd": 299,
-         "user_id": str(user["_id"]), "paid_at": now, "created_at": now},
+         "user_id": str(user["_id"]), "paid_at": now, "created_at": now,
+         "card_token": "SECRET_TOKEN_MUST_NOT_LEAK", "trade_id": "PT12345",
+         "invoice_snapshot": {"invoice_type": "personal"}},
         # O-VOIDED：唯一一張發票已作廢
         {"merchant_order_no": "O-VOIDED", "type": "subscription", "tier": "basic",
          "billing_cycle": "monthly", "status": "paid", "amount_twd": 99,
@@ -198,6 +200,21 @@ class TestListOrdersInvoiceJoin:
             "invoice_number": "AB111", "random_number": "1111",
             "invoice_date": "2026/08/08", "invoice_status": "issued",
         }
+
+    async def test_order_fields_whitelisted_no_card_token(self, seeded_db):
+        """回傳不可整包 order doc 下發：card_token（免 CVV 續扣憑證）/trade_id/
+        invoice_snapshot 等內部欄位不得出現在使用者端回應（staging E2E 抓到的既有洩漏）。"""
+        db, user = seeded_db
+        result = await subs.list_orders(limit=20, skip=0, current_user=user, db=db)
+        by_order = {o["merchant_order_no"]: o for o in result["orders"]}
+        row = by_order["O-ISSUED"]
+        for leaked in ("card_token", "trade_id", "invoice_snapshot", "user_id",
+                       "expires_at", "period_no"):
+            assert leaked not in row, f"{leaked} 不該下發到使用者端"
+        # 前端會用的欄位必須都在
+        for needed in ("merchant_order_no", "type", "tier", "billing_cycle",
+                       "amount_twd", "status", "created_at", "paid_at", "invoice", "_id"):
+            assert needed in row
 
     async def test_voided_order_reports_voided_status(self, seeded_db):
         db, user = seeded_db
