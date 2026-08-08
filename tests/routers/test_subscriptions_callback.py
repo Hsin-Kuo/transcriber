@@ -50,8 +50,8 @@ class TestProcessPaymentResult:
         )
         assert out == "activated"
         webhook_repo.claim.assert_awaited_once()
-        # natural_id = "<trade_id>:<record_status>"
-        assert webhook_repo.claim.await_args.kwargs["natural_id"] == "PT1:Success"
+        # natural_id = trade_id（不併入 record_status，P0-1：見 _process_payment_result docstring）
+        assert webhook_repo.claim.await_args.kwargs["natural_id"] == "PT1"
         assert webhook_repo.claim.await_args.kwargs["provider"] == "91app"
         n = settlement.settle.await_args.args[0]
         assert n.order_no == "SLSUB1" and n.success is True and n.trade_id == "PT1"
@@ -73,11 +73,56 @@ class TestProcessPaymentResult:
         webhook_repo.release.assert_awaited_once()  # 釋放讓 91APP 重送能重做
 
     async def test_natural_id_falls_back_to_order_no_when_no_trade_id(self, monkeypatch):
+        # F10：失敗通知額外帶 ":fail" 後綴（見 _process_payment_result docstring）
         webhook_repo, _ = _patch(monkeypatch)
         await subs._process_payment_result(
             MagicMock(), trade_id="", record_status="failed", order_no="SLSUB1", success=False,
         )
-        assert webhook_repo.claim.await_args.kwargs["natural_id"] == "SLSUB1:failed"
+        assert webhook_repo.claim.await_args.kwargs["natural_id"] == "SLSUB1:fail"
+
+    async def test_failure_key_is_namespaced_so_later_success_is_not_deduped(self, monkeypatch):
+        """F10：同一筆 trade 先收到失敗通知（佔走 ":fail" 鍵），之後的成功 callback 用
+        不帶後綴的鍵，兩者互不 dedup——避免『扣款其實成功但因鍵衝突被判 duplicate、
+        訂閱從未啟用』。
+        """
+        webhook_repo, settlement = _patch(monkeypatch, claim_ok=True)
+        await subs._process_payment_result(
+            MagicMock(), trade_id="PT9", record_status="RefuseTrade", order_no="SLSUB1", success=False,
+        )
+        fail_key = webhook_repo.claim.await_args.kwargs["natural_id"]
+
+        webhook_repo2, settlement2 = _patch(monkeypatch, claim_ok=True)
+        out = await subs._process_payment_result(
+            MagicMock(), trade_id="PT9", record_status="Success", order_no="SLSUB1", success=True,
+        )
+        success_key = webhook_repo2.claim.await_args.kwargs["natural_id"]
+
+        assert fail_key == "PT9:fail"
+        assert success_key == "PT9"
+        assert fail_key != success_key
+        assert out == "activated"
+        settlement2.settle.assert_awaited_once()
+
+    async def test_same_trade_two_callbacks_dedup_on_same_key(self, monkeypatch):
+        """同一筆 trade 的兩封 callback（91APP recordStatus 4→5 演進）必須落在同一個
+        claim 鍵上，第二封才會被 claim 擋成 duplicate（P0-1 的直接驗證：natural_id
+        不再併入 record_status，同 trade_id 不論 record_status 是什麼都收斂成同一鍵）。
+        """
+        webhook_repo, settlement = _patch(monkeypatch)
+        await subs._process_payment_result(
+            MagicMock(), trade_id="PT1", record_status="4", order_no="SLSUB1", success=True,
+        )
+        first_key = webhook_repo.claim.await_args.kwargs["natural_id"]
+
+        webhook_repo, settlement = _patch(monkeypatch, claim_ok=False)
+        out = await subs._process_payment_result(
+            MagicMock(), trade_id="PT1", record_status="5", order_no="SLSUB1", success=True,
+        )
+        second_key = webhook_repo.claim.await_args.kwargs["natural_id"]
+
+        assert first_key == second_key == "PT1"
+        assert out == "duplicate"
+        settlement.settle.assert_not_awaited()
 
     async def test_first_payment_derived_from_order_type(self, monkeypatch):
         # type=subscription → 首期；type=renewal（換卡挽回）→ 續扣分支

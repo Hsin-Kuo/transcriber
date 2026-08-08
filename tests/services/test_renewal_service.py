@@ -3,6 +3,7 @@
 用 monkeypatch 換掉 repo/service/settlement，聚焦 Dunning 狀態機與 claim 去重，
 免 Mongo / 91APP / email。
 """
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -64,10 +65,12 @@ def _patch(monkeypatch, *, claim_ok=True, charge_resp=None, existing_order=None)
     order_repo.get_by_order_no = AsyncMock(return_value=existing_order)
     order_repo.create = AsyncMock()
     order_repo.update_by_order_no = AsyncMock()
+    order_repo.mark_failed_unless_paid = AsyncMock(return_value=True)
     monkeypatch.setattr(rs, "OrderRepository", lambda db: order_repo)
 
     user_repo = MagicMock()
     user_repo.update_subscription = AsyncMock()
+    user_repo.update_subscription_fields = AsyncMock(return_value=True)
     user_repo.get_by_id = AsyncMock(return_value={"email": None})  # _send_email 早退
     monkeypatch.setattr(rs, "UserRepository", lambda db: user_repo)
 
@@ -78,7 +81,7 @@ def _patch(monkeypatch, *, claim_ok=True, charge_resp=None, existing_order=None)
 
     settlement = MagicMock()
     settlement.settle = AsyncMock(return_value=SettleResult(SettleOutcome.RENEWED, "o"))
-    settlement._expire_to_free = AsyncMock()
+    settlement._expire_to_free = AsyncMock(return_value=True)
     monkeypatch.setattr(rs, "build_order_settlement", lambda db: settlement)
 
     return {"webhook": webhook, "order_repo": order_repo, "user_repo": user_repo,
@@ -120,10 +123,34 @@ class TestAttemptCharge:
         m["svc"].charge_renewal.assert_not_awaited()  # deterministic order 已成功 → 不重扣
         m["webhook"].release.assert_not_awaited()  # 已 paid 早退：claim 留著防重扣，不 release
 
+    async def test_late_failure_response_does_not_overwrite_paid_order(self, monkeypatch):
+        """F1 時序測試（第二意見審查）：sweep 發起扣款後，91APP 先送 callback 讓
+        settle() 的 claim_paid 把單搶成 paid，charge_renewal 的 HTTP response 才姍姍
+        來遲且回非 Success（例如逾時後 91APP 端其實成功了）。改用
+        mark_failed_unless_paid 之後，不該再用會無條件覆寫的 update_by_order_no 寫
+        status=failed；這裡直接把 mark_failed_unless_paid mock 回 False（模擬它在 DB
+        層被 $ne paid 擋下），驗證呼叫路徑正確且不因此拋例外。
+        """
+        m = _patch(monkeypatch, charge_resp={"statusCode": "RefuseTrade"})
+        m["order_repo"].mark_failed_unless_paid = AsyncMock(return_value=False)
+        await rs._attempt_charge(MagicMock(), {"_id": "u1", "subscription": _sub()})
+
+        m["order_repo"].mark_failed_unless_paid.assert_awaited_once()
+        args = m["order_repo"].mark_failed_unless_paid.await_args.args
+        assert args[1] == {"status": "failed"}
+        # 沒有透過會無條件覆寫的 update_by_order_no 寫 status=failed
+        assert not any(
+            c.args[1].get("status") == "failed"
+            for c in m["order_repo"].update_by_order_no.await_args_list
+        )
+        # Dunning 狀態機仍照跑（不因為 mark 被擋就跳過失敗分類處理）
+        m["user_repo"].update_subscription_fields.assert_awaited_once()
+
     async def test_retryable_failure_sets_past_due(self, monkeypatch):
         m = _patch(monkeypatch, charge_resp={"statusCode": "RefuseTrade", "message": "decline"})
         await rs._attempt_charge(MagicMock(), {"_id": "u1", "subscription": _sub(dunning_attempts=0)})
-        saved = m["user_repo"].update_subscription.await_args.args[1]
+        # P0-2(b)：dotted 欄位寫入改走 update_subscription_fields（不再整包 $set）
+        saved = m["user_repo"].update_subscription_fields.await_args.args[1]
         assert saved["status"] == "past_due"
         assert saved["dunning_attempts"] == 1
         assert saved["next_retry_at"] is not None
@@ -134,12 +161,15 @@ class TestAttemptCharge:
         m = _patch(monkeypatch, charge_resp={"statusCode": "RefuseTrade"})
         # 已重試 3 次 → 本次為第 4 次(RETRY_MAX) → 降 free
         await rs._attempt_charge(MagicMock(), {"_id": "u1", "subscription": _sub(status="past_due", dunning_attempts=3, dunning_started_at=100)})
-        m["settlement"]._expire_to_free.assert_awaited_once_with("u1")
+        # P0-2(b)：guard 帶手上快照的 next_charge_at（_sub() 預設 1000）
+        m["settlement"]._expire_to_free.assert_awaited_once_with(
+            "u1", guard={"subscription.next_charge_at": 1000}
+        )
 
     async def test_card_fix_flags_needs_update_no_retry(self, monkeypatch):
         m = _patch(monkeypatch, charge_resp={"statusCode": "CardExpired"})
         await rs._attempt_charge(MagicMock(), {"_id": "u1", "subscription": _sub()})
-        saved = m["user_repo"].update_subscription.await_args.args[1]
+        saved = m["user_repo"].update_subscription_fields.await_args.args[1]
         assert saved["status"] == "past_due"
         assert saved["needs_card_update"] is True
         assert saved["next_retry_at"] is None  # 換卡類不自動重試
@@ -148,13 +178,15 @@ class TestAttemptCharge:
     async def test_hard_stop_downgrades_immediately(self, monkeypatch):
         m = _patch(monkeypatch, charge_resp={"statusCode": "CreditCardBlacklist"})
         await rs._attempt_charge(MagicMock(), {"_id": "u1", "subscription": _sub()})
-        m["settlement"]._expire_to_free.assert_awaited_once_with("u1")
+        m["settlement"]._expire_to_free.assert_awaited_once_with(
+            "u1", guard={"subscription.next_charge_at": 1000}
+        )
 
     async def test_no_card_token_needs_update(self, monkeypatch):
         m = _patch(monkeypatch)
         await rs._attempt_charge(MagicMock(), {"_id": "u1", "subscription": _sub(card_token=None)})
         m["svc"].charge_renewal.assert_not_awaited()
-        saved = m["user_repo"].update_subscription.await_args.args[1]
+        saved = m["user_repo"].update_subscription_fields.await_args.args[1]
         assert saved["status"] == "past_due" and saved["needs_card_update"] is True
 
     async def test_charge_exception_releases_claim(self, monkeypatch):
@@ -240,3 +272,95 @@ class TestDeterministicOrderNo:
         b = rs._renewal_order_no("6a631c4ec1ad174ecb0a716d", 1787446766, 2)
         c = rs._renewal_order_no("6a631c4ec1ad174ecb0a716d", 1787446766, 3)
         assert a == b and a != c and len(a) <= 50
+
+
+# ── P0-2(b)：dunning 更新 / 降級的樂觀併發 guard ─────────────────────────────────
+
+class TestApplyUpdatesGuard:
+    async def test_stale_guard_is_silently_skipped(self, monkeypatch):
+        """update_subscription_fields 回 False（guard 不符，代表併發續約已推進 next_charge_at）
+        → 不拋例外、只記警告（呼叫端不重試，下一輪 sweep 會用新狀態重新判斷）。"""
+        user_repo = MagicMock()
+        user_repo.update_subscription_fields = AsyncMock(return_value=False)
+        monkeypatch.setattr(rs, "UserRepository", lambda db: user_repo)
+
+        await rs._apply_updates(MagicMock(), "u1", {"next_charge_at": 1000}, {"status": "past_due"})
+
+        user_repo.update_subscription_fields.assert_awaited_once_with(
+            "u1", {"status": "past_due"}, guard={"subscription.next_charge_at": 1000}
+        )
+
+
+class TestDowngradeGuard:
+    async def test_guard_failure_skips_downgrade_and_returns_false(self, monkeypatch):
+        settlement = MagicMock()
+        settlement._expire_to_free = AsyncMock(return_value=False)
+        monkeypatch.setattr(rs, "build_order_settlement", lambda db: settlement)
+
+        ok = await rs._downgrade(
+            MagicMock(), "u1", reason="hard_stop:X", sub_snapshot={"next_charge_at": 1000}
+        )
+        assert ok is False
+        settlement._expire_to_free.assert_awaited_once_with(
+            "u1", guard={"subscription.next_charge_at": 1000}
+        )
+
+    async def test_no_snapshot_passes_no_guard(self, monkeypatch):
+        """呼叫端沒有快照可傳（sub_snapshot=None）→ guard=None，行為等同舊版一律降級。"""
+        settlement = MagicMock()
+        settlement._expire_to_free = AsyncMock(return_value=True)
+        monkeypatch.setattr(rs, "build_order_settlement", lambda db: settlement)
+
+        ok = await rs._downgrade(MagicMock(), "u1", reason="grace_expired")
+        assert ok is True
+        settlement._expire_to_free.assert_awaited_once_with("u1", guard=None)
+
+    async def test_hard_stop_downgrade_skipped_stale_does_not_send_email(self, monkeypatch):
+        """P0-2(b) 的完整鏈路：guard 失敗 → _downgrade 回 False → _handle_failure 不寄
+        『已降級』通知信（訂閱其實已被併發續約救回，寄這封信會誤導用戶）。"""
+        m = _patch(monkeypatch, charge_resp={"statusCode": "CreditCardBlacklist"})
+        m["settlement"]._expire_to_free = AsyncMock(return_value=False)
+        send_email = AsyncMock()
+        monkeypatch.setattr(rs, "_send_email", send_email)
+
+        await rs._attempt_charge(MagicMock(), {"_id": "u1", "subscription": _sub()})
+
+        m["settlement"]._expire_to_free.assert_awaited_once()
+        send_email.assert_not_awaited()
+
+
+# ── P0-2(a)：periodic_renewal_check 的 sweep lease gate ─────────────────────────
+
+class TestPeriodicRenewalCheckLeaseGate:
+    """用 asyncio.sleep 的 side_effect 拋 CancelledError 收束無限迴圈，只驗證單輪行為
+    （比照本檔案既有的 async 測試慣例，不真的跑多輪）。
+    """
+
+    async def _run_one_round(self, monkeypatch, *, claim_ok=True, claim_raises=None):
+        lease_repo = MagicMock()
+        if claim_raises:
+            lease_repo.claim_window = AsyncMock(side_effect=claim_raises)
+        else:
+            lease_repo.claim_window = AsyncMock(return_value=claim_ok)
+        monkeypatch.setattr(rs, "JobLeaseRepository", lambda db: lease_repo)
+
+        sweep = AsyncMock()
+        monkeypatch.setattr(rs, "run_renewal_sweep", sweep)
+        monkeypatch.setattr(rs.asyncio, "sleep", AsyncMock(side_effect=asyncio.CancelledError()))
+
+        with pytest.raises(asyncio.CancelledError):
+            await rs.periodic_renewal_check(MagicMock(), interval_seconds=1800)
+        return lease_repo, sweep
+
+    async def test_lease_lost_skips_sweep(self, monkeypatch):
+        lease_repo, sweep = await self._run_one_round(monkeypatch, claim_ok=False)
+        lease_repo.claim_window.assert_awaited_once_with("renewal_sweep", 1800)
+        sweep.assert_not_awaited()
+
+    async def test_lease_won_runs_sweep(self, monkeypatch):
+        _, sweep = await self._run_one_round(monkeypatch, claim_ok=True)
+        sweep.assert_awaited_once()
+
+    async def test_lease_check_exception_fails_open_and_runs_sweep(self, monkeypatch):
+        _, sweep = await self._run_one_round(monkeypatch, claim_raises=RuntimeError("mongo down"))
+        sweep.assert_awaited_once()  # fail-open：lease 查詢失敗仍照跑本輪

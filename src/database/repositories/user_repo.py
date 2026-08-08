@@ -262,6 +262,40 @@ class UserRepository:
         """更新用戶訂閱資料"""
         return await self.update(user_id, {"subscription": subscription_data})
 
+    async def update_subscription_fields(
+        self, user_id: str, fields: Dict[str, Any], *, guard: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """dotted $set 只寫指定的 subscription 欄位（不整包覆蓋，P0-2(b)）。
+
+        整包覆蓋（update_subscription）在併發下會把「讀取快照當下」以外的並行寫入蓋掉
+        （例如續扣成功推進 next_charge_at 的同時，背景 dunning sweep 用舊快照整包 $set
+        把它蓋回過期值）。dotted $set 只動 `fields` 指定的欄位，不受其他並行寫入的欄位
+        影響。
+
+        guard：額外 filter 條件（呼叫端自帶 dotted key，如
+        `{"subscription.next_charge_at": snapshot_value}`），不符即不寫——樂觀併發鎖，
+        guard 值是呼叫端手上快照的「天然版本 token」，若已被別的路徑推進，代表併發寫入
+        已經發生、我們手上的判斷已經過期，這次寫入應該放棄而不是照樣覆寫。
+
+        回傳是否 guard 命中（matched_count > 0），不用 modified_count（F7，第二意見
+        審查）：如果這次要寫入的值剛好跟現有值完全相同，MongoDB 會回報
+        modified_count=0，用它判斷會把「guard 其實有命中、只是內容沒變」誤報成
+        「guard 沒中、寫入被放棄」，讓呼叫端誤判成併發衝突（例如 /cancel 兩次連點，
+        第二次其實該視為成功而非 409）。matched_count 只反映 filter（含 guard）有沒有
+        命中文件，才是「guard 是否命中」的正確判準。user_id 格式錯誤時直接回 False。
+        """
+        try:
+            oid = ObjectId(user_id)
+        except InvalidId:
+            return False
+        filt: Dict[str, Any] = {"_id": oid}
+        if guard:
+            filt.update(guard)
+        updates = {f"subscription.{k}": v for k, v in fields.items()}
+        updates["updated_at"] = get_utc_timestamp()
+        result = await self.collection.update_one(filt, {"$set": updates})
+        return result.matched_count > 0
+
     async def reset_monthly_usage(self, user_id: str, now: datetime) -> bool:
         """歸零當期用量（訂閱首扣 / 續扣成功時呼叫）。
 

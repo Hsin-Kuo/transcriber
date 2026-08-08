@@ -329,6 +329,11 @@ async def startup_event():
     processed_webhook_repo_init = ProcessedWebhookRepository(db)
     await _safe_create("processed_webhooks", processed_webhook_repo_init.create_indexes())
 
+    # job_leases：背景 sweep 的 per-window leader lease（P0-2(a)，多 uvicorn worker 防重複掃描）
+    from src.database.repositories.job_lease_repo import JobLeaseRepository
+    job_lease_repo_init = JobLeaseRepository(db)
+    await _safe_create("job_leases", job_lease_repo_init.create_indexes())
+
     # 建立 chunk_uploads 索引（分片上傳 metadata；過期由 periodic_chunk_upload_cleanup 處理）
     from src.database.repositories.chunk_upload_repo import ChunkUploadRepository
     chunk_upload_repo_init = ChunkUploadRepository(db)

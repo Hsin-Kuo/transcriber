@@ -29,7 +29,6 @@ from ..database.repositories.user_repo import UserRepository
 from ..models.quota import build_quota_from_tier
 from ..utils.billing_period import calc_period_end
 from ..utils.sentry_helpers import create_background_task
-from ..utils.time_utils import get_utc_timestamp
 from ..utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -131,38 +130,86 @@ class OrderSettlement:
     # ── 收斂（webhook 入口）────────────────────────────────────────────────
 
     async def settle(self, n: PaymentNotification) -> SettleResult:
-        """把單一 notification 收斂成帳號狀態變更。"""
+        """把單一 notification 收斂成帳號狀態變更。
+
+        P0-1/P0-3（併發正確性）：settle() 只有一個權威的「已處理過」判斷點——下方
+        `claim_paid` 的原子 status!=paid→paid 搶單，不分首購/續扣、不分呼叫路徑
+        （/callback webhook 或 renewal sweep）。開頭的 order.status=="paid" 快路徑
+        同樣不分 is_first_payment（舊版只在首購擋，續扣重放沒有防線）——但它只是省一次
+        不必要的 handler dispatch，真正擋住併發重入的是 claim_paid：即使兩個 settle()
+        幾乎同時通過快路徑檢查，也只有一個能搶到 claim_paid，另一個回 ALREADY_PAID。
+        """
         order = await self.order_repo.get_by_order_no(n.order_no)
         if not order:
             log.warning("subscription.webhook.order_not_found", merchant_order_no=n.order_no)
             return SettleResult(SettleOutcome.ORDER_NOT_FOUND, n.order_no)
 
-        # order 生命週期 idempotency：首期重發但 order 已 paid → 短路（webhook_repo
-        # claim 擋同一封重發，這裡擋「不同封但 order 已處理」）。
-        if n.is_first_payment and order.get("status") == "paid":
+        if order.get("status") == "paid":
             log.warning("subscription.webhook.order_already_paid", merchant_order_no=n.order_no)
             return SettleResult(SettleOutcome.ALREADY_PAID, n.order_no)
 
         order_type = order.get("type", "subscription")
 
         if not n.success:
-            await self.order_repo.update_by_order_no(n.order_no, {"status": "failed"})
+            # mark_failed_unless_paid：擋住「快路徑檢查之後、claim_paid 之前」的 TOCTOU
+            # 縫隙——遲到的舊 trade 失敗通知不能把已被另一封通知結算成功的單打成 failed。
+            marked = await self.order_repo.mark_failed_unless_paid(n.order_no, {"status": "failed"})
+            if not marked:
+                log.warning("subscription.webhook.failed_notify_ignored_already_paid", merchant_order_no=n.order_no)
             # 續扣失敗不在此即時降 free——由 renewal_service 的 dunning 接手（past_due→重試→寬限滿降 free）。
-            # settle 失敗僅標記 order + 回 FAILED。
             log.warning("payment.failed", merchant_order_no=n.order_no, type=order_type)
             return SettleResult(SettleOutcome.FAILED, n.order_no)
 
         if order_type in _SUBSCRIPTION_TYPES:
-            result = await self._settle_subscription(order, n)
+            settle_fn = self._settle_subscription
         elif order_type == "extra_quota":
-            result = await self._settle_extra_quota(order, n)
+            settle_fn = self._settle_extra_quota
         else:
             log.warning("payment.unknown_order_type", merchant_order_no=n.order_no, type=order_type)
             return SettleResult(SettleOutcome.FAILED, n.order_no)
 
+        # 權威防線（本 PR 核心）：先原子搶單、贏了才施加權益。取捨：搶到 claim_paid 之後、
+        # handler 完成之前若 crash，會留下「paid 但權益未施」的單（可被 P1-9 對帳補回）——
+        # 比原本「重放 = 權益重複施加（$inc 兩次配額 / 續期兩次）」更便宜、更容易事後修復。
+        extra = {"trade_id": n.trade_id} if n.trade_id else None
+        if not await self.order_repo.claim_paid(n.order_no, extra_updates=extra):
+            log.warning("subscription.webhook.claim_paid_lost_race", merchant_order_no=n.order_no)
+            return SettleResult(SettleOutcome.ALREADY_PAID, n.order_no)
+
+        try:
+            result = await settle_fn(order, n)
+        except Exception as exc:
+            # F5（第二意見審查）：claim_paid 已經贏了、但 handler 施加權益中途 crash/
+            # 例外——order 已經是 paid，權益卻可能沒施完整。補寫旗標 + Sentry 告警，
+            # 讓 P1-9 對帳 sweep 能認出這種單並補施權益；不吞原例外，往上拋讓既有的
+            # webhook release / log 邏輯照舊處理。
+            await self._mark_entitlement_pending(n.order_no, exc)
+            raise
+
         if result.outcome.value in _INVOICE_TRIGGER_OUTCOMES:
             await self._trigger_invoice(n.order_no)
         return result
+
+    async def _mark_entitlement_pending(self, order_no: str, exc: Exception) -> None:
+        """標記「paid 但權益可能未施加完整」+ Sentry 告警（見 settle() 呼叫處）。
+
+        這個方法本身絕不可拋例外——否則會蓋掉呼叫端正在往外拋的原始例外。
+        """
+        try:
+            await self.order_repo.update_by_order_no(order_no, {"entitlement_pending": True})
+        except Exception as flag_err:
+            log.error(
+                "settle.entitlement_pending_flag_failed",
+                order_no=order_no, error=str(flag_err), exc_info=True,
+            )
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("order_no", order_no)
+                scope.set_context("settle_entitlement_pending", {"order_no": order_no, "error": str(exc)})
+                sentry_sdk.capture_message("settle.entitlement_pending", level="error")
+        except Exception:
+            pass
 
     async def _trigger_invoice(self, order_no: str) -> None:
         """開票背景觸發（91APP 付款成功後自動開立電子發票）。
@@ -193,19 +240,15 @@ class OrderSettlement:
         order_type = order.get("type", "subscription")
         period_end = calc_period_end(billing_cycle, now)
 
-        await self.order_repo.update_by_order_no(n.order_no, {"trade_id": n.trade_id})
-
         if not n.is_first_payment:
-            # 續扣成功：標 order paid + 滾計費週期 + 歸零當期用量 + 清 dunning（past_due→active）
-            await self.order_repo.update_by_order_no(
-                n.order_no, {"status": "paid", "paid_at": now.timestamp()}
-            )
+            # 續扣成功：order paid（+ trade_id）已由 settle() 的 claim_paid 權威寫入
+            # （見上方閘門）。這裡只需展期 + 歸零當期用量 + 清 dunning（past_due→active）。
             full_user = await self.user_repo.get_by_id(user_id)
             sub = full_user.get("subscription", {}) if full_user else {}
             # 方案變更（期末降級 pending_plan_change 生效）：續扣單帶的是「目標 tier」。
             #   以 tier 判定（quota 由 tier 決定，與 billing_cycle 無關）。
             plan_changed = sub.get("tier") != tier
-            sub.update({
+            fields = {
                 "status": "active",  # 若原為 past_due（重試/換卡成功）→ 回 active
                 "tier": tier,                       # 套用續扣單的 tier（降級生效時 = 目標 tier）
                 "billing_cycle": billing_cycle,
@@ -219,12 +262,14 @@ class OrderSettlement:
                 "needs_card_update": False,
                 "last_payment_error": None,
                 "updated_at": now.timestamp(),
-            })
+            }
             # 換卡挽回：recovery order 帶新 card_token → 更新綁定
             new_token = order.get("card_token")
             if new_token:
-                sub["card_token"] = new_token
-            await self.user_repo.update_subscription(user_id, sub)
+                fields["card_token"] = new_token
+            # P0-2(b)：dotted $set 只寫這些欄位，guard=None——續扣成功是權威寫入方，
+            # 一定要贏（不像 dunning 降級面對續扣要退讓，見 _apply_updates/_expire_to_free）。
+            await self.user_repo.update_subscription_fields(user_id, fields, guard=None)
             await self.user_repo.reset_monthly_usage(user_id, now)
             # 方案有變更（升/降級生效）→ 一律重套目標方案額度；否則同 tier 續扣：
             #   月繳重套最新、年繳凍結（週期內由 lazy refill 補額不改額度）。
@@ -271,9 +316,7 @@ class OrderSettlement:
         await self.user_repo.update_subscription(user_id, subscription)
         await self.user_repo.update_quota(user_id, build_quota_from_tier(tier))
         await self.user_repo.reset_monthly_usage(user_id, now)
-        await self.order_repo.update_by_order_no(
-            n.order_no, {"status": "paid", "paid_at": now.timestamp()}
-        )
+        # order paid（+ trade_id）已由 settle() 的 claim_paid 權威寫入（見上方閘門）。
         log.info("subscription.activated", user_id=user_id, tier=tier, billing_cycle=billing_cycle, type=order_type)
         # 降級生效後（quota 已 commit）：釋放超過新方案額度的釘選音檔，進寬限期。
         #   best-effort（reconcile 自行吞例外），不影響已成功的訂閱啟用。
@@ -284,15 +327,11 @@ class OrderSettlement:
     # ── 額外額度（一次性加購）────────────────────────────────────────────────
 
     async def _settle_extra_quota(self, order: dict, n: PaymentNotification) -> SettleResult:
+        """order paid（+ trade_id）已由 settle() 的 claim_paid 權威寫入（見上方閘門）。"""
         user_id = order["user_id"]
         extra_dur = order.get("extra_duration_minutes", 0)
         extra_ai = order.get("extra_ai_summaries", 0)
         await self.user_repo.add_extra_quota(user_id, extra_dur, extra_ai)
-        await self.order_repo.update_by_order_no(n.order_no, {
-            "status": "paid",
-            "trade_id": n.trade_id,
-            "paid_at": datetime.utcnow().timestamp(),
-        })
         log.info(
             "payment.extra_quota.purchased",
             user_id=user_id, extra_duration_minutes=extra_dur, extra_ai_summaries=extra_ai,
@@ -301,20 +340,33 @@ class OrderSettlement:
 
     # ── 內部 effect helpers ─────────────────────────────────────────────────
 
-    async def _expire_to_free(self, user_id: str) -> None:
-        """續扣失敗：訂閱標 expired、quota 降為 free。"""
-        full_user = await self.user_repo.get_by_id(user_id)
-        sub = full_user.get("subscription", {}) if full_user else {}
-        sub.update({
-            "status": "expired",
-            "cancel_at_period_end": False,
-            "updated_at": datetime.utcnow().timestamp(),
-        })
-        await self.user_repo.update_subscription(user_id, sub)
+    async def _expire_to_free(self, user_id: str, guard: Optional[dict] = None) -> bool:
+        """續扣失敗：訂閱標 expired、quota 降為 free。
+
+        P0-2(b)：guard 有值時走樂觀併發（呼叫端帶著 dunning sweep 手上的訂閱快照，
+        guard 通常是 `{"subscription.next_charge_at": snapshot_value}`）——若併發的
+        續扣已經成功、把 next_charge_at 推進了，guard 不符代表這份「該降級」的判斷已經
+        過期，訂閱其實已經被救回，直接放棄（return False，不執行 update_quota / 釘選
+        reconcile：訂閱沒真的動就不能動配額）。guard=None（例如舊呼叫端未提供快照）
+        則一律寫入，行為等同舊版。
+        """
+        ok = await self.user_repo.update_subscription_fields(
+            user_id,
+            {
+                "status": "expired",
+                "cancel_at_period_end": False,
+                "updated_at": datetime.utcnow().timestamp(),
+            },
+            guard=guard,
+        )
+        if not ok:
+            log.warning("subscription.expire_to_free.guard_failed", user_id=user_id)
+            return False
         await self.user_repo.update_quota(user_id, build_quota_from_tier("free"))
         log.warning("subscription.renewal.payment_failed", user_id=user_id)
         # 降為 free（quota 已 commit）：free 不能保留音檔 → 釋放全部釘選進寬限期。
         await self._reconcile_pinned_audio(user_id, "free")
+        return True
 
     async def _reconcile_pinned_audio(self, user_id: str, new_tier: str) -> None:
         """降額後核對釘選音檔（best-effort，絕不拋例外拖垮結算流程）。"""
@@ -348,12 +400,16 @@ class OrderSettlement:
         """重複完成處理：標記需退款，不啟用/不加值。
 
         首期已實際扣款，故標記 needs_refund + 送 Sentry 供人工用 91APP refund API 退款。
-        91APP 無 gateway 委託可終止，這裡不再有終止動作。
+        91APP 無 gateway 委託可終止，這裡不再有終止動作。order 的 status/paid_at 已由
+        settle() 的 claim_paid 權威寫入（見上方閘門），這裡只補寫重複完成專屬的旗標。
+
+        F9（第二意見審查）：Sentry 告警排在 DB 寫入**之前**——若中間被 SIGTERM，至少
+        Sentry 留下記錄，不會留下一張「已重複扣款但無旗標、無告警」的單（DB 寫入本身
+        是 idempotent 的 $set，重跑一次無害；但告警只有第一次呼叫才有意義，寧可早發）。
         """
         ono = order["merchant_order_no"]
+        self._capture_refund_alert(user_id, ono, "重複完成已拒絕，需退首期款")
         await self.order_repo.update_by_order_no(ono, {
-            "status": "paid",
-            "paid_at": get_utc_timestamp(),
             "is_duplicate": True,
             "needs_refund": True,
         })
@@ -361,7 +417,6 @@ class OrderSettlement:
             "subscription.duplicate_completion.rejected",
             user_id=user_id, order_no=ono,
         )
-        self._capture_refund_alert(user_id, ono, "重複完成已拒絕，需退首期款")
 
     @staticmethod
     def _capture_refund_alert(user_id: str, order_no: str, detail: str) -> None:
