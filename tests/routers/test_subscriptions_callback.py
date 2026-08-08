@@ -88,3 +88,97 @@ class TestProcessPaymentResult:
         _, settlement2 = _patch(monkeypatch, order={"type": "renewal"})
         await subs._process_payment_result(MagicMock(), trade_id="T2", record_status="Success", order_no="o2", success=True)
         assert settlement2.settle.await_args.args[0].is_first_payment is False
+
+
+class _FakeRequest:
+    """最小 Request 替身：/callback 只用到 body()（JSON）。"""
+    def __init__(self, payload: dict):
+        import json
+        self._raw = json.dumps(payload).encode()
+
+    async def body(self):
+        return self._raw
+
+    async def form(self):  # pragma: no cover - JSON 路徑不會走到
+        return {}
+
+
+def _patch_callback(monkeypatch, *, trade: dict, order=None):
+    """換掉 query_trade / _process_payment_result / OrderRepository，回傳被捕捉的 settle 參數。"""
+    svc = MagicMock()
+    svc.query_trade = AsyncMock(return_value=trade)
+    monkeypatch.setattr(subs, "get_payments91_service", lambda: svc)
+
+    order_repo = MagicMock()
+    order_repo.get_by_order_no = AsyncMock(return_value=order or {"type": "subscription"})
+    monkeypatch.setattr(subs, "OrderRepository", lambda db: order_repo)
+
+    captured = {}
+
+    async def fake_process(db, *, trade_id, record_status, order_no, success):
+        captured.update(trade_id=trade_id, record_status=record_status, order_no=order_no, success=success)
+        return "activated" if success else "failed"
+
+    monkeypatch.setattr(subs, "_process_payment_result", fake_process)
+    return captured
+
+
+class TestCallbackSuccessDerivation:
+    """🔴 /callback 以回查的 recordStatus（付款結果）判定成敗，而非查詢層的 statusCode。"""
+
+    async def test_record_status_paid_settles_success(self, monkeypatch):
+        cap = _patch_callback(monkeypatch, trade={
+            "merchantOrderId": "SLSUB1", "recordStatus": 4, "statusCode": "Success",
+        })
+        out = await subs.payment_callback(_FakeRequest({"tradeId": "PT1", "recordStatus": 4}), db=MagicMock())
+        assert out == {"status": "ok"}
+        assert cap["success"] is True
+        assert cap["record_status"] == "4"  # 用整數 recordStatus 當冪等鍵，非 statusCode
+
+    async def test_record_status_failed_settles_failure(self, monkeypatch):
+        # 關鍵回歸：statusCode=Success（查詢成功）但 recordStatus=2（付款失敗）→ 必須判失敗
+        cap = _patch_callback(monkeypatch, trade={
+            "merchantOrderId": "SLSUB1", "recordStatus": 2, "statusCode": "Success",
+        })
+        await subs.payment_callback(_FakeRequest({"tradeId": "PT1", "recordStatus": 2}), db=MagicMock())
+        assert cap["success"] is False
+
+    async def test_pending_does_not_settle(self, monkeypatch):
+        cap = _patch_callback(monkeypatch, trade={
+            "merchantOrderId": "SLSUB1", "recordStatus": 8, "statusCode": "Success",
+        })
+        out = await subs.payment_callback(_FakeRequest({"tradeId": "PT1"}), db=MagicMock())
+        assert out == {"status": "pending"}
+        assert cap == {}  # 未定案 → 不進 settle
+
+    async def test_binding_failed_blocks_activation(self, monkeypatch):
+        # 付款成功（recordStatus=4）但綁卡失敗（bindingStatus=Failed）→ 無可續扣的卡 → 判失敗
+        cap = _patch_callback(monkeypatch, trade={
+            "merchantOrderId": "SLUPG1", "recordStatus": 4,
+        }, order={"type": "upgrade_subscription"})
+        await subs.payment_callback(
+            _FakeRequest({"tradeId": "PT1", "bindingStatus": "Failed"}), db=MagicMock())
+        assert cap["success"] is False
+
+    async def test_binding_succeeded_allows_activation(self, monkeypatch):
+        cap = _patch_callback(monkeypatch, trade={
+            "merchantOrderId": "SLSUB1", "recordStatus": 4,
+        }, order={"type": "subscription"})
+        await subs.payment_callback(
+            _FakeRequest({"tradeId": "PT1", "bindingStatus": "Succeeded"}), db=MagicMock())
+        assert cap["success"] is True
+
+    async def test_extra_quota_ignores_binding(self, monkeypatch):
+        # 加購為一次性，不需綁卡；綁卡失敗不影響其成交
+        cap = _patch_callback(monkeypatch, trade={
+            "merchantOrderId": "SLEXT1", "recordStatus": 4,
+        }, order={"type": "extra_quota"})
+        await subs.payment_callback(
+            _FakeRequest({"tradeId": "PT1", "bindingStatus": "Failed"}), db=MagicMock())
+        assert cap["success"] is True
+
+    async def test_no_order_no_ignored(self, monkeypatch):
+        cap = _patch_callback(monkeypatch, trade={"recordStatus": 4})
+        out = await subs.payment_callback(_FakeRequest({"tradeId": "PT1"}), db=MagicMock())
+        assert out == {"status": "ignored"}
+        assert cap == {}

@@ -185,6 +185,29 @@ class Payments91APPService:
         return prices.get((tier, billing_cycle))
 
 
+# ── 交易結果判讀 ─────────────────────────────────────────────────────────────
+# 🔴 trade 回查 / callback 的 recordStatus（整數）才是「付款結果」的權威欄位。
+# 回查回應裡的 statusCode 是「查詢是否成功」（trade 存在即 Success），**不是**交易結果——
+# 誤用它會讓任何進得來的 callback 一律判成功（見 91APP OpenAPI spec）。
+# recordStatus enum：1 待付款 / 2 付款失敗 / 3 付款取消 / 4 付款成功 / 5 請款成功 /
+#                    6 部分退款 / 7 全部退款 / 8 付款處理中
+_RECORD_SUCCESS = {4, 5}
+_RECORD_PENDING = {1, 8}
+
+
+def interpret_record_status(record_status) -> str:
+    """依 recordStatus 判 'success' | 'pending' | 'failed'。非法/未知一律當 failed（保守）。"""
+    try:
+        rs = int(record_status)
+    except (TypeError, ValueError):
+        return "failed"
+    if rs in _RECORD_SUCCESS:
+        return "success"
+    if rs in _RECORD_PENDING:
+        return "pending"
+    return "failed"
+
+
 _payments91_service: Optional[Payments91APPService] = None
 
 
