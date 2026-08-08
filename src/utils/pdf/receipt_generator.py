@@ -24,9 +24,25 @@ from reportlab.platypus import (
     TableStyle,
 )
 from reportlab.lib.styles import ParagraphStyle
+from reportlab import rl_config as _rl_config
+from xml.sax.saxutils import escape as _xml_escape
 
 from .pdf_generator import preload_fonts
 from .script_detect import FONT_TC
+
+# 收據 PDF 從不需要外部資源；關閉 ReportLab 的外部 scheme 解析，避免 Paragraph 的
+# markup（<img src=...> / <link>）被當成真實 URL 抓取造成 SSRF（金流體檢 P0-4）。
+_rl_config.trustedSchemes = []
+
+
+def _p(text, style) -> "Paragraph":
+    """動態值一律經 XML escape 再進 Paragraph。
+
+    ReportLab Paragraph 會解析 XML-like markup（<img>/<link>/<font>）；company_name、
+    載具、外部 callback 來源的 trade_id 等使用者/外部可控欄位若不 escape，會被當標籤
+    解析 → SSRF / 版面破壞（金流體檢 P0-4）。固定 i18n 字串不走這裡（可能含 & 等字元）。
+    """
+    return Paragraph(_xml_escape(str(text)), style)
 
 _LOGO_PATH = os.path.join(os.path.dirname(__file__), "assets", "soundlite_logo_black.png")
 _TW_OFFSET = timedelta(hours=8)  # Asia/Taipei（無 DST）
@@ -250,7 +266,8 @@ def generate_receipt_pdf(*, order: dict, user: dict, lang: str = "zh-TW") -> byt
     inv = _invoice_line(user, s)
     if inv:
         meta_rows.append((s["invoice"], inv))
-    meta = Table([[Paragraph(k, label), Paragraph(str(v), base)] for k, v in meta_rows], colWidths=[30 * mm, None])
+    # value 端含使用者/外部可控（trade_id 來自未認證 callback、invoice_line 的 company_name）→ escape
+    meta = Table([[Paragraph(k, label), _p(v, base)] for k, v in meta_rows], colWidths=[30 * mm, None])
     meta.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("LEFTPADDING", (0, 0), (-1, -1), 0),
@@ -274,7 +291,7 @@ def generate_receipt_pdf(*, order: dict, user: dict, lang: str = "zh-TW") -> byt
         [
             [Paragraph(s["item"], label), Paragraph(s["qty"], label_r),
              Paragraph(s["unit_price"], label_r), Paragraph(s["amount"], label_r)],
-            [Paragraph(_item_desc(order, s), base), Paragraph(str(qty), amount_r),
+            [_p(_item_desc(order, s), base), Paragraph(str(qty), amount_r),
              Paragraph(money(unit), amount_r), Paragraph(money(amt), amount_r)],
         ],
         colWidths=[None] + _num_cols,
@@ -320,9 +337,9 @@ def generate_receipt_pdf(*, order: dict, user: dict, lang: str = "zh-TW") -> byt
         [
             [Paragraph(s["payment_label"], label), Paragraph(s["date_col"], label),
              Paragraph(s["amount_paid_col"], label_r), Paragraph(s["receipt_no"], label_r)],
-            [Paragraph(_payment_method(order, s), base),
+            [_p(_payment_method(order, s), base),
              Paragraph(_fmt_date(order.get("paid_at") or order.get("created_at")), base),
-             Paragraph(money(amt), amount_r), Paragraph(order.get("merchant_order_no", "-"), order_no_r)],
+             Paragraph(money(amt), amount_r), _p(order.get("merchant_order_no", "-"), order_no_r)],
         ],
         colWidths=[None, 24 * mm, 24 * mm, 54 * mm],
     )
