@@ -87,3 +87,27 @@ class TestGeneratePdf:
     def test_missing_fields_no_crash(self):
         pdf = generate_receipt_pdf(order={"merchant_order_no": "X", "amount_twd": 0}, user={}, lang="en")
         assert pdf[:5] == b"%PDF-"
+
+
+class TestMarkupInjection:
+    """金流體檢 P0-4：company_name / trade_id 等使用者/外部可控欄位含 ReportLab markup
+    時不得被當標籤解析（<img src> → SSRF；壞 markup → 500）。escape 後應正常產出 PDF。"""
+
+    def test_company_name_with_img_markup_no_crash(self):
+        user = {"email": "u@x.com", "invoice_info": {
+            "type": "company", "company_tax_id": "12345678",
+            "company_name": '<img src="http://169.254.169.254/latest/meta-data/" width="1"/>',
+        }}
+        pdf = generate_receipt_pdf(order=_order(), user=user, lang="zh-TW")
+        assert pdf[:5] == b"%PDF-"  # 未因外部資源抓取失敗而 500，且不發出對外請求
+
+    def test_trade_id_with_markup_no_crash(self):
+        pdf = generate_receipt_pdf(
+            order=_order(trade_id='<link href="file:///etc/passwd"/>'),
+            user={"email": "u@x.com"}, lang="en",
+        )
+        assert pdf[:5] == b"%PDF-"
+
+    def test_external_schemes_disabled(self):
+        from reportlab import rl_config
+        assert rl_config.trustedSchemes == []
