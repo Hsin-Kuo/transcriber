@@ -1457,7 +1457,7 @@ async def list_orders(
     needs_attention: Optional[bool] = Query(
         None,
         description="true 時只列出需要人工看一眼的單（entitlement_pending / "
-                     "needs_manual / reconciliation_gave_up 任一為 True）",
+                     "needs_manual / reconciliation_gave_up / needs_refund 任一為 True）",
     ),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
@@ -1485,6 +1485,9 @@ async def list_orders(
             {"entitlement_pending": True},
             {"needs_manual": True},
             {"reconciliation_gave_up": True},
+            # F7（跨 PR 複檢）：重複扣款待人工退款的單（_reject_duplicate 標的
+            # is_duplicate/needs_refund）也要進待辦，否則營運只能靠 Sentry 發現。
+            {"needs_refund": True},
         ]
 
     orders, total = await OrderRepository(db).admin_list_with_invoices(

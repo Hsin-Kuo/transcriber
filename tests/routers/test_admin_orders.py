@@ -356,6 +356,10 @@ class TestListOrdersNeedsAttention:
             # 有結果」（例如全額退款自動降級成功），不該落入 needs_attention。
             {"merchant_order_no": "P4", "type": "subscription", "status": "paid", "amount_twd": 1,
              "user_id": str(ids["u1"]), "created_at": time.time(), "refund_seen": True},
+            # F7（跨 PR 複檢）：needs_refund 單獨為 True（_reject_duplicate 標的重複扣款
+            # 待退款單，無 needs_manual）也必須進 needs_attention。
+            {"merchant_order_no": "P5", "type": "subscription", "status": "paid", "amount_twd": 1,
+             "user_id": str(ids["u1"]), "created_at": time.time(), "needs_refund": True},
         ])
         return db, ids
 
@@ -367,8 +371,9 @@ class TestListOrdersNeedsAttention:
             skip=0, limit=50, admin=ADMIN, db=db,
         )
         # L6：P4（只有 refund_seen）不該出現——已經有結果的退款不算『待人工』。
-        assert {o["order_no"] for o in result["orders"]} == {"P1", "P2", "P3"}
-        assert result["total"] == 3
+        # F7：P5（只有 needs_refund）必須出現——重複扣款待人工退款。
+        assert {o["order_no"] for o in result["orders"]} == {"P1", "P2", "P3", "P5"}
+        assert result["total"] == 4
 
     async def test_needs_attention_false_does_not_filter(self, flagged_db):
         db, _ids = flagged_db
@@ -377,8 +382,8 @@ class TestListOrdersNeedsAttention:
             date_from=None, date_to=None, invoice_status=None, needs_attention=False,
             skip=0, limit=50, admin=ADMIN, db=db,
         )
-        # 7 筆既有 seeded 訂單 + 4 筆新插入的旗標訂單
-        assert result["total"] == 11
+        # 7 筆既有 seeded 訂單 + 5 筆新插入的旗標訂單
+        assert result["total"] == 12
 
     async def test_needs_attention_combines_with_other_filters(self, flagged_db):
         db, _ids = flagged_db
