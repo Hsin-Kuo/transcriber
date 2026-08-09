@@ -68,6 +68,34 @@ def _find(obj, key_lower: str):
     return None
 
 
+def _encrypt_card_token_safe(plaintext: str, order_no: str, context: str):
+    """加密 card_token 供落庫；失敗回 None 而非拋（F2，跨 PR 複檢）。
+
+    encrypt 例外（KEK 未 seed / SSM 暫時性讀取失敗）絕不能阻斷呼叫端流程：在 /pay 會
+    連帶擋掉同一批 update 的 trade_id 落庫（→ 對帳 sweep 要求有 trade_id，這張已扣款單
+    變結構性不可見、T+1h 被標 expired、使用者扣款卻無訂閱無告警）；在 /callback 這段
+    位於 _process_payment_result（settle）之前，拋出會直接讓整筆結算不執行。
+
+    失敗時略過 card_token 儲存，續扣時由 renewal_service 的 NoCardToken →
+    needs_card_update dunning 兜底（callback 補救路徑本就依賴這條）。error=str(e) 只含
+    KEK/參數的錯誤分類字串（"invalid length"/"... unavailable from SSM"），不含 token 或
+    金鑰值本身。
+    """
+    try:
+        return encrypt(plaintext)
+    except Exception as e:
+        log.error("subscription.card_token.encrypt_failed",
+                  order_no=order_no, context=context, error=str(e))
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("order_no", order_no)
+                sentry_sdk.capture_message("card_token.encrypt_failed", level="error")
+        except ImportError:
+            pass
+        return None
+
+
 # ── Request Models ───────────────────────────────────────────────────────────
 
 # 統編 8 碼數字；手機條碼載具 `/` + 7 碼（數字/大寫英文/+-.）。後端也要驗（非瀏覽器 client
@@ -441,7 +469,10 @@ async def pay(
         order_updates["trade_id"] = str(trade_id)
     if card_token:
         # P2-10（金流體檢）：明文從 91APP 進 DB 的入口，落庫前一律加密（AES-256-GCM）。
-        order_updates["card_token"] = encrypt(str(card_token))
+        # F2：加密失敗回 None（不阻擋同批 trade_id 落庫），略過 card_token。
+        enc = _encrypt_card_token_safe(str(card_token), order["merchant_order_no"], "pay")
+        if enc:
+            order_updates["card_token"] = enc
     else:
         log.warning("subscription.pay.no_card_token", order_no=order["merchant_order_no"])
     card_brand = _find(resp, "cardbrand")
@@ -557,9 +588,11 @@ async def payment_callback(request: Request, db=Depends(get_database)):
     if success and order and not order.get("card_token") \
             and order.get("type") in ("subscription", "upgrade_subscription", "renewal"):
         qb_token = _find(trade, "cardtoken") or _find(trade, "bindingtoken")
-        if qb_token:
+        enc = _encrypt_card_token_safe(str(qb_token), order_no, "callback") if qb_token else None
+        if enc:
             # P2-10（金流體檢）：同樣是明文從 91APP 進 DB 的入口，落庫前加密。
-            await order_repo.update_by_order_no(order_no, {"card_token": encrypt(str(qb_token))})
+            # F2：加密失敗回 None，略過寫回（此段在 settle 之前，拋出會阻斷結算）。
+            await order_repo.update_by_order_no(order_no, {"card_token": enc})
         else:
             log.warning("subscription.callback.no_card_token_captured", trade_id=trade_id, order_no=order_no)
             try:

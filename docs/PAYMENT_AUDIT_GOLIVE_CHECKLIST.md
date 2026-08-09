@@ -13,7 +13,7 @@
 
 ```
 1. seed SSM secrets（KEK；金流上線時的 SMILEPAY/PAYMENTS91_ENV）  ── 無前置，先做
-2. 部署含修復的碼到 staging → prod                              ── 依賴 1（KEK required=True，缺會 fail-fast）
+2. 部署含修復的碼到 staging → prod                              ── seed KEK（§1a）；缺 KEK 只在 §1b 設 PAYMENTS91_ENV=production 後才 fail-fast
 3. origin 鎖定（SG 收斂 CF prefix）                              ── 依賴 2；讓 real_ip 真的拿到真實 IP
 4. 跑 card_token migration                                      ── 依賴 2（碼要先含 decrypt 明文相容）
 5. 設 INVOICE_GAP_EPOCH env（發票整合全量生效後）               ── 依賴 4 + 發票確認可用
@@ -32,8 +32,11 @@ X-Real-IP，只是值 = 直連來源）。**staging 先做、驗證通過再碰 
 
 ### 1a. card_token 加密金鑰（KEK）— PR #331 [無前置，最先做]
 
-`required=True`：**prod 缺這把金鑰，後端啟動會 fail-fast**（刻意，不讓它靜默存明文）。所以
-**seed 要在部署含 P2-10 的碼之前或同時**完成。
+**KEK 的 fail-fast 綁在「金流已上線」**：`validate_payment_env()`（startup）在 `PAYMENTS91_ENV=production`
+時會呼叫 `_get_kek()`，缺 KEK 直接 `RuntimeError` 擋下啟動；金流尚未上線（PAYMENTS91_ENV 未設）時
+KEK 可缺、不擋啟動（此時若有人打 /pay，`encrypt` 失敗會被 F2 的 `_encrypt_card_token_safe` 安全略過，
+不會靜默存明文）。因此 **§1b 設 `PAYMENTS91_ENV=production` 之前務必先完成本步 KEK seed**，否則
+go-live 那次部署會 fail-fast crash。建議 seed 在部署含 P2-10 的碼之前或同時完成。
 
 ```bash
 # 產生一把 base64 編碼的 32-byte 金鑰（AES-256）
@@ -68,8 +71,8 @@ aws ssm put-parameter --region ap-northeast-1 --type SecureString \
 ## §2 部署（PR 全部）[依賴 §1a]
 
 - [ ] staging 部署最新 main（含 #322–#331）
-- [ ] staging 後端正常啟動（KEK 已 seed，否則 fail-fast crash）
-- [ ] prod 部署最新 main
+- [ ] staging 後端正常啟動（staging 是 APP_ENV=staging → is_prod_aws() 為 False → validate_payment_env 不檢查 KEK；KEK fail-fast 只在 prod 觸發。staging 金流走 sandbox/test）
+- [ ] prod 部署最新 main（若 prod 已設 PAYMENTS91_ENV=production 則 KEK 必須先 seed，否則 fail-fast crash）
 - [ ] prod 後端正常啟動
 
 ---

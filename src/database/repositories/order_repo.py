@@ -462,6 +462,12 @@ class OrderRepository:
         cursor = self.collection.find({
             "entitlement_pending": True,
             "entitlement_retry_count": {"$not": {"$gte": max_retry}},
+            # F1（跨 PR 複檢）：已被退款流程處置過的單不得再補施權益——否則
+            # 「首購 crash 留 entitlement_pending → 全額退款撤訂閱 → resettle 又把訂閱
+            # 開回來、甚至重開一張真發票」。refund_seen 是全額(claim_refund_processed)
+            # 與部分(flag_partial_refund)退款都會寫的共同旗標。resettle_entitlement 進入
+            # 時另有重讀守門擋住 cursor 讀取後才退款的競態。
+            "refund_seen": {"$ne": True},
         })
         async for doc in cursor:
             yield doc

@@ -215,3 +215,18 @@ def validate_payment_env() -> None:
             raise RuntimeError(
                 f"{var_name} is set to a non-production value on prod (P1-6 fail-fast)"
             )
+
+    # F3（跨 PR 複檢）：card_token 加密金鑰(KEK)在「金流已上線」時必須可取得——否則第一筆
+    # /pay 的 encrypt 會失敗，靠 subscriptions._encrypt_card_token_safe 的 F2 兜底雖不會
+    # 靜默存明文，但每筆首購都拿不到續扣憑證。綁在 PAYMENTS91_ENV=production（與上面
+    # 同一個「金流真的上線」訊號）而非無條件：金流未上線時 KEK 可缺（同 env 未設分支的
+    # 語意，避免把還沒排上金流的 prod 打掛）。go-live 設 production 卻忘了 seed KEK 時，
+    # 這裡會在啟動就 fail-fast，而不是等到第一筆真實付款。
+    if os.getenv("PAYMENTS91_ENV") == "production":
+        try:
+            from .card_token_cipher import _get_kek
+            _get_kek()
+        except Exception as e:
+            raise RuntimeError(
+                "card_token KEK unavailable while payments are live (P2-10 fail-fast)"
+            ) from e
