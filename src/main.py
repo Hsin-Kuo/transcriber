@@ -230,6 +230,11 @@ async def startup_event():
         validate_aws_config()
         logger.info("app.startup.aws_config_validated")
 
+        # 金流體檢 P1-6：prod-aws 分級告警（staging 內部直接 return 不檢查）
+        from src.utils.config_loader import validate_payment_env
+        validate_payment_env()
+        logger.info("app.startup.payment_env_validated")
+
     # Email 服務設定驗證（resend/ses 漏設 FROM_EMAIL 在第一個用戶註冊時才爆炸太晚）
     from src.utils.email_service import get_email_service
     get_email_service()  # 觸發 __init__ 的 _validate_config()

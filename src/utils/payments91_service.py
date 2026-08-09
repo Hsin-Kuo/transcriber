@@ -18,7 +18,7 @@ from urllib.parse import quote
 
 import httpx
 
-from .config_loader import get_parameter
+from .config_loader import get_parameter, is_prod_aws
 
 # callback 收到的 tradeId 未認證，直接嵌入 query path 前先驗證格式（體檢 P1-8）。
 # 91APP tradeId 觀察形狀為半形英數，保守放行底線/連字號；router 亦會 import 此常數做早退檢查。
@@ -30,20 +30,28 @@ class Payments91APPService:
 
     def __init__(self):
         self.api_key = get_parameter(
-            "/transcriber/91app-api-key", fallback_env="PAYMENTS91_API_KEY"
+            "/transcriber/91app-api-key", fallback_env="PAYMENTS91_API_KEY", required=True
         )
         self.shared_secret = get_parameter(
-            "/transcriber/91app-shared-secret", fallback_env="PAYMENTS91_SHARED_SECRET"
+            "/transcriber/91app-shared-secret", fallback_env="PAYMENTS91_SHARED_SECRET", required=True
         )
         # publishableKey 非機密，會下發給前端 SDK。
         self.publishable_key = get_parameter(
-            "/transcriber/91app-publishable-key", fallback_env="PAYMENTS91_PUBLISHABLE_KEY"
+            "/transcriber/91app-publishable-key", fallback_env="PAYMENTS91_PUBLISHABLE_KEY", required=True
         )
         # storeCode 目前不需帶進 request body（API key 已識別商店），保留供對帳/多店參考。
         self.store_code = get_parameter(
-            "/transcriber/91app-store-code", fallback_env="PAYMENTS91_STORE_CODE"
+            "/transcriber/91app-store-code", fallback_env="PAYMENTS91_STORE_CODE", required=True
         )
         self.env = os.getenv("PAYMENTS91_ENV", "sandbox")
+
+        # P1-6 fail-fast：prod-aws 下 PAYMENTS91_ENV 必須顯式為 production，否則真客戶
+        # 扣款/發票會打到 91APP sandbox。這裡的 raise 若發生在背景 sweep（例如
+        # renewal_service 的迴圈），可能被 per-item try/except 吞掉只留 log——但仍是
+        # fail-closed：操作沒執行 = 不會誤打測試環境。main.py startup 的
+        # validate_payment_env() 負責讓設定錯誤在啟動當下「被人看到」。
+        if is_prod_aws() and self.env != "production":
+            raise RuntimeError("PAYMENTS91_ENV must be 'production' on prod (P1-6 fail-fast)")
 
     @property
     def base_url(self) -> str:
