@@ -329,11 +329,17 @@ class TestListOrders:
         assert o1["needs_manual"] is False
         assert o1["reconciliation_gave_up"] is False
         assert o1["refund_seen"] is False
+        assert o1["refund_processed"] is False  # P1-5
 
 
 class TestListOrdersNeedsAttention:
-    """P3-J（第二意見審查）：needs_attention=True 一次篩出四種對帳補償旗標任一為
+    """P3-J（第二意見審查）：needs_attention=True 一次篩出三種對帳補償旗標任一為
     True 的單；False/None 都不篩（維持既有全量列表行為）。
+
+    L6（第二意見審查）：refund_seen **不再**是 needs_attention 的篩選條件之一——
+    P1-5 之後它的語意已經從「退款待人工」變成「這筆單已經有退款結果了」（自動降級
+    成功的 revoked/quota_deducted 也會寫它），繼續篩它會把『已經自動處理好』的單
+    誤篩進『需要人工看一眼』。P4 專門驗證這個排除。
     """
 
     @pytest.fixture
@@ -346,6 +352,8 @@ class TestListOrdersNeedsAttention:
              "user_id": str(ids["u1"]), "created_at": time.time(), "needs_manual": True},
             {"merchant_order_no": "P3", "type": "subscription", "status": "pending", "amount_twd": 1,
              "user_id": str(ids["u1"]), "created_at": time.time(), "reconciliation_gave_up": True},
+            # refund_seen 為 True 但 needs_manual 為 False：代表自動退款處置「已經
+            # 有結果」（例如全額退款自動降級成功），不該落入 needs_attention。
             {"merchant_order_no": "P4", "type": "subscription", "status": "paid", "amount_twd": 1,
              "user_id": str(ids["u1"]), "created_at": time.time(), "refund_seen": True},
         ])
@@ -358,8 +366,9 @@ class TestListOrdersNeedsAttention:
             date_from=None, date_to=None, invoice_status=None, needs_attention=True,
             skip=0, limit=50, admin=ADMIN, db=db,
         )
-        assert {o["order_no"] for o in result["orders"]} == {"P1", "P2", "P3", "P4"}
-        assert result["total"] == 4
+        # L6：P4（只有 refund_seen）不該出現——已經有結果的退款不算『待人工』。
+        assert {o["order_no"] for o in result["orders"]} == {"P1", "P2", "P3"}
+        assert result["total"] == 3
 
     async def test_needs_attention_false_does_not_filter(self, flagged_db):
         db, _ids = flagged_db
@@ -402,6 +411,17 @@ class TestOrderDetail:
         result = await admin_router.get_order_detail(order_no="O1", admin=ADMIN, db=db)
         assert "card_token" not in result["order"]
         assert result["order"]["trade_id"] == "TXN123"
+
+    async def test_detail_surfaces_refund_processed_fields(self, seeded_db):
+        """P1-5：refund_processed/refunded_at 是 admin 排查退款處置的可見性欄位。"""
+        db, _ids = seeded_db
+        await db.orders.update_one(
+            {"merchant_order_no": "O1"},
+            {"$set": {"refund_processed": True, "refunded_at": 12345}},
+        )
+        result = await admin_router.get_order_detail(order_no="O1", admin=ADMIN, db=db)
+        assert result["order"]["refund_processed"] is True
+        assert result["order"]["refunded_at"] == 12345
 
 
 # ── void ─────────────────────────────────────────────────────────────────────

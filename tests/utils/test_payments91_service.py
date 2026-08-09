@@ -32,11 +32,17 @@ class TestInterpretRecordStatus:
     def test_failed_states(self):
         assert interpret_record_status(2) == "failed"    # 付款失敗（3D 失敗）
         assert interpret_record_status(3) == "failed"    # 付款取消
-        assert interpret_record_status(7) == "failed"    # 全部退款
 
     def test_pending_states(self):
         assert interpret_record_status(1) == "pending"   # 待付款
         assert interpret_record_status(8) == "pending"   # 處理中
+
+    def test_refunded_states(self):
+        # P1-5：6/7 從 "failed" 拆成獨立的 "refunded" 語意（不再被 mark_failed_unless_paid
+        # 的 `$ne paid` 條件式寫入吃掉，見 order_settlement.handle_full_refund/flag_partial_refund）。
+        assert interpret_record_status(6) == "refunded"  # 部分退款
+        assert interpret_record_status(7) == "refunded"  # 全部退款
+        assert interpret_record_status("7") == "refunded"  # 字串亦可
 
     def test_unknown_is_failed(self):
         assert interpret_record_status(None) == "failed"

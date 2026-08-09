@@ -50,6 +50,10 @@ def _make(order=None, user=None, invoice_issuer=None):
     # 讓既有測試聚焦其他行為，marker gate 本身的行為見 TestClaimMarkerGate。
     order_repo.claim_marker = AsyncMock(return_value=True)
     order_repo.increment_entitlement_retry = AsyncMock(return_value=1)
+    # P1-5：退款處置閘門，預設「一定搶得到 / 沒有更新的單」，讓既有測試不受影響；
+    # 閘門本身的行為見 TestHandleFullRefund/TestFlagPartialRefund。
+    order_repo.claim_refund_processed = AsyncMock(return_value=True)
+    order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
 
     user_repo = MagicMock()
     user_repo.db = MagicMock()
@@ -59,6 +63,8 @@ def _make(order=None, user=None, invoice_issuer=None):
     user_repo.update_quota = AsyncMock(return_value=True)
     user_repo.reset_monthly_usage = AsyncMock(return_value=True)
     user_repo.add_extra_quota = AsyncMock(return_value=True)
+    # P1-5：extra_quota 退款扣回，預設「一定扣得到」（非 None）。
+    user_repo.adjust_extra_quota_atomic = AsyncMock(return_value={"extra_quota": {}})
 
     s = OrderSettlement(
         order_repo=order_repo, user_repo=user_repo,
@@ -696,3 +702,454 @@ class TestResettleEntitlement:
         order_repo.increment_entitlement_retry.assert_awaited_once_with("SLSUB1")
         # handler 只跑一次（成功那一次），沒有因為清旗標失敗而被重新呼叫。
         user_repo.update_subscription.assert_awaited_once()
+
+
+# ── P1-5：全額退款(7) 自動降級 / 部分退款(6) 轉人工 ───────────────────────────────
+# 第二意見審查追加：H1（重複完成單誤殺 / active_order_no 精確歸屬 / guard 收斂）、
+# H2（claim 後動作失敗要留耐久旗標）、M4（extra_quota gate + 結轉未回收）、
+# M5（部分/全額退款用獨立閘門，互不卡住）。
+
+def _patch_invoice_lookup(monkeypatch, invoice=None, void_result=None, void_side_effect=None):
+    """換掉 handle_full_refund 內 lazy import 的 InvoiceRepository/void_invoice_for。
+
+    兩者都在方法內用 `from ... import ...` 動態匯入，monkeypatch 對應模組上的名字即可
+    在呼叫當下生效（比照本檔案其餘 lazy-import 慣例）。
+    """
+    from src.database.repositories import invoice_repo as invoice_repo_mod
+    from src.services import invoice_service as invoice_service_mod
+
+    fake_repo = MagicMock()
+    fake_repo.get_active_by_order_no = AsyncMock(return_value=invoice)
+    monkeypatch.setattr(invoice_repo_mod, "InvoiceRepository", lambda db: fake_repo)
+
+    void_mock = AsyncMock(
+        side_effect=void_side_effect,
+        return_value=void_result if void_side_effect is None else None,
+    )
+    monkeypatch.setattr(invoice_service_mod, "void_invoice_for", void_mock)
+    return fake_repo, void_mock
+
+
+def _active_user(order_no: str = "SLSUB1", **extra):
+    """H1 第 2 層的測試 fixture：user.subscription.active_order_no 指向這張退款單，
+    是自動降級唯一安全的前提（見 _handle_full_refund_subscription）。"""
+    sub = {"active_order_no": order_no}
+    sub.update(extra)
+    return {"subscription": sub}
+
+
+class TestHandleFullRefund:
+    async def test_order_not_found(self, monkeypatch):
+        s, order_repo, user_repo = _make(order=None)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+        out = await s.handle_full_refund("NOPE")
+        assert out == "order_not_found"
+        order_repo.claim_refund_processed.assert_not_awaited()
+
+    async def test_already_processed_is_a_noop(self, monkeypatch):
+        order = _order(status="paid", paid_at=1000)
+        s, order_repo, user_repo = _make(order=order)
+        order_repo.claim_refund_processed = AsyncMock(return_value=False)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+        out = await s.handle_full_refund("SLSUB1", trade_id="T1")
+        assert out == "already_processed"
+        user_repo.update_subscription_fields.assert_not_awaited()
+        order_repo.update_by_order_no.assert_not_awaited()
+
+    async def test_non_paid_order_flags_needs_manual(self, monkeypatch):
+        order = _order(status="pending")
+        s, order_repo, user_repo = _make(order=order)
+        alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_on_unpaid_order_alert", alert)
+        _fake_repo, void_mock = _patch_invoice_lookup(monkeypatch, invoice=None)
+        out = await s.handle_full_refund("SLSUB1")
+        assert out == "needs_manual"
+        order_repo.update_by_order_no.assert_any_await("SLSUB1", {"needs_manual": True})
+        alert.assert_called_once_with("SLSUB1")
+        user_repo.update_subscription_fields.assert_not_awaited()
+        # L11：needs_manual 不搶著自動作廢——這裡甚至不該去查發票。
+        void_mock.assert_not_awaited()
+
+    # ── H1 場景：重複完成單的退款不能誤殺正常訂閱 ───────────────────────────
+
+    @pytest.mark.parametrize("flag", ["is_duplicate", "needs_refund"])
+    async def test_duplicate_order_refund_is_resolved_without_touching_subscription(self, monkeypatch, flag):
+        """審查場景：O1 啟用訂閱（active_order_no=O1），O2 撞重複完成標
+        is_duplicate/needs_refund（同樣 paid）。退 O2 時絕不能去動 O1 建立的訂閱——
+        即使 user 目前的 active_order_no 根本不是這張單，也要在碰時效/歸屬檢查之前
+        就短路掉。"""
+        order = _order(status="paid", type="subscription", paid_at=2000, **{flag: True})
+        # active_order_no 刻意指向「別張單」(O1)，證明這條路徑完全不看它就短路了。
+        s, order_repo, user_repo = _make(order=order, user=_active_user("O1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(
+            side_effect=AssertionError("不該呼叫——is_duplicate/needs_refund 應該更早短路")
+        )
+        resolved_alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_duplicate_refund_resolved_alert", resolved_alert)
+        _fake_repo, void_mock = _patch_invoice_lookup(monkeypatch, invoice=None)
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "duplicate_refund_resolved"
+        user_repo.update_subscription_fields.assert_not_awaited()
+        user_repo.update_quota.assert_not_awaited()
+        resolved_alert.assert_called_once_with("SLSUB1")
+        # L11：duplicate_refund_resolved 不在自動作廢白名單——這張單本來就沒有發票。
+        void_mock.assert_not_awaited()
+
+    async def test_stale_order_via_has_newer_check_needs_manual(self, monkeypatch):
+        """時效檢查（fail-safe 核心）：使用者已重新付款（例如續扣，續扣不更新
+        active_order_no）→ 不自動降級，轉人工。"""
+        order = _order(status="paid", paid_at=1000, type="subscription")
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=True)
+        stale_alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_stale_order_alert", stale_alert)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+
+        out = await s.handle_full_refund("SLSUB1", trade_id="T1")
+
+        assert out == "needs_manual"
+        user_repo.update_subscription_fields.assert_not_awaited()
+        order_repo.update_by_order_no.assert_any_await("SLSUB1", {"needs_manual": True})
+        stale_alert.assert_called_once_with("SLSUB1")
+
+    async def test_active_order_no_mismatch_needs_manual(self, monkeypatch):
+        """H1 第 2 層——精確歸屬：這張單不是 active_order_no，代表使用者目前的訂閱
+        是別張單（升降級換約/reactivate）在撐著，自動降級會誤殺，轉人工。"""
+        order = _order(status="paid", paid_at=1000, type="subscription")
+        s, order_repo, user_repo = _make(order=order, user=_active_user("OTHER_ORDER"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        not_active_alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_order_not_active_alert", not_active_alert)
+        _fake_repo, void_mock = _patch_invoice_lookup(monkeypatch, invoice=None)
+
+        out = await s.handle_full_refund("SLSUB1", trade_id="T1")
+
+        assert out == "needs_manual"
+        user_repo.update_subscription_fields.assert_not_awaited()
+        order_repo.update_by_order_no.assert_any_await("SLSUB1", {"needs_manual": True})
+        not_active_alert.assert_called_once_with("SLSUB1")
+        void_mock.assert_not_awaited()
+
+    async def test_active_order_no_match_and_no_newer_order_is_revoked(self, monkeypatch):
+        order = _order(status="paid", paid_at=1000, type="subscription")
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        revoked_alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_revoked_alert", revoked_alert)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+
+        out = await s.handle_full_refund("SLSUB1", trade_id="T1")
+
+        assert out == "revoked"
+        order_repo.has_newer_paid_subscription_order.assert_awaited_once_with("u1", 1000)
+        fields = user_repo.update_subscription_fields.await_args
+        assert fields.args[1]["status"] == "expired"
+        # H1 第 3 層：guard 收斂成 active_order_no 的原子條件（不再是 None）。
+        assert fields.kwargs["guard"] == {"subscription.active_order_no": "SLSUB1"}
+        user_repo.update_quota.assert_awaited_once()
+        revoked_alert.assert_called_once_with("SLSUB1")
+
+    async def test_expire_to_free_guard_lost_needs_manual(self, monkeypatch):
+        """H1 第 3 層：check-then-act 縫隙裡 active_order_no 被併發改掉——guard 沒中
+        不能靜默當作『降級成功』，轉人工。"""
+        order = _order(status="paid", paid_at=1000, type="subscription")
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        user_repo.update_subscription_fields = AsyncMock(return_value=False)  # guard 沒中
+        guard_lost_alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_guard_lost_alert", guard_lost_alert)
+        _fake_repo, void_mock = _patch_invoice_lookup(monkeypatch, invoice=None)
+
+        out = await s.handle_full_refund("SLSUB1", trade_id="T1")
+
+        assert out == "needs_manual"
+        user_repo.update_quota.assert_not_awaited()  # 降級沒真的發生，quota 不能動
+        order_repo.update_by_order_no.assert_any_await("SLSUB1", {"needs_manual": True})
+        guard_lost_alert.assert_called_once_with("SLSUB1")
+        void_mock.assert_not_awaited()
+
+    # ── M4 場景：升級結轉的 extra_quota 不自動回收 ───────────────────────────
+
+    async def test_carryover_granted_still_revokes_but_flags_needs_manual(self, monkeypatch):
+        order = _order(
+            status="paid", paid_at=1000, type="upgrade_subscription", carryover_granted=True,
+        )
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        carryover_alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_carryover_unreclaimed_alert", carryover_alert)
+        invoice = {"_id": "inv1", "status": "issued", "invoice_number": "AB123", "order_no": "SLSUB1"}
+        _fake_repo, void_mock = _patch_invoice_lookup(monkeypatch, invoice=invoice, void_result={"success": True})
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        # outcome 仍是 revoked（訂閱本身確實降級了）——carryover 只是額外標記，
+        # 不改變 outcome、也不阻擋發票作廢（兩者是獨立關注點）。
+        assert out == "revoked"
+        order_repo.update_by_order_no.assert_any_await("SLSUB1", {"needs_manual": True})
+        carryover_alert.assert_called_once_with("SLSUB1")
+        void_mock.assert_awaited_once()
+
+    # ── M4 場景：extra_quota 扣減前置 gate ───────────────────────────────────
+
+    async def test_extra_quota_not_granted_needs_manual_without_deducting(self, monkeypatch):
+        """quota_granted 非 True＝額度從未真正發放過（entitlement_pending 中途
+        crash）——沒有東西可扣，不能硬扣。"""
+        order = _order(status="paid", type="extra_quota", extra_duration_minutes=120, extra_ai_summaries=5)
+        s, order_repo, user_repo = _make(order=order)
+        alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_quota_not_granted_alert", alert)
+        _fake_repo, void_mock = _patch_invoice_lookup(monkeypatch, invoice=None)
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "needs_manual"
+        user_repo.adjust_extra_quota_atomic.assert_not_awaited()
+        order_repo.update_by_order_no.assert_any_await("SLSUB1", {"needs_manual": True})
+        alert.assert_called_once_with("SLSUB1", "not_granted")
+        void_mock.assert_not_awaited()
+
+    async def test_extra_quota_amount_missing_needs_manual_without_deducting(self, monkeypatch):
+        """quota_granted=True 但金額欄位都缺/為 0 是矛盾狀態——沒東西可扣，不能回報
+        『已扣回』。"""
+        order = _order(
+            status="paid", type="extra_quota", quota_granted=True,
+            extra_duration_minutes=0, extra_ai_summaries=0,
+        )
+        s, order_repo, user_repo = _make(order=order)
+        alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_quota_not_granted_alert", alert)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "needs_manual"
+        user_repo.adjust_extra_quota_atomic.assert_not_awaited()
+        alert.assert_called_once_with("SLSUB1", "amount_missing")
+
+    async def test_extra_quota_refund_deducts_when_sufficient(self, monkeypatch):
+        order = _order(
+            status="paid", type="extra_quota", quota_granted=True,
+            extra_duration_minutes=120, extra_ai_summaries=5,
+        )
+        s, order_repo, user_repo = _make(order=order)
+        user_repo.adjust_extra_quota_atomic = AsyncMock(return_value={"extra_quota": {}})
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "quota_deducted"
+        user_repo.adjust_extra_quota_atomic.assert_awaited_once_with(
+            "u1", duration_minutes=-120, ai_summaries=-5,
+        )
+        order_repo.update_by_order_no.assert_not_awaited()  # 沒標 needs_manual
+
+    async def test_extra_quota_refund_insufficient_balance_needs_manual(self, monkeypatch):
+        """不足以全扣時不部分扣——轉人工，不做『能扣多少扣多少』。"""
+        order = _order(
+            status="paid", type="extra_quota", quota_granted=True,
+            extra_duration_minutes=120, extra_ai_summaries=0,
+        )
+        s, order_repo, user_repo = _make(order=order)
+        user_repo.adjust_extra_quota_atomic = AsyncMock(return_value=None)
+        quota_alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_quota_insufficient_alert", quota_alert)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "needs_manual"
+        order_repo.update_by_order_no.assert_any_await("SLSUB1", {"needs_manual": True})
+        quota_alert.assert_called_once_with("SLSUB1")
+
+    # ── 發票作廢（L11：只在 revoked/quota_deducted 才嘗試）───────────────────
+
+    async def test_issued_invoice_gets_voided_on_revoked(self, monkeypatch):
+        order = _order(status="paid", type="subscription", paid_at=1000)
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        invoice = {"_id": "inv1", "status": "issued", "invoice_number": "AB12345678", "order_no": "SLSUB1"}
+        _fake_repo, void_mock = _patch_invoice_lookup(monkeypatch, invoice=invoice, void_result={"success": True})
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "revoked"
+        void_mock.assert_awaited_once()
+        assert void_mock.await_args.args[1] == invoice
+
+    async def test_issued_invoice_gets_voided_on_quota_deducted(self, monkeypatch):
+        order = _order(
+            status="paid", type="extra_quota", quota_granted=True,
+            extra_duration_minutes=60, extra_ai_summaries=0,
+        )
+        s, order_repo, user_repo = _make(order=order)
+        invoice = {"_id": "inv1", "status": "issued", "invoice_number": "AB999", "order_no": "SLSUB1"}
+        _fake_repo, void_mock = _patch_invoice_lookup(monkeypatch, invoice=invoice, void_result={"success": True})
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "quota_deducted"
+        void_mock.assert_awaited_once()
+
+    async def test_non_issued_invoice_is_not_voided(self, monkeypatch):
+        order = _order(status="paid", type="subscription", paid_at=1000)
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        invoice = {"_id": "inv1", "status": "pending", "invoice_number": None, "order_no": "SLSUB1"}
+        _fake_repo, void_mock = _patch_invoice_lookup(monkeypatch, invoice=invoice)
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "revoked"
+        void_mock.assert_not_awaited()
+
+    async def test_invoice_void_exception_does_not_fail_refund(self, monkeypatch):
+        """發票作廢是 best-effort：例外絕不可拖垮已經成功的退款/降級主流程。"""
+        order = _order(status="paid", type="subscription", paid_at=1000)
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        invoice = {"_id": "inv1", "status": "issued", "invoice_number": "AB12345678", "order_no": "SLSUB1"}
+        _patch_invoice_lookup(monkeypatch, invoice=invoice, void_side_effect=RuntimeError("smilepay down"))
+        fail_alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_invoice_void_failed_alert", fail_alert)
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "revoked"  # 主流程不受影響
+        fail_alert.assert_called_once_with("SLSUB1", "exception")
+
+    async def test_invoice_void_rejection_alerts_but_does_not_fail_refund(self, monkeypatch):
+        order = _order(status="paid", type="subscription", paid_at=1000)
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        invoice = {"_id": "inv1", "status": "issued", "invoice_number": "AB12345678", "order_no": "SLSUB1"}
+        _patch_invoice_lookup(
+            monkeypatch, invoice=invoice, void_result={"success": False, "status_code": "-2008"},
+        )
+        fail_alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_invoice_void_failed_alert", fail_alert)
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "revoked"
+        fail_alert.assert_called_once_with("SLSUB1", "-2008")
+
+    # ── H2：claim 消耗後動作失敗要留耐久旗標，不能靜默 ────────────────────────
+
+    async def test_action_failure_after_claim_marks_refund_action_failed_and_reraises(self, monkeypatch):
+        order = _order(status="paid", type="subscription", paid_at=1000)
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        s._dispatch_full_refund = AsyncMock(side_effect=RuntimeError("boom"))
+        action_failed_alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_action_failed_alert", action_failed_alert)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await s.handle_full_refund("SLSUB1")
+
+        order_repo.update_by_order_no.assert_awaited_once_with(
+            "SLSUB1", {"needs_manual": True, "refund_action_failed": True}
+        )
+        action_failed_alert.assert_called_once()
+        assert action_failed_alert.call_args.args[0] == "SLSUB1"
+
+    async def test_action_failure_flag_write_itself_failing_does_not_mask_original_exception(self, monkeypatch):
+        """`_mark_refund_action_failed` 本身絕不可拋例外——否則會蓋掉正在外拋的
+        原始例外。"""
+        order = _order(status="paid", type="subscription", paid_at=1000)
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        s._dispatch_full_refund = AsyncMock(side_effect=RuntimeError("original"))
+        order_repo.update_by_order_no = AsyncMock(side_effect=ConnectionError("db down"))
+
+        with pytest.raises(RuntimeError, match="original"):
+            await s.handle_full_refund("SLSUB1")
+
+    async def test_retry_after_action_failure_short_circuits_on_already_processed(self, monkeypatch):
+        """91APP 重送：claim 已經被第一次呼叫消耗掉，第二次呼叫應該快速回
+        already_processed，不會再跑一次（也不會再失敗一次）——旗標已經寫在單上了。"""
+        order = _order(status="paid", type="subscription", paid_at=1000)
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        s._dispatch_full_refund = AsyncMock(side_effect=RuntimeError("boom"))
+        with pytest.raises(RuntimeError):
+            await s.handle_full_refund("SLSUB1")
+
+        order_repo.claim_refund_processed = AsyncMock(return_value=False)  # 重送：閘門已被佔用
+        out = await s.handle_full_refund("SLSUB1")
+        assert out == "already_processed"
+        assert s._dispatch_full_refund.await_count == 1  # 沒有被重新呼叫
+
+
+class TestFlagPartialRefund:
+    async def test_order_not_found(self):
+        s, order_repo, user_repo = _make(order=None)
+        out = await s.flag_partial_refund("NOPE", record_status=6)
+        assert out == "order_not_found"
+        order_repo.claim_marker.assert_not_awaited()
+
+    async def test_already_processed_when_marker_lost(self):
+        order = _order(status="paid")
+        s, order_repo, user_repo = _make(order=order)
+        order_repo.claim_marker = AsyncMock(return_value=False)
+        out = await s.flag_partial_refund("SLSUB1", record_status=6)
+        assert out == "already_processed"
+        order_repo.update_by_order_no.assert_not_awaited()
+
+    async def test_flags_needs_manual_using_independent_marker_gate(self):
+        """M5：閘門用 claim_marker("refund_partial_flagged")，完全不碰
+        claim_refund_processed（那把鎖保留給 handle_full_refund 獨佔）。"""
+        order = _order(status="paid", type="subscription")
+        s, order_repo, user_repo = _make(order=order)
+        alert = MagicMock()
+        s._capture_partial_refund_alert = alert
+
+        out = await s.flag_partial_refund("SLSUB1", record_status=6)
+
+        assert out == "needs_manual"
+        order_repo.claim_marker.assert_awaited_once_with("SLSUB1", "refund_partial_flagged")
+        order_repo.claim_refund_processed.assert_not_awaited()
+        order_repo.update_by_order_no.assert_awaited_once_with(
+            "SLSUB1", {"refund_seen": True, "needs_manual": True}
+        )
+        alert.assert_called_once_with("SLSUB1", 6)
+        user_repo.update_subscription_fields.assert_not_awaited()
+        user_repo.adjust_extra_quota_atomic.assert_not_awaited()
+
+    async def test_action_failure_after_marker_marks_refund_action_failed_and_reraises(self, monkeypatch):
+        """H2 同款：claim_marker 已消耗，後續寫入中途失敗要留耐久旗標 + re-raise。"""
+        order = _order(status="paid", type="subscription")
+        s, order_repo, user_repo = _make(order=order)
+        # 第一次呼叫（寫 refund_seen/needs_manual）失敗；第二次呼叫（
+        # _mark_refund_action_failed 補寫 refund_action_failed）成功。
+        order_repo.update_by_order_no = AsyncMock(side_effect=[RuntimeError("db down"), True])
+        action_failed_alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_action_failed_alert", action_failed_alert)
+
+        with pytest.raises(RuntimeError, match="db down"):
+            await s.flag_partial_refund("SLSUB1", record_status=6)
+
+        assert order_repo.update_by_order_no.await_count == 2
+        second_call = order_repo.update_by_order_no.await_args_list[1]
+        assert second_call.args == ("SLSUB1", {"needs_manual": True, "refund_action_failed": True})
+        action_failed_alert.assert_called_once()
+
+
+class TestPartialThenFullRefundIndependentGates:
+    """M5 回歸：部分退款(6)先到不能卡住之後抵達的全額退款(7)——兩者用完全獨立的
+    冪等閘門（claim_marker vs claim_refund_processed），互不消耗對方的鎖。"""
+
+    async def test_partial_first_does_not_block_full_afterwards(self, monkeypatch):
+        order = _order(status="paid", type="subscription", paid_at=1000)
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+
+        partial_outcome = await s.flag_partial_refund("SLSUB1", record_status=6)
+        assert partial_outcome == "needs_manual"
+        order_repo.claim_marker.assert_awaited_once_with("SLSUB1", "refund_partial_flagged")
+
+        # 全額退款隨後抵達：claim_refund_processed 是獨立的鎖，預設仍是「一定搶得到」
+        # （_make() 的 fixture 沒有因為上面呼叫過 flag_partial_refund 而被影響）。
+        full_outcome = await s.handle_full_refund("SLSUB1", trade_id="T1")
+        assert full_outcome == "revoked"
+        order_repo.claim_refund_processed.assert_awaited_once_with("SLSUB1")
