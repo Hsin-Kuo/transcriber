@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.routers import subscriptions as subs  # noqa: E402
 from src.services.order_settlement import SettleResult, SettleOutcome  # noqa: E402
+from src.utils.card_token_cipher import decrypt  # noqa: E402
 
 
 def _patch(monkeypatch, *, claim_ok=True, settle_outcome=SettleOutcome.ACTIVATED, settle_raises=False, order=None):
@@ -379,7 +380,12 @@ class TestCallbackSuccessDerivation:
         }, order={"type": "subscription"})  # 無 card_token
         await subs.payment_callback(_FakeRequest({"tradeId": "PT1"}), db=MagicMock())
         assert cap["success"] is True
-        order_repo.update_by_order_no.assert_awaited_once_with("SLSUB1", {"card_token": "CT-RECOVERED"})
+        # P2-10（金流體檢）：補救寫回前一樣要加密，不能是明文。
+        order_repo.update_by_order_no.assert_awaited_once()
+        order_no, updates = order_repo.update_by_order_no.await_args.args
+        assert order_no == "SLSUB1"
+        assert updates["card_token"].startswith("v1:")
+        assert decrypt(updates["card_token"]) == "CT-RECOVERED"
 
     async def test_extra_quota_ignores_binding(self, monkeypatch):
         # 加購為一次性，不綁卡；即使回查回應帶出非成功 bindingStatus（形狀未實測，防禦性假設）
@@ -408,7 +414,12 @@ class TestCallbackSuccessDerivation:
         }, order={"type": "renewal"})  # 無 card_token
         await subs.payment_callback(_FakeRequest({"tradeId": "PT1"}), db=MagicMock())
         assert cap["success"] is True
-        order_repo.update_by_order_no.assert_awaited_once_with("REN2", {"card_token": "CT-NEWCARD"})
+        # P2-10（金流體檢）：補救寫回前一樣要加密，不能是明文。
+        order_repo.update_by_order_no.assert_awaited_once()
+        order_no, updates = order_repo.update_by_order_no.await_args.args
+        assert order_no == "REN2"
+        assert updates["card_token"].startswith("v1:")
+        assert decrypt(updates["card_token"]) == "CT-NEWCARD"
 
     async def test_no_order_no_ignored(self, monkeypatch):
         cap, _ = _patch_callback(monkeypatch, trade={"recordStatus": 4})

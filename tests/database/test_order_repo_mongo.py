@@ -393,3 +393,28 @@ class TestIterPaidInvoiceGapCandidatesRealMongo:
         await repo.stamp_invoice_gap_checked("O1", now)
         doc = await repo.collection.find_one({"merchant_order_no": "O1"})
         assert doc["invoice_gap_checked_at"] == now
+
+
+class TestClearCardTokenRealMongo:
+    """P2-10（金流體檢）：clear_card_token 必須是真正的 `$unset`（欄位整個消失），
+    不是 `update_by_order_no` 那種 `$set` 語意（$set 成空字串仍會留下欄位，
+    免 CVV 續扣憑證雙份留存的疑慮沒有解除）。"""
+
+    async def test_unsets_card_token_field_entirely(self, repo):
+        await repo.collection.insert_one(
+            {"merchant_order_no": "O1", "card_token": "v1:secret", "status": "paid"})
+        ok = await repo.clear_card_token("O1")
+        assert ok is True
+        doc = await repo.collection.find_one({"merchant_order_no": "O1"})
+        assert "card_token" not in doc
+        assert doc["status"] == "paid"  # 其他欄位不受影響
+
+    async def test_no_matching_order_returns_false(self, repo):
+        ok = await repo.clear_card_token("NOPE")
+        assert ok is False
+
+    async def test_order_without_card_token_returns_false(self, repo):
+        # modified_count == 0（$unset 對不存在的欄位視為 no-op）
+        await repo.collection.insert_one({"merchant_order_no": "O2", "status": "paid"})
+        ok = await repo.clear_card_token("O2")
+        assert ok is False

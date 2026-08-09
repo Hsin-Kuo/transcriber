@@ -294,6 +294,19 @@ class OrderRepository:
         )
         return result.modified_count > 0
 
+    async def clear_card_token(self, merchant_order_no: str) -> bool:
+        """`$unset` order 的 card_token（P2-10，金流體檢）。
+
+        settle 把 order.card_token 搬進 subscription 之後呼叫——orders 那份只是
+        搬移中繼，訂閱已有（加密）副本，留著等於免 CVV 續扣憑證雙份留存，徒增
+        暴露面。`update_by_order_no` 是 `$set` 語意做不到 unset，故獨立一支方法。
+        """
+        result = await self.collection.update_one(
+            {"merchant_order_no": merchant_order_no},
+            {"$unset": {"card_token": ""}},
+        )
+        return result.modified_count > 0
+
     async def claim_paid(
         self, merchant_order_no: str, extra_updates: Optional[Dict[str, Any]] = None
     ) -> bool:

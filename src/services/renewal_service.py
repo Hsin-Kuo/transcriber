@@ -18,6 +18,7 @@ from ..database.repositories.user_repo import UserRepository
 from .invoice_service import build_invoice_snapshot_from_user_invoice_info
 from .order_settlement import build_order_settlement, PaymentNotification
 from ..utils.payments91_service import get_payments91_service
+from ..utils.card_token_cipher import decrypt
 from ..utils.time_utils import get_utc_timestamp
 from ..utils.logger import get_logger
 
@@ -32,7 +33,7 @@ RENEWAL_INTERVAL_SECONDS = 1800  # 每 30 分掃描（縮短「期末→扣款�
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
 # 失敗分類（statusCode → 行為），對應 ASSESSMENT §6
-_CARD_FIX = {"CardExpired", "cardExpired", "CardNumberWrong", "NoCardToken"}
+_CARD_FIX = {"CardExpired", "cardExpired", "CardNumberWrong", "NoCardToken", "CardTokenDecryptError"}
 _HARD_STOP = {"CreditCardBlacklist", "IPBlacklist"}
 
 
@@ -225,9 +226,23 @@ async def _attempt_charge(db, user: dict) -> Optional[str]:
         log.error("renewal.attempt.setup_failed", user_id=user_id, order_no=order_no, error=str(e), exc_info=True)
         raise
 
+    # P2-10（金流體檢）：sub["card_token"] 落庫時已加密，這是唯一使用點（實際扣款），
+    # 單點解密成明文餵給 payments91_service（純 adapter，只認明文）。解密失敗（KEK 輪替
+    # 未 re-encrypt、密文毀損）是永久性壞資料，重試不會變好——release claim 後走
+    # needs_card_update dunning（比照 NoCardToken），逼使用者重新綁卡並停止每輪無限重試，
+    # 而不是靜默 return 讓 sweep 每 30 分鐘重撞同一個壞 token（第二意見審查 LOW）。
+    try:
+        card_token_plain = decrypt(sub["card_token"])
+    except Exception as e:
+        await webhook_repo.release(provider="91app-renewal", natural_id=order_no)
+        log.error("renewal.charge.decrypt_failed", user_id=user_id, order_no=order_no, error=str(e))
+        await _handle_failure(db, user_id, sub, attempt, status_code="CardTokenDecryptError",
+                              message="card_token 解密失敗")
+        return
+
     try:
         resp = await svc.charge_renewal(
-            card_token=sub["card_token"],
+            card_token=card_token_plain,
             consumer_id=sub.get("merchant_consumer_id", user_id),
             order_no=order_no,
             amount=amount,
