@@ -216,12 +216,14 @@ async def _process_payment_result(
     claim 擋成 duplicate，變成「扣款其實成功但訂閱從未啟用」。分鍵後成功/失敗各自
     claim 一次；mark_failed_unless_paid 本身在 DB 層已是 idempotent 的 `$ne paid` 條件式
     寫入，失敗鍵重複 claim 不會造成覆寫風險，分鍵零成本。
-    ⚠️ 退款 callback（91APP recordStatus 6/7）：interpret_record_status 目前把 6/7 歸為
-    "failed"（success=False）→ 走 ":fail" 鍵，並不會被 trade_id 主鍵 dedup；真正攔下它
-    的是 settle 的 status=="paid" ALREADY_PAID 快路徑（已付款單不受失敗通知改動）。
-    另注意：部分退款(6)與全額退款(7)同 trade 會撞同一把 ":fail" 鍵，第二封被 dedup。
-    退款分支屬 P1-5 範圍，屆時需依 record_status 另開獨立 claim 鍵（例如
-    "refund:{record_status}"），不能沿用這裡的 natural_id。
+    ✅ 退款 callback（91APP recordStatus 6/7）：P1-5 已實作——interpret_record_status
+    現在把 6/7 拆成獨立的 "refunded" 語意（不再併入 "failed"）。payment_callback 在
+    outcome=="pending" 早退之後、success/fail 判定之前就把 outcome=="refunded" 分流
+    給 `_process_refund`（獨立的 claim 鍵 `f"refund:{record_status}:{trade_id or order_no}"`，
+    record_status 入鍵讓部分退款(6)與全額退款(7)各自一封，不會共用一把鍵互相 dedup），
+    完全不會走到這個函式、也不會落入下面的 ":fail" 分支。
+    ":fail" 鍵現在只服務 recordStatus 2/3（付款失敗/取消）——退款有自己獨立的
+    claim namespace，兩者不再混在一起。
     """
     order = await OrderRepository(db).get_by_order_no(order_no)
     is_first_payment = not (order and order.get("type") == "renewal")
@@ -252,7 +254,58 @@ async def _process_payment_result(
                 scope.set_tag("webhook.provider", "91app")
                 scope.set_tag("webhook.order_no", order_no)
                 sentry_sdk.capture_exception(e)
-        except ImportError:
+        except Exception:
+            # L10（第二意見審查）：見 _process_refund 同款註解——push_scope 本身拋出
+            # 非 ImportError 例外時不能取代掉正在外拋的原始例外。
+            pass
+        raise
+
+
+async def _process_refund(db, *, trade_id: str, record_status: str, order_no: str) -> str:
+    """91APP 退款/爭議款 callback 收斂（recordStatus 6 部分退款／7 全額退款，P1-5）。
+
+    形狀比照 `_process_payment_result`：claim 去重 → 呼叫對應的 OrderSettlement 方法。
+    唯一差異是 claim 鍵——`natural_id` 把 `record_status` 打進去
+    （`f"refund:{record_status}:{trade_id or order_no}"`）：部分退款(6)與全額退款(7)
+    是完全不同的處置語意（人工 vs 自動降級），不能像 `_process_payment_result` 的
+    `":fail"` 鍵那樣共用一把鍵，否則同一筆 trade 若先後收到 6 又收到 7（或反過來）
+    會有一封被 dedup 掉、該做的動作沒做到。
+
+    settle 例外時 release claim + re-raise，行為對齊 `_process_payment_result`——
+    讓 91APP 重送有機會重新處理，不留下「claim 已佔用但動作沒做完」的坑。
+    """
+    webhook_repo = ProcessedWebhookRepository(db)
+    natural_id = f"refund:{record_status}:{trade_id or order_no}"
+    if not await webhook_repo.claim(
+        provider="91app",
+        natural_id=natural_id,
+        metadata={"status": record_status, "trade_id": trade_id, "order_no": order_no},
+    ):
+        log.warning("subscription.webhook.refund_duplicate_skipped", natural_id=natural_id)
+        return "duplicate"
+    settlement = build_order_settlement(db)
+    try:
+        rs = int(record_status)
+        if rs == 7:
+            outcome = await settlement.handle_full_refund(order_no, trade_id=trade_id)
+        else:
+            outcome = await settlement.flag_partial_refund(order_no, record_status=rs)
+        log.info("subscription.webhook.refund_settled", natural_id=natural_id, outcome=outcome)
+        return outcome
+    except Exception as e:
+        await webhook_repo.release(provider="91app", natural_id=natural_id)
+        log.error("subscription.webhook.refund_processing_failed", natural_id=natural_id, error=str(e), exc_info=True)
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("webhook.provider", "91app")
+                scope.set_tag("webhook.order_no", order_no)
+                sentry_sdk.capture_exception(e)
+        except Exception:
+            # L10（第二意見審查）：原本只接 ImportError（未裝 sentry_sdk），但
+            # push_scope()/capture_exception() 本身也可能拋非 ImportError 的例外
+            # （例如 SDK 內部狀態問題）——那種例外會取代掉正在往外拋的原始例外 e，
+            # 讓呼叫端看到的變成 Sentry 自己的錯誤，掩蓋真正的失敗原因。
             pass
         raise
 
@@ -467,6 +520,15 @@ async def payment_callback(request: Request, db=Depends(get_database)):
         # 尚未定案（待付款/處理中）→ 不結算，回 200 待 91APP 下次通知（3D 卡片實務多同步定案）
         log.info("subscription.callback.pending", trade_id=trade_id, order_no=order_no, record_status=record_status)
         return {"status": "pending"}
+    if outcome == "refunded":
+        # P1-5：部分退款(6)/全額退款(7) 有自己獨立的處置語意，完全不走下面的
+        # success/fail 判定與 binding gate（那些是給「付款結果」用的，退款是另一種事件）。
+        # L9（第二意見審查）：回應形狀改回 {"status": ...} dict，跟其他分支一致
+        # （_process_refund 本身仍回傳裸字串，供內部/測試直接斷言 outcome）。
+        refund_outcome = await _process_refund(
+            db, trade_id=trade_id, record_status=str(record_status), order_no=order_no,
+        )
+        return {"status": refund_outcome}
     success = outcome == "success"
 
     # 綁卡類（首購/升級走 BindingCard）：判定來源一律用回查回應（trade，我方簽章保護的通道），

@@ -135,6 +135,145 @@ class TestProcessPaymentResult:
         assert settlement2.settle.await_args.args[0].is_first_payment is False
 
 
+class _RefundPatch:
+    def __init__(self, webhook_repo, settlement):
+        self.webhook_repo = webhook_repo
+        self.settlement = settlement
+
+
+def _patch_refund(monkeypatch, *, claim_ok=True, full_refund_outcome="revoked",
+                   partial_refund_outcome="needs_manual", settle_raises=False):
+    webhook_repo = MagicMock()
+    webhook_repo.claim = AsyncMock(return_value=claim_ok)
+    webhook_repo.release = AsyncMock(return_value=True)
+    monkeypatch.setattr(subs, "ProcessedWebhookRepository", lambda db: webhook_repo)
+
+    settlement = MagicMock()
+    if settle_raises:
+        settlement.handle_full_refund = AsyncMock(side_effect=RuntimeError("boom"))
+        settlement.flag_partial_refund = AsyncMock(side_effect=RuntimeError("boom"))
+    else:
+        settlement.handle_full_refund = AsyncMock(return_value=full_refund_outcome)
+        settlement.flag_partial_refund = AsyncMock(return_value=partial_refund_outcome)
+    monkeypatch.setattr(subs, "build_order_settlement", lambda db: settlement)
+    return _RefundPatch(webhook_repo, settlement)
+
+
+class TestProcessRefund:
+    """P1-5：全額退款(7) 自動降級 / 部分退款(6) 轉人工——claim 去重鍵獨立於一般付款。"""
+
+    async def test_full_refund_dispatches_to_handle_full_refund(self, monkeypatch):
+        p = _patch_refund(monkeypatch)
+        out = await subs._process_refund(
+            MagicMock(), trade_id="PT1", record_status="7", order_no="SLSUB1",
+        )
+        assert out == "revoked"
+        p.settlement.handle_full_refund.assert_awaited_once_with("SLSUB1", trade_id="PT1")
+        p.settlement.flag_partial_refund.assert_not_awaited()
+        assert p.webhook_repo.claim.await_args.kwargs["natural_id"] == "refund:7:PT1"
+        assert p.webhook_repo.claim.await_args.kwargs["provider"] == "91app"
+
+    async def test_partial_refund_dispatches_to_flag_partial_refund(self, monkeypatch):
+        p = _patch_refund(monkeypatch)
+        out = await subs._process_refund(
+            MagicMock(), trade_id="PT1", record_status="6", order_no="SLSUB1",
+        )
+        assert out == "needs_manual"
+        p.settlement.flag_partial_refund.assert_awaited_once_with("SLSUB1", record_status=6)
+        p.settlement.handle_full_refund.assert_not_awaited()
+        assert p.webhook_repo.claim.await_args.kwargs["natural_id"] == "refund:6:PT1"
+
+    async def test_6_and_7_each_claim_successfully_on_distinct_keys(self, monkeypatch):
+        """部分退款(6)與全額退款(7)是不同語意的通知，不能共用一把 claim 鍵。"""
+        p6 = _patch_refund(monkeypatch)
+        out6 = await subs._process_refund(
+            MagicMock(), trade_id="PT1", record_status="6", order_no="SLSUB1",
+        )
+        key6 = p6.webhook_repo.claim.await_args.kwargs["natural_id"]
+
+        p7 = _patch_refund(monkeypatch)
+        out7 = await subs._process_refund(
+            MagicMock(), trade_id="PT1", record_status="7", order_no="SLSUB1",
+        )
+        key7 = p7.webhook_repo.claim.await_args.kwargs["natural_id"]
+
+        assert key6 == "refund:6:PT1" and key7 == "refund:7:PT1"
+        assert key6 != key7
+        assert out6 == "needs_manual" and out7 == "revoked"
+
+    async def test_duplicate_claim_skips_settlement(self, monkeypatch):
+        p = _patch_refund(monkeypatch, claim_ok=False)
+        out = await subs._process_refund(
+            MagicMock(), trade_id="PT1", record_status="7", order_no="SLSUB1",
+        )
+        assert out == "duplicate"
+        p.settlement.handle_full_refund.assert_not_awaited()
+        p.settlement.flag_partial_refund.assert_not_awaited()
+
+    async def test_natural_id_falls_back_to_order_no_when_no_trade_id(self, monkeypatch):
+        p = _patch_refund(monkeypatch)
+        await subs._process_refund(
+            MagicMock(), trade_id="", record_status="7", order_no="SLSUB1",
+        )
+        assert p.webhook_repo.claim.await_args.kwargs["natural_id"] == "refund:7:SLSUB1"
+
+    async def test_settlement_failure_releases_claim_and_raises(self, monkeypatch):
+        p = _patch_refund(monkeypatch, settle_raises=True)
+        with pytest.raises(RuntimeError):
+            await subs._process_refund(
+                MagicMock(), trade_id="PT1", record_status="7", order_no="SLSUB1",
+            )
+        p.webhook_repo.release.assert_awaited_once()
+
+
+class TestCallbackRefundDispatch:
+    """/callback 對 recordStatus 6/7 的分流——outcome=="refunded" 走獨立路徑，
+    完全不經過 success/fail 判定與 binding gate。"""
+
+    async def test_full_refund_record_status_dispatches_to_process_refund(self, monkeypatch):
+        svc = MagicMock()
+        svc.query_trade = AsyncMock(return_value={"merchantOrderId": "SLSUB1", "recordStatus": 7})
+        monkeypatch.setattr(subs, "get_payments91_service", lambda: svc)
+
+        captured = {}
+
+        async def fake_refund(db, *, trade_id, record_status, order_no):
+            captured.update(trade_id=trade_id, record_status=record_status, order_no=order_no)
+            return "revoked"
+
+        monkeypatch.setattr(subs, "_process_refund", fake_refund)
+        process_payment_result = AsyncMock()
+        monkeypatch.setattr(subs, "_process_payment_result", process_payment_result)
+
+        out = await subs.payment_callback(_FakeRequest({"tradeId": "PT1"}), db=MagicMock())
+
+        # L9：/callback 回應形狀統一成 {"status": ...} dict，跟其他分支一致。
+        assert out == {"status": "revoked"}
+        assert captured == {"trade_id": "PT1", "record_status": "7", "order_no": "SLSUB1"}
+        process_payment_result.assert_not_awaited()
+
+    async def test_partial_refund_record_status_dispatches_to_process_refund(self, monkeypatch):
+        svc = MagicMock()
+        svc.query_trade = AsyncMock(return_value={"merchantOrderId": "SLSUB1", "recordStatus": 6})
+        monkeypatch.setattr(subs, "get_payments91_service", lambda: svc)
+
+        captured = {}
+
+        async def fake_refund(db, *, trade_id, record_status, order_no):
+            captured.update(trade_id=trade_id, record_status=record_status, order_no=order_no)
+            return "needs_manual"
+
+        monkeypatch.setattr(subs, "_process_refund", fake_refund)
+        process_payment_result = AsyncMock()
+        monkeypatch.setattr(subs, "_process_payment_result", process_payment_result)
+
+        out = await subs.payment_callback(_FakeRequest({"tradeId": "PT1"}), db=MagicMock())
+
+        assert out == {"status": "needs_manual"}
+        assert captured["record_status"] == "6"
+        process_payment_result.assert_not_awaited()
+
+
 class _FakeRequest:
     """最小 Request 替身：/callback 只用到 body()（JSON）。"""
     def __init__(self, payload: dict):

@@ -210,10 +210,20 @@ class Payments91APPService:
 #                    6 部分退款 / 7 全部退款 / 8 付款處理中
 _RECORD_SUCCESS = {4, 5}
 _RECORD_PENDING = {1, 8}
+# P1-5（金流體檢）：6/7 從 "failed" 拆成獨立的 "refunded" 語意——已付款單收到退款
+# 通知不是「付款失敗」，混在 failed 分支會被 order_settlement 的 mark_failed_unless_paid
+# （`$ne paid` 條件式寫入）直接擋掉，變成「錢退了、權益完全沒被撤銷」的靜默漏洞。
+# 呼叫端（subscriptions.py callback）依此值分流到獨立的退款處理路徑。
+_RECORD_REFUND = {6, 7}
 
 
 def interpret_record_status(record_status) -> str:
-    """依 recordStatus 判 'success' | 'pending' | 'failed'。非法/未知一律當 failed（保守）。"""
+    """依 recordStatus 判 'success' | 'pending' | 'failed' | 'refunded'。
+
+    非法/未知一律當 failed（保守，fail-closed）。'refunded' 涵蓋部分退款(6)/全部退款(7)
+    ——呼叫端（見 subscriptions.py payment_callback）需再依實際 record_status 分辨
+    6 與 7 各自的處置（P1-5：6 轉人工、7 自動降級）。
+    """
     try:
         rs = int(record_status)
     except (TypeError, ValueError):
@@ -222,6 +232,8 @@ def interpret_record_status(record_status) -> str:
         return "success"
     if rs in _RECORD_PENDING:
         return "pending"
+    if rs in _RECORD_REFUND:
+        return "refunded"
     return "failed"
 
 

@@ -11,6 +11,12 @@ from ...utils.logger import get_logger
 log = get_logger(__name__)
 
 
+# P1-5（金流體檢）：全額退款時效檢查用的訂閱型 order type 白名單。刻意在這裡獨立
+# 定義一份、不從 services/order_settlement.py 匯入同名常數——repository 層不應該
+# 依賴 service 層（會造成循環 import：order_settlement 已經 import 這個 repo 模組）。
+_SUBSCRIPTION_ORDER_TYPES = ("subscription", "upgrade_subscription", "downgrade_subscription", "renewal")
+
+
 class DuplicatePendingOrderError(Exception):
     """同 user+type 已有 in-flight 的 pending 單（由 DB partial unique index 攔下）。
 
@@ -38,6 +44,10 @@ class OrderRepository:
         await self.collection.create_index("status")
         # P1-9 對帳 sweep：查「有 trade_id 的 pending/expired 單」的複合索引。
         await self.collection.create_index([("status", 1), ("trade_id", 1)])
+        # P1-5 退款稽核 sweep：paid 單 30 天窗口 + refund_audited_at 排序——沒有這顆，
+        # orders 累積後會全量掃 paid 單 + in-memory sort（32MB 上限炸掉整輪，而這支
+        # 是 paid 單退款的唯一 fallback）。
+        await self.collection.create_index([("status", 1), ("paid_at", -1)])
         await self._ensure_pending_unique_index()
 
     async def _ensure_pending_unique_index(self):
@@ -442,6 +452,90 @@ class OrderRepository:
         })
         async for doc in cursor:
             yield doc
+
+    # ── P1-5 退款/爭議款處置 ─────────────────────────────────────────────────
+
+    async def claim_refund_processed(self, merchant_order_no: str) -> bool:
+        """退款處理冪等閘門（P1-5）：形狀比照 `claim_paid`——只有第一個呼叫者能把
+        `refund_processed` 從未設定（或非 True）翻成 True。`/callback` 與對帳
+        sweep（`payment_reconciliation._reconcile_one`）都可能對同一筆退款通知觸發
+        `OrderSettlement.handle_full_refund`/`flag_partial_refund`，只有贏得這個
+        閘門的呼叫者才該執行後續動作（自動降級/標記人工/扣回額度/作廢發票），輸家
+        回 False，呼叫端應視為 "already_processed" 直接跳過——避免重複降級、重複
+        扣額度、重複告警。
+
+        一併寫入 `refund_seen: True`：`OrderRepository.iter_for_reconciliation` 的
+        查詢層排除條件本來就是 `refund_seen: {"$ne": True}`（P1-C 遺留），這裡沿用
+        同一個旗標當作「這筆退款已經有結果了，對帳 sweep 不用再重查」的天然停止點，
+        不需要另外改查詢條件。
+        """
+        now = get_utc_timestamp()
+        result = await self.collection.update_one(
+            {"merchant_order_no": merchant_order_no, "refund_processed": {"$ne": True}},
+            {"$set": {"refund_processed": True, "refunded_at": now, "refund_seen": True}},
+        )
+        return result.modified_count == 1
+
+    async def has_newer_paid_subscription_order(self, user_id: str, paid_at: Optional[float]) -> bool:
+        """該 user 是否存在『比 `paid_at` 更新』的已付款訂閱型訂單（P1-5 時效檢查）。
+
+        fail-safe 核心：全額退款 callback 對應到的可能是舊期別的單——若使用者在那之後
+        已經重新付款過（新單的 `paid_at` 晚於這張退款單），代表訂閱早就被新單接手，
+        這時自動降級是誤殺（會把使用者剛付的新期別也降掉），必須轉人工判斷，不能
+        自動處理。
+
+        `paid_at` 為 None 時（理論上不會發生——呼叫端只在 order.status=="paid" 之後
+        才會走到這裡，`claim_paid` 保證寫入 `paid_at`；防禦性處理仍保留）視為「任何
+        一筆已付款訂閱單都算更新」，一律回 True 轉人工，不冒險自動降級。
+        """
+        query: Dict[str, Any] = {
+            "user_id": user_id,
+            "type": {"$in": list(_SUBSCRIPTION_ORDER_TYPES)},
+            "status": "paid",
+        }
+        query["paid_at"] = {"$gt": paid_at} if paid_at is not None else {"$exists": True}
+        doc = await self.collection.find_one(query)
+        return doc is not None
+
+    # M3（第二意見審查）：paid 單退款稽核 lane——`/callback` 是 paid 單退款唯一即時
+    # 路徑，91APP 若真的沒打 callback（或打到但被吃掉），一張已 paid 的訂閱/加購單
+    # 被使用者事後對發卡行申訴退款，系統完全沒有第二條路能發現。這是唯一 fallback。
+    REFUND_AUDIT_BATCH_LIMIT = 200
+    REFUND_AUDIT_WINDOW_SECONDS = 30 * 24 * 3600
+
+    async def iter_for_refund_audit(self) -> AsyncIterator[Dict[str, Any]]:
+        """撈「30 天內 paid、還沒被退款流程認領過」的訂閱型/extra_quota 單。
+
+        30 天窗口：91APP/發卡行的退款爭議申訴實務上不會拖超過這個量級，且訂閱大多
+        月繳/年繳循環，避免每天對帳量隨帳期無限累積。排除條件用 `refund_seen`
+        而非 `refund_processed`（第二意見複核 N1）：M5 拆閘門後 `flag_partial_refund`
+        只寫 refund_seen 不寫 refund_processed——若排除鍵用後者，部分退款單會在
+        30 天窗口內每天被重新 query_trade + 重呼（claim_marker 擋住無副作用，但白燒
+        API 額度且讓 refund_partial 計數每日虛增）。refund_seen 是兩條退款路徑都會
+        寫的共同旗標，語意即「這筆退款已有結果」。
+
+        排序用 `refund_audited_at` 升冪（缺欄位＝從未稽核過，BSON 排序在最前）：
+        搭配每筆處理前先 stamp 該欄位（見 `stamp_refund_audited`），讓積壓超過
+        batch 上限時批次會輪替，比照 `iter_for_reconciliation` 的既有手法。
+        """
+        cutoff = get_utc_timestamp() - self.REFUND_AUDIT_WINDOW_SECONDS
+        cursor = self.collection.find({
+            "status": "paid",
+            "type": {"$in": list(_SUBSCRIPTION_ORDER_TYPES) + ["extra_quota"]},
+            "refund_seen": {"$ne": True},
+            "paid_at": {"$gte": cutoff},
+        }).sort("refund_audited_at", 1).limit(self.REFUND_AUDIT_BATCH_LIMIT)
+        async for doc in cursor:
+            yield doc
+
+    async def stamp_refund_audited(self, merchant_order_no: str, ts: float) -> None:
+        """輪替 stamp（比照 `_reconcile_one` 的 `last_reconciled_at`）：每筆處理前
+        先寫，讓 `iter_for_refund_audit` 依此升冪撈單時，積壓超過 batch 上限的單
+        不會永遠卡在佇列頭部沒被排到。"""
+        await self.collection.update_one(
+            {"merchant_order_no": merchant_order_no},
+            {"$set": {"refund_audited_at": ts}},
+        )
 
     async def purge_old_superseded_orders(self, older_than_seconds: int = 30 * 24 * 3600) -> int:
         """刪除夠舊的 superseded 訂單（被取代的廢棄付款嘗試），避免無限累積。

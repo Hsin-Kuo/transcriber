@@ -1381,13 +1381,22 @@ _ORDER_DETAIL_FIELDS = (
     "invoice_snapshot", "is_duplicate", "needs_refund",
     "created_at", "updated_at", "paid_at", "expires_at",
     # P1-9 對帳補償 sweep 可見性：entitlement_pending/needs_manual 是「需要人工看一眼」
-    # 的旗標，reconciliation_gave_up 代表 72h 對帳仍懸而不決，refund_seen 代表對帳
-    # 回查認出退款（P1-5 前的暫定收斂），carryover_granted/quota_granted 是 $inc
-    # 一次性 marker（供排查「這筆到底發過額度沒」），reconciliation_first_seen_at
-    # 是 72h 放棄時鐘的起點（P1-D，第二意見審查）。
+    # 的旗標，reconciliation_gave_up 代表 72h 對帳仍懸而不決，refund_seen 代表這筆單
+    # 已經有退款結果了（L6，第二意見審查：P1-5 之後不再等同「待人工」——自動降級
+    # 成功的 revoked/quota_deducted 也會寫它，needs_attention 篩選已改用 needs_manual），
+    # carryover_granted/quota_granted 是 $inc 一次性 marker（供排查「這筆到底發過
+    # 額度沒」），reconciliation_first_seen_at 是 72h 放棄時鐘的起點（P1-D，第二意見
+    # 審查）。
     "entitlement_pending", "reconciliation_gave_up", "needs_manual", "refund_seen",
     "carryover_granted", "quota_granted", "entitlement_resettled_at",
     "reconciliation_first_seen_at",
+    # P1-5：退款處置冪等閘門旗標（見 order_repo.claim_refund_processed）——
+    # refund_processed 是「這筆單已經跑過 handle_full_refund」的權威標記、
+    # refund_partial_flagged 是部分退款的獨立閘門（M5 拆分）、refund_action_failed
+    # 讓營運分辨 needs_manual 的來源是「退款動作中途失敗」（否則得回頭翻 Sentry）、
+    # refunded_at/refund_audited_at 供排查時間點。
+    "refund_processed", "refunded_at", "refund_action_failed",
+    "refund_partial_flagged", "refund_audited_at",
 )
 
 
@@ -1424,7 +1433,7 @@ async def list_orders(
     needs_attention: Optional[bool] = Query(
         None,
         description="true 時只列出需要人工看一眼的單（entitlement_pending / "
-                     "needs_manual / reconciliation_gave_up / refund_seen 任一為 True）",
+                     "needs_manual / reconciliation_gave_up 任一為 True）",
     ),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
@@ -1439,16 +1448,19 @@ async def list_orders(
     if meta.get("email_not_found"):
         return {"orders": [], "total": 0, "skip": skip, "limit": limit}
 
-    # P3-J（第二意見審查）：對帳補償 sweep 引入的四種「需要人工看一眼」旗標一次
+    # P3-J（第二意見審查）：對帳補償 sweep 引入的「需要人工看一眼」旗標一次
     # 篩出來，不用逐頁翻找。只在 needs_attention=True 時加這個 $or——False/None
     # 都不篩（None 是預設值，維持既有行為；顯式 False 沒有另外定義語意，同樣視為
     # 不篩，因為「不需要特別關注」不等於「這些單都要被排除」）。
+    # L6（第二意見審查）：拿掉 refund_seen——P1-5 之後它的語意已經從「退款待人工」
+    # 變成「這筆單已經有退款結果了」（`claim_refund_processed`/`flag_partial_refund`
+    # 都會寫它，包括自動降級成功的 revoked/quota_deducted），繼續放在這裡會把
+    # 「已經自動處理好」的單也篩進『需要人工看一眼』，該用 needs_manual 才對。
     if needs_attention:
         mongo_filter["$or"] = [
             {"entitlement_pending": True},
             {"needs_manual": True},
             {"reconciliation_gave_up": True},
-            {"refund_seen": True},
         ]
 
     orders, total = await OrderRepository(db).admin_list_with_invoices(
@@ -1477,6 +1489,8 @@ async def list_orders(
             "needs_manual": bool(o.get("needs_manual")),
             "reconciliation_gave_up": bool(o.get("reconciliation_gave_up")),
             "refund_seen": bool(o.get("refund_seen")),
+            # P1-5：列表頁可見性——refund_processed 代表已跑過自動降級/人工標記處置。
+            "refund_processed": bool(o.get("refund_processed")),
         })
 
     return {"orders": result, "total": total, "skip": skip, "limit": limit}

@@ -367,6 +367,422 @@ class OrderSettlement:
         except Exception:
             pass
 
+    # ── 退款 / 爭議款處置（P1-5，金流體檢）──────────────────────────────────────
+    #
+    # 產品決策（已拍板）：全額退款(7) = 即時降級 free；部分退款(6) = 人工處理
+    # （needs_manual + 告警，不自動動權益）；已開發票 = 自動作廢（失敗走既有
+    # needs_manual 機制）。設計原則：所有自動動作 fail-safe——語意不明確就轉人工，
+    # 寧可人工也不誤殺。
+
+    async def handle_full_refund(self, order_no: str, *, trade_id: str = "") -> str:
+        """全額退款（91APP recordStatus 7）：自動降級 free + 作廢發票。
+
+        回傳 outcome 字串（供 log/測試）：
+        - "order_not_found"：order 不存在。
+        - "already_processed"：`claim_refund_processed` 沒搶到——`/callback` 與對帳
+          sweep 重複觸發時，只有第一個贏得閘門的呼叫者會執行到這裡以下的分支。
+          （M5，第二意見審查：這把閘門現在由 `handle_full_refund` 獨佔，
+          `flag_partial_refund` 改用獨立的 `claim_marker`，兩者不再互相卡住。）
+        - "duplicate_refund_resolved"：這張單當初被 `_reject_duplicate` 判定為
+          『重複完成』（`is_duplicate`/`needs_refund`）——從未真正啟用過訂閱，退款
+          只是營運照 SOP 把多扣的錢退回去，跟目前的訂閱狀態無關（H1，第二意見審查）。
+        - "needs_manual"：order 非 paid、時效檢查未通過（使用者已重新付款）、
+          `active_order_no` 與這張單不符（H1 第 2 層：不是目前訂閱狀態的權威來源）、
+          降級的樂觀鎖 guard 沒中（H1 第 3 層：check-then-act 縫隙被併發改掉）、
+          額度型退款從未真正發放過/金額缺失/餘額不足、或訂單型別未知——一律轉人工。
+        - "revoked"：訂閱型退款通過所有 fail-safe 檢查，已呼叫 `_expire_to_free`
+          降級（若該單帶有升級結轉的 extra_quota，會額外標 needs_manual，見 M4）。
+        - "quota_deducted"：額度型（extra_quota）退款已原子扣回發放的額度。
+
+        H2（第二意見審查）：claim 一旦搶到就會被消耗掉（`claim_refund_processed`
+        是一次性的），若之後的處置動作中途拋例外，91APP 重送只會拿到
+        "already_processed"、不會再有機會重跑——因此这段動作整個包在 try/except
+        裡，例外時寫入耐久旗標 `refund_action_failed`（見 `_mark_refund_action_failed`）
+        讓 admin needs_attention 撈得到，再原例外照樣往上拋。
+
+        發票作廢只在「權益確定已經處置成功」（revoked / quota_deducted）才嘗試
+        （L11：needs_manual 類分支留給人工，不搶著自動作廢），見
+        `_void_issued_invoice_for_refund`。
+        """
+        order = await self.order_repo.get_by_order_no(order_no)
+        if not order:
+            log.warning("payment.refund.order_not_found", order_no=order_no)
+            return "order_not_found"
+
+        if not await self.order_repo.claim_refund_processed(order_no):
+            log.info("payment.refund.already_processed", order_no=order_no, outcome="already_processed")
+            return "already_processed"
+
+        try:
+            outcome = await self._dispatch_full_refund(order)
+        except Exception as exc:
+            await self._mark_refund_action_failed(order_no, exc)
+            raise
+        log.info("payment.refund.full_refund_processed", order_no=order_no, outcome=outcome)
+        return outcome
+
+    async def _dispatch_full_refund(self, order: dict) -> str:
+        """claim 贏了之後的實際處置——整段被 `handle_full_refund` 包在 try/except 裡（H2）。"""
+        order_no = order["merchant_order_no"]
+        if order.get("status") != "paid":
+            await self.order_repo.update_by_order_no(order_no, {"needs_manual": True})
+            log.warning("payment.refund.on_unpaid_order", order_no=order_no, outcome="needs_manual")
+            self._capture_refund_on_unpaid_order_alert(order_no)
+            return "needs_manual"
+
+        order_type = order.get("type", "subscription")
+        if order_type in _SUBSCRIPTION_TYPES:
+            outcome = await self._handle_full_refund_subscription(order)
+        elif order_type == "extra_quota":
+            outcome = await self._handle_full_refund_extra_quota(order)
+        else:
+            log.warning("payment.refund.unknown_order_type", order_no=order_no, type=order_type)
+            await self.order_repo.update_by_order_no(order_no, {"needs_manual": True})
+            outcome = "needs_manual"
+
+        # L11：只有「權益確定已經處置成功」的 outcome 才嘗試作廢發票——
+        # needs_manual/duplicate_refund_resolved 都不搶著自動作廢，留給人工判斷
+        # （duplicate_refund_resolved 這張單本來就從未啟用過，理論上也沒有發票）。
+        if outcome in ("revoked", "quota_deducted"):
+            await self._void_issued_invoice_for_refund(order_no)
+        return outcome
+
+    async def _mark_refund_action_failed(self, order_no: str, exc: Exception) -> None:
+        """H2：claim 已消耗、後續動作中途失敗——寫耐久旗標讓 admin 撈得到。
+
+        這個方法本身絕不可拋例外——否則會蓋掉呼叫端正在往外拋的原始例外（比照
+        `_mark_entitlement_pending` 形狀）。
+        """
+        try:
+            await self.order_repo.update_by_order_no(
+                order_no, {"needs_manual": True, "refund_action_failed": True}
+            )
+        except Exception as flag_err:
+            log.error(
+                "payment.refund.action_failed_flag_write_failed",
+                order_no=order_no, error=str(flag_err), exc_info=True,
+            )
+        log.error("payment.refund.action_failed", order_no=order_no, error=str(exc), exc_info=True)
+        self._capture_refund_action_failed_alert(order_no, str(exc))
+
+    async def _handle_full_refund_subscription(self, order: dict) -> str:
+        """訂閱型（subscription/upgrade/downgrade/renewal）全額退款：層層 fail-safe
+        檢查全過才降級（H1，第二意見審查）。"""
+        order_no = order["merchant_order_no"]
+        user_id = order["user_id"]
+
+        if order.get("is_duplicate") or order.get("needs_refund"):
+            # H1 場景：這張單當初被 _reject_duplicate 判定為『重複完成』（sibling
+            # 已先啟動），從未真正啟用過訂閱/施加權益。它也是 paid+subscription 型，
+            # 若不特判會被下面的邏輯誤判成「這是使用者目前的訂閱」而觸發降級——
+            # 但使用者目前生效的其實是另一張 sibling 單，跟這張完全無關。
+            log.info("payment.duplicate_refund_resolved", order_no=order_no)
+            self._capture_duplicate_refund_resolved_alert(order_no)
+            return "duplicate_refund_resolved"
+
+        if await self.order_repo.has_newer_paid_subscription_order(user_id, order.get("paid_at")):
+            # 使用者已重新付款（新單晚於這張退款單）——這裡特別涵蓋「續扣不更新
+            # active_order_no」的情況：即使 active_order_no 仍指向這張單，只要
+            # 使用者之後續扣成功過，訂閱其實已經被那筆續扣接手，自動降級會誤殺。
+            await self.order_repo.update_by_order_no(order_no, {"needs_manual": True})
+            log.warning("payment.refund.stale_order", order_no=order_no)
+            self._capture_refund_stale_order_alert(order_no)
+            return "needs_manual"
+
+        user = await self.user_repo.get_by_id(user_id)
+        sub = (user or {}).get("subscription") or {}
+        if sub.get("active_order_no") != order_no:
+            # H1 第 2 層——精確歸屬：active_order_no 是既有的權威欄位（見
+            # _settle_subscription 的啟用/續扣分支），只有這張單「目前就是」使用者
+            # 訂閱狀態的來源時，自動降級才安全。不符代表使用者的訂閱早就是別張單
+            # （升降級換約、reactivate、或本例的『重複完成』sibling）在撐著。
+            await self.order_repo.update_by_order_no(order_no, {"needs_manual": True})
+            log.warning("payment.refund.order_not_active", order_no=order_no)
+            self._capture_refund_order_not_active_alert(order_no)
+            return "needs_manual"
+
+        # H1 第 3 層：guard 把上面 check-then-act 的縫隙收成原子條件寫入——
+        # active_order_no 若在讀取之後、寫入之前被併發改掉（例如另一張單剛好在這
+        # 期間啟用），guard 不中，不能靜默當作『降級成功』。
+        ok = await self._expire_to_free(user_id, guard={"subscription.active_order_no": order_no})
+        if not ok:
+            await self.order_repo.update_by_order_no(order_no, {"needs_manual": True})
+            log.warning("payment.refund.guard_lost_race", order_no=order_no)
+            self._capture_refund_guard_lost_alert(order_no)
+            return "needs_manual"
+
+        self._capture_refund_revoked_alert(order_no)
+        log.warning("payment.refund.subscription_revoked", order_no=order_no)
+
+        if order.get("carryover_granted") is True:
+            # M4：升級換約時把舊方案剩餘額度結轉進 extra_quota（見 _settle_subscription
+            # 的 upgrade_subscription 分支）。降級照做（訂閱本身的權益撤銷跟結轉額度
+            # 是兩件事），但結轉出去的額度不自動扣回——使用者可能已經花掉部分，
+            # `adjust_extra_quota_atomic` 的『不足就整筆放棄』policy 對這種混合用量
+            # 場景太粗糙，交給人工核對實際剩餘量調整。
+            await self.order_repo.update_by_order_no(order_no, {"needs_manual": True})
+            log.warning("payment.refund.carryover_unreclaimed", order_no=order_no)
+            self._capture_refund_carryover_unreclaimed_alert(order_no)
+
+        # L8：不寄「已降級」通知信——既有的 "downgraded" 文案是續扣失敗語境
+        # （「您的訂閱因付款失敗已降級」），套在退款情境會誤導使用者。退款情境的
+        # 通知信文案待產品定稿，follow-up。
+
+        return "revoked"
+
+    async def _handle_full_refund_extra_quota(self, order: dict) -> str:
+        """extra_quota（一次性加購）全額退款：原子扣回當初發放的額度（M4 fail-safe）。"""
+        order_no = order["merchant_order_no"]
+        user_id = order["user_id"]
+
+        if order.get("quota_granted") is not True:
+            # M4：quota_granted 是 claim_marker 在 _settle_extra_quota 真的成功施加
+            # $inc 額度時才會寫 True 的一次性 marker——非 True 代表額度從未真正發放
+            # 過（例如 entitlement_pending 中途 crash），這裡沒有東西可扣，硬扣會
+            # 把使用者既有額度誤扣成負值。
+            await self.order_repo.update_by_order_no(order_no, {"needs_manual": True})
+            log.warning("payment.refund.quota_not_granted", order_no=order_no)
+            self._capture_refund_quota_not_granted_alert(order_no, "not_granted")
+            return "needs_manual"
+
+        extra_dur = order.get("extra_duration_minutes", 0) or 0
+        extra_ai = order.get("extra_ai_summaries", 0) or 0
+        if not extra_dur and not extra_ai:
+            # M4：quota_granted=True 但兩個金額欄位都缺/為 0 是矛盾狀態（理論上不會
+            # 發生）——沒有東西可扣，不能回報「已扣回」，一律轉人工。
+            await self.order_repo.update_by_order_no(order_no, {"needs_manual": True})
+            log.warning("payment.refund.quota_amount_missing", order_no=order_no)
+            self._capture_refund_quota_not_granted_alert(order_no, "amount_missing")
+            return "needs_manual"
+
+        # 不足以全扣時不部分扣——adjust_extra_quota_atomic 的原子條件（`$gte` 餘額）
+        # 沒過就回 None，這裡一律轉人工，不做「能扣多少扣多少」的部分扣減（會留下
+        # 金額對不上的帳，且更難事後稽核）。
+        result = await self.user_repo.adjust_extra_quota_atomic(
+            user_id, duration_minutes=-extra_dur, ai_summaries=-extra_ai,
+        )
+        if result is None:
+            await self.order_repo.update_by_order_no(order_no, {"needs_manual": True})
+            log.warning("payment.refund.quota_insufficient", order_no=order_no)
+            self._capture_refund_quota_insufficient_alert(order_no)
+            return "needs_manual"
+        log.info("payment.refund.quota_deducted", order_no=order_no)
+        return "quota_deducted"
+
+    async def _void_issued_invoice_for_refund(self, order_no: str) -> None:
+        """全額退款後嘗試作廢已開立發票（best-effort，絕不拋例外拖垮退款流程）。
+
+        只對 status=="issued" 且有 invoice_number 的發票動作（同 admin 手動作廢端點
+        的前置條件，見 routers/admin.py void_invoice 端點）——pending/failed/
+        needs_manual/voided 的發票本來就不是「已開立給客戶」的終局狀態，沒有可作廢
+        的對象，交給發票側既有機制（sweep/admin）處理。
+
+        作廢失敗（SmilePay 拒絕或例外）不重試、不拋出——log.error + Sentry，讓
+        `invoice_service` 既有的 needs_manual/reissue 機制接手人工介入。
+        """
+        try:
+            from ..database.repositories.invoice_repo import InvoiceRepository  # lazy：避免無條件拉進 invoice 依賴
+            from .invoice_service import void_invoice_for
+
+            invoice = await InvoiceRepository(self.order_repo.db).get_active_by_order_no(order_no)
+            if not invoice or invoice.get("status") != "issued" or not invoice.get("invoice_number"):
+                return
+            result = await void_invoice_for(self.order_repo.db, invoice, "退款自動作廢", "system:refund")
+            if not result.get("success"):
+                log.error(
+                    "payment.refund.invoice_void_failed",
+                    order_no=order_no, status_code=result.get("status_code"),
+                )
+                self._capture_refund_invoice_void_failed_alert(order_no, str(result.get("status_code")))
+        except Exception as e:
+            log.error("payment.refund.invoice_void_error", order_no=order_no, error=str(e), exc_info=True)
+            self._capture_refund_invoice_void_failed_alert(order_no, "exception")
+
+    async def flag_partial_refund(self, order_no: str, *, record_status: int) -> str:
+        """部分退款（91APP recordStatus 6）：只標記人工處理，不動訂閱/額度/發票。
+
+        產品決策：部分退款金額不確定對應多少權益，自動處置風險太高，一律轉人工。
+
+        M5（第二意見審查）：冪等閘門改用獨立的 `claim_marker(order_no,
+        "refund_partial_flagged")`，**不再**跟 `handle_full_refund` 共用
+        `claim_refund_processed`。舊版共用會有這個 bug：部分退款(6) 先抵達時把
+        `claim_refund_processed` 先佔走，之後真正的全額退款(7) callback 抵達時被
+        誤判成 "already_processed"、完整跳過自動降級+發票作廢——`claim_refund_processed`
+        現在由 `handle_full_refund` 獨佔，兩個閘門互不干擾，6 與 7 不論抵達順序都能
+        各自完整執行。
+
+        回傳 outcome 字串：order_not_found / already_processed / needs_manual。
+        （`order_not_found` 檢查是防禦性補強——`claim_marker` 對不存在的 order 一樣
+        會因為 `update_one` 沒匹配到文件而回 False，若不先檢查 order 是否存在，這種
+        情況會被誤報成 "already_processed"，掩蓋「這筆單根本不存在」的異常。）
+        """
+        order = await self.order_repo.get_by_order_no(order_no)
+        if not order:
+            log.warning("payment.refund.order_not_found", order_no=order_no)
+            return "order_not_found"
+
+        if not await self.order_repo.claim_marker(order_no, "refund_partial_flagged"):
+            log.info("payment.refund.already_processed", order_no=order_no, outcome="already_processed")
+            return "already_processed"
+
+        try:
+            # 自行寫 refund_seen（天然停止對帳 sweep 重查）+ needs_manual，不透過
+            # claim_refund_processed（那把鎖保留給 handle_full_refund 獨佔，見上）。
+            await self.order_repo.update_by_order_no(order_no, {"refund_seen": True, "needs_manual": True})
+            log.warning("payment.refund.partial_refund_needs_manual", order_no=order_no, record_status=record_status)
+            self._capture_partial_refund_alert(order_no, record_status)
+        except Exception as exc:
+            # H2：跟 handle_full_refund 同款——claim_marker 已消耗，動作中途失敗
+            # 不能靜默，寫耐久旗標 + re-raise。
+            await self._mark_refund_action_failed(order_no, exc)
+            raise
+        return "needs_manual"
+
+    @staticmethod
+    def _capture_duplicate_refund_resolved_alert(order_no: str) -> None:
+        """重複完成單的退款已由營運照 SOP 處理完畢 → Sentry info（純記錄，非異常，H1）。"""
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("order_no", order_no)
+                scope.set_context("refund", {"order_no": order_no})
+                sentry_sdk.capture_message("payment.duplicate_refund_resolved", level="info")
+        except Exception:
+            pass
+
+    @staticmethod
+    def _capture_refund_order_not_active_alert(order_no: str) -> None:
+        """退款單的 active_order_no 與使用者目前訂閱不符 → 轉人工告警（H1 第 2 層）。"""
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("order_no", order_no)
+                scope.set_context("refund", {"order_no": order_no})
+                sentry_sdk.capture_message("payment.refund_order_not_active", level="warning")
+        except Exception:
+            pass
+
+    @staticmethod
+    def _capture_refund_guard_lost_alert(order_no: str) -> None:
+        """降級寫入的樂觀鎖 guard 沒中（併發改掉 active_order_no）→ 轉人工告警（H1 第 3 層）。"""
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("order_no", order_no)
+                scope.set_context("refund", {"order_no": order_no})
+                sentry_sdk.capture_message("payment.refund_guard_lost_race", level="error")
+        except Exception:
+            pass
+
+    @staticmethod
+    def _capture_refund_action_failed_alert(order_no: str, error: str) -> None:
+        """H2：claim 已消耗、後續動作中途失敗 → Sentry error（耐久旗標見
+        `refund_action_failed`，admin needs_attention 撈得到；這裡是即時通知）。"""
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("order_no", order_no)
+                scope.set_context("refund", {"order_no": order_no, "error": error})
+                sentry_sdk.capture_message("payment.refund_action_failed", level="error")
+        except Exception:
+            pass
+
+    @staticmethod
+    def _capture_refund_carryover_unreclaimed_alert(order_no: str) -> None:
+        """升級結轉的 extra_quota 未自動回收 → 轉人工告警（M4）。"""
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("order_no", order_no)
+                scope.set_context("refund", {"order_no": order_no})
+                sentry_sdk.capture_message("payment.refund_carryover_unreclaimed", level="warning")
+        except Exception:
+            pass
+
+    @staticmethod
+    def _capture_refund_quota_not_granted_alert(order_no: str, reason: str) -> None:
+        """extra_quota 退款沒有東西可扣（額度從未發放/金額缺失）→ 轉人工告警（M4）。"""
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("order_no", order_no)
+                scope.set_context("refund", {"order_no": order_no, "reason": reason})
+                sentry_sdk.capture_message("payment.refund_quota_not_granted", level="warning")
+        except Exception:
+            pass
+
+    @staticmethod
+    def _capture_refund_on_unpaid_order_alert(order_no: str) -> None:
+        """未付款單收到全額退款通知（異常）→ Sentry。lazy import：未裝 sentry_sdk 時靜默略過。"""
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("order_no", order_no)
+                scope.set_context("refund", {"order_no": order_no})
+                sentry_sdk.capture_message("payment.refund_on_unpaid_order", level="warning")
+        except Exception:
+            pass
+
+    @staticmethod
+    def _capture_refund_stale_order_alert(order_no: str) -> None:
+        """退款對應舊期別、使用者已重新付款 → 轉人工 Sentry 告警。"""
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("order_no", order_no)
+                scope.set_context("refund", {"order_no": order_no})
+                sentry_sdk.capture_message("payment.refund_stale_order", level="warning")
+        except Exception:
+            pass
+
+    @staticmethod
+    def _capture_refund_revoked_alert(order_no: str) -> None:
+        """全額退款已自動降級 free → Sentry（level=warning：權威事件，值得留意但非錯誤）。"""
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("order_no", order_no)
+                scope.set_context("refund", {"order_no": order_no})
+                sentry_sdk.capture_message("payment.refunded_subscription_revoked", level="warning")
+        except Exception:
+            pass
+
+    @staticmethod
+    def _capture_refund_quota_insufficient_alert(order_no: str) -> None:
+        """額度型退款餘額不足以扣回 → 轉人工 Sentry 告警。"""
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("order_no", order_no)
+                scope.set_context("refund", {"order_no": order_no})
+                sentry_sdk.capture_message("payment.refund_quota_insufficient", level="warning")
+        except Exception:
+            pass
+
+    @staticmethod
+    def _capture_refund_invoice_void_failed_alert(order_no: str, detail: str) -> None:
+        """退款後發票自動作廢失敗 → Sentry（level=error：需要人工介入手動作廢）。"""
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("order_no", order_no)
+                scope.set_context("refund", {"order_no": order_no, "detail": detail})
+                sentry_sdk.capture_message("payment.refund_invoice_void_failed", level="error")
+        except Exception:
+            pass
+
+    @staticmethod
+    def _capture_partial_refund_alert(order_no: str, record_status: int) -> None:
+        """部分退款轉人工 → Sentry（level=warning）。"""
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("order_no", order_no)
+                scope.set_context("refund", {"order_no": order_no, "record_status": record_status})
+                sentry_sdk.capture_message("payment.partial_refund_needs_manual", level="warning")
+        except Exception:
+            pass
+
     # ── 訂閱（subscription / upgrade / downgrade）─────────────────────────────
 
     async def _settle_subscription(self, order: dict, n: PaymentNotification) -> SettleResult:
