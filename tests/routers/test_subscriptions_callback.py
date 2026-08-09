@@ -387,6 +387,18 @@ class TestCallbackSuccessDerivation:
         assert updates["card_token"].startswith("v1:")
         assert decrypt(updates["card_token"]) == "CT-RECOVERED"
 
+    async def test_paid_order_duplicate_callback_does_not_revive_card_token(self, monkeypatch):
+        # F4（跨 PR 複檢）：settle 成功後 clear_card_token 已 $unset orders 那份；91APP 重送
+        # 同一封 callback 時 order 已是 paid、card_token 已空——補救寫回不該再把密文副本寫回
+        # orders（settle 會 ALREADY_PAID 短路、不再 $unset → 雙份永久回歸）。paid 單跳過補救。
+        cap, order_repo = _patch_callback(monkeypatch, trade={
+            "merchantOrderId": "SLSUB1", "recordStatus": 4, "cardToken": "CT-RECOVERED",
+        }, order={"type": "subscription", "status": "paid"})  # 已結算、token 已搬進 subscription
+        await subs.payment_callback(_FakeRequest({"tradeId": "PT1"}), db=MagicMock())
+        # 補救寫回（唯一會寫 card_token 到 orders 的路徑）不得被呼叫
+        for call in order_repo.update_by_order_no.await_args_list:
+            assert "card_token" not in call.args[1]
+
     async def test_extra_quota_ignores_binding(self, monkeypatch):
         # 加購為一次性，不綁卡；即使回查回應帶出非成功 bindingStatus（形狀未實測，防禦性假設）
         # 也不得誤殺——gate 僅限綁卡型訂單（subscription/upgrade_subscription）。

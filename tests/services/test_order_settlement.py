@@ -561,6 +561,20 @@ class TestExpireToFreeGuard:
         user_repo.update_quota.assert_awaited_once_with("u1", _bqft("free"))
         s._reconcile_pinned_audio.assert_awaited_once_with("u1", "free")
 
+    async def test_clears_card_token_on_downgrade(self):
+        # F6（跨 PR 複檢）：降 free 時清空 card_token——退款撤訂閱與 dunning 降級兩條路徑都
+        # 讓使用者變 expired/free、無有效訂閱可續扣，留著免 CVV 憑證只擴大留存面。
+        s, order_repo, user_repo = _make()
+        from unittest.mock import AsyncMock as _AM
+        s._reconcile_pinned_audio = _AM()
+
+        ok = await s._expire_to_free("u1")
+
+        assert ok is True
+        fields = user_repo.update_subscription_fields.await_args.args[1]
+        assert fields["card_token"] == ""       # 免 CVV 續扣憑證已清
+        assert fields["status"] == "expired"
+
 
 # ── settle: handler crash 留下 entitlement_pending 旗標（F5，第二意見審查）────────
 

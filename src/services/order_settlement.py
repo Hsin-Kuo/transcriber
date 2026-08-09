@@ -948,12 +948,19 @@ class OrderSettlement:
         過期，訂閱其實已經被救回，直接放棄（return False，不執行 update_quota / 釘選
         reconcile：訂閱沒真的動就不能動配額）。guard=None（例如舊呼叫端未提供快照）
         則一律寫入，行為等同舊版。
+
+        F6（跨 PR 複檢）：降 free 時一併清空 card_token。兩個呼叫端（退款撤訂閱、dunning
+        寬限滿/重試耗盡降級）都讓使用者變成 expired/free、沒有有效訂閱可續扣，留著這個免 CVV
+        續扣憑證只是擴大留存面（萬一 KEK 外洩多一份可解密的曝險）；resubscribe 時本就會重新
+        綁卡。設成 ""（與 codebase「無卡」語意一致，renewal 的 `if not sub.get("card_token")`
+        視為空）而非 $unset，留在同一個原子 guarded 寫入內完成。
         """
         ok = await self.user_repo.update_subscription_fields(
             user_id,
             {
                 "status": "expired",
                 "cancel_at_period_end": False,
+                "card_token": "",
                 "updated_at": datetime.utcnow().timestamp(),
             },
             guard=guard,
