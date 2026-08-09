@@ -23,6 +23,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.routers import subscriptions as subs  # noqa: E402
 from src.services.order_settlement import SettleOutcome, SettleResult  # noqa: E402
+from src.utils.card_token_cipher import decrypt  # noqa: E402
 from src.utils.time_utils import get_utc_timestamp  # noqa: E402
 
 
@@ -91,7 +92,9 @@ class TestPayTradeIdPersistence:
         assert out["status"] == "success"
         order_no, updates = order_repo.update_by_order_no.await_args.args
         assert updates["trade_id"] == "PT999"
-        assert updates["card_token"] == "CT1"
+        # P2-10（金流體檢）：card_token 落庫前已加密，不再是明文。
+        assert updates["card_token"].startswith("v1:")
+        assert decrypt(updates["card_token"]) == "CT1"
         n = settlement.settle.await_args.args[0]
         assert n.trade_id == "PT999"
 

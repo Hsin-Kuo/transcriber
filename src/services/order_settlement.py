@@ -823,6 +823,15 @@ class OrderSettlement:
             # P0-2(b)：dotted $set 只寫這些欄位，guard=None——續扣成功是權威寫入方，
             # 一定要贏（不像 dunning 降級面對續扣要退讓，見 _apply_updates/_expire_to_free）。
             await self.user_repo.update_subscription_fields(user_id, fields, guard=None)
+            if new_token:
+                # P2-10：換卡挽回搬完新 token 進 subscription，orders 那份中繼副本清掉
+                # （避免免 CVV 續扣憑證雙份留存）。$unset 失敗不拖垮續扣本身，僅 log。
+                try:
+                    await self.order_repo.clear_card_token(order["merchant_order_no"])
+                except Exception as e:
+                    log.warning(
+                        "order.card_token.clear_failed", order_no=order["merchant_order_no"], error=str(e)
+                    )
             await self.user_repo.reset_monthly_usage(user_id, now)
             # 方案有變更（升/降級生效）→ 一律重套目標方案額度；否則同 tier 續扣：
             #   月繳重套最新、年繳凍結（週期內由 lazy refill 補額不改額度）。
@@ -862,13 +871,27 @@ class OrderSettlement:
             "pending_plan_change": None,
             "payment_provider": "91app",
             "active_order_no": order["merchant_order_no"],
-            "card_token": order.get("card_token", ""),      # /pay 捕捉並暫存於 order
+            # /pay 捕捉並暫存於 order（密文）。P2-10 修正（第二意見審查）：settle 成功後
+            # orders 那份會被 clear_card_token $unset，若 handler 後段 crash → 對帳 sweep
+            # 的 resettle_entitlement 繞過 claim_paid 重跑本 handler，此時 order.card_token
+            # 已空——必須 fallback 到現有 subscription 的密文副本（訂閱是權威副本），否則
+            # 整包覆寫會把免 CVV 續扣憑證抹成空、逼使用者重新綁卡。
+            "card_token": order.get("card_token") or cur_sub.get("card_token", ""),
             "merchant_consumer_id": str(user_id),           # 綁卡與續扣共用
             # 沿用既有訂閱的建立時間（降級/升級換約時不重置）；全新訂閱才用 now
             "created_at": cur_sub.get("created_at", now.timestamp()),
             "updated_at": now.timestamp(),
         }
         await self.user_repo.update_subscription(user_id, subscription)
+        if order.get("card_token"):
+            # P2-10：首購 settle 搬完 token 進 subscription，orders 那份中繼副本清掉
+            # （避免免 CVV 續扣憑證雙份留存）。$unset 失敗不拖垮 settle 本身，僅 log。
+            try:
+                await self.order_repo.clear_card_token(order["merchant_order_no"])
+            except Exception as e:
+                log.warning(
+                    "order.card_token.clear_failed", order_no=order["merchant_order_no"], error=str(e)
+                )
         await self.user_repo.update_quota(user_id, build_quota_from_tier(tier))
         await self.user_repo.reset_monthly_usage(user_id, now)
         # order paid（+ trade_id）已由 settle() 的 claim_paid 權威寫入（見上方閘門）。

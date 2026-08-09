@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT))
 from src.database.repositories.order_repo import DuplicatePendingOrderError  # noqa: E402
 from src.services import renewal_service as rs  # noqa: E402
 from src.services.order_settlement import SettleResult, SettleOutcome  # noqa: E402
+from src.utils.card_token_cipher import encrypt  # noqa: E402
 
 
 class FakeCursor:
@@ -199,6 +200,29 @@ class TestAttemptCharge:
         m = _patch(monkeypatch, charge_resp={"statusCode": "Success", "tradeId": "TY"})
         await rs._attempt_charge(MagicMock(), {"_id": "u1", "subscription": _sub(billing_cycle="yearly")})
         m["settlement"].settle.assert_awaited_once()
+
+    async def test_encrypted_card_token_is_decrypted_before_charge(self, monkeypatch):
+        """P2-10（金流體檢）：sub.card_token 落庫時已是密文，charge_renewal（純 adapter，
+        只認明文）收到的必須是解密後的明文。"""
+        m = _patch(monkeypatch, charge_resp={"statusCode": "Success", "tradeId": "T9"})
+        await rs._attempt_charge(
+            MagicMock(), {"_id": "u1", "subscription": _sub(card_token=encrypt("CT1"))}
+        )
+        m["svc"].charge_renewal.assert_awaited_once()
+        assert m["svc"].charge_renewal.await_args.kwargs["card_token"] == "CT1"
+
+    async def test_decrypt_failure_routes_to_needs_card_update_not_infinite_retry(self, monkeypatch):
+        """P2-10（第二意見審查 LOW）：card_token 解密失敗（KEK 輪替未 re-encrypt、密文毀損）
+        是永久性壞資料——不扣款、release claim、走 needs_card_update dunning 停止無限重試，
+        而不是靜默 return 讓 sweep 每輪重撞同一個壞 token。"""
+        m = _patch(monkeypatch)
+        monkeypatch.setattr(rs, "decrypt", lambda v: (_ for _ in ()).throw(ValueError("MAC check failed")))
+        await rs._attempt_charge(MagicMock(), {"_id": "u1", "subscription": _sub(card_token="v1:garbage")})
+        m["svc"].charge_renewal.assert_not_awaited()      # 未扣款
+        m["webhook"].release.assert_awaited_once()         # claim 釋放
+        saved = m["user_repo"].update_subscription_fields.await_args.args[1]
+        assert saved["status"] == "past_due" and saved["needs_card_update"] is True
+        assert saved["next_retry_at"] is None              # 換卡類不自動重試
 
     async def test_pending_plan_change_charges_target_tier(self, monkeypatch):
         # 期末降級：pro→basic 的 pending_plan_change → 續扣單用目標 tier basic

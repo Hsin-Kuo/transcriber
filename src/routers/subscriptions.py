@@ -29,6 +29,7 @@ from ..services.invoice_service import (
 )
 from ..services.order_settlement import build_order_settlement, PaymentNotification
 from ..utils.payments91_service import get_payments91_service, interpret_record_status, TRADE_ID_RE
+from ..utils.card_token_cipher import encrypt
 from ..utils.billing_period import generate_order_no
 from ..utils.time_utils import get_utc_timestamp
 from ..utils.logger import get_logger
@@ -439,7 +440,8 @@ async def pay(
     if trade_id:
         order_updates["trade_id"] = str(trade_id)
     if card_token:
-        order_updates["card_token"] = card_token
+        # P2-10（金流體檢）：明文從 91APP 進 DB 的入口，落庫前一律加密（AES-256-GCM）。
+        order_updates["card_token"] = encrypt(str(card_token))
     else:
         log.warning("subscription.pay.no_card_token", order_no=order["merchant_order_no"])
     card_brand = _find(resp, "cardbrand")
@@ -556,7 +558,8 @@ async def payment_callback(request: Request, db=Depends(get_database)):
             and order.get("type") in ("subscription", "upgrade_subscription", "renewal"):
         qb_token = _find(trade, "cardtoken") or _find(trade, "bindingtoken")
         if qb_token:
-            await order_repo.update_by_order_no(order_no, {"card_token": str(qb_token)})
+            # P2-10（金流體檢）：同樣是明文從 91APP 進 DB 的入口，落庫前加密。
+            await order_repo.update_by_order_no(order_no, {"card_token": encrypt(str(qb_token))})
         else:
             log.warning("subscription.callback.no_card_token_captured", trade_id=trade_id, order_no=order_no)
             try:

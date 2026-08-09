@@ -54,6 +54,9 @@ def _make(order=None, user=None, invoice_issuer=None):
     # 閘門本身的行為見 TestHandleFullRefund/TestFlagPartialRefund。
     order_repo.claim_refund_processed = AsyncMock(return_value=True)
     order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+    # P2-10：settle 搬完 card_token 進 subscription 後 $unset orders 那份，預設「一定
+    # 成功」，讓既有測試不受影響；閘門本身的行為見 TestCardTokenUnsetAfterSettle。
+    order_repo.clear_card_token = AsyncMock(return_value=True)
 
     user_repo = MagicMock()
     user_repo.db = MagicMock()
@@ -194,6 +197,66 @@ class TestSubscriptionSettle:
         ))
         assert r.outcome == SettleOutcome.FAILED
         user_repo.update_subscription.assert_not_awaited()
+
+
+# ── settle: card_token 搬移後 $unset orders 那份（P2-10，金流體檢）───────────────
+
+class TestCardTokenUnsetAfterSettle:
+    async def test_first_payment_clears_order_card_token_after_move(self):
+        s, order_repo, user_repo = _make(order=_order(card_token="CT1"))
+        await s.settle(PaymentNotification(
+            order_no="SLSUB1", success=True, is_first_payment=True, trade_id="T1",
+        ))
+        order_repo.clear_card_token.assert_awaited_once_with("SLSUB1")
+
+    async def test_first_payment_without_card_token_does_not_call_clear(self):
+        s, order_repo, user_repo = _make(order=_order())  # 無 card_token
+        await s.settle(PaymentNotification(
+            order_no="SLSUB1", success=True, is_first_payment=True, trade_id="T1",
+        ))
+        order_repo.clear_card_token.assert_not_awaited()
+
+    async def test_resettle_after_unset_preserves_subscription_card_token(self):
+        """P2-10 回歸（第二意見審查 Medium）：首購 settle 成功後 orders.card_token 被
+        $unset；若 handler 後段 crash → 對帳 resettle_entitlement 繞過 claim_paid 重跑
+        _settle_subscription，此時 order 已無 token。必須 fallback 到現有 subscription 的
+        密文副本，否則整包覆寫會把免 CVV 續扣憑證抹成空、逼使用者重新綁卡。"""
+        order = _order(status="paid")  # 已 $unset，order 無 card_token
+        user = {"subscription": {"status": "active", "tier": "basic", "billing_cycle": "monthly",
+                                 "created_at": 111, "card_token": "v1:ENCRYPTED_TOKEN"}}
+        s, order_repo, user_repo = _make(order=order, user=user)
+        await s.resettle_entitlement(order)
+        saved = user_repo.update_subscription.await_args.args[1]
+        assert saved["card_token"] == "v1:ENCRYPTED_TOKEN"  # 未被抹成空
+
+    async def test_card_swap_renewal_clears_order_card_token_after_move(self):
+        user = {"subscription": {"status": "past_due", "tier": "basic", "created_at": 111,
+                                 "card_token": "OLD", "dunning_attempts": 2, "needs_card_update": True}}
+        order = _order(type="renewal", billing_cycle="monthly", card_token="NEWTOKEN")
+        s, order_repo, user_repo = _make(order=order, user=user)
+        await s.settle(PaymentNotification(
+            order_no="SLSUB1", success=True, is_first_payment=False, trade_id="T3",
+        ))
+        order_repo.clear_card_token.assert_awaited_once_with("SLSUB1")
+
+    async def test_renewal_without_new_token_does_not_call_clear(self):
+        # 一般排程續扣（非換卡挽回）order 不帶新 card_token → 沒有搬移，不該呼叫 $unset。
+        user = {"subscription": {"status": "active", "tier": "basic", "created_at": 111, "card_token": "CT1"}}
+        s, order_repo, user_repo = _make(order=_order(billing_cycle="monthly", status="pending"), user=user)
+        await s.settle(PaymentNotification(
+            order_no="SLSUB1", success=True, is_first_payment=False, trade_id="T2",
+        ))
+        order_repo.clear_card_token.assert_not_awaited()
+
+    async def test_clear_card_token_failure_does_not_break_settle(self):
+        # $unset 失敗（例如短暫 DB 異常）不得拖垮 settle 本身——續扣/首購已經是權益
+        # 生效的權威路徑，不能因為清理中繼欄位失敗而整筆 settle 掛掉。
+        s, order_repo, user_repo = _make(order=_order(card_token="CT1"))
+        order_repo.clear_card_token = AsyncMock(side_effect=RuntimeError("mongo hiccup"))
+        r = await s.settle(PaymentNotification(
+            order_no="SLSUB1", success=True, is_first_payment=True, trade_id="T1",
+        ))
+        assert r.outcome == SettleOutcome.ACTIVATED
 
 
 # ── settle: 升級 / 降級 ──────────────────────────────────────────────────────
