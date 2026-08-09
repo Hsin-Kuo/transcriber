@@ -258,6 +258,15 @@ class UserRepository:
         )
         return result.modified_count > 0
 
+    async def revoke_all_refresh_tokens(self, user_id: str) -> bool:
+        """撤銷該用戶全部 Refresh Token（P2-12：停用帳號/重設密碼時強制全部舊 session 失效）。
+
+        形狀照刪帳號先例（本檔 caller 於軟刪除時直接 `update(user_id, {"refresh_tokens": []})`，
+        見 routers/auth.py:1228）——整包清空比逐一 `$set revoked=True` 簡單，反正撤銷後
+        這些 token 本來就不該再被任何人拿來用。
+        """
+        return await self.update(user_id, {"refresh_tokens": []})
+
     async def update_subscription(self, user_id: str, subscription_data: Dict[str, Any]) -> bool:
         """更新用戶訂閱資料"""
         return await self.update(user_id, {"subscription": subscription_data})

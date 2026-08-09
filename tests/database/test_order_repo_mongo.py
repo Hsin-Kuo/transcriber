@@ -298,3 +298,98 @@ class TestRefundAuditRealMongo:
         ])
         docs = [d async for d in repo.iter_for_refund_audit()]
         assert [d["merchant_order_no"] for d in docs] == ["NEVER", "OLDEST", "RECENT"]
+
+
+class TestIterPaidInvoiceGapCandidatesRealMongo:
+    """P2-13 開票補洞 sweep 的撈單查詢——真 Mongo 驗證 filter 形狀。"""
+
+    async def test_excludes_orders_paid_within_min_age(self, repo):
+        """10 分鐘下限：給正常 fire-and-forget 路徑跑完的時間，太新的單不撈，
+        避免跟尚在執行中的 create_background_task(issue_for_order(...)) 賽跑。"""
+        now = get_utc_timestamp()
+        await repo.collection.insert_many([
+            {"merchant_order_no": "OLD_ENOUGH", "status": "paid",
+             "paid_at": now - OrderRepository.INVOICE_GAP_MIN_AGE_SECONDS - 10},
+            {"merchant_order_no": "TOO_NEW", "status": "paid",
+             "paid_at": now - 5},
+        ])
+        docs = [d async for d in repo.iter_paid_invoice_gap_candidates(now, 0.0)]
+        assert {d["merchant_order_no"] for d in docs} == {"OLD_ENOUGH"}
+
+    async def test_excludes_orders_older_than_max_age(self, repo):
+        """7 天上限：控制掃描量，超過這個窗的漏單交人工，不再讓 sweep 無限往回撈。"""
+        now = get_utc_timestamp()
+        await repo.collection.insert_many([
+            {"merchant_order_no": "WITHIN_WINDOW", "status": "paid",
+             "paid_at": now - OrderRepository.INVOICE_GAP_MAX_AGE_SECONDS + 10},
+            {"merchant_order_no": "TOO_OLD", "status": "paid",
+             "paid_at": now - OrderRepository.INVOICE_GAP_MAX_AGE_SECONDS - 10},
+        ])
+        docs = [d async for d in repo.iter_paid_invoice_gap_candidates(now, 0.0)]
+        assert {d["merchant_order_no"] for d in docs} == {"WITHIN_WINDOW"}
+
+    async def test_excludes_non_paid_status(self, repo):
+        now = get_utc_timestamp()
+        await repo.collection.insert_many([
+            {"merchant_order_no": "O1", "status": "paid", "paid_at": now - 1000},
+            {"merchant_order_no": "O2", "status": "pending", "paid_at": now - 1000},
+            {"merchant_order_no": "O3", "status": "expired", "paid_at": now - 1000},
+        ])
+        docs = [d async for d in repo.iter_paid_invoice_gap_candidates(now, 0.0)]
+        assert {d["merchant_order_no"] for d in docs} == {"O1"}
+
+    async def test_excludes_duplicate_and_refunded_orders(self, repo):
+        now = get_utc_timestamp()
+        await repo.collection.insert_many([
+            {"merchant_order_no": "O1", "status": "paid", "paid_at": now - 1000},
+            {"merchant_order_no": "IS_DUP", "status": "paid", "paid_at": now - 1000,
+             "is_duplicate": True},
+            {"merchant_order_no": "REFUNDED", "status": "paid", "paid_at": now - 1000,
+             "refund_processed": True},
+        ])
+        docs = [d async for d in repo.iter_paid_invoice_gap_candidates(now, 0.0)]
+        assert {d["merchant_order_no"] for d in docs} == {"O1"}
+
+    async def test_respects_batch_limit(self, repo):
+        now = get_utc_timestamp()
+        docs_in = [
+            {"merchant_order_no": f"O{i}", "status": "paid", "paid_at": now - 1000 - i}
+            for i in range(3)
+        ]
+        await repo.collection.insert_many(docs_in)
+        docs = [d async for d in repo.iter_paid_invoice_gap_candidates(now, 0.0)]
+        assert len(docs) <= OrderRepository.INVOICE_GAP_BATCH_LIMIT
+
+    async def test_sorts_by_gap_checked_at_never_checked_first(self, repo):
+        """M1（第二意見審查）：依 invoice_gap_checked_at 升冪——缺欄位（從未檢查）排最前，
+        已 stamp 的排隊尾，積壓 > batch 時輪替。"""
+        now = get_utc_timestamp()
+        await repo.collection.insert_many([
+            {"merchant_order_no": "CHECKED_RECENT", "status": "paid", "paid_at": now - 1000,
+             "invoice_gap_checked_at": now - 100},
+            {"merchant_order_no": "NEVER_CHECKED", "status": "paid", "paid_at": now - 1000},
+            {"merchant_order_no": "CHECKED_OLD", "status": "paid", "paid_at": now - 1000,
+             "invoice_gap_checked_at": now - 5000},
+        ])
+        docs = [d async for d in repo.iter_paid_invoice_gap_candidates(now, 0.0)]
+        assert [d["merchant_order_no"] for d in docs] == [
+            "NEVER_CHECKED", "CHECKED_OLD", "CHECKED_RECENT"]
+
+    async def test_epoch_excludes_orders_paid_before_it(self, repo):
+        """M2（第二意見審查）：epoch 下限擋掉首次部署前的歷史 paid 單，防 retro 重複開票。"""
+        now = get_utc_timestamp()
+        epoch = now - 2000
+        await repo.collection.insert_many([
+            {"merchant_order_no": "AFTER_EPOCH", "status": "paid", "paid_at": now - 1000},
+            {"merchant_order_no": "BEFORE_EPOCH", "status": "paid", "paid_at": now - 3000},
+        ])
+        docs = [d async for d in repo.iter_paid_invoice_gap_candidates(now, epoch)]
+        assert {d["merchant_order_no"] for d in docs} == {"AFTER_EPOCH"}
+
+    async def test_stamp_invoice_gap_checked_writes_field(self, repo):
+        now = get_utc_timestamp()
+        await repo.collection.insert_one(
+            {"merchant_order_no": "O1", "status": "paid", "paid_at": now - 1000})
+        await repo.stamp_invoice_gap_checked("O1", now)
+        doc = await repo.collection.find_one({"merchant_order_no": "O1"})
+        assert doc["invoice_gap_checked_at"] == now

@@ -89,3 +89,23 @@ class TestUpdateSubscriptionFields:
             str(ObjectId()), {"status": "active"}, guard={"subscription.next_charge_at": 1000}
         )
         assert ok is True
+
+
+class TestRevokeAllRefreshTokens:
+    """P2-12：撤銷全部 refresh token——形狀照刪帳號先例，整包 `$set refresh_tokens: []`
+    （不是逐一 `$set refresh_tokens.$.revoked=True`），比對 update() 的既有測試手法。
+    """
+
+    async def test_sets_refresh_tokens_to_empty_list(self):
+        repo, collection, _ = _make_repo()
+        uid = str(ObjectId())
+        ok = await repo.revoke_all_refresh_tokens(uid)
+        filt, update = collection.update_one.await_args.args
+        assert filt == {"_id": ObjectId(uid)}
+        assert update["$set"]["refresh_tokens"] == []
+        assert ok is True
+
+    async def test_no_matching_user_returns_false(self):
+        repo, collection, _ = _make_repo(matched_count=0, modified_count=0)
+        ok = await repo.revoke_all_refresh_tokens(str(ObjectId()))
+        assert ok is False

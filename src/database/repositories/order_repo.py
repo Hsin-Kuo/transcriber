@@ -537,6 +537,52 @@ class OrderRepository:
             {"$set": {"refund_audited_at": ts}},
         )
 
+    # P2-13（金流體檢）：開票補洞 sweep——settle() 的 `create_background_task(issue_for_order(...))`
+    # 是唯一的開票起點，若該 asyncio task 在 upsert_initial 落地前就被 process kill
+    # （部署重啟、OOM），這筆訂單永遠不會有 invoice doc，且不留任何痕跡（沒有例外、
+    # 沒有 log）。既有的 `run_invoice_retry_sweep` 只掃「已存在」的 invoices doc，
+    # 對這種「doc 從未落地」的洞完全補不到，需要反過來從 orders 找。
+    INVOICE_GAP_MIN_AGE_SECONDS = 600   # 給正常 fire-and-forget 路徑跑完的時間，避免跟它賽跑
+    INVOICE_GAP_MAX_AGE_SECONDS = 7 * 24 * 3600  # 控制掃描量，超過這個窗的漏單交人工
+    INVOICE_GAP_BATCH_LIMIT = 50
+
+    async def iter_paid_invoice_gap_candidates(
+        self, now: float, epoch: float,
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """撈「已付款、可能從未觸發開票」的候選單（doc 是否真的存在由呼叫端查 invoice_repo 判斷）。
+
+        `is_duplicate`/`refund_processed` 已終局的單排除在外——它們的 settle 路徑本來
+        就不會（或不該再）觸發開票，不算「洞」。時間窗見上方兩個常數的說明。
+
+        `epoch`（第二意見審查 M2）：只補 `paid_at >= epoch` 的單。防首次部署一次性 retro
+        補開過去 7 天所有無 doc 的 paid 單——這些單可能已在速買配後台人工開過票，重複開
+        真發票是不可逆的稅務事件。epoch 由 INVOICE_GAP_EPOCH env 明確給定（見 sweep）。
+
+        排序用 `invoice_gap_checked_at` 升冪（缺欄位＝從未檢查過，BSON 排序在最前，M1）：
+        搭配 sweep 每筆檢查後 stamp 該欄位，積壓超過 batch 上限時批次會輪替；否則候選集
+        （paid_at 區間，不因檢查而改變）每輪固定回傳最舊 50 筆，較新的洞要等前面的單老出
+        7 天窗才輪得到，補洞延遲從 10 分鐘退化成近 7 天。
+        """
+        lower = max(now - self.INVOICE_GAP_MAX_AGE_SECONDS, epoch)
+        cursor = self.collection.find({
+            "status": "paid",
+            "paid_at": {
+                "$gte": lower,
+                "$lte": now - self.INVOICE_GAP_MIN_AGE_SECONDS,
+            },
+            "is_duplicate": {"$ne": True},
+            "refund_processed": {"$ne": True},
+        }).sort("invoice_gap_checked_at", 1).limit(self.INVOICE_GAP_BATCH_LIMIT)
+        async for doc in cursor:
+            yield doc
+
+    async def stamp_invoice_gap_checked(self, merchant_order_no: str, ts: float) -> None:
+        """gap sweep 檢查過一筆就 stamp（不論補開或已有 doc）——推進輪替游標（M1）。"""
+        await self.collection.update_one(
+            {"merchant_order_no": merchant_order_no},
+            {"$set": {"invoice_gap_checked_at": ts}},
+        )
+
     async def purge_old_superseded_orders(self, older_than_seconds: int = 30 * 24 * 3600) -> int:
         """刪除夠舊的 superseded 訂單（被取代的廢棄付款嘗試），避免無限累積。
 
