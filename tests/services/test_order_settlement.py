@@ -631,12 +631,12 @@ class TestResettleEntitlement:
         )
 
     async def test_retry_exhausted_marks_needs_manual_and_alerts(self, monkeypatch):
-        import sentry_sdk
-        alert = MagicMock()
-        monkeypatch.setattr(sentry_sdk, "capture_message", alert)
-
+        # patch 我方的 _capture_* wrapper 而非真的 sentry_sdk 模組——CI 沒裝
+        # sentry_sdk，`import sentry_sdk` 會 ModuleNotFoundError（2026-08-09 CI 事故）。
         order = _order(card_token="CT1")
         s, order_repo, user_repo = _make(order=order)
+        alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_entitlement_manual_alert", alert)
         s._settle_subscription = AsyncMock(side_effect=RuntimeError("boom"))
         order_repo.increment_entitlement_retry = AsyncMock(return_value=5)
         with pytest.raises(RuntimeError, match="boom"):
@@ -646,7 +646,7 @@ class TestResettleEntitlement:
             for c in order_repo.update_by_order_no.await_args_list
         )
         alert.assert_called_once()
-        assert alert.call_args.args[0] == "settle.entitlement_manual"
+        assert alert.call_args.args[0] == "SLSUB1"
 
     async def test_retry_inc_failure_does_not_mask_original_exception(self):
         order = _order(card_token="CT1")

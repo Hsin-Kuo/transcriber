@@ -346,13 +346,22 @@ class OrderSettlement:
                 "settle.resettle_entitlement.needs_manual_flag_failed",
                 order_no=order_no, error=str(flag_err), exc_info=True,
             )
+        self._capture_entitlement_manual_alert(order_no, retry_count, str(exc))
+
+    @staticmethod
+    def _capture_entitlement_manual_alert(order_no: str, retry_count: int, error: str) -> None:
+        """重試耗盡轉人工 → 送 Sentry。lazy import：未裝 sentry_sdk 時靜默略過。
+
+        抽成 helper（比照 `_capture_refund_alert`）讓測試 patch 這裡即可，不必
+        monkeypatch 真的 sentry_sdk 模組——CI 環境沒裝 sentry_sdk，直接 import 會炸。
+        """
         try:
             import sentry_sdk
             with sentry_sdk.push_scope() as scope:
                 scope.set_tag("order_no", order_no)
                 scope.set_context(
                     "resettle_entitlement",
-                    {"order_no": order_no, "retry_count": retry_count, "error": str(exc)},
+                    {"order_no": order_no, "retry_count": retry_count, "error": error},
                 )
                 sentry_sdk.capture_message("settle.entitlement_manual", level="error")
         except Exception:
