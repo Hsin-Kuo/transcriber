@@ -14,9 +14,27 @@ sys.path.insert(0, str(ROOT))
 
 import importlib  # noqa: E402
 
+import pytest  # noqa: E402
 from fastapi import Response  # noqa: E402
 
 from src.auth import cookies as cookies_module  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _restore_deploy_env():
+    """`_reload_cookies` 直接改 os.environ["DEPLOY_ENV"] 且不還原，會讓同 session
+    之後的測試（例如金流體檢 P1-6 的 prod-aws fail-fast）被殘留的 "aws" 誤傷。
+    測試結束後把 DEPLOY_ENV 還原成進入測試前的狀態，並重載 module 讓 _IS_LOCAL
+    跟著復位，確保 tests/ 對執行順序無依賴。"""
+    original = os.environ.get("DEPLOY_ENV")
+    try:
+        yield
+    finally:
+        if original is None:
+            os.environ.pop("DEPLOY_ENV", None)
+        else:
+            os.environ["DEPLOY_ENV"] = original
+        importlib.reload(cookies_module)
 
 
 def _reload_cookies(deploy_env: str):

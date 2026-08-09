@@ -168,7 +168,7 @@ invoice_snapshot: {
 | `Description` | 訂閱＝`SoundLite {tier}方案({cycle})` 固定字典；加購＝order 快照的 `label`（★建單時落庫，不反推） | **禁 `\|` 與符號**，統一過 `sanitize_item_text()`（去符號、截長度） |
 | `Quantity`/`UnitPrice`/`Amount` | 訂閱＝`1/amount_twd/amount_twd`；加購＝`quantity/unit_price_twd/小計` | 含稅整數；送出前驗算 `ΣAmount == AllAmount`，不合直接 needs_manual（程式 bug） |
 | `AllAmount` | `amount_twd` | §9 spike：`ALLAmount` 拼法實測 |
-| `Email` | user.email | SmilePay 據此寄通知/建會員載具 |
+| `Email` | user.email | ⚠️ 官方文件未承諾寄通知信（2026-08-08 staging 真實信箱實測**未收到**開立通知）；已知用途僅 EJ0113 載具歸戶。是否寄信待向速買配確認，我方自寄通知信規劃見 §9.3 |
 | — B2C（personal）— | | |
 | `Name` | user 顯示名 → 去符號、截 30 字；空值 fallback email local-part（去符號截 30） ★清洗規則寫死 | |
 | `CarrierType`/`CarrierID`/`CarrierID2` | carrier_num 有效→`3J0002`+carrier_num（明暗碼同值）；無/降級→全不帶 | 格式 `^/[0-9A-Z+\-.]{7}$` 前後端都驗 |
@@ -229,7 +229,7 @@ PR-B 實作註記（PR-A 複審遺留）：
 
 1. **列印頁拿不到 PDF**：`InvoiceDetails.php` 回 `text/html`（18.5KB），PDF 是頁內 **client-side jsPDF/html2pdf** 產生；資產全是**相對路徑**（`../js/*.js`、`Barcode/*.jpg`、`qrcode_generator.php`）→ HTML 轉發資產全破、無法用。**決策：Phase 1 移除 `/print` 代抓 endpoint**（§7.1 原第 6 支砍掉，XSS 面同時消失）。admin 日常看資料用我方詳情頁（號碼/隨機碼/金額齊全）；需正式證明聯的罕見情況走速買配後台人工。未來如需自產證明聯 PDF 另開 issue（QR/barcode 格式工程量不小）。
 2. **`ALLAmount` / `AllAmount` 兩種拼法都接受**（ASP 參數不分大小寫）；統一用官方範例的 `ALLAmount`。
-3. **SmilePay 是否寄 email**：curl 無法驗證，**staging 驗證時用真實信箱開一張確認**（影響通知信分工，未定案前我方先不自寄）。
+3. **SmilePay 是否寄 email**：**2026-08-08 staging 真實信箱實測未收到**開立通知信。官方文件對 Email 欄位無寄信承諾（先前文件寫「據此寄通知」是整理時的推論，已更正）。待向速買配確認：測試/正式環境寄信行為、觸發條件、後台通知設定。**我方傾向不依賴對方、自寄「發票已開立」通知**（Resend，含號碼/隨機碼/日期），確認後實作。
 4. **測試環境不驗載具**：`3J0002`＋`/ZZZZZZZ` 竟回 `Status=0` 且照存 → 測試環境寬鬆，**-10056 類錯誤只會在 prod 發生**。含義：(a) 我方 regex 預檢是實質防線；(b) 降級分類表保留（prod 行為以官方錯誤碼表為準）；(c) staging 測不到降級路徑，單測要補 fake。
 5. **作廢實測成功**（`types=Cancel`）＋兩個文件外發現：**回應 root tag 是 `SmilePayEinvoiceModify`**（非文件寫的 `SmilePayEinvoice`）、`CancelDate` 是 dash 格式 → `_parse()` 必須接受任意 root tag。當期作廢 OK；跨期作廢行為未測（測試帳號無跨期舊票），admin 作廢失敗時把 `-2008`/`Nowstatus` 原样呈現即可。
 6. **B2B 不帶 `SalesAmount`/`TaxAmount` 可成功開立**（`UnitTAX=Y`，回 `InvoiceType=B2C2B`，符合文件「有統編可作廢」語意）→ 不帶，由速買配自算。

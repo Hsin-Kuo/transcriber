@@ -12,11 +12,17 @@ import hashlib
 import hmac
 import json
 import os
+import re
 from typing import Optional, Dict
+from urllib.parse import quote
 
 import httpx
 
-from .config_loader import get_parameter
+from .config_loader import get_parameter, is_prod_aws
+
+# callback 收到的 tradeId 未認證，直接嵌入 query path 前先驗證格式（體檢 P1-8）。
+# 91APP tradeId 觀察形狀為半形英數，保守放行底線/連字號；router 亦會 import 此常數做早退檢查。
+TRADE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 class Payments91APPService:
@@ -24,20 +30,28 @@ class Payments91APPService:
 
     def __init__(self):
         self.api_key = get_parameter(
-            "/transcriber/91app-api-key", fallback_env="PAYMENTS91_API_KEY"
+            "/transcriber/91app-api-key", fallback_env="PAYMENTS91_API_KEY", required=True
         )
         self.shared_secret = get_parameter(
-            "/transcriber/91app-shared-secret", fallback_env="PAYMENTS91_SHARED_SECRET"
+            "/transcriber/91app-shared-secret", fallback_env="PAYMENTS91_SHARED_SECRET", required=True
         )
         # publishableKey 非機密，會下發給前端 SDK。
         self.publishable_key = get_parameter(
-            "/transcriber/91app-publishable-key", fallback_env="PAYMENTS91_PUBLISHABLE_KEY"
+            "/transcriber/91app-publishable-key", fallback_env="PAYMENTS91_PUBLISHABLE_KEY", required=True
         )
         # storeCode 目前不需帶進 request body（API key 已識別商店），保留供對帳/多店參考。
         self.store_code = get_parameter(
-            "/transcriber/91app-store-code", fallback_env="PAYMENTS91_STORE_CODE"
+            "/transcriber/91app-store-code", fallback_env="PAYMENTS91_STORE_CODE", required=True
         )
         self.env = os.getenv("PAYMENTS91_ENV", "sandbox")
+
+        # P1-6 fail-fast：prod-aws 下 PAYMENTS91_ENV 必須顯式為 production，否則真客戶
+        # 扣款/發票會打到 91APP sandbox。這裡的 raise 若發生在背景 sweep（例如
+        # renewal_service 的迴圈），可能被 per-item try/except 吞掉只留 log——但仍是
+        # fail-closed：操作沒執行 = 不會誤打測試環境。main.py startup 的
+        # validate_payment_env() 負責讓設定錯誤在啟動當下「被人看到」。
+        if is_prod_aws() and self.env != "production":
+            raise RuntimeError("PAYMENTS91_ENV must be 'production' on prod (P1-6 fail-fast)")
 
     @property
     def base_url(self) -> str:
@@ -170,7 +184,10 @@ class Payments91APPService:
     # ── 交易回查（callback 防禦：不信 payload，以此為準）────────────
 
     async def query_trade(self, trade_id: str) -> Dict:
-        return await self._get(f"/v2/trades/{trade_id}")
+        if not isinstance(trade_id, str) or not TRADE_ID_RE.fullmatch(trade_id):
+            # 訊息不回帶原值：trade_id 來自未認證的 callback payload，避免注入內容進 log/Sentry。
+            raise ValueError("invalid trade_id format")
+        return await self._get(f"/v2/trades/{quote(trade_id, safe='')}")
 
     # ── 定價 ─────────────────────────────────────────────────────
 
@@ -193,10 +210,20 @@ class Payments91APPService:
 #                    6 部分退款 / 7 全部退款 / 8 付款處理中
 _RECORD_SUCCESS = {4, 5}
 _RECORD_PENDING = {1, 8}
+# P1-5（金流體檢）：6/7 從 "failed" 拆成獨立的 "refunded" 語意——已付款單收到退款
+# 通知不是「付款失敗」，混在 failed 分支會被 order_settlement 的 mark_failed_unless_paid
+# （`$ne paid` 條件式寫入）直接擋掉，變成「錢退了、權益完全沒被撤銷」的靜默漏洞。
+# 呼叫端（subscriptions.py callback）依此值分流到獨立的退款處理路徑。
+_RECORD_REFUND = {6, 7}
 
 
 def interpret_record_status(record_status) -> str:
-    """依 recordStatus 判 'success' | 'pending' | 'failed'。非法/未知一律當 failed（保守）。"""
+    """依 recordStatus 判 'success' | 'pending' | 'failed' | 'refunded'。
+
+    非法/未知一律當 failed（保守，fail-closed）。'refunded' 涵蓋部分退款(6)/全部退款(7)
+    ——呼叫端（見 subscriptions.py payment_callback）需再依實際 record_status 分辨
+    6 與 7 各自的處置（P1-5：6 轉人工、7 自動降級）。
+    """
     try:
         rs = int(record_status)
     except (TypeError, ValueError):
@@ -205,6 +232,8 @@ def interpret_record_status(record_status) -> str:
         return "success"
     if rs in _RECORD_PENDING:
         return "pending"
+    if rs in _RECORD_REFUND:
+        return "refunded"
     return "failed"
 
 

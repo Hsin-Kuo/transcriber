@@ -22,6 +22,7 @@
           <tr>
             <th>data_id</th>
             <th>發票號碼</th>
+            <th>買受人</th>
             <th>狀態</th>
             <th>嘗試次數</th>
             <th>最後錯誤</th>
@@ -34,6 +35,7 @@
             <tr>
               <td class="mono">{{ inv.data_id }}</td>
               <td class="mono">{{ inv.invoice_number || '-' }}</td>
+              <td>{{ formatBuyer(inv.buyer) }}</td>
               <td><span class="status-badge" :class="`invoice-status-${inv.status}`">{{ inv.status }}</span></td>
               <td>{{ inv.attempts ?? 0 }}</td>
               <td class="last-error">{{ formatLastError(inv.last_error) }}</td>
@@ -53,7 +55,7 @@
               </td>
             </tr>
             <tr v-if="reissuingId === inv._id" class="reissue-form-row">
-              <td :colspan="canWrite ? 7 : 6">
+              <td :colspan="canWrite ? 8 : 7">
                 <div class="reissue-form">
                   <p class="hint">留空代表沿用原買受人資料</p>
                   <p class="hint hint-warning">修正後的買受人資料會同步更新該用戶儲存的發票設定</p>
@@ -144,6 +146,15 @@ function formatTimestamp(ts) {
 function formatLastError(lastError) {
   if (!lastError) return '-'
   return `${lastError.status || ''} ${lastError.desc || ''}`.trim() || '-'
+}
+
+function formatBuyer(buyer) {
+  if (!buyer) return '-'
+  if (buyer.invoice_type === 'company') {
+    return `統編 ${buyer.company_tax_id || '?'}・${buyer.company_name || '?'}`
+  }
+  if (buyer.carrier_num) return `手機條碼 ${buyer.carrier_num}`
+  return '個人（無載具）'
 }
 
 async function voidInvoice(inv) {

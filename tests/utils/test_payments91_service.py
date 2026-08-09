@@ -32,11 +32,17 @@ class TestInterpretRecordStatus:
     def test_failed_states(self):
         assert interpret_record_status(2) == "failed"    # 付款失敗（3D 失敗）
         assert interpret_record_status(3) == "failed"    # 付款取消
-        assert interpret_record_status(7) == "failed"    # 全部退款
 
     def test_pending_states(self):
         assert interpret_record_status(1) == "pending"   # 待付款
         assert interpret_record_status(8) == "pending"   # 處理中
+
+    def test_refunded_states(self):
+        # P1-5：6/7 從 "failed" 拆成獨立的 "refunded" 語意（不再被 mark_failed_unless_paid
+        # 的 `$ne paid` 條件式寫入吃掉，見 order_settlement.handle_full_refund/flag_partial_refund）。
+        assert interpret_record_status(6) == "refunded"  # 部分退款
+        assert interpret_record_status(7) == "refunded"  # 全部退款
+        assert interpret_record_status("7") == "refunded"  # 字串亦可
 
     def test_unknown_is_failed(self):
         assert interpret_record_status(None) == "failed"
@@ -155,3 +161,35 @@ class TestRequestBodies:
         out = await svc.query_trade("PT123")
         assert captured["path"] == "/v2/trades/PT123"
         assert out["merchantOrderId"] == "SLSUB1"
+
+
+class TestQueryTradeTradeIdValidation:
+    """🔴 P1-8：trade_id 來自未認證 callback payload，直接嵌入 path 前需驗證格式（避免注入）。"""
+
+    async def test_invalid_trade_id_raises_without_calling_get(self):
+        svc = _svc()
+        svc._get = AsyncMock()
+        with pytest.raises(ValueError):
+            await svc.query_trade("X?merchantOrderId=victim")
+        svc._get.assert_not_awaited()
+
+    @pytest.mark.parametrize("non_string_trade_id", [12345, True, ["PT1"], {"x": "PT1"}, None])
+    async def test_non_string_trade_id_raises_without_calling_get(self, non_string_trade_id):
+        # F2 回歸：query_trade 自身也要守 isinstance，不能只靠 router 那層檢查。
+        svc = _svc()
+        svc._get = AsyncMock()
+        with pytest.raises(ValueError):
+            await svc.query_trade(non_string_trade_id)
+        svc._get.assert_not_awaited()
+
+    async def test_valid_trade_id_is_quoted_into_path(self):
+        svc = _svc()
+        captured = {}
+
+        async def fake_get(path_with_query):
+            captured["path"] = path_with_query
+            return {"statusCode": "Success"}
+
+        svc._get = fake_get
+        await svc.query_trade("PT0260724700004T")
+        assert captured["path"] == "/v2/trades/PT0260724700004T"

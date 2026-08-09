@@ -354,6 +354,16 @@ async def update_user_status(
 
     success = await user_repo.update(user_id, {"is_active": body.is_active})
 
+    if success and not body.is_active:
+        # P2-12：停用帳號要連動撤銷全部 refresh token，否則使用者手上舊 session
+        # 只要還沒過期就能一路 refresh 出新 access token，停用形同虛設（啟用時不用
+        # 動 refresh_tokens——沒有安全疑慮，且用戶原本的 session 應該自然恢復）。
+        # 包 try/except 避免這步失敗拖垮主流程（帳號畢竟已經停用成功）。
+        try:
+            await user_repo.revoke_all_refresh_tokens(user_id)
+        except Exception as e:
+            logger.warning("admin.disable_user.revoke_refresh_failed", user_id=user_id, error=str(e))
+
     if success:
         action = "enable_user" if body.is_active else "disable_user"
         await log_admin_action(
@@ -392,7 +402,14 @@ async def update_user_role(
     admin: dict = Depends(require_permission(Permission.ADMIN_GRANT)),
     db = Depends(get_database)
 ):
-    """修改用戶角色（管理員）"""
+    """修改用戶角色（管理員）
+
+    P2-12：這裡刻意不撤銷 refresh token。`/auth/refresh` 已經改成新 access token 的
+    role/email 一律從 DB user doc 現讀（不再沿用 refresh token 裡的舊 claim），所以
+    降權後即使舊 refresh token 還沒過期，下一次 refresh 也只會鑄出「DB 當前 role」的
+    access token，不會讓被降權的 admin 拿回 admin 權限——沒有安全洞需要靠撤銷 session
+    來補，維持原有登入狀態的使用者體驗即可。
+    """
     if body.role not in ["user", "admin"]:
         raise api_error("ADMIN_INVALID_ROLE",
                         "Role must be 'user' or 'admin'",
@@ -802,6 +819,13 @@ async def reset_user_password(
     success = await user_repo.update(user_id, {"password_hash": hashed_password})
 
     if success:
+        # P2-12：換密碼＝舊 session 全失效是標準做法（不撤銷的話，被盜帳號的舊
+        # session 在密碼重設後仍能繼續用 refresh token 換新 access token）。
+        try:
+            await user_repo.revoke_all_refresh_tokens(user_id)
+        except Exception as e:
+            logger.warning("admin.reset_password.revoke_refresh_failed", user_id=user_id, error=str(e))
+
         await log_admin_action(
             admin_id=str(admin["_id"]),
             action="reset_password",
@@ -1380,6 +1404,23 @@ _ORDER_DETAIL_FIELDS = (
     "extra_duration_minutes", "extra_ai_summaries",
     "invoice_snapshot", "is_duplicate", "needs_refund",
     "created_at", "updated_at", "paid_at", "expires_at",
+    # P1-9 對帳補償 sweep 可見性：entitlement_pending/needs_manual 是「需要人工看一眼」
+    # 的旗標，reconciliation_gave_up 代表 72h 對帳仍懸而不決，refund_seen 代表這筆單
+    # 已經有退款結果了（L6，第二意見審查：P1-5 之後不再等同「待人工」——自動降級
+    # 成功的 revoked/quota_deducted 也會寫它，needs_attention 篩選已改用 needs_manual），
+    # carryover_granted/quota_granted 是 $inc 一次性 marker（供排查「這筆到底發過
+    # 額度沒」），reconciliation_first_seen_at 是 72h 放棄時鐘的起點（P1-D，第二意見
+    # 審查）。
+    "entitlement_pending", "reconciliation_gave_up", "needs_manual", "refund_seen",
+    "carryover_granted", "quota_granted", "entitlement_resettled_at",
+    "reconciliation_first_seen_at",
+    # P1-5：退款處置冪等閘門旗標（見 order_repo.claim_refund_processed）——
+    # refund_processed 是「這筆單已經跑過 handle_full_refund」的權威標記、
+    # refund_partial_flagged 是部分退款的獨立閘門（M5 拆分）、refund_action_failed
+    # 讓營運分辨 needs_manual 的來源是「退款動作中途失敗」（否則得回頭翻 Sentry）、
+    # refunded_at/refund_audited_at 供排查時間點。
+    "refund_processed", "refunded_at", "refund_action_failed",
+    "refund_partial_flagged", "refund_audited_at",
 )
 
 
@@ -1413,6 +1454,11 @@ async def list_orders(
     invoice_status: Optional[str] = Query(
         None, description="發票狀態；'none' 代表尚無 invoice"
     ),
+    needs_attention: Optional[bool] = Query(
+        None,
+        description="true 時只列出需要人工看一眼的單（entitlement_pending / "
+                     "needs_manual / reconciliation_gave_up / needs_refund 任一為 True）",
+    ),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     admin: dict = Depends(require_permission(Permission.BILLING_READ)),
@@ -1425,6 +1471,24 @@ async def list_orders(
     )
     if meta.get("email_not_found"):
         return {"orders": [], "total": 0, "skip": skip, "limit": limit}
+
+    # P3-J（第二意見審查）：對帳補償 sweep 引入的「需要人工看一眼」旗標一次
+    # 篩出來，不用逐頁翻找。只在 needs_attention=True 時加這個 $or——False/None
+    # 都不篩（None 是預設值，維持既有行為；顯式 False 沒有另外定義語意，同樣視為
+    # 不篩，因為「不需要特別關注」不等於「這些單都要被排除」）。
+    # L6（第二意見審查）：拿掉 refund_seen——P1-5 之後它的語意已經從「退款待人工」
+    # 變成「這筆單已經有退款結果了」（`claim_refund_processed`/`flag_partial_refund`
+    # 都會寫它，包括自動降級成功的 revoked/quota_deducted），繼續放在這裡會把
+    # 「已經自動處理好」的單也篩進『需要人工看一眼』，該用 needs_manual 才對。
+    if needs_attention:
+        mongo_filter["$or"] = [
+            {"entitlement_pending": True},
+            {"needs_manual": True},
+            {"reconciliation_gave_up": True},
+            # F7（跨 PR 複檢）：重複扣款待人工退款的單（_reject_duplicate 標的
+            # is_duplicate/needs_refund）也要進待辦，否則營運只能靠 Sentry 發現。
+            {"needs_refund": True},
+        ]
 
     orders, total = await OrderRepository(db).admin_list_with_invoices(
         mongo_filter, invoice_status, skip, limit,
@@ -1447,6 +1511,13 @@ async def list_orders(
             "paid_at": o.get("paid_at"),
             "created_at": o.get("created_at"),
             "invoice": o.get("invoice"),
+            # P1-9：列表頁可見性，不用逐筆點進詳情才看得到需要人工處理的單。
+            "entitlement_pending": bool(o.get("entitlement_pending")),
+            "needs_manual": bool(o.get("needs_manual")),
+            "reconciliation_gave_up": bool(o.get("reconciliation_gave_up")),
+            "refund_seen": bool(o.get("refund_seen")),
+            # P1-5：列表頁可見性——refund_processed 代表已跑過自動降級/人工標記處置。
+            "refund_processed": bool(o.get("refund_processed")),
         })
 
     return {"orders": result, "total": total, "skip": skip, "limit": limit}
@@ -1603,11 +1674,13 @@ async def reissue_invoice(
             db, invoice, corrected_buyer=corrected_buyer, admin_id=str(admin["_id"]),
         )
     except invoice_service.ReissueConflictError:
-        # 搶不到 reissue lease：狀態已變更，或另一個 admin 正在重開同一張（PR-B 驗收
-        # finding #2）——不能讓雙擊/併發各自成功送出，變出兩張真發票。
+        # 搶不到 reissue lease（狀態已變更，或另一個 admin 正在重開同一張——PR-B 驗收
+        # finding #2）；或撞到 P2-14 的 `uniq_active_invoice_per_order` DB 原子防線
+        # （該 order 已有另一顆活躍發票，多半是另一個 reissue 剛好搶先落地）——兩種
+        # 語意都指向「有其他操作正在進行或狀態已變」，訊息一併涵蓋，不細分。
         raise api_error(
             "ADMIN_INVOICE_REISSUE_CONFLICT",
-            "Invoice is currently being reissued elsewhere or its status has changed",
+            "Invoice number conflict, or this order already has an invoice in progress — please refresh and retry",
             status.HTTP_409_CONFLICT,
         )
     except DuplicateKeyError:

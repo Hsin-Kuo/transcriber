@@ -25,7 +25,9 @@ _SENSITIVE_SUBSTRINGS = (
 def _is_sensitive(key) -> bool:
     if not isinstance(key, str):
         return False
-    k = key.lower()
+    # 正規化連字號 → 底線：header 式命名（如 91APP 的 N1-API-KEY）不會漏掉。
+    # 否則 "n1-api-key" 不含子字串 "api_key"，API 金鑰會隨例外堆疊 frame vars 進 Sentry（金流體檢 P2-11）。
+    k = key.lower().replace("-", "_")
     return any(s in k for s in _SENSITIVE_SUBSTRINGS)
 
 

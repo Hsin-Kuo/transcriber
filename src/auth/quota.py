@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 from fastapi import HTTPException, status
 
+from src.database.repositories.job_lease_repo import JobLeaseRepository
 from src.models.quota import QUOTA_TIERS, QuotaTier, tier_default, build_quota_from_tier
 from src.utils.time_utils import get_utc_timestamp, timestamp_to_datetime
 from src.utils.logger import get_logger
@@ -267,13 +268,18 @@ class QuotaManager:
         if sub_status == "active" and sub.get("cancel_at_period_end"):
             period_end_dt = _to_datetime(sub.get("current_period_end"))
             if period_end_dt and period_end_dt < now:
+                # F5：只在 guard 命中（真的降級）時才把本地狀態當成 expired。db 為 None
+                # （純 in-memory 判定、無寫入競態）或寫入異常時沿用原保守行為當作已過期。
+                expired = True
                 if db is not None:
                     try:
-                        await QuotaManager._expire_subscription(db, user)
+                        expired = await QuotaManager._expire_subscription(db, user)
                     except Exception as e:
                         log.warning("quota.subscription.expire.writeback_failed", error=str(e))
-                # 繼續走免費用戶邏輯
-                sub_status = "expired"
+                        expired = True
+                if expired:
+                    # 繼續走免費用戶邏輯
+                    sub_status = "expired"
 
         # ── 重置判斷 ────────────────────────────────────────────
         # active/trialing/past_due：在「新計費週期開始」或「週期內每跨一個週月」時 refill。
@@ -349,8 +355,17 @@ class QuotaManager:
         return usage
 
     @staticmethod
-    async def _expire_subscription(db, user: dict):
-        """訂閱到期：更新狀態並降為 free 配額"""
+    async def _expire_subscription(db, user: dict) -> bool:
+        """訂閱到期：更新狀態並降為 free 配額。回傳是否真的降級（guard 命中）。
+
+        F5（跨 PR 複檢）：sweep 是「cursor 撈單 → 逐筆處理」，撈單與這裡的寫入之間使用者
+        可能成功 /reactivate（把 cancel_at_period_end 設 False、current_period_end 續期）。
+        update_one 的 filter 原子重申 sweep 的選取條件（status=active + cancel_at_period_end
+        + current_period_end<now），reactivate 後這些不再成立 → 不寫入、不動 in-memory
+        quota、不 reconcile 釘選音檔——否則會靜默把剛恢復的付費訂閱蓋回 expired+free，而
+        續扣 sweep 只查 active/past_due，這帳號再也不會被撈到、無告警。#324 對其他訂閱寫入
+        建立的樂觀鎖紀律，這支 sweep 補齊。
+        """
         from bson import ObjectId
         from src.models.quota import QUOTA_TIERS, QuotaTier
 
@@ -362,8 +377,13 @@ class QuotaManager:
             **{k: v for k, v in free_config.items() if k not in ("name", "price")},
         }
 
-        await db.users.update_one(
-            {"_id": ObjectId(user_id)},
+        result = await db.users.update_one(
+            {
+                "_id": ObjectId(user_id),
+                "subscription.status": "active",
+                "subscription.cancel_at_period_end": True,
+                "subscription.current_period_end": {"$lt": now.timestamp()},
+            },
             {
                 "$set": {
                     "subscription.status": "expired",
@@ -373,6 +393,11 @@ class QuotaManager:
                 }
             }
         )
+        if result.matched_count == 0:
+            # guard 未命中：使用者在撈單後、寫入前 reactivate（或狀態已被其他路徑改動）。
+            # 不降級、不動 in-memory quota、不釋放釘選音檔。
+            log.info("quota.subscription.expire.skipped_reactivated", user_id=user_id)
+            return False
         # 同步 in-memory user，避免同一次呼叫後續（月配額重置的 tier 重套）讀到 stale 的付費 tier
         user["quota"] = free_quota
         log.warning("quota.subscription.expired", user_id=user_id, downgraded_to="free")
@@ -384,6 +409,7 @@ class QuotaManager:
             await reconcile_pinned_audio(db, user_id, "free")
         except Exception as e:
             log.warning("quota.subscription.expire.reconcile_failed", user_id=user_id, error=str(e))
+        return True
 
     @staticmethod
     async def reset_user_monthly_quota(db, user_id: str):
@@ -557,10 +583,23 @@ async def periodic_subscription_expiry_check(db, interval_seconds: int = 3600) -
     ⚠️ 只處理 cancel_at_period_end 的 lapse。auto-renew 的 active 訂閱過期末由
     renewal_service 續扣（不在此降級）；past_due 寬限期滿降級也由 renewal_service 負責。
 
-    第一次 sweep 在啟動後立即跑（不等 interval），避免 restart 緊接的時段
-    沒被 sweep 覆蓋；之後每 interval_seconds 跑一次。
+    啟動嘗試搶當前時間窗執行權，搶到才立即跑第一次（不等 interval），避免 restart
+    緊接的時段沒被 sweep 覆蓋；搶不到就等下一輪。之後每 interval_seconds 跑一次。
+
+    🔴 P0-2(a)：prod 兩個 uvicorn worker 都跑這個背景任務，用 JobLeaseRepository 對本輪
+    時間窗搶執行權，避免同一輪 lapse 掃描被跑兩次。lease 檢查失敗（DB 例外）fail-open，
+    照跑本輪並記警告——sweep 冪等，寧可偶發重跑也不要背景任務全停。
     """
+    lease_repo = JobLeaseRepository(db)
     while True:
+        should_run = True
+        try:
+            should_run = await lease_repo.claim_window("subscription_expiry", interval_seconds)
+        except Exception as e:
+            log.warning("subscription.expiry_sweep.lease_check_failed", error=str(e))
+        if not should_run:
+            await asyncio.sleep(interval_seconds)
+            continue
         try:
             now_ts = get_utc_timestamp()
             cursor = db.users.find(
@@ -573,8 +612,10 @@ async def periodic_subscription_expiry_check(db, interval_seconds: int = 3600) -
             )
             expired_count = 0
             async for user in cursor:
-                await QuotaManager._expire_subscription(db, user)
-                expired_count += 1
+                # F5：只計真的降級的（guard 命中）。reactivate 競態 no-op 回 False 不計入，
+                # 避免 expired 遙測指標膨脹。
+                if await QuotaManager._expire_subscription(db, user):
+                    expired_count += 1
             if expired_count:
                 log.info("subscription.expiry_sweep.completed", expired=expired_count)
         except Exception as e:

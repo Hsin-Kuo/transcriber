@@ -885,3 +885,171 @@ class TestVoidAndReissue:
         result = await isvc.reissue(MagicMock(), source, admin_id="admin1")
         assert result is not None
         attempt.assert_awaited_once()
+
+    async def test_reissue_raises_conflict_when_create_hits_order_no_unique_index(self, monkeypatch):
+        """P2-14：`create()` 撞到新加的 `uniq_active_invoice_per_order`（order_no）
+        不是 data_id 序號競爭，重算 seq 沒有意義——必須直接轉 ReissueConflictError，
+        不能落進既有的「撞號重算一次」迴圈裡再撞一次牆。"""
+        repo, _ = _repo()
+        invoice = await repo.create({"order_no": "O1", "user_id": "u1", "data_id": "SL-O1",
+                                      "status": "voided", "buyer": {}, "amount_twd": 1})
+        order_index_error = DuplicateKeyError(
+            "E11000 duplicate key error collection: invoices index: uniq_active_invoice_per_order "
+            "dup key: { order_no: \"O1\" }", 11000, {"keyPattern": {"order_no": 1}},
+        )
+        monkeypatch.setattr(repo, "create", AsyncMock(side_effect=order_index_error))
+        monkeypatch.setattr(isvc, "InvoiceRepository", lambda db: repo)
+        order_repo = MagicMock()
+        order_repo.get_by_order_no = AsyncMock(return_value=_order())
+        monkeypatch.setattr(isvc, "OrderRepository", lambda db: order_repo)
+        monkeypatch.setattr(isvc, "UserRepository",
+                             lambda db: MagicMock(get_by_id=AsyncMock(return_value={"email": "a@b.com"})))
+        attempt = AsyncMock()
+        monkeypatch.setattr(isvc, "_attempt_issue", attempt)
+
+        with pytest.raises(isvc.ReissueConflictError):
+            await isvc.reissue(MagicMock(), invoice, admin_id="admin1")
+        attempt.assert_not_awaited()
+        # 重算迴圈只呼叫一次 create 就該放棄（不是靠耗盡兩次重試才失敗）
+        repo.create.assert_awaited_once()
+        # lease 仍要在 finally 釋放，不能卡死之後的重開嘗試
+        assert (await repo.get_by_id(invoice["_id"])).get("reissue_claimed_until") is None
+
+
+class TestDuplicateKeyDiscrimination:
+    """P2-14：`_duplicate_key_hits_order_index` 純函數——區分 reissue create 迴圈撞到
+    的是 order_no 防線還是 data_id 序號競爭。"""
+
+    def test_order_no_key_pattern_is_order_index(self):
+        e = DuplicateKeyError("dup", 11000, {"keyPattern": {"order_no": 1}})
+        assert isvc._duplicate_key_hits_order_index(e) is True
+
+    def test_data_id_key_pattern_is_not_order_index(self):
+        e = DuplicateKeyError("dup", 11000, {"keyPattern": {"data_id": 1}})
+        assert isvc._duplicate_key_hits_order_index(e) is False
+
+    def test_missing_keypattern_falls_back_to_errmsg_index_name(self):
+        e = DuplicateKeyError(
+            "E11000 duplicate key error collection: invoices index: uniq_active_invoice_per_order "
+            "dup key: { order_no: \"O1\" }"
+        )
+        assert isvc._duplicate_key_hits_order_index(e) is True
+
+    def test_missing_keypattern_and_no_index_name_defaults_to_data_id_path(self):
+        e = DuplicateKeyError("some other unrelated duplicate key error")
+        assert isvc._duplicate_key_hits_order_index(e) is False
+
+
+class TestGapSweep:
+    """P2-13 run_invoice_gap_sweep：monkeypatch OrderRepository/InvoiceRepository/
+    issue_for_order/_capture_invoice_gap_recovered，聚焦排程邏輯本身（有無 doc 分流、
+    poison 隔離），不重複測 issue_for_order 內部行為（已由 TestIssueForOrder 覆蓋）。
+    """
+
+    def _patch(self, monkeypatch, *, orders=None, exists_side_effect=None, epoch="1"):
+        # M2：sweep 未設 INVOICE_GAP_EPOCH 是 no-op，測排程邏輯時給一個明確 epoch。
+        if epoch is not None:
+            monkeypatch.setenv("INVOICE_GAP_EPOCH", epoch)
+        else:
+            monkeypatch.delenv("INVOICE_GAP_EPOCH", raising=False)
+
+        invoice_repo = MagicMock()
+        if exists_side_effect is not None:
+            invoice_repo.exists_any_by_order_no = AsyncMock(side_effect=exists_side_effect)
+        else:
+            invoice_repo.exists_any_by_order_no = AsyncMock(return_value=False)
+        monkeypatch.setattr(isvc, "InvoiceRepository", lambda db: invoice_repo)
+
+        order_repo = MagicMock()
+        docs = orders or []
+
+        async def _iter(now, epoch_arg):
+            for d in docs:
+                yield d
+
+        order_repo.iter_paid_invoice_gap_candidates = _iter
+        order_repo.stamp_invoice_gap_checked = AsyncMock(return_value=None)
+        monkeypatch.setattr(isvc, "OrderRepository", lambda db: order_repo)
+
+        issue = AsyncMock()
+        monkeypatch.setattr(isvc, "issue_for_order", issue)
+
+        capture = MagicMock()
+        monkeypatch.setattr(isvc, "_capture_invoice_gap_recovered", capture)
+
+        return invoice_repo, order_repo, issue, capture
+
+    async def test_no_epoch_env_is_noop(self, monkeypatch):
+        """M2：未設 INVOICE_GAP_EPOCH → sweep 完全不動（不撈單、不開票），回 skip 計數。"""
+        order = {"merchant_order_no": "O1", "user_id": "u1", "paid_at": get_utc_timestamp() - 1000}
+        invoice_repo, order_repo, issue, capture = self._patch(
+            monkeypatch, orders=[order], epoch=None
+        )
+        counts = await isvc.run_invoice_gap_sweep(MagicMock())
+        assert counts.get("skipped_no_epoch") == 1
+        assert counts["gap_issued"] == 0
+        issue.assert_not_awaited()
+
+    async def test_checked_orders_get_stamped_for_rotation(self, monkeypatch):
+        """M1：檢查過的單（補開或已有 doc）都 stamp invoice_gap_checked_at 推進輪替。"""
+        o1 = {"merchant_order_no": "O1", "user_id": "u1", "paid_at": get_utc_timestamp() - 1000}
+        o2 = {"merchant_order_no": "O2", "user_id": "u1", "paid_at": get_utc_timestamp() - 2000}
+        invoice_repo, order_repo, issue, capture = self._patch(
+            monkeypatch, orders=[o1, o2], exists_side_effect=[False, True]
+        )
+        await isvc.run_invoice_gap_sweep(MagicMock())
+        stamped = {c.args[0] for c in order_repo.stamp_invoice_gap_checked.await_args_list}
+        assert stamped == {"O1", "O2"}
+
+    async def test_order_without_any_doc_triggers_issue_and_sentry(self, monkeypatch):
+        order = {"merchant_order_no": "O1", "user_id": "u1", "paid_at": get_utc_timestamp() - 1000}
+        invoice_repo, order_repo, issue, capture = self._patch(monkeypatch, orders=[order])
+
+        counts = await isvc.run_invoice_gap_sweep(MagicMock())
+
+        assert counts["gap_issued"] == 1
+        assert counts["has_doc"] == 0
+        assert counts["errored"] == 0
+        issue.assert_awaited_once()
+        assert issue.await_args.args[1] == order
+        capture.assert_called_once_with(order)
+
+    async def test_order_with_existing_doc_is_left_alone(self, monkeypatch):
+        """有 doc（不論狀態）就歸 retry sweep / reissue 管，這支不重複介入——不喚
+        issue_for_order，也不觸發 Sentry（沒有洞可補）。"""
+        order = {"merchant_order_no": "O1", "user_id": "u1", "paid_at": get_utc_timestamp() - 1000}
+        invoice_repo, order_repo, issue, capture = self._patch(
+            monkeypatch, orders=[order], exists_side_effect=[True]
+        )
+
+        counts = await isvc.run_invoice_gap_sweep(MagicMock())
+
+        assert counts["has_doc"] == 1
+        assert counts["gap_issued"] == 0
+        issue.assert_not_awaited()
+        capture.assert_not_called()
+
+    async def test_poison_order_does_not_stall_the_whole_sweep(self, monkeypatch):
+        order1 = {"merchant_order_no": "O1", "user_id": "u1", "paid_at": get_utc_timestamp() - 1000}
+        order2 = {"merchant_order_no": "O2", "user_id": "u1", "paid_at": get_utc_timestamp() - 2000}
+        invoice_repo, order_repo, issue, capture = self._patch(
+            monkeypatch, orders=[order1, order2],
+            exists_side_effect=[RuntimeError("db hiccup"), False],
+        )
+
+        counts = await isvc.run_invoice_gap_sweep(MagicMock())
+
+        assert counts["errored"] == 1
+        assert counts["gap_issued"] == 1  # 第二筆仍正常處理，沒被第一筆拖垮
+        issue.assert_awaited_once()
+
+    async def test_issue_for_order_exception_is_isolated_per_item(self, monkeypatch):
+        order = {"merchant_order_no": "O1", "user_id": "u1", "paid_at": get_utc_timestamp() - 1000}
+        invoice_repo, order_repo, issue, capture = self._patch(monkeypatch, orders=[order])
+        issue.side_effect = RuntimeError("smilepay down")
+
+        counts = await isvc.run_invoice_gap_sweep(MagicMock())
+
+        assert counts["errored"] == 1
+        assert counts["gap_issued"] == 0
+        capture.assert_not_called()  # 補救本身失敗，不該假裝已經補成功

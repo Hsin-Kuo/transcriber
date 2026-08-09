@@ -202,9 +202,14 @@ class TestMonthlyReset:
         # 到期降級只在 db 可寫時觸發，故用 fake db 走真實路徑（_id 須為合法 ObjectId）。
         from src.models.quota import QUOTA_TIERS, QuotaTier
 
+        class _Result:
+            matched_count = 1  # guard 命中（未 reactivate）
+
         class _FakeUsers:
             def __init__(self): self.sets = []
-            async def update_one(self, flt, update): self.sets.append(update.get("$set", {}))
+            async def update_one(self, flt, update):
+                self.sets.append(update.get("$set", {}))
+                return _Result()
 
         class _FakeDB:
             def __init__(self): self.users = _FakeUsers()
@@ -226,6 +231,34 @@ class TestMonthlyReset:
         # 寫回 DB 的 quota 也必須是 free，而非 basic
         quota_writes = [s["quota"]["tier"] for s in db.users.sets if "quota" in s]
         assert quota_writes and all(t == "free" for t in quota_writes)
+
+    async def test_expire_skipped_when_guard_misses_reactivated_concurrently(self):
+        # F5（跨 PR 複檢）：sweep 撈單後、_expire_subscription 寫入前使用者成功 /reactivate
+        # → guard filter（cancel_at_period_end=True 等）不再命中 → update_one matched_count=0
+        # → 不降級、不動 in-memory quota、回傳 False。否則會靜默把剛恢復的付費訂閱蓋回 free。
+        class _Result:
+            matched_count = 0  # guard 未命中（已被 reactivate 改掉狀態）
+
+        class _FakeUsers:
+            def __init__(self): self.calls = 0
+            async def update_one(self, flt, update):
+                self.calls += 1
+                return _Result()
+
+        class _FakeDB:
+            def __init__(self): self.users = _FakeUsers()
+
+        db = _FakeDB()
+        user = {
+            "_id": "507f1f77bcf86cd799439011",
+            "subscription": {"status": "active", "cancel_at_period_end": True,
+                             "current_period_end": datetime.utcnow() - timedelta(days=2)},
+            "quota": {"tier": "basic", "max_duration_minutes": 600},
+        }
+        expired = await QuotaManager._expire_subscription(db, user)
+        assert expired is False
+        assert user["quota"]["tier"] == "basic"  # in-memory quota 未被降級
+        assert db.users.calls == 1               # 有嘗試寫，但 guard 擋下
 
 
 class TestMonthlyRefillHelpers:

@@ -230,6 +230,11 @@ async def startup_event():
         validate_aws_config()
         logger.info("app.startup.aws_config_validated")
 
+        # 金流體檢 P1-6：prod-aws 分級告警（staging 內部直接 return 不檢查）
+        from src.utils.config_loader import validate_payment_env
+        validate_payment_env()
+        logger.info("app.startup.payment_env_validated")
+
     # Email 服務設定驗證（resend/ses 漏設 FROM_EMAIL 在第一個用戶註冊時才爆炸太晚）
     from src.utils.email_service import get_email_service
     get_email_service()  # 觸發 __init__ 的 _validate_config()
@@ -329,6 +334,11 @@ async def startup_event():
     processed_webhook_repo_init = ProcessedWebhookRepository(db)
     await _safe_create("processed_webhooks", processed_webhook_repo_init.create_indexes())
 
+    # job_leases：背景 sweep 的 per-window leader lease（P0-2(a)，多 uvicorn worker 防重複掃描）
+    from src.database.repositories.job_lease_repo import JobLeaseRepository
+    job_lease_repo_init = JobLeaseRepository(db)
+    await _safe_create("job_leases", job_lease_repo_init.create_indexes())
+
     # 建立 chunk_uploads 索引（分片上傳 metadata；過期由 periodic_chunk_upload_cleanup 處理）
     from src.database.repositories.chunk_upload_repo import ChunkUploadRepository
     chunk_upload_repo_init = ChunkUploadRepository(db)
@@ -418,6 +428,13 @@ async def startup_event():
         create_background_task(
             periodic_order_cleanup(db),
             name="periodic_order_cleanup",
+        )
+
+        # 5.3b 定期金流對帳補償 sweep（P1-9：callback 遺失主動回查收斂 + entitlement_pending 補償）
+        from src.services.payment_reconciliation import periodic_payment_reconciliation
+        create_background_task(
+            periodic_payment_reconciliation(db),
+            name="periodic_payment_reconciliation",
         )
 
         # 5.4 定期訂閱到期掃描（已排定取消者到期 lapse 為 free）

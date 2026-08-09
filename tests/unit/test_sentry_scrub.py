@@ -31,6 +31,17 @@ class TestBeforeSendFrameVars:
         assert frame_vars["body"]["Grvc"] == "SEI1004730"  # 非敏感欄位不動
         assert frame_vars["url"] == "https://x"
 
+    def test_hyphenated_header_key_filtered(self):
+        # 金流體檢 P2-11：91APP 的 N1-API-KEY header 隨 httpx 例外的 frame local
+        # `headers` dict 進 Sentry，連字號寫法必須被正規化後命中遮蔽清單。
+        event = _event_with_frame_vars(
+            {"headers": {"N1-API-KEY": "SECRET_91APP_KEY", "Content-Type": "application/json"}}
+        )
+        out = _before_send(event, {})
+        frame_vars = out["exception"]["values"][0]["stacktrace"]["frames"][0]["vars"]
+        assert frame_vars["headers"]["N1-API-KEY"] == "[FILTERED]"
+        assert frame_vars["headers"]["Content-Type"] == "application/json"
+
     def test_threads_section_also_scrubbed(self):
         event = {"threads": _event_with_frame_vars({"api_key_1": "zzz"})["exception"]}
         out = _before_send(event, {})

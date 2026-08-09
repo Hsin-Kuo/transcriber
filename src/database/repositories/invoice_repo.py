@@ -32,6 +32,35 @@ class InvoiceRepository:
         await self.collection.create_index("order_no")
         await self.collection.create_index("user_id")
         await self.collection.create_index([("status", 1), ("next_retry_at", 1)])
+        await self._ensure_active_invoice_unique_index()
+
+    async def _ensure_active_invoice_unique_index(self):
+        """P2-14：同一張 order 同時只允許一顆「活躍」發票 doc（issued/pending/failed）。
+
+        `reissue()` 現有的併發防護（`claim_for_reissue` lease + `find_reissue_conflict`
+        query）是 read-then-write，兩次查詢之間不是原子的——`find_reissue_conflict`
+        本身查的就是這三個 status，跟這裡的 partialFilterExpression 對齊，讓 DB 在
+        insert 當下再擋一次真正的原子防線（DuplicateKeyError，見 `reissue()` 的
+        create 重試迴圈分流）。voided/needs_manual 不受限——同一個 order 可以有多顆
+        voided（作廢又重開的歷史）或 needs_manual（設計上就是給人工善後的終局狀態），
+        partial filter 刻意排除它們。
+
+        建立失敗（代表歷史資料已有同一 order 多顆活躍 doc）**不自動修資料**：發票是
+        稅務文件，不能像 orders 的 pending unique index 那樣自動 dedupe/supersede
+        （這裡沒有安全的「保留哪一顆」判斷——兩顆都可能已經真的送出去給 SmilePay）。
+        只記錯誤 + 讓應用照常啟動，PR 說明附人工清理指引（查出違規 order_no 後，
+        逐筆到速買配後台核對哪一顆是真正有效的發票，再手動把其餘的改成 voided/
+        needs_manual 讓 index 得以建立）。
+        """
+        try:
+            await self.collection.create_index(
+                [("order_no", 1)],
+                unique=True,
+                partialFilterExpression={"status": {"$in": ["issued", "pending", "failed"]}},
+                name="uniq_active_invoice_per_order",
+            )
+        except Exception as e:
+            log.error("invoice_repo.create_active_unique_index_failed", error=str(e))
 
     # ── 建立 ───────────────────────────────────────────────────────────────
 
@@ -107,6 +136,16 @@ class InvoiceRepository:
 
     async def get_by_data_id(self, data_id: str) -> Optional[Dict[str, Any]]:
         return await self.collection.find_one({"data_id": data_id})
+
+    async def exists_any_by_order_no(self, order_no: str) -> bool:
+        """該 order 是否有**任何**狀態的 invoice doc（含 voided）——P2-13 gap sweep 專用。
+
+        刻意不排除 voided：只要曾經落過地就代表「開票流程有跑過」，之後的狀態演進
+        （作廢/重開）歸既有的 retry sweep / reissue 管，gap sweep 只負責補「doc 從未
+        落地」這種完全沒有痕跡的洞，兩者互不重疊。
+        """
+        doc = await self.collection.find_one({"order_no": order_no}, {"_id": 1})
+        return doc is not None
 
     async def get_active_by_order_no(self, order_no: str) -> Optional[Dict[str, Any]]:
         """該 order 目前「非 voided」的 invoice doc（issued/pending/failed/needs_manual）。

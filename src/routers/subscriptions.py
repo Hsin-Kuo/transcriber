@@ -9,7 +9,7 @@ import os
 import json
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional
@@ -28,7 +28,8 @@ from ..services.invoice_service import (
     build_invoice_snapshot_from_user_invoice_info,
 )
 from ..services.order_settlement import build_order_settlement, PaymentNotification
-from ..utils.payments91_service import get_payments91_service, interpret_record_status
+from ..utils.payments91_service import get_payments91_service, interpret_record_status, TRADE_ID_RE
+from ..utils.card_token_cipher import encrypt
 from ..utils.billing_period import generate_order_no
 from ..utils.time_utils import get_utc_timestamp
 from ..utils.logger import get_logger
@@ -65,6 +66,34 @@ def _find(obj, key_lower: str):
             if found not in (None, ""):
                 return found
     return None
+
+
+def _encrypt_card_token_safe(plaintext: str, order_no: str, context: str):
+    """加密 card_token 供落庫；失敗回 None 而非拋（F2，跨 PR 複檢）。
+
+    encrypt 例外（KEK 未 seed / SSM 暫時性讀取失敗）絕不能阻斷呼叫端流程：在 /pay 會
+    連帶擋掉同一批 update 的 trade_id 落庫（→ 對帳 sweep 要求有 trade_id，這張已扣款單
+    變結構性不可見、T+1h 被標 expired、使用者扣款卻無訂閱無告警）；在 /callback 這段
+    位於 _process_payment_result（settle）之前，拋出會直接讓整筆結算不執行。
+
+    失敗時略過 card_token 儲存，續扣時由 renewal_service 的 NoCardToken →
+    needs_card_update dunning 兜底（callback 補救路徑本就依賴這條）。error=str(e) 只含
+    KEK/參數的錯誤分類字串（"invalid length"/"... unavailable from SSM"），不含 token 或
+    金鑰值本身。
+    """
+    try:
+        return encrypt(plaintext)
+    except Exception as e:
+        log.error("subscription.card_token.encrypt_failed",
+                  order_no=order_no, context=context, error=str(e))
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("order_no", order_no)
+                sentry_sdk.capture_message("card_token.encrypt_failed", level="error")
+        except ImportError:
+            pass
+        return None
 
 
 # ── Request Models ───────────────────────────────────────────────────────────
@@ -202,11 +231,33 @@ async def _process_payment_result(
     """claim 去重 → settle。回傳 outcome 字串（或 "duplicate"）。失敗會 release + raise。
 
     is_first_payment 由 order type 推導：type=renewal（換卡挽回/續扣）走續扣分支，其餘為首期。
+
+    natural_id（P0-1 金流體檢）：只用 trade_id（缺 trade_id 時 fallback order_no），
+    不再併入 record_status。舊版 `f"{trade_id}:{record_status}"` 會讓同一筆 trade 的
+    recordStatus 演進（例如 91APP 4→5）或 /pay 立即成交與 /callback 兩條路徑各自帶不同
+    record_status 打進來時，被當成「不同封 webhook」各自 claim 一次成功——去重形同虛設。
+    現在同一 trade_id（或同一 order_no）只有一次 claim 會贏，record_status 的演進交給
+    order 狀態機（claim_paid 的 status!=paid→paid）判斷，不再靠 natural_id 分岔。
+    record_status 仍保留在 claim metadata 供觀測。
+
+    F10（第二意見審查）：失敗通知額外加 ":fail" 後綴分鍵——同一筆 trade 若先收到一封
+    失敗通知（先佔走 trade_id 主鍵），之後同一 trade 的成功 callback 用同一把鍵會被
+    claim 擋成 duplicate，變成「扣款其實成功但訂閱從未啟用」。分鍵後成功/失敗各自
+    claim 一次；mark_failed_unless_paid 本身在 DB 層已是 idempotent 的 `$ne paid` 條件式
+    寫入，失敗鍵重複 claim 不會造成覆寫風險，分鍵零成本。
+    ✅ 退款 callback（91APP recordStatus 6/7）：P1-5 已實作——interpret_record_status
+    現在把 6/7 拆成獨立的 "refunded" 語意（不再併入 "failed"）。payment_callback 在
+    outcome=="pending" 早退之後、success/fail 判定之前就把 outcome=="refunded" 分流
+    給 `_process_refund`（獨立的 claim 鍵 `f"refund:{record_status}:{trade_id or order_no}"`，
+    record_status 入鍵讓部分退款(6)與全額退款(7)各自一封，不會共用一把鍵互相 dedup），
+    完全不會走到這個函式、也不會落入下面的 ":fail" 分支。
+    ":fail" 鍵現在只服務 recordStatus 2/3（付款失敗/取消）——退款有自己獨立的
+    claim namespace，兩者不再混在一起。
     """
     order = await OrderRepository(db).get_by_order_no(order_no)
     is_first_payment = not (order and order.get("type") == "renewal")
     webhook_repo = ProcessedWebhookRepository(db)
-    natural_id = f"{trade_id or order_no}:{record_status}"
+    natural_id = (trade_id or order_no) + ("" if success else ":fail")
     if not await webhook_repo.claim(
         provider="91app",
         natural_id=natural_id,
@@ -232,7 +283,58 @@ async def _process_payment_result(
                 scope.set_tag("webhook.provider", "91app")
                 scope.set_tag("webhook.order_no", order_no)
                 sentry_sdk.capture_exception(e)
-        except ImportError:
+        except Exception:
+            # L10（第二意見審查）：見 _process_refund 同款註解——push_scope 本身拋出
+            # 非 ImportError 例外時不能取代掉正在外拋的原始例外。
+            pass
+        raise
+
+
+async def _process_refund(db, *, trade_id: str, record_status: str, order_no: str) -> str:
+    """91APP 退款/爭議款 callback 收斂（recordStatus 6 部分退款／7 全額退款，P1-5）。
+
+    形狀比照 `_process_payment_result`：claim 去重 → 呼叫對應的 OrderSettlement 方法。
+    唯一差異是 claim 鍵——`natural_id` 把 `record_status` 打進去
+    （`f"refund:{record_status}:{trade_id or order_no}"`）：部分退款(6)與全額退款(7)
+    是完全不同的處置語意（人工 vs 自動降級），不能像 `_process_payment_result` 的
+    `":fail"` 鍵那樣共用一把鍵，否則同一筆 trade 若先後收到 6 又收到 7（或反過來）
+    會有一封被 dedup 掉、該做的動作沒做到。
+
+    settle 例外時 release claim + re-raise，行為對齊 `_process_payment_result`——
+    讓 91APP 重送有機會重新處理，不留下「claim 已佔用但動作沒做完」的坑。
+    """
+    webhook_repo = ProcessedWebhookRepository(db)
+    natural_id = f"refund:{record_status}:{trade_id or order_no}"
+    if not await webhook_repo.claim(
+        provider="91app",
+        natural_id=natural_id,
+        metadata={"status": record_status, "trade_id": trade_id, "order_no": order_no},
+    ):
+        log.warning("subscription.webhook.refund_duplicate_skipped", natural_id=natural_id)
+        return "duplicate"
+    settlement = build_order_settlement(db)
+    try:
+        rs = int(record_status)
+        if rs == 7:
+            outcome = await settlement.handle_full_refund(order_no, trade_id=trade_id)
+        else:
+            outcome = await settlement.flag_partial_refund(order_no, record_status=rs)
+        log.info("subscription.webhook.refund_settled", natural_id=natural_id, outcome=outcome)
+        return outcome
+    except Exception as e:
+        await webhook_repo.release(provider="91app", natural_id=natural_id)
+        log.error("subscription.webhook.refund_processing_failed", natural_id=natural_id, error=str(e), exc_info=True)
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("webhook.provider", "91app")
+                scope.set_tag("webhook.order_no", order_no)
+                sentry_sdk.capture_exception(e)
+        except Exception:
+            # L10（第二意見審查）：原本只接 ImportError（未裝 sentry_sdk），但
+            # push_scope()/capture_exception() 本身也可能拋非 ImportError 的例外
+            # （例如 SDK 內部狀態問題）——那種例外會取代掉正在往外拋的原始例外 e，
+            # 讓呼叫端看到的變成 Sentry 自己的錯誤，掩蓋真正的失敗原因。
             pass
         raise
 
@@ -321,6 +423,14 @@ async def pay(
         raise api_error("ORDER_NOT_FOUND", "Order not found", 404)
     if order.get("status") != "pending":
         raise api_error("ORDER_NOT_PENDING", "Order is not payable", 400)
+    # P3-I（金流體檢 P1-9 第二意見審查）：order_repo.sweep_expired_pending_orders
+    # 讓路後，有 trade_id 的 pending 單不再被 1 小時 cleanup 標 expired（歸對帳
+    # sweep 管），重付窗口因此變成無限——沒有這個 gate，使用者可能對著一張帶舊
+    # 價格/舊 invoice_snapshot 的過期單按下付款。expires_at 本身仍照舊在建單時
+    # 寫入（1 小時），只是不再由 cleanup 主動改狀態，這裡在 /pay 當下自己補查。
+    expires_at = order.get("expires_at")
+    if expires_at is not None and expires_at < get_utc_timestamp():
+        raise api_error("ORDER_EXPIRED", "Order has expired, please checkout again", 400)
 
     svc = get_payments91_service()
     resp = await svc.create_first_payment(
@@ -344,11 +454,25 @@ async def pay(
             message=resp.get("message"),
         )
 
+    # P1-9（金流體檢）：trade_id 提前到 order_updates 組裝之前落庫。3DS 分支在下面
+    # `paymentUrl` 檢查後就直接 return，原本 trade_id 只在「無 3D 立即收斂」分支才
+    # 讀取——3DS 單（正是 callback 遺失的高風險族群：使用者導去銀行頁面，回來後靠
+    # /callback 完成，中途逾時 500 就沒人重送）身上因此從未落庫過 trade_id，對帳
+    # sweep（payment_reconciliation.py）找不到 trade_id 就沒法主動回查。現在無論
+    # 是否走 3D，只要回應帶得出 tradeId 就一併寫回 order。
+    trade_id = _find(resp, "tradeid") or ""
+
     # 捕捉 cardToken（僅在 3D 成功後才有效；settle 時才搬進 subscription）+ 卡別/末四碼（收據用）。存於 order。
     card_token = _find(resp, "cardtoken")
     order_updates = {}
+    if trade_id:
+        order_updates["trade_id"] = str(trade_id)
     if card_token:
-        order_updates["card_token"] = card_token
+        # P2-10（金流體檢）：明文從 91APP 進 DB 的入口，落庫前一律加密（AES-256-GCM）。
+        # F2：加密失敗回 None（不阻擋同批 trade_id 落庫），略過 card_token。
+        enc = _encrypt_card_token_safe(str(card_token), order["merchant_order_no"], "pay")
+        if enc:
+            order_updates["card_token"] = enc
     else:
         log.warning("subscription.pay.no_card_token", order_no=order["merchant_order_no"])
     card_brand = _find(resp, "cardbrand")
@@ -366,7 +490,6 @@ async def pay(
 
     # 無 3D → 依 statusCode 直接收斂
     status_code = resp.get("statusCode") or "Unknown"
-    trade_id = _find(resp, "tradeid") or ""
     success = status_code == "Success"
     outcome = await _process_payment_result(
         db, trade_id=trade_id, record_status=status_code,
@@ -388,7 +511,12 @@ async def payment_callback(request: Request, db=Depends(get_database)):
 
     🔴 成交判定以回查的 **recordStatus**（付款結果）為準，**不是** statusCode——後者在回查回應
     是「查詢是否成功」（trade 存在即 Success），誤用會讓任何 callback 一律判成功。
-    綁卡類（BindingCard）另需 payload 的 bindingStatus=Succeeded，否則即使付款成功也無可續扣的卡。
+    綁卡類（BindingCard）的成敗以回查回應（`trade`，我方簽章保護的通道）的 bindingStatus 為準，
+    採負向 gate（欄位不存在＝不擋，fail-open）；payload 的 bindingStatus 未認證，僅記 log 不判定。
+    order 缺 card_token 時同樣 fail-open（不判失敗）——cardToken 可能在 3D 完成「之後」才產生
+    （見 docs/PAYMENT_91APP_ADMIN_BACKEND_REFERENCE.md），/pay 同步 response 拿不到不代表沒綁卡
+    成功；改用回查回應補救寫回 order，寫不到則告警，續扣時 renewal_service 的 NoCardToken →
+    needs_card_update dunning 是既有兜底（體檢 P1-8/第二意見 F1）。
     """
     raw = await request.body()
     try:
@@ -400,6 +528,11 @@ async def payment_callback(request: Request, db=Depends(get_database)):
     trade_id = payload.get("tradeId") or payload.get("TradeId") or ""
     if not trade_id:
         log.warning("subscription.callback.no_trade_id", payload_keys=list(payload.keys()))
+        return {"status": "ignored"}
+
+    if not isinstance(trade_id, str) or not TRADE_ID_RE.fullmatch(trade_id):
+        # 未認證 payload 的 tradeId 會直接嵌入回查 path，型別不符/格式不符一律拒絕（不 log 原值）。
+        log.warning("subscription.callback.invalid_trade_id", trade_id_type=type(trade_id).__name__)
         return {"status": "ignored"}
 
     svc = get_payments91_service()
@@ -420,18 +553,60 @@ async def payment_callback(request: Request, db=Depends(get_database)):
         # 尚未定案（待付款/處理中）→ 不結算，回 200 待 91APP 下次通知（3D 卡片實務多同步定案）
         log.info("subscription.callback.pending", trade_id=trade_id, order_no=order_no, record_status=record_status)
         return {"status": "pending"}
+    if outcome == "refunded":
+        # P1-5：部分退款(6)/全額退款(7) 有自己獨立的處置語意，完全不走下面的
+        # success/fail 判定與 binding gate（那些是給「付款結果」用的，退款是另一種事件）。
+        # L9（第二意見審查）：回應形狀改回 {"status": ...} dict，跟其他分支一致
+        # （_process_refund 本身仍回傳裸字串，供內部/測試直接斷言 outcome）。
+        refund_outcome = await _process_refund(
+            db, trade_id=trade_id, record_status=str(record_status), order_no=order_no,
+        )
+        return {"status": refund_outcome}
     success = outcome == "success"
 
-    # 綁卡類（首購/升級走 BindingCard）：付款成功但綁卡失敗 → 沒有可續扣的卡 → 整筆判失敗。
-    # bindingStatus 只在 callback payload（回查回應不含），用作負向 gate（僅出現失敗值才擋，安全）。
-    if success:
-        order = await OrderRepository(db).get_by_order_no(order_no)
-        if order and order.get("type") in ("subscription", "upgrade_subscription"):
-            binding_status = payload.get("bindingStatus") or payload.get("BindingStatus")
-            if binding_status and binding_status != "Succeeded":
-                log.warning("subscription.callback.binding_failed", trade_id=trade_id,
-                            order_no=order_no, binding_status=binding_status, record_status=record_status)
-                success = False
+    # 綁卡類（首購/升級走 BindingCard）：判定來源一律用回查回應（trade，我方簽章保護的通道），
+    # 不用 payload——payload 未認證，其 bindingStatus 僅記 log 供比對，不參與判定。
+    # gate 僅限綁卡型訂單：續扣（MIT）/加購交易不綁卡，回查若帶非成功 bindingStatus 不得誤殺。
+    order_repo = OrderRepository(db)
+    order = await order_repo.get_by_order_no(order_no) if success else None
+    qb_binding = _find(trade, "bindingstatus")
+    payload_binding_status = payload.get("bindingStatus") or payload.get("BindingStatus")
+    is_binding_order = bool(order) and order.get("type") in ("subscription", "upgrade_subscription")
+    if success and is_binding_order and qb_binding is not None \
+            and str(qb_binding).lower() not in ("succeeded", "success"):
+        # 負向 gate：只有回查回應明確帶出非成功值才擋；欄位不存在＝不擋（fail-open）。
+        log.warning("subscription.callback.binding_failed", trade_id=trade_id, order_no=order_no,
+                    query_binding_status=qb_binding, payload_binding_status=payload_binding_status,
+                    record_status=record_status)
+        success = False
+
+    # order 缺 card_token 不再判失敗（cardToken 可能在 3D 完成「之後」才產生，/pay 同步 response
+    # 拿不到不代表沒綁卡成功）：fail-open，先試著從回查回應（可信）補救寫回，寫不到就告警，
+    # 續扣時 renewal_service 的 NoCardToken → needs_card_update dunning 是既有兜底。
+    # type 白名單含 "renewal"：/update-card 換卡挽回單建單時 card_token 為空，須由此補上新卡
+    # token；排程續扣單建單時已從 subscription 帶 token，不會落入此分支。
+    # F4（跨 PR 複檢）：只在單尚未結算（status != paid）時補救。settle 成功後 clear_card_token
+    # 會 $unset orders 那份，91APP 重送同一封 callback 時 `not order.get("card_token")` 會再度
+    # 成立、把密文副本寫回 orders（settle 已 ALREADY_PAID 短路→不再 $unset）→ P2-10 要消除的
+    # 「免 CVV 憑證雙份」對這張單永久回歸。paid 單的 token 已安全在 subscription，無須補救。
+    if success and order and order.get("status") != "paid" and not order.get("card_token") \
+            and order.get("type") in ("subscription", "upgrade_subscription", "renewal"):
+        qb_token = _find(trade, "cardtoken") or _find(trade, "bindingtoken")
+        enc = _encrypt_card_token_safe(str(qb_token), order_no, "callback") if qb_token else None
+        if enc:
+            # P2-10（金流體檢）：同樣是明文從 91APP 進 DB 的入口，落庫前加密。
+            # F2：加密失敗回 None，略過寫回（此段在 settle 之前，拋出會阻斷結算）。
+            await order_repo.update_by_order_no(order_no, {"card_token": enc})
+        else:
+            log.warning("subscription.callback.no_card_token_captured", trade_id=trade_id, order_no=order_no)
+            try:
+                import sentry_sdk
+                with sentry_sdk.push_scope() as scope:
+                    scope.set_tag("webhook.order_no", order_no)
+                    sentry_sdk.capture_message(
+                        "subscription.callback.no_card_token_captured", level="warning")
+            except ImportError:
+                pass
 
     log.info("subscription.callback.received", trade_id=trade_id, order_no=order_no,
              record_status=record_status, success=success)
@@ -505,10 +680,21 @@ async def cancel_subscription(
     if sub.get("cancel_at_period_end"):
         raise api_error("SUBSCRIPTION_ALREADY_SCHEDULED_CANCEL", "Subscription is already scheduled for cancellation", 400)
 
-    sub["cancel_at_period_end"] = True
-    sub["canceled_at"] = get_utc_timestamp()
-    sub["updated_at"] = get_utc_timestamp()
-    await user_repo.update_subscription(str(current_user["_id"]), sub)
+    # P0-2(b)（第二意見審查 F2）：dotted $set + guard，不再整包覆寫。guard 用
+    # next_charge_at 當版本 token——期末 sweep 若剛好續扣成功會推進它，若使用者手上這份
+    # 快照已經過期，寧可回 409 讓前端重新整理，也不能把續扣後的新狀態整包蓋掉。
+    ok = await user_repo.update_subscription_fields(
+        str(current_user["_id"]),
+        {"cancel_at_period_end": True, "canceled_at": get_utc_timestamp(),
+         "updated_at": get_utc_timestamp()},
+        guard={"subscription.next_charge_at": sub.get("next_charge_at")},
+    )
+    if not ok:
+        raise api_error(
+            "SUBSCRIPTION_CONCURRENT_UPDATE",
+            "Subscription state has changed, please refresh and try again",
+            status.HTTP_409_CONFLICT,
+        )
 
     return {"message": "訂閱將於目前計費週期結束時取消"}
 
@@ -577,10 +763,19 @@ async def reactivate_subscription(
     if not sub.get("cancel_at_period_end"):
         raise api_error("SUBSCRIPTION_NOT_SCHEDULED_CANCEL", "Subscription is not scheduled for cancellation", 400)
 
-    sub["cancel_at_period_end"] = False
-    sub["canceled_at"] = None
-    sub["updated_at"] = get_utc_timestamp()
-    await user_repo.update_subscription(str(current_user["_id"]), sub)
+    # P0-2(b)（F2）：dotted $set + guard，理由同 /cancel。
+    ok = await user_repo.update_subscription_fields(
+        str(current_user["_id"]),
+        {"cancel_at_period_end": False, "canceled_at": None,
+         "updated_at": get_utc_timestamp()},
+        guard={"subscription.next_charge_at": sub.get("next_charge_at")},
+    )
+    if not ok:
+        raise api_error(
+            "SUBSCRIPTION_CONCURRENT_UPDATE",
+            "Subscription state has changed, please refresh and try again",
+            status.HTTP_409_CONFLICT,
+        )
     return {"message": "訂閱已恢復，將於下個計費週期正常續扣"}
 
 
@@ -648,13 +843,26 @@ async def change_plan(
         }
 
     # 降級（basic←pro；改 free 請用 /cancel）：期末生效，只寫 pending_plan_change，不扣款
-    sub["pending_plan_change"] = {
-        "tier": request.tier,
-        "billing_cycle": request.billing,
-        "requested_at": get_utc_timestamp(),
-    }
-    sub["updated_at"] = get_utc_timestamp()
-    await user_repo.update_subscription(user_id, sub)
+    # P0-2(b)（F2）：dotted $set + guard。失敗場景舉例（F2 審查意見）：使用者在這裡讀到
+    # 舊快照，同時期末 sweep 續扣成功把 tier/billing_cycle/next_charge_at 都推進到新一期
+    # → 若整包覆寫，會把 tier 退回舊方案、next_charge_at 退回過去，變成「付新方案的錢
+    # 卻享舊方案、且永遠不再被排入續扣」。guard 命中 next_charge_at 版本 token 不符時
+    # 回 409，讓前端重新整理拿最新狀態再送一次。
+    ok = await user_repo.update_subscription_fields(
+        user_id,
+        {"pending_plan_change": {
+            "tier": request.tier,
+            "billing_cycle": request.billing,
+            "requested_at": get_utc_timestamp(),
+        }, "updated_at": get_utc_timestamp()},
+        guard={"subscription.next_charge_at": sub.get("next_charge_at")},
+    )
+    if not ok:
+        raise api_error(
+            "SUBSCRIPTION_CONCURRENT_UPDATE",
+            "Subscription state has changed, please refresh and try again",
+            status.HTTP_409_CONFLICT,
+        )
     return {
         "action": "downgrade",
         "effective": "end_of_period",
@@ -679,9 +887,18 @@ async def cancel_plan_change(
     if not sub.get("pending_plan_change"):
         raise api_error("SUBSCRIPTION_NO_PENDING_CHANGE", "No scheduled plan change", 400)
 
-    sub["pending_plan_change"] = None
-    sub["updated_at"] = get_utc_timestamp()
-    await user_repo.update_subscription(user_id, sub)
+    # P0-2(b)（F2）：dotted $set + guard，理由同 /change 降級分支。
+    ok = await user_repo.update_subscription_fields(
+        user_id,
+        {"pending_plan_change": None, "updated_at": get_utc_timestamp()},
+        guard={"subscription.next_charge_at": sub.get("next_charge_at")},
+    )
+    if not ok:
+        raise api_error(
+            "SUBSCRIPTION_CONCURRENT_UPDATE",
+            "Subscription state has changed, please refresh and try again",
+            status.HTTP_409_CONFLICT,
+        )
     return {"message": "已取消排定的方案變更，維持目前方案"}
 
 
