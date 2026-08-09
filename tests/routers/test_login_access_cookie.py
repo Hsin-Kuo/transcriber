@@ -22,6 +22,7 @@ from fastapi import Response  # noqa: E402
 
 from src.routers import auth  # noqa: E402
 from src.models.auth import UserLogin  # noqa: E402
+from src.utils.client_ip import get_client_ip  # noqa: E402
 from tests.response_helpers import get_set_cookie_headers  # noqa: E402
 
 ACTIVE_VERIFIED_USER = {
@@ -67,6 +68,14 @@ class _FakeUserRepo:
 class _FakeAuditLogger:
     async def log_auth(self, **kwargs):
         pass
+
+
+def test_fake_request_resolves_to_unknown_client_ip():
+    """_FakeRequest（headers={}、client=None）沒有 X-Real-IP 也沒有連線來源，
+    get_client_ip 必須安全回退到 "unknown" 而不是拋例外——這是本機開發 /
+    單元測試路徑（無 nginx）的既定行為，login() 底下的 get_client_ip(request)
+    呼叫依賴這個回退不炸掉。"""
+    assert get_client_ip(_FakeRequest()) == "unknown"
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from datetime import datetime, timedelta
 from ..utils.time_utils import get_utc_timestamp
+from ..utils.client_ip import get_client_ip
 from ..auth.cookies import (
     REFRESH_COOKIE_NAME,
     set_refresh_cookie,
@@ -158,9 +159,7 @@ async def register(
     audit_logger = get_audit_logger()
 
     # --- 速率限制（在任何 DB 寫入 / 寄信之前） ---
-    client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-    if not client_ip:
-        client_ip = request.client.host if request.client else "unknown"
+    client_ip = get_client_ip(request)
     normalized_email = user_data.email.strip().lower()
 
     ip_allowed, _ = await rate_limit_repo.check_rate_limit(
@@ -318,9 +317,7 @@ async def resend_verification_email(
     email_service = get_email_service()
 
     # --- 速率限制（在 DB 查詢 / 寄信之前） ---
-    client_ip = http_request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-    if not client_ip:
-        client_ip = http_request.client.host if http_request.client else "unknown"
+    client_ip = get_client_ip(http_request)
     normalized_email = request.email.strip().lower()
 
     ip_allowed, _ = await rate_limit_repo.check_rate_limit(
@@ -414,9 +411,7 @@ async def registration_status(
         HTTPException: 429 超過 rate limit
     """
     rate_limit_repo = RateLimitRepository(db)
-    client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-    if not client_ip:
-        client_ip = request.client.host if request.client else "unknown"
+    client_ip = get_client_ip(request)
 
     ip_allowed, _ = await rate_limit_repo.check_rate_limit(
         limit_type="registration_status_ip",
@@ -486,9 +481,7 @@ async def abandon_registration(
     """
     rate_limit_repo = RateLimitRepository(db)
     audit_logger = get_audit_logger()
-    client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-    if not client_ip:
-        client_ip = request.client.host if request.client else "unknown"
+    client_ip = get_client_ip(request)
 
     ip_allowed, _ = await rate_limit_repo.check_rate_limit(
         limit_type="abandon_registration_ip",
@@ -570,9 +563,7 @@ async def login(
     rate_limit_repo = RateLimitRepository(db)
 
     # --- 速率限制（在驗證密碼之前） ---
-    client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-    if not client_ip:
-        client_ip = request.client.host if request.client else "unknown"
+    client_ip = get_client_ip(request)
 
     ip_allowed, _ = await rate_limit_repo.check_rate_limit(
         limit_type="login_ip",
@@ -1041,9 +1032,7 @@ async def forgot_password(
         HTTPException: 超過速率限制
     """
     # 取得客戶端 IP（支援反向代理）
-    client_ip = http_request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-    if not client_ip:
-        client_ip = http_request.client.host if http_request.client else "unknown"
+    client_ip = get_client_ip(http_request)
 
     rate_limit_repo = RateLimitRepository(db)
     email_service = get_email_service()
