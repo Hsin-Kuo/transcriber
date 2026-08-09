@@ -341,6 +341,14 @@ async def pay(
         raise api_error("ORDER_NOT_FOUND", "Order not found", 404)
     if order.get("status") != "pending":
         raise api_error("ORDER_NOT_PENDING", "Order is not payable", 400)
+    # P3-I（金流體檢 P1-9 第二意見審查）：order_repo.sweep_expired_pending_orders
+    # 讓路後，有 trade_id 的 pending 單不再被 1 小時 cleanup 標 expired（歸對帳
+    # sweep 管），重付窗口因此變成無限——沒有這個 gate，使用者可能對著一張帶舊
+    # 價格/舊 invoice_snapshot 的過期單按下付款。expires_at 本身仍照舊在建單時
+    # 寫入（1 小時），只是不再由 cleanup 主動改狀態，這裡在 /pay 當下自己補查。
+    expires_at = order.get("expires_at")
+    if expires_at is not None and expires_at < get_utc_timestamp():
+        raise api_error("ORDER_EXPIRED", "Order has expired, please checkout again", 400)
 
     svc = get_payments91_service()
     resp = await svc.create_first_payment(
@@ -364,9 +372,19 @@ async def pay(
             message=resp.get("message"),
         )
 
+    # P1-9（金流體檢）：trade_id 提前到 order_updates 組裝之前落庫。3DS 分支在下面
+    # `paymentUrl` 檢查後就直接 return，原本 trade_id 只在「無 3D 立即收斂」分支才
+    # 讀取——3DS 單（正是 callback 遺失的高風險族群：使用者導去銀行頁面，回來後靠
+    # /callback 完成，中途逾時 500 就沒人重送）身上因此從未落庫過 trade_id，對帳
+    # sweep（payment_reconciliation.py）找不到 trade_id 就沒法主動回查。現在無論
+    # 是否走 3D，只要回應帶得出 tradeId 就一併寫回 order。
+    trade_id = _find(resp, "tradeid") or ""
+
     # 捕捉 cardToken（僅在 3D 成功後才有效；settle 時才搬進 subscription）+ 卡別/末四碼（收據用）。存於 order。
     card_token = _find(resp, "cardtoken")
     order_updates = {}
+    if trade_id:
+        order_updates["trade_id"] = str(trade_id)
     if card_token:
         order_updates["card_token"] = card_token
     else:
@@ -386,7 +404,6 @@ async def pay(
 
     # 無 3D → 依 statusCode 直接收斂
     status_code = resp.get("statusCode") or "Unknown"
-    trade_id = _find(resp, "tradeid") or ""
     success = status_code == "Success"
     outcome = await _process_payment_result(
         db, trade_id=trade_id, record_status=status_code,

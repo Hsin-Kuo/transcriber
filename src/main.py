@@ -425,6 +425,13 @@ async def startup_event():
             name="periodic_order_cleanup",
         )
 
+        # 5.3b 定期金流對帳補償 sweep（P1-9：callback 遺失主動回查收斂 + entitlement_pending 補償）
+        from src.services.payment_reconciliation import periodic_payment_reconciliation
+        create_background_task(
+            periodic_payment_reconciliation(db),
+            name="periodic_payment_reconciliation",
+        )
+
         # 5.4 定期訂閱到期掃描（已排定取消者到期 lapse 為 free）
         from src.auth.quota import periodic_subscription_expiry_check
         create_background_task(

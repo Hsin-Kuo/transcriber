@@ -1380,6 +1380,14 @@ _ORDER_DETAIL_FIELDS = (
     "extra_duration_minutes", "extra_ai_summaries",
     "invoice_snapshot", "is_duplicate", "needs_refund",
     "created_at", "updated_at", "paid_at", "expires_at",
+    # P1-9 對帳補償 sweep 可見性：entitlement_pending/needs_manual 是「需要人工看一眼」
+    # 的旗標，reconciliation_gave_up 代表 72h 對帳仍懸而不決，refund_seen 代表對帳
+    # 回查認出退款（P1-5 前的暫定收斂），carryover_granted/quota_granted 是 $inc
+    # 一次性 marker（供排查「這筆到底發過額度沒」），reconciliation_first_seen_at
+    # 是 72h 放棄時鐘的起點（P1-D，第二意見審查）。
+    "entitlement_pending", "reconciliation_gave_up", "needs_manual", "refund_seen",
+    "carryover_granted", "quota_granted", "entitlement_resettled_at",
+    "reconciliation_first_seen_at",
 )
 
 
@@ -1413,6 +1421,11 @@ async def list_orders(
     invoice_status: Optional[str] = Query(
         None, description="發票狀態；'none' 代表尚無 invoice"
     ),
+    needs_attention: Optional[bool] = Query(
+        None,
+        description="true 時只列出需要人工看一眼的單（entitlement_pending / "
+                     "needs_manual / reconciliation_gave_up / refund_seen 任一為 True）",
+    ),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     admin: dict = Depends(require_permission(Permission.BILLING_READ)),
@@ -1425,6 +1438,18 @@ async def list_orders(
     )
     if meta.get("email_not_found"):
         return {"orders": [], "total": 0, "skip": skip, "limit": limit}
+
+    # P3-J（第二意見審查）：對帳補償 sweep 引入的四種「需要人工看一眼」旗標一次
+    # 篩出來，不用逐頁翻找。只在 needs_attention=True 時加這個 $or——False/None
+    # 都不篩（None 是預設值，維持既有行為；顯式 False 沒有另外定義語意，同樣視為
+    # 不篩，因為「不需要特別關注」不等於「這些單都要被排除」）。
+    if needs_attention:
+        mongo_filter["$or"] = [
+            {"entitlement_pending": True},
+            {"needs_manual": True},
+            {"reconciliation_gave_up": True},
+            {"refund_seen": True},
+        ]
 
     orders, total = await OrderRepository(db).admin_list_with_invoices(
         mongo_filter, invoice_status, skip, limit,
@@ -1447,6 +1472,11 @@ async def list_orders(
             "paid_at": o.get("paid_at"),
             "created_at": o.get("created_at"),
             "invoice": o.get("invoice"),
+            # P1-9：列表頁可見性，不用逐筆點進詳情才看得到需要人工處理的單。
+            "entitlement_pending": bool(o.get("entitlement_pending")),
+            "needs_manual": bool(o.get("needs_manual")),
+            "reconciliation_gave_up": bool(o.get("reconciliation_gave_up")),
+            "refund_seen": bool(o.get("refund_seen")),
         })
 
     return {"orders": result, "total": total, "skip": skip, "limit": limit}
