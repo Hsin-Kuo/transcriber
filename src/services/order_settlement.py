@@ -50,6 +50,11 @@ async def _default_invoice_issuer(db, order: dict) -> None:
 # 超過此秒數的舊 pending 單不擋，改由 supersede 取代，讓使用者可立即重試。
 PENDING_COOLDOWN_SECONDS = 30
 
+# resettle_entitlement 補償重試上限：達此值轉人工（needs_manual + Sentry），不再
+# 無限重試同一筆。單一定義（P2-G，第二意見審查）：payment_reconciliation.py 的
+# iter_entitlement_pending 查詢上限 import 這個常數，避免兩處各自硬編碼 5 飄移。
+ENTITLEMENT_RESETTLE_MAX_RETRY = 5
+
 _SUBSCRIPTION_TYPES = ("subscription", "upgrade_subscription", "downgrade_subscription", "renewal")
 
 
@@ -194,9 +199,18 @@ class OrderSettlement:
         """標記「paid 但權益可能未施加完整」+ Sentry 告警（見 settle() 呼叫處）。
 
         這個方法本身絕不可拋例外——否則會蓋掉呼叫端正在往外拋的原始例外。
+
+        🔴 第二意見審查 P0-A：一併初始化 `entitlement_retry_count: 0`——若留給欄位
+        缺省，`OrderRepository.iter_entitlement_pending` 的 `$lt`/`$gte` 範圍查詢
+        （MongoDB 的 type bracketing）完全不會匹配缺欄位的文件，真實 crash 留下的單
+        會永遠撈不到、對帳補償 sweep 形同虛設。這裡只會被呼叫一次（settle() 短路
+        `status=="paid"` 之後不會再進到這個 try/except），不會被 resettle 的
+        `$inc` 併發覆寫成 0。
         """
         try:
-            await self.order_repo.update_by_order_no(order_no, {"entitlement_pending": True})
+            await self.order_repo.update_by_order_no(
+                order_no, {"entitlement_pending": True, "entitlement_retry_count": 0}
+            )
         except Exception as flag_err:
             log.error(
                 "settle.entitlement_pending_flag_failed",
@@ -229,6 +243,120 @@ class OrderSettlement:
             )
         except Exception as e:
             log.error("invoice.trigger.failed", order_no=order_no, error=str(e), exc_info=True)
+
+    # ── 補結算 entitlement_pending（P1-9 對帳 sweep 第二段）─────────────────────
+
+    async def resettle_entitlement(self, order: dict) -> None:
+        """補施加一張 `entitlement_pending` 單的權益（`settle()` handler 中途 crash 留下的坑）。
+
+        order 已經是 `paid`（`claim_paid` 早就贏過一次），這裡**直接呼叫對應
+        handler**（`_settle_subscription` / `_settle_extra_quota`），繞過 `claim_paid`
+        ——不能再走 `settle()` 的公開入口，因為那個入口的權威閘門就是「status!=paid
+        才施加」，重跑會被自己的 ALREADY_PAID 短路擋死。
+
+        兩個已知副作用（呼叫端/告警口徑需知情，見金流體檢 P1-9）：
+        - 訂閱 handler 的續扣分支會 `reset_monthly_usage`——補償時會把「權益懸置
+          期間累積的用量」一併歸零（不只補發權益，連帶重置當期用量）。
+        - 續扣 handler 的 `current_period_start/end` 用補償當下的 `now` 重算，起點
+          會比原本的付款時間點往後位移（不是回補「原本該有」的週期起訖）。
+        兩者都延續 P0-3「寧少發勿重發」的基調：補償不追求分秒對齊，追求「權益一定
+        有補到、不會漏發也不會雙發」。
+
+        失敗不吞：不論是 handler 本身失敗、還是 handler 成功後「清旗標」這步失敗
+        （見下方獨立 try），都會 `$inc entitlement_retry_count`（+ 達上限寫
+        `needs_manual`/Sentry，見 `_handle_resettle_failure`）後原例外照樣往上拋，
+        讓呼叫端（sweep）計入 errored、下一輪憑 `entitlement_retry_count` 繼續重試。
+        """
+        order_no = order["merchant_order_no"]
+        order_type = order.get("type", "subscription")
+        n = PaymentNotification(
+            order_no=order_no,
+            success=True,
+            is_first_payment=(order_type != "renewal"),
+            trade_id=order.get("trade_id", ""),
+        )
+        try:
+            if order_type in _SUBSCRIPTION_TYPES:
+                result = await self._settle_subscription(order, n)
+            elif order_type == "extra_quota":
+                result = await self._settle_extra_quota(order, n)
+            else:
+                log.warning("settle.resettle_entitlement.unknown_type", order_no=order_no, type=order_type)
+                return
+        except Exception as exc:
+            await self._handle_resettle_failure(order_no, exc)
+            raise
+
+        # P1-B（第二意見審查）：清旗標本身也可能失敗（DB 抖動），若不接住並走同一條
+        # `_handle_resettle_failure` $inc 記帳路徑，這筆單會在 entitlement_pending
+        # 仍是 True 的狀態下被下一輪 sweep 無限重跑——handler 已經成功，但每輪都白白
+        # 重跑一次（訂閱型還會重複 reset_monthly_usage + 重算期別）、且永遠不會因為
+        # 「重試次數過多」轉人工終止（因為 handler 本身沒有失敗）。獨立 try（不重跑
+        # handler）：handler 已確定成功，沒必要因為單純的旗標寫入失敗而重放它的副
+        # 作用；接住例外後 re-raise，讓 sweep 計 errored，也讓 retry_count 持續累積
+        # 直到達到 ENTITLEMENT_RESETTLE_MAX_RETRY 轉 needs_manual 為止。
+        # 注意「不重跑」只在本次呼叫內成立：旗標沒清掉，下一輪 sweep 仍會整個
+        # resettle 重來（$inc 型有 marker 擋、訂閱型會重放 reset_monthly_usage 與
+        # 期別重算），上限 ENTITLEMENT_RESETTLE_MAX_RETRY 輪——有界的已接受副作用。
+        try:
+            await self.order_repo.update_by_order_no(order_no, {
+                "entitlement_pending": False,
+                "entitlement_resettled_at": datetime.utcnow().timestamp(),
+            })
+        except Exception as exc:
+            await self._handle_resettle_failure(order_no, exc)
+            raise
+
+        # 同 settle() 的開票白名單（見 `_INVOICE_TRIGGER_OUTCOMES`）：handler 沒拋例外
+        # 不代表結果是「已啟用/已加值」——例如撞上 `_is_duplicate_first_completion`
+        # 會回 REJECTED_DUPLICATE（標 needs_refund，不啟用/不加值），這種情況不該
+        # 觸發開票。旗標一律清（handler 已跑完，不再是「crash 留下的坑」），開票才
+        # 依 outcome 把關。
+        if result.outcome.value in _INVOICE_TRIGGER_OUTCOMES:
+            await self._trigger_invoice(order_no)
+        log.info(
+            "settle.entitlement_resettled",
+            order_no=order_no, type=order_type, outcome=result.outcome.value,
+        )
+
+    async def _handle_resettle_failure(self, order_no: str, exc: Exception) -> None:
+        """`resettle_entitlement` 失敗記帳：$inc 重試次數，達上限轉人工 + Sentry。
+
+        比照 `_mark_entitlement_pending`：這個方法本身絕不可拋例外，否則會蓋掉呼叫端
+        正在往外拋的原始例外。
+        """
+        try:
+            retry_count = await self.order_repo.increment_entitlement_retry(order_no)
+        except Exception as inc_err:
+            log.error(
+                "settle.resettle_entitlement.retry_inc_failed",
+                order_no=order_no, error=str(inc_err), exc_info=True,
+            )
+            return
+        log.error(
+            "settle.resettle_entitlement.failed",
+            order_no=order_no, retry_count=retry_count, error=str(exc), exc_info=True,
+        )
+        if retry_count < ENTITLEMENT_RESETTLE_MAX_RETRY:
+            return
+        try:
+            await self.order_repo.update_by_order_no(order_no, {"needs_manual": True})
+        except Exception as flag_err:
+            log.error(
+                "settle.resettle_entitlement.needs_manual_flag_failed",
+                order_no=order_no, error=str(flag_err), exc_info=True,
+            )
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("order_no", order_no)
+                scope.set_context(
+                    "resettle_entitlement",
+                    {"order_no": order_no, "retry_count": retry_count, "error": str(exc)},
+                )
+                sentry_sdk.capture_message("settle.entitlement_manual", level="error")
+        except Exception:
+            pass
 
     # ── 訂閱（subscription / upgrade / downgrade）─────────────────────────────
 
@@ -289,11 +417,13 @@ class OrderSettlement:
             return SettleResult(SettleOutcome.REJECTED_DUPLICATE, n.order_no)
 
         # 升級：把舊方案剩餘額度結轉進 extra_quota（91APP 無 gateway 委託可終止，換約即換 tier）
+        # P1-9：claim_marker 先搶後施——重跑安全化（見 order_repo.claim_marker docstring）。
         if order_type == "upgrade_subscription":
             extra_dur = order.get("extra_duration_minutes", 0)
             extra_ai = order.get("extra_ai_summaries", 0)
             if extra_dur or extra_ai:
-                await self.user_repo.add_extra_quota(user_id, extra_dur, extra_ai)
+                if await self.order_repo.claim_marker(order["merchant_order_no"], "carryover_granted"):
+                    await self.user_repo.add_extra_quota(user_id, extra_dur, extra_ai)
 
         subscription = {
             "status": "active",
@@ -327,11 +457,15 @@ class OrderSettlement:
     # ── 額外額度（一次性加購）────────────────────────────────────────────────
 
     async def _settle_extra_quota(self, order: dict, n: PaymentNotification) -> SettleResult:
-        """order paid（+ trade_id）已由 settle() 的 claim_paid 權威寫入（見上方閘門）。"""
+        """order paid（+ trade_id）已由 settle() 的 claim_paid 權威寫入（見上方閘門）。
+
+        P1-9：claim_marker 先搶後施——重跑安全化（見 order_repo.claim_marker docstring）。
+        """
         user_id = order["user_id"]
         extra_dur = order.get("extra_duration_minutes", 0)
         extra_ai = order.get("extra_ai_summaries", 0)
-        await self.user_repo.add_extra_quota(user_id, extra_dur, extra_ai)
+        if await self.order_repo.claim_marker(order["merchant_order_no"], "quota_granted"):
+            await self.user_repo.add_extra_quota(user_id, extra_dur, extra_ai)
         log.info(
             "payment.extra_quota.purchased",
             user_id=user_id, extra_duration_minutes=extra_dur, extra_ai_summaries=extra_ai,

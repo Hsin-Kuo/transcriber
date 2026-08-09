@@ -46,6 +46,10 @@ def _make(order=None, user=None, invoice_issuer=None):
     # 聚焦在其他行為上；併發重入專屬測試會覆寫成 False 來驗證短路。
     order_repo.claim_paid = AsyncMock(return_value=True)
     order_repo.mark_failed_unless_paid = AsyncMock(return_value=True)
+    # P1-9：$inc 副作用（升級結轉/加購）改走 claim_marker 先搶後施；預設一定搶得到，
+    # 讓既有測試聚焦其他行為，marker gate 本身的行為見 TestClaimMarkerGate。
+    order_repo.claim_marker = AsyncMock(return_value=True)
+    order_repo.increment_entitlement_retry = AsyncMock(return_value=1)
 
     user_repo = MagicMock()
     user_repo.db = MagicMock()
@@ -530,3 +534,165 @@ class TestEntitlementPendingOnCrash:
             await s.settle(PaymentNotification(
                 order_no="SLSUB1", success=True, is_first_payment=True, trade_id="T1",
             ))
+
+
+# ── settle: claim_marker 一次性閘門（P1-9：$inc 副作用重跑安全化）───────────────
+
+class TestClaimMarkerGate:
+    async def test_upgrade_carryover_only_grants_when_marker_won(self):
+        order = _order(
+            merchant_order_no="SLUPG1", type="upgrade_subscription", tier="pro",
+            prev_order_no="SLSUB0", extra_duration_minutes=42.5, extra_ai_summaries=3,
+        )
+        s, order_repo, user_repo = _make(order=order)
+        order_repo.claim_marker = AsyncMock(return_value=False)
+        r = await s.settle(PaymentNotification(
+            order_no="SLUPG1", success=True, is_first_payment=True, trade_id="T9",
+        ))
+        assert r.outcome == SettleOutcome.ACTIVATED
+        order_repo.claim_marker.assert_awaited_once_with("SLUPG1", "carryover_granted")
+        user_repo.add_extra_quota.assert_not_awaited()
+
+    async def test_extra_quota_only_grants_when_marker_won(self):
+        order = _order(
+            merchant_order_no="SLEXT1", type="extra_quota", tier=None, billing_cycle=None,
+            extra_duration_minutes=120, extra_ai_summaries=0,
+        )
+        s, order_repo, user_repo = _make(order=order)
+        order_repo.claim_marker = AsyncMock(return_value=False)
+        r = await s.settle(PaymentNotification(
+            order_no="SLEXT1", success=True, is_first_payment=True, trade_id="T1",
+        ))
+        assert r.outcome == SettleOutcome.GRANTED  # settle 本身仍照常回報成功（權益已由第一次呼叫施加過）
+        order_repo.claim_marker.assert_awaited_once_with("SLEXT1", "quota_granted")
+        user_repo.add_extra_quota.assert_not_awaited()
+
+    async def test_marker_won_still_grants(self):
+        order = _order(
+            merchant_order_no="SLEXT1", type="extra_quota", tier=None, billing_cycle=None,
+            extra_duration_minutes=120, extra_ai_summaries=0,
+        )
+        s, order_repo, user_repo = _make(order=order)
+        r = await s.settle(PaymentNotification(
+            order_no="SLEXT1", success=True, is_first_payment=True, trade_id="T1",
+        ))
+        assert r.outcome == SettleOutcome.GRANTED
+        user_repo.add_extra_quota.assert_awaited_once_with("u1", 120, 0)
+
+
+# ── resettle_entitlement：P1-9 對帳 sweep 第二段補償 ─────────────────────────────
+
+class TestResettleEntitlement:
+    async def test_subscription_success_clears_flag_and_triggers_invoice(self):
+        issuer = AsyncMock()
+        order = _order(card_token="CT1")
+        s, order_repo, user_repo = _make(order=order, invoice_issuer=issuer)
+        await s.resettle_entitlement(order)
+        user_repo.update_subscription.assert_awaited_once()  # 首購 handler 真的被喚
+        cleared = order_repo.update_by_order_no.await_args.args
+        assert cleared[0] == "SLSUB1"
+        assert cleared[1]["entitlement_pending"] is False
+        assert "entitlement_resettled_at" in cleared[1]
+        await asyncio.sleep(0)
+        issuer.assert_awaited_once()  # _trigger_invoice 走的是 create_background_task，需讓出一次 loop
+
+    async def test_resettle_does_not_go_through_claim_paid(self):
+        """order 已經是 paid——resettle 直接呼叫 handler，不能再經過 claim_paid 那道
+        『status!=paid 才施加』的閘門，否則會被自己的 ALREADY_PAID 短路擋死。"""
+        order = _order(status="paid", card_token="CT1")
+        s, order_repo, user_repo = _make(order=order)
+        await s.resettle_entitlement(order)
+        order_repo.claim_paid.assert_not_awaited()
+        user_repo.update_subscription.assert_awaited_once()
+
+    async def test_extra_quota_second_call_does_not_double_grant(self):
+        order = _order(
+            merchant_order_no="SLEXT1", type="extra_quota", tier=None, billing_cycle=None,
+            status="paid", extra_duration_minutes=120, extra_ai_summaries=0,
+        )
+        s, order_repo, user_repo = _make(order=order)
+        order_repo.claim_marker = AsyncMock(side_effect=[True, False])
+        await s.resettle_entitlement(order)
+        await s.resettle_entitlement(order)
+        user_repo.add_extra_quota.assert_awaited_once_with("u1", 120, 0)
+
+    async def test_handler_failure_increments_retry_and_reraises(self):
+        order = _order(card_token="CT1")
+        s, order_repo, user_repo = _make(order=order)
+        s._settle_subscription = AsyncMock(side_effect=RuntimeError("boom"))
+        order_repo.increment_entitlement_retry = AsyncMock(return_value=2)
+        with pytest.raises(RuntimeError, match="boom"):
+            await s.resettle_entitlement(order)
+        order_repo.increment_entitlement_retry.assert_awaited_once_with("SLSUB1")
+        # 未達上限：不寫 needs_manual
+        assert not any(
+            c.args[1].get("needs_manual") is True
+            for c in order_repo.update_by_order_no.await_args_list
+        )
+
+    async def test_retry_exhausted_marks_needs_manual_and_alerts(self, monkeypatch):
+        import sentry_sdk
+        alert = MagicMock()
+        monkeypatch.setattr(sentry_sdk, "capture_message", alert)
+
+        order = _order(card_token="CT1")
+        s, order_repo, user_repo = _make(order=order)
+        s._settle_subscription = AsyncMock(side_effect=RuntimeError("boom"))
+        order_repo.increment_entitlement_retry = AsyncMock(return_value=5)
+        with pytest.raises(RuntimeError, match="boom"):
+            await s.resettle_entitlement(order)
+        assert any(
+            c.args[1].get("needs_manual") is True
+            for c in order_repo.update_by_order_no.await_args_list
+        )
+        alert.assert_called_once()
+        assert alert.call_args.args[0] == "settle.entitlement_manual"
+
+    async def test_retry_inc_failure_does_not_mask_original_exception(self):
+        order = _order(card_token="CT1")
+        s, order_repo, user_repo = _make(order=order)
+        s._settle_subscription = AsyncMock(side_effect=RuntimeError("original"))
+        order_repo.increment_entitlement_retry = AsyncMock(side_effect=ConnectionError("db down"))
+        with pytest.raises(RuntimeError, match="original"):
+            await s.resettle_entitlement(order)
+
+    async def test_unknown_type_is_a_noop(self):
+        order = _order(type="something_weird")
+        s, order_repo, user_repo = _make(order=order)
+        await s.resettle_entitlement(order)
+        order_repo.update_by_order_no.assert_not_awaited()
+
+    async def test_rejected_duplicate_outcome_clears_flag_but_does_not_trigger_invoice(self):
+        """handler 沒拋例外 ≠ 該開票——撞上重複完成防護（sibling 已先啟動）時，
+        settle_fn 正常回傳 REJECTED_DUPLICATE（標 needs_refund，不啟用），旗標仍要
+        清（handler 已跑完），但不能觸發開票（同 settle() 的白名單口徑）。"""
+        issuer = AsyncMock()
+        user = {"subscription": {"status": "active", "active_order_no": "OTHER", "cancel_at_period_end": False}}
+        order = _order(card_token="CT1")
+        s, order_repo, user_repo = _make(order=order, user=user, invoice_issuer=issuer)
+        await s.resettle_entitlement(order)
+        cleared = order_repo.update_by_order_no.await_args.args
+        assert cleared[1]["entitlement_pending"] is False
+        await asyncio.sleep(0)
+        issuer.assert_not_awaited()
+
+    async def test_clear_flag_failure_increments_retry_without_rerunning_handler(self):
+        """P1-B（第二意見審查）：handler 已經成功——清 entitlement_pending 這個
+        update_by_order_no 呼叫本身失敗（DB 抖動），不能被吞掉不記帳，否則這筆單
+        會在 entitlement_pending 仍是 True 的狀態下被下一輪 sweep 無限重跑（訂閱型
+        還會重複 reset_monthly_usage + 重算期別），且永遠不會因為『重試太多次』
+        轉人工。必須走 `_handle_resettle_failure` 的 $inc 記帳 + re-raise，且**不能
+        重新呼叫 handler**（handler 已經確定成功，沒理由重放它的副作用）。
+        """
+        order = _order(card_token="CT1")
+        s, order_repo, user_repo = _make(order=order)
+        # 只有「清旗標」那一次 update_by_order_no 呼叫失敗；handler 本身（
+        # _settle_subscription）不呼叫 order_repo.update_by_order_no，所以這裡讓它
+        # 對所有呼叫都失敗一樣能精準命中「清旗標」這一步。
+        order_repo.update_by_order_no = AsyncMock(side_effect=ConnectionError("db down"))
+        order_repo.increment_entitlement_retry = AsyncMock(return_value=1)
+        with pytest.raises(ConnectionError, match="db down"):
+            await s.resettle_entitlement(order)
+        order_repo.increment_entitlement_retry.assert_awaited_once_with("SLSUB1")
+        # handler 只跑一次（成功那一次），沒有因為清旗標失敗而被重新呼叫。
+        user_repo.update_subscription.assert_awaited_once()
