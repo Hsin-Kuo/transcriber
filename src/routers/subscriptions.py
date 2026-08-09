@@ -585,7 +585,11 @@ async def payment_callback(request: Request, db=Depends(get_database)):
     # 續扣時 renewal_service 的 NoCardToken → needs_card_update dunning 是既有兜底。
     # type 白名單含 "renewal"：/update-card 換卡挽回單建單時 card_token 為空，須由此補上新卡
     # token；排程續扣單建單時已從 subscription 帶 token，不會落入此分支。
-    if success and order and not order.get("card_token") \
+    # F4（跨 PR 複檢）：只在單尚未結算（status != paid）時補救。settle 成功後 clear_card_token
+    # 會 $unset orders 那份，91APP 重送同一封 callback 時 `not order.get("card_token")` 會再度
+    # 成立、把密文副本寫回 orders（settle 已 ALREADY_PAID 短路→不再 $unset）→ P2-10 要消除的
+    # 「免 CVV 憑證雙份」對這張單永久回歸。paid 單的 token 已安全在 subscription，無須補救。
+    if success and order and order.get("status") != "paid" and not order.get("card_token") \
             and order.get("type") in ("subscription", "upgrade_subscription", "renewal"):
         qb_token = _find(trade, "cardtoken") or _find(trade, "bindingtoken")
         enc = _encrypt_card_token_safe(str(qb_token), order_no, "callback") if qb_token else None
