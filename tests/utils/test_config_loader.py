@@ -19,7 +19,7 @@ def fake_ssm(monkeypatch):
             calls.append(Name)
             return {"Parameter": {"Value": f"value-for-{Name}"}}
 
-    monkeypatch.setattr(config_loader, "DEPLOY_ENV", "aws")
+    monkeypatch.setenv("DEPLOY_ENV", "aws")
     monkeypatch.setattr(config_loader, "_get_ssm", lambda: _FakeSSM())
     config_loader._param_cache.clear()
     yield calls
