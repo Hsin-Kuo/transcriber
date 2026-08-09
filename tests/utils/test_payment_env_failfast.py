@@ -205,10 +205,41 @@ class TestValidatePaymentEnv:
         monkeypatch.setenv("SMILEPAY_ENV", "production")
         fake_log = MagicMock()
         monkeypatch.setattr(config_loader, "log", fake_log)
+        # F3：payments live 時 validate 會呼叫 _get_kek()；stub 掉避免打真 SSM。
+        from src.utils import card_token_cipher
+        monkeypatch.setattr(card_token_cipher, "_get_kek", lambda: b"0" * 32)
 
         validate_payment_env()  # 不應拋例外
 
         fake_log.warning.assert_not_called()
+
+    def test_kek_missing_when_payments_live_raises(self, monkeypatch):
+        """F3（跨 PR 複檢）：PAYMENTS91_ENV=production 但 KEK 取不到 → 啟動 fail-fast，
+        而不是等到第一筆真實付款時 encrypt 才炸（那時 trade_id 落庫已被 F2 兜底但每筆
+        首購都拿不到續扣憑證）。"""
+        monkeypatch.setenv("DEPLOY_ENV", "aws")
+        monkeypatch.delenv("APP_ENV", raising=False)
+        monkeypatch.setenv("PAYMENTS91_ENV", "production")
+        monkeypatch.setenv("SMILEPAY_ENV", "production")
+        from src.utils import card_token_cipher
+        monkeypatch.setattr(card_token_cipher, "_get_kek",
+                            lambda: (_ for _ in ()).throw(RuntimeError("KEK unavailable from SSM")))
+        with pytest.raises(RuntimeError, match="card_token KEK"):
+            validate_payment_env()
+
+    def test_kek_not_checked_when_payments_not_live(self, monkeypatch):
+        """金流未上線（PAYMENTS91_ENV 未設）時 KEK 可缺——不呼叫 _get_kek、不擋啟動，
+        避免把還沒排上金流的 prod 打掛（同 env 未設分支的語意）。"""
+        monkeypatch.setenv("DEPLOY_ENV", "aws")
+        monkeypatch.delenv("APP_ENV", raising=False)
+        monkeypatch.delenv("PAYMENTS91_ENV", raising=False)
+        monkeypatch.delenv("SMILEPAY_ENV", raising=False)
+        monkeypatch.setattr(config_loader, "log", MagicMock())
+        from src.utils import card_token_cipher
+        kek = MagicMock()
+        monkeypatch.setattr(card_token_cipher, "_get_kek", kek)
+        validate_payment_env()  # 不拋
+        kek.assert_not_called()  # 金流未上線 → 根本不查 KEK
 
     def test_unset_logs_warning_and_does_not_raise(self, monkeypatch):
         monkeypatch.setenv("DEPLOY_ENV", "aws")

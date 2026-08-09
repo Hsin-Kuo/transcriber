@@ -81,6 +81,24 @@ class TestPayTradeIdPersistence:
         assert order_no == "SLSUB1"
         assert updates["trade_id"] == "PT123"
 
+    async def test_encrypt_failure_does_not_block_trade_id_persistence(self, monkeypatch):
+        """F2（跨 PR 複檢）：card_token 加密失敗（KEK 未 seed / SSM 抖動）絕不能連帶擋掉
+        同一批 trade_id 落庫——否則這張已扣款的單對帳 sweep 看不到（要求有 trade_id），
+        T+1h 被標 expired，使用者扣款卻無訂閱無告警。encrypt 失敗 → 略過 card_token，
+        trade_id 照常寫入。"""
+        order_repo, svc, _ = _patch(monkeypatch, resp={
+            "statusCode": "Success", "paymentUrl": "https://bank.example/3ds",
+            "tradeId": "PT123", "cardToken": "CT1",
+        })
+        monkeypatch.setattr(subs, "encrypt",
+                            lambda v: (_ for _ in ()).throw(RuntimeError("KEK unavailable")))
+        request = subs.PayRequest(order_no="SLSUB1", txn_token="tok")
+        out = await subs.pay(request, current_user={"_id": "u1"}, db=MagicMock())
+        assert out["status"] == "pending_3ds"
+        order_no, updates = order_repo.update_by_order_no.await_args.args
+        assert updates["trade_id"] == "PT123"      # trade_id 仍落庫（對帳看得到）
+        assert "card_token" not in updates          # 加密失敗 → 略過，不寫明文也不阻斷
+
     async def test_non_3ds_branch_also_persists_trade_id(self, monkeypatch):
         """迴歸：非 3DS 立即收斂分支本來就會走到 trade_id 賦值，改動後仍要保留。"""
         order_repo, svc, settlement = _patch(monkeypatch, resp={

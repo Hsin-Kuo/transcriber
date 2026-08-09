@@ -218,7 +218,12 @@ class TestIterEntitlementPending:
         repo = OrderRepository(db)
         _ = [o async for o in repo.iter_entitlement_pending(5)]
         filt = collection.find.call_args.args[0]
-        assert filt == {"entitlement_pending": True, "entitlement_retry_count": {"$not": {"$gte": 5}}}
+        # F1（跨 PR 複檢）：加 refund_seen 排除，已退款單不得再被 resettle 撈到補施權益。
+        assert filt == {
+            "entitlement_pending": True,
+            "entitlement_retry_count": {"$not": {"$gte": 5}},
+            "refund_seen": {"$ne": True},
+        }
 
 
 class TestStampReconciliationFirstSeen:

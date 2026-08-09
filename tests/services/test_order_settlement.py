@@ -665,6 +665,18 @@ class TestResettleEntitlement:
         await asyncio.sleep(0)
         issuer.assert_awaited_once()  # _trigger_invoice 走的是 create_background_task，需讓出一次 loop
 
+    async def test_resettle_skips_refunded_order(self):
+        """F1（跨 PR 複檢）：已被退款流程處置（refund_seen）的 entitlement_pending 單，
+        resettle 絕不能重跑 handler——否則把已撤銷的訂閱開回付費 tier、對已作廢的發票
+        重開一張真發票。改成清 entitlement_pending 旗標 + 標 needs_manual 讓 admin 收斂。"""
+        order = _order(status="paid", card_token="CT1", entitlement_pending=True, refund_seen=True)
+        s, order_repo, user_repo = _make(order=order)
+        await s.resettle_entitlement(order)
+        user_repo.update_subscription.assert_not_awaited()   # handler 未被喚（不重開訂閱）
+        cleared = order_repo.update_by_order_no.await_args.args
+        assert cleared[1]["entitlement_pending"] is False
+        assert cleared[1]["needs_manual"] is True
+
     async def test_resettle_does_not_go_through_claim_paid(self):
         """order 已經是 paid——resettle 直接呼叫 handler，不能再經過 claim_paid 那道
         『status!=paid 才施加』的閘門，否則會被自己的 ALREADY_PAID 短路擋死。"""

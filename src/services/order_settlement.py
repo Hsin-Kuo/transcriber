@@ -269,6 +269,23 @@ class OrderSettlement:
         """
         order_no = order["merchant_order_no"]
         order_type = order.get("type", "subscription")
+
+        # F1（跨 PR 複檢）：退款守門。iter_entitlement_pending 已排除 refund_seen，但
+        # sweep 撈單（cursor）到這裡之間可能剛發生退款——重讀一次 order 擋住這個競態窗。
+        # 已退款的單絕不能重跑 handler（會把已撤銷的訂閱開回來、對已作廢的發票重開一張
+        # 真發票），改成清掉 entitlement_pending 旗標 + 標 needs_manual 讓 admin 收斂。
+        fresh = await self.order_repo.get_by_order_no(order_no)
+        if fresh and fresh.get("refund_seen"):
+            log.warning("settle.resettle_entitlement.skipped_refunded", order_no=order_no)
+            try:
+                await self.order_repo.update_by_order_no(order_no, {
+                    "entitlement_pending": False, "needs_manual": True,
+                })
+            except Exception as exc:
+                log.error("settle.resettle_entitlement.refund_skip_flag_failed",
+                          order_no=order_no, error=str(exc))
+            return
+
         n = PaymentNotification(
             order_no=order_no,
             success=True,
