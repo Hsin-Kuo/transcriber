@@ -276,6 +276,14 @@ class CredentialFlow:
             "password_reset_expires": None,
             "password_reset_requested_at": None,
         })
+        # P2-12：自助重設密碼＝舊 session 全失效，跟 admin 重設密碼同一個道理（換密碼
+        # 代表使用者認定舊 session 可能已不可信，不撤銷的話舊 refresh token 還能繼續
+        # 換出新 access token）。包 try/except 不讓這步失敗擋住密碼重設本身成功的結果。
+        try:
+            await self.user_repo.revoke_all_refresh_tokens(str(user["_id"]))
+        except Exception as e:
+            log.warning("credential_flow.reset_password.revoke_refresh_failed",
+                        user_id=str(user["_id"]), error=str(e))
         return CredentialOutcome(
             response={"message": "密碼已重設成功，請使用新密碼登入"},
             audit=AuditDescriptor("reset_password", str(user["_id"]), 200, f"密碼重設成功：{user.get('email')}"),

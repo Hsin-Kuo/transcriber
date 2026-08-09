@@ -691,6 +691,14 @@ async def refresh_token(
     """刷新 Access Token。
 
     從 httpOnly cookie 讀 refresh token，舊版傳 body 的呼叫一律拒絕（401）。
+
+    P2-12（金流體檢）：舊版只驗 refresh token 本身有沒有被撤銷/過期，沒有回頭查
+    使用者目前的帳號狀態——一個被 admin 停用/軟刪的帳號，只要手上還握著沒過期的
+    refresh token，就能一路刷出新的 access token，等於停用/刪除形同虛設。這裡比照
+    `/auth/me`（:888）的既有檢查，補一次 DB 讀取；同時新 access token 的 role/email
+    改成從 DB user doc 取（而不是沿用舊 refresh token 裡的 claim）——否則一個被降權
+    的 admin，只要 refresh token 還沒過期，refresh 一次就能拿回帶 role=admin 的新
+    access token，完全繞過 admin.py 的降權動作。
     """
     cookie_token = request.cookies.get(REFRESH_COOKIE_NAME)
     if not cookie_token:
@@ -702,8 +710,11 @@ async def refresh_token(
 
     token_data = verify_token(cookie_token, "refresh")
     if not token_data:
-        # 順手清掉壞掉的 cookie，避免下次再帶錯
+        # 順手清掉壞掉的 cookie，避免下次再帶錯。access 也一起清（L1，第二意見審查）：
+        # 停用帳號走的是 revoke_all → 下次 refresh 撞的是下面的 revoked 分支，不是這裡，
+        # 但一致地兩個都清，避免任一 401 路徑留下半截 session。
         clear_refresh_cookie(response)
+        clear_access_cookie(response)
         raise api_error(
             "AUTH_REFRESH_TOKEN_INVALID",
             "Invalid refresh token",
@@ -713,18 +724,37 @@ async def refresh_token(
     # 驗證 Token 是否在資料庫中且未被撤銷
     user_repo = UserRepository(db)
     if not await user_repo.verify_refresh_token(token_data.user_id, cookie_token):
+        # L1：access cookie 一起清。admin 停用/重設密碼會 revoke_all_refresh_tokens
+        # 清空陣列，被停用者下次 refresh 最常撞的就是這條（早於下面的 is_active 檢查），
+        # 不在這裡清 access 就會留到 ≤15 分鐘自然過期。
         clear_refresh_cookie(response)
+        clear_access_cookie(response)
         raise api_error(
             "AUTH_REFRESH_TOKEN_REVOKED",
             "Refresh token has been revoked or expired",
             status.HTTP_401_UNAUTHORIZED,
         )
 
-    # 生成新 Access Token；refresh token 沿用不旋轉（簡化 client 同步）
+    # P2-12：帳號目前狀態要重查 DB（不能信任 refresh token 裡的舊 claim）。
+    # 停用/軟刪之後手上仍握有效 refresh token 的情境，必須在這裡截斷。
+    user = await user_repo.get_by_id(token_data.user_id)
+    if not user or user.get("deleted_at") or not user.get("is_active", True):
+        clear_refresh_cookie(response)
+        clear_access_cookie(response)
+        raise api_error(
+            "AUTH_REFRESH_USER_INACTIVE",
+            "User account is inactive or deleted",
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    # 生成新 Access Token；refresh token 沿用不旋轉（簡化 client 同步）。
+    # role/email 一律從 DB user doc 取（P2-12），不再沿用 token_data 裡的舊 claim。
     access_token, expires_at = create_access_token({
         "sub": token_data.user_id,
-        "email": token_data.email,
-        "role": token_data.role
+        # email fallback 到舊 claim（L3）：TokenData.email 是必填 str，DB doc 極少數
+        # 缺 email 時若鑄出 email=None 會讓後續 verify_token 的 pydantic 驗證每請求 500。
+        "email": user.get("email") or token_data.email,
+        "role": user.get("role", "user")
     })
     set_access_cookie(response, access_token)
 
@@ -843,6 +873,17 @@ async def change_password(
     await user_repo.update(str(current_user["_id"]), {
         "password_hash": new_password_hash
     })
+
+    # L4（第二意見審查）：改密碼撤銷全部 refresh token，與自助/admin 重設一致。
+    # 威脅：帳號被盜、使用者改密碼想趕走入侵者——不撤銷的話入侵者手上的 refresh
+    # 仍有效 30 天。連同當前 session 一起撤（此端點無 response 不重簽 cookie，當前
+    # 分頁在 access 過期後需重登）——自願改密碼後重登屬可接受摩擦，且是驅逐入侵者
+    # 的正解。撤銷失敗不擋改密碼本身（try/except）。
+    try:
+        await user_repo.revoke_all_refresh_tokens(str(current_user["_id"]))
+    except Exception as e:
+        log.warning("auth.change_password.revoke_failed",
+                    user_id=str(current_user["_id"]), error=str(e))
 
     # 記錄密碼變更成功
     audit_logger = get_audit_logger()

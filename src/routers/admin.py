@@ -354,6 +354,16 @@ async def update_user_status(
 
     success = await user_repo.update(user_id, {"is_active": body.is_active})
 
+    if success and not body.is_active:
+        # P2-12：停用帳號要連動撤銷全部 refresh token，否則使用者手上舊 session
+        # 只要還沒過期就能一路 refresh 出新 access token，停用形同虛設（啟用時不用
+        # 動 refresh_tokens——沒有安全疑慮，且用戶原本的 session 應該自然恢復）。
+        # 包 try/except 避免這步失敗拖垮主流程（帳號畢竟已經停用成功）。
+        try:
+            await user_repo.revoke_all_refresh_tokens(user_id)
+        except Exception as e:
+            logger.warning("admin.disable_user.revoke_refresh_failed", user_id=user_id, error=str(e))
+
     if success:
         action = "enable_user" if body.is_active else "disable_user"
         await log_admin_action(
@@ -392,7 +402,14 @@ async def update_user_role(
     admin: dict = Depends(require_permission(Permission.ADMIN_GRANT)),
     db = Depends(get_database)
 ):
-    """修改用戶角色（管理員）"""
+    """修改用戶角色（管理員）
+
+    P2-12：這裡刻意不撤銷 refresh token。`/auth/refresh` 已經改成新 access token 的
+    role/email 一律從 DB user doc 現讀（不再沿用 refresh token 裡的舊 claim），所以
+    降權後即使舊 refresh token 還沒過期，下一次 refresh 也只會鑄出「DB 當前 role」的
+    access token，不會讓被降權的 admin 拿回 admin 權限——沒有安全洞需要靠撤銷 session
+    來補，維持原有登入狀態的使用者體驗即可。
+    """
     if body.role not in ["user", "admin"]:
         raise api_error("ADMIN_INVALID_ROLE",
                         "Role must be 'user' or 'admin'",
@@ -802,6 +819,13 @@ async def reset_user_password(
     success = await user_repo.update(user_id, {"password_hash": hashed_password})
 
     if success:
+        # P2-12：換密碼＝舊 session 全失效是標準做法（不撤銷的話，被盜帳號的舊
+        # session 在密碼重設後仍能繼續用 refresh token 換新 access token）。
+        try:
+            await user_repo.revoke_all_refresh_tokens(user_id)
+        except Exception as e:
+            logger.warning("admin.reset_password.revoke_refresh_failed", user_id=user_id, error=str(e))
+
         await log_admin_action(
             admin_id=str(admin["_id"]),
             action="reset_password",
@@ -1647,11 +1671,13 @@ async def reissue_invoice(
             db, invoice, corrected_buyer=corrected_buyer, admin_id=str(admin["_id"]),
         )
     except invoice_service.ReissueConflictError:
-        # 搶不到 reissue lease：狀態已變更，或另一個 admin 正在重開同一張（PR-B 驗收
-        # finding #2）——不能讓雙擊/併發各自成功送出，變出兩張真發票。
+        # 搶不到 reissue lease（狀態已變更，或另一個 admin 正在重開同一張——PR-B 驗收
+        # finding #2）；或撞到 P2-14 的 `uniq_active_invoice_per_order` DB 原子防線
+        # （該 order 已有另一顆活躍發票，多半是另一個 reissue 剛好搶先落地）——兩種
+        # 語意都指向「有其他操作正在進行或狀態已變」，訊息一併涵蓋，不細分。
         raise api_error(
             "ADMIN_INVOICE_REISSUE_CONFLICT",
-            "Invoice is currently being reissued elsewhere or its status has changed",
+            "Invoice number conflict, or this order already has an invoice in progress — please refresh and retry",
             status.HTTP_409_CONFLICT,
         )
     except DuplicateKeyError:

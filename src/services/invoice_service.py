@@ -15,6 +15,7 @@
 走 judgment-rubrics §5。
 """
 import asyncio
+import os
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
@@ -71,6 +72,26 @@ class RetryInFlightError(Exception):
     """admin_retry 搶不到 processing lease（sweep 或另一請求正在處理同一張發票）——
     admin router 轉 409，不視為失敗、不寫 audit（PR-B 驗收 finding #4）。"""
     pass
+
+
+def _duplicate_key_hits_order_index(e: DuplicateKeyError) -> bool:
+    """P2-14：區分 `reissue()` create 重試迴圈撞到的是哪個 unique index。
+
+    `uniq_active_invoice_per_order`（order_no）代表該 order 已經有其他活躍發票
+    （issued/pending/failed）——這不是「data_id 序號算錯，重算一次就好」的情況，
+    doc 邏輯本身就衝突（雙開），繼續在迴圈裡重算 seq 只會讓第二方永遠撞牆。
+    `data_id` 撞號才是既有的序號競爭，維持原本重算一次的行為。
+
+    優先看結構化的 `keyPattern`；理論上不會缺，但某些 driver/伺服器版本組合下
+    `details` 可能不完整，保守 fallback 用 errmsg 是否含 index name 字串判斷。
+    """
+    details = getattr(e, "details", None) or {}
+    key_pattern = details.get("keyPattern") or {}
+    if "data_id" in key_pattern:
+        return False
+    if "order_no" in key_pattern:
+        return True
+    return "uniq_active_invoice_per_order" in str(e)
 
 
 class ReissueConflictError(Exception):
@@ -317,6 +338,26 @@ def _capture_invoice_alert(invoice: Dict[str, Any], kind: str, detail: str) -> N
         pass
 
 
+def _capture_invoice_gap_recovered(order: Dict[str, Any]) -> None:
+    """P2-13：每補一筆 gap sweep 都要看得到——每一筆都代表 settle() 的
+    `create_background_task(issue_for_order(...))` fire-and-forget 起點曾經掉包
+    （process kill 於 upsert_initial 落地之前），不是無害的正常路徑，用 warning 而非
+    info，讓它在 Sentry 浮現而不是被 log 洪流蓋掉。形狀比照 `_capture_invoice_alert`。
+    """
+    try:
+        import sentry_sdk
+        with sentry_sdk.push_scope() as scope:
+            scope.set_tag("invoice.issue", "gap_recovered")
+            scope.set_context("invoice_gap", {
+                "order_no": order.get("merchant_order_no"),
+                "user_id": order.get("user_id"),
+                "paid_at": order.get("paid_at"),
+            })
+            sentry_sdk.capture_message("invoice.gap_recovered", level="warning")
+    except Exception:
+        pass
+
+
 async def _finalize_needs_manual(invoice_repo: InvoiceRepository, invoice: Dict[str, Any], *,
                                   kind: str, desc: str, attempts: Optional[int] = None,
                                   last_error: Optional[Dict[str, Any]] = None) -> None:
@@ -443,6 +484,17 @@ async def _degrade_and_reopen(db, invoice_repo: InvoiceRepository, claimed: Dict
 
     （成功後應通知使用者載具未生效——PR-A 先以 log 記錄，實際 email 通知留待後續 PR，
     見交付報告「偏差」章節。）
+
+    P2-14 相容性確認：這裡是 `update(claimed["_id"], {"status": "pending", ...})`——
+    改的是同一顆既有 doc（`_id` 不變、`order_no` 不變），不是 insert 新 doc。呼叫路徑
+    上，`claimed` 一定是剛被 `claim_for_processing` 搶到 lease 的 doc，而該方法的搶佔
+    條件是 `status ∈ {pending, failed}`——也就是說在這次 update 之前，`claimed` 已經是
+    `uniq_active_invoice_per_order`（issued/pending/failed）partial index 底下、該
+    order_no 唯一一顆佔用中的活躍 doc。這次 update 把 status 從 pending/failed 改成
+    pending，仍落在同一個 partial filter 集合內、`_id` 也沒變——對該 order_no 而言，
+    「活躍 doc 數」在 update 前後都是 1（同一顆），不會新增第二個成員，因此不可能
+    撞上這顆 unique index，不需要額外防護。（真正需要防護的是 insert 新 doc 的路徑，
+    即 `reissue()` 的 create 重試迴圈，已在該處理。）
     """
     new_buyer = {
         "invoice_type": "personal", "carrier_type": None, "carrier_num": None,
@@ -632,7 +684,12 @@ async def reissue(db, invoice: Dict[str, Any], corrected_buyer: Optional[Dict[st
                     "deadline_at": _deadline_at(order, buyer, now),
                 })
                 break
-            except DuplicateKeyError:
+            except DuplicateKeyError as e:
+                if _duplicate_key_hits_order_index(e):
+                    # P2-14：撞到「該 order 已有活躍發票」的原子防線——不是 data_id
+                    # 序號競爭，重算 seq 再試也沒用，直接轉 409 讓 router 回應衝突
+                    # （router 已有 ReissueConflictError → 409 的既有處理）。
+                    raise ReissueConflictError(invoice.get("_id")) from e
                 continue
         else:
             raise DuplicateKeyError(f"reissue data_id 撞號重算失敗：order_no={order_no}")
@@ -646,6 +703,13 @@ async def reissue(db, invoice: Dict[str, Any], corrected_buyer: Optional[Dict[st
 
 
 # ── 背景 sweep（比照 renewal_service 形狀）───────────────────────────────────
+
+# P2-13：gap sweep 用獨立 window lease，每 1800 秒（30 分鐘）最多一輪——形狀比照
+# payment_reconciliation.py 的 refund_audit lane（該檔 REFUND_AUDIT_LEASE_WINDOW_SECONDS
+# 的同一個理由）：這是「補洞」的 fallback 掃描，不需要跟主迴圈的 600 秒節奏綁在一起，
+# 用獨立鎖讓它照自己的節奏走，也不會被主迴圈搶走每輪的執行權。
+INVOICE_GAP_SWEEP_WINDOW_SECONDS = 1800
+
 
 async def periodic_invoice_retry(db, interval_seconds: int = INVOICE_RETRY_INTERVAL_SECONDS) -> None:
     """啟動嘗試搶當前時間窗執行權，搶到才立即跑一次；搶不到等下一輪。之後每 interval
@@ -667,6 +731,21 @@ async def periodic_invoice_retry(db, interval_seconds: int = INVOICE_RETRY_INTER
                 await run_invoice_retry_sweep(db)
             except Exception as e:
                 log.error("invoice.sweep.failed", error=str(e), exc_info=True)
+
+        # P2-13：獨立 window lease，跟上面主迴圈的 lease 完全分開判定——即使上面
+        # 搶輸了（should_run=False），這段仍照自己 30 分鐘一輪的節奏獨立判斷
+        # （比照 payment_reconciliation.periodic_payment_reconciliation 的 refund_audit lane）。
+        should_run_gap = True
+        try:
+            should_run_gap = await lease_repo.claim_window("invoice_gap", INVOICE_GAP_SWEEP_WINDOW_SECONDS)
+        except Exception as e:
+            log.warning("invoice.gap_sweep.lease_check_failed", error=str(e))
+        if should_run_gap:
+            try:
+                await run_invoice_gap_sweep(db)
+            except Exception as e:
+                log.error("invoice.gap_sweep.failed", error=str(e), exc_info=True)
+
         await asyncio.sleep(interval_seconds)
 
 
@@ -734,4 +813,70 @@ async def run_invoice_retry_sweep(db) -> Dict[str, int]:
 
     if any(counts.values()):
         log.info("invoice.sweep.completed", **counts)
+    return counts
+
+
+# ── P2-13：開票補洞 sweep ──────────────────────────────────────────────────
+
+async def run_invoice_gap_sweep(db) -> Dict[str, int]:
+    """一輪掃描：撈「已付款但可能從未觸發開票」的訂單，補呼叫 issue_for_order。
+
+    動機（見本檔頂部 docstring 呼叫鏈）：`OrderSettlement.settle()` 的
+    `create_background_task(issue_for_order(...))` 是唯一的開票起點，若這個
+    asyncio task 在 `upsert_initial` 落地前就被 process kill（部署重啟、OOM、
+    uvicorn worker 被 supervisor 殺掉），這筆訂單永遠不會有任何 invoice doc，
+    且完全不留痕跡（沒有例外、沒有 log、`run_invoice_retry_sweep` 也查無此 doc）。
+    `run_invoice_retry_sweep` 只能掃「已存在」的 invoices doc，對這種「doc 從未
+    落地」的洞結構性補不到——這支 sweep 反過來從 orders 找，用
+    `invoice_repo.exists_any_by_order_no`（**任何**狀態都算數，不只 issued）判斷
+    是否真的是洞：有 doc（不論 issued/pending/failed/voided/needs_manual）代表
+    開票流程有跑過，後續狀態演進歸 retry sweep / reissue 管，這支不重複介入。
+
+    `issue_for_order` 本身冪等（upsert_initial 用 data_id 當唯一鍵 + `_attempt_issue`
+    走 claim lease），補呼叫它不會與正常路徑或 retry sweep 衝突。
+    """
+    # M2（第二意見審查）：retro 補開票必須明確 opt-in。未設 INVOICE_GAP_EPOCH 時整支
+    # sweep 是 no-op——稅務文件不可逆，寧可不補也不能在首次部署一次性 retro 補開過去
+    # 7 天的單（可能已在速買配後台人工開過票 → 重複開真發票）。上線流程：確認發票整合
+    # 全量生效後，把 epoch 設成當下時間戳，此後只補 epoch 之後的付款漏單。
+    epoch_raw = os.getenv("INVOICE_GAP_EPOCH")
+    if not epoch_raw:
+        log.warning("invoice.gap_sweep.disabled_no_epoch")
+        return {"gap_issued": 0, "has_doc": 0, "errored": 0, "skipped_no_epoch": 1}
+    try:
+        epoch = float(epoch_raw)
+    except ValueError:
+        log.error("invoice.gap_sweep.bad_epoch", value_len=len(epoch_raw))
+        return {"gap_issued": 0, "has_doc": 0, "errored": 0, "skipped_bad_epoch": 1}
+
+    order_repo = OrderRepository(db)
+    invoice_repo = InvoiceRepository(db)
+    now = get_utc_timestamp()
+    counts = {"gap_issued": 0, "has_doc": 0, "errored": 0}
+
+    # 撈單當下物化成 list（比照 run_invoice_retry_sweep 的既有理由）：每筆都可能
+    # 觸發 issue_for_order → httpx 呼叫，長時間掛在迴圈中不宜依賴 motor cursor 存活。
+    candidates = [o async for o in order_repo.iter_paid_invoice_gap_candidates(now, epoch)]
+
+    for order in candidates:
+        order_no = order.get("merchant_order_no")
+        try:
+            if await invoice_repo.exists_any_by_order_no(order_no):
+                counts["has_doc"] += 1
+            else:
+                log.info("invoice.gap_sweep.recovering", order_no=order_no)
+                await issue_for_order(db, order)
+                _capture_invoice_gap_recovered(order)
+                counts["gap_issued"] += 1
+            # 檢查過就 stamp 推進輪替游標（M1）——不論補開或已有 doc，都讓這筆排到隊尾，
+            # 積壓 > batch 上限時下一輪換最久沒查的一批。stamp 失敗不影響本筆結果。
+            await order_repo.stamp_invoice_gap_checked(order_no, now)
+        except Exception as e:
+            # 單筆炸掉不可讓整輪 sweep 停擺。stamp 也在 try 內：poison order 若 stamp 前就
+            # 炸，下一輪（invoice_gap_checked_at 仍為舊值/缺）會再被撈到重試，不會卡佇列頭。
+            counts["errored"] += 1
+            log.error("invoice.gap_sweep.item_failed", order_no=order_no, error=str(e), exc_info=True)
+
+    if any(counts.values()):
+        log.info("invoice.gap_sweep.completed", **counts)
     return counts
