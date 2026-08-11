@@ -458,6 +458,46 @@ class EmailService:
             html_content=html_content, text_content=text_content,
         )
 
+    # 訂閱成功通知文案（zh-TW / en）：首購開通 / 續扣成功。body_template 含
+    # {plan}/{amount}/{next_charge} 佔位——這些值皆為伺服器端安全來源（見
+    # order_settlement._send_subscription_email_task），仍統一走下方的 html.escape 一次。
+    _SUBSCRIPTION_SUCCESS_COPY = {
+        "purchase_confirmed": {
+            "zh-TW": ("訂閱已開通", "感謝您訂閱 SoundLite {plan}。您的方案已開通，所有 {plan} 功能即刻可用。下次自動續扣日為 {next_charge}，可隨時在「設定 → 方案」管理或取消訂閱。", "開始使用"),
+            "en": ("Your subscription is active", "Thanks for subscribing to SoundLite {plan}. Your plan is now active and every {plan} feature is ready to use. Your next automatic renewal is on {next_charge} — manage or cancel anytime under Settings → Plan.", "Start using"),
+        },
+        "renewal_succeeded": {
+            "zh-TW": ("訂閱已自動續扣", "您的 SoundLite {plan} 已完成本期自動續扣，本次扣款 NT${amount}，服務不中斷。下次自動續扣日為 {next_charge}。如需管理或取消訂閱，請至「設定 → 方案」。", "管理訂閱"),
+            "en": ("Your subscription renewed", "Your SoundLite {plan} renewed automatically. Amount charged this cycle: NT${amount}. Your service continues uninterrupted; the next automatic charge is on {next_charge}. Manage or cancel anytime under Settings → Plan.", "Manage subscription"),
+        },
+    }
+
+    async def send_subscription_success_email(
+        self, to_email: str, kind: str, lang: str = "zh-TW", *,
+        plan: str = "", amount=0, next_charge: str = "",
+    ) -> bool:
+        """訂閱成功側通知（首購開通 / 續扣成功）。比照 send_dunning_email 的形狀。"""
+        variants = self._SUBSCRIPTION_SUCCESS_COPY.get(kind)
+        if not variants:
+            return False
+        heading, body_template, cta_label = variants.get(lang) or variants["zh-TW"]
+        body = body_template.format(plan=plan, amount=amount, next_charge=next_charge)
+        cta_url = f"{self.frontend_url.rstrip('/')}/tasks" if kind == "purchase_confirmed" \
+            else f"{self.frontend_url.rstrip('/')}/settings?panel=plan"
+        html_content = self._render_branded_email(
+            heading=heading,
+            intro_html=f'<p>{html.escape(body)}</p>',
+            cta_label=cta_label,
+            cta_url=cta_url,
+            preheader=body[:80],
+        )
+        text_content = self._render_branded_text(f"{heading}\n\n{body}\n\n{cta_label}: {cta_url}")
+        subject = f"{heading} - SoundLite"
+        return await self._send_email(
+            to_email=to_email, subject=subject,
+            html_content=html_content, text_content=text_content,
+        )
+
     async def send_audio_grace_period_email(
         self,
         to_email: str,
