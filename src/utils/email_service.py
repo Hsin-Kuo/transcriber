@@ -458,10 +458,13 @@ class EmailService:
             html_content=html_content, text_content=text_content,
         )
 
-    # 訂閱成功通知文案（zh-TW / en）：首購開通 / 續扣成功。body_template 含
-    # {plan}/{amount}/{next_charge} 佔位——這些值皆為伺服器端安全來源（見
-    # order_settlement._send_subscription_email_task），仍統一走下方的 html.escape 一次。
-    _SUBSCRIPTION_SUCCESS_COPY = {
+    # 訂閱生命週期通知文案（zh-TW / en）：首購開通 / 續扣成功 / 退款撤訂閱 / 加購完成 /
+    # 訂閱到期轉免費 / 已排定取消。body_template 含 {plan}/{amount}/{next_charge}/
+    # {period_end} 佔位——這些值皆為伺服器端安全來源（見 order_settlement /
+    # quota.py / routers/subscriptions.py 各自的背景寄信 task），仍統一走下方的
+    # html.escape 一次。template 只引用自己需要的佔位符，呼叫端一律四個都傳
+    # （.format 對多餘的 kwargs 無感；但缺了某個 template 有引用的 key 會 KeyError）。
+    _SUBSCRIPTION_COPY = {
         "purchase_confirmed": {
             "zh-TW": ("訂閱已開通", "感謝您訂閱 SoundLite {plan}。您的方案已開通，所有 {plan} 功能即刻可用。下次自動續扣日為 {next_charge}，可隨時在「設定 → 方案」管理或取消訂閱。", "開始使用"),
             "en": ("Your subscription is active", "Thanks for subscribing to SoundLite {plan}. Your plan is now active and every {plan} feature is ready to use. Your next automatic renewal is on {next_charge} — manage or cancel anytime under Settings → Plan.", "Start using"),
@@ -470,20 +473,48 @@ class EmailService:
             "zh-TW": ("訂閱已自動續扣", "您的 SoundLite {plan} 已完成本期自動續扣，本次扣款 NT${amount}，服務不中斷。下次自動續扣日為 {next_charge}。如需管理或取消訂閱，請至「設定 → 方案」。", "管理訂閱"),
             "en": ("Your subscription renewed", "Your SoundLite {plan} renewed automatically. Amount charged this cycle: NT${amount}. Your service continues uninterrupted; the next automatic charge is on {next_charge}. Manage or cancel anytime under Settings → Plan.", "Manage subscription"),
         },
+        "refund_revoked": {
+            "zh-TW": ("訂閱已因退款取消", "我們已處理您 SoundLite {plan} 的退款，訂閱已取消，帳號已轉為免費版。您的資料仍完整保留，隨時可重新訂閱。", "重新訂閱"),
+            "en": ("Your subscription was cancelled (refund)", "We've processed the refund for your SoundLite {plan}. Your subscription is cancelled and your account is now on Free. Your data is intact — you can re-subscribe anytime.", "Re-subscribe"),
+        },
+        "addon_confirmed": {
+            "zh-TW": ("加購已完成", "感謝您購買 SoundLite 加購方案。本次加購 NT${amount} 已生效，額度已加入您的帳號，立即可用。", "開始使用"),
+            "en": ("Your add-on is active", "Thanks for your SoundLite add-on purchase (NT${amount}). Your extra quota has been added to your account and is ready to use.", "Start using"),
+        },
+        "subscription_ended": {
+            "zh-TW": ("訂閱已到期，已轉為免費版", "您先前排定的取消已生效，SoundLite {plan} 訂閱已於本期結束，帳號已轉為免費版。您的資料仍完整保留，隨時可重新訂閱。", "重新訂閱"),
+            "en": ("Your subscription has ended", "Your scheduled cancellation has taken effect. Your SoundLite {plan} has ended and your account is now on Free. Your data is intact — re-subscribe anytime.", "Re-subscribe"),
+        },
+        "cancel_scheduled": {
+            "zh-TW": ("已排定取消訂閱", "我們已收到您的取消要求。您的 SoundLite {plan} 將於 {period_end} 到期，在此之前所有功能仍可正常使用。改變主意的話，可隨時在設定中恢復訂閱。", "管理訂閱"),
+            "en": ("Cancellation scheduled", "We've received your cancellation. Your SoundLite {plan} stays active until {period_end}, then moves to Free. Changed your mind? Resume anytime in Settings.", "Manage subscription"),
+        },
     }
 
-    async def send_subscription_success_email(
+    # kind → CTA 目的地：開通類（首購/加購）導去開始使用；其餘（續扣/退款/到期/取消）
+    # 導去方案設定頁。集中一個 map，避免散落的 if/elif 隨 kind 增加而長蟲。
+    _SUBSCRIPTION_CTA_PATH = {
+        "purchase_confirmed": "/tasks",
+        "addon_confirmed": "/tasks",
+        "renewal_succeeded": "/settings?panel=plan",
+        "refund_revoked": "/settings?panel=plan",
+        "subscription_ended": "/settings?panel=plan",
+        "cancel_scheduled": "/settings?panel=plan",
+    }
+
+    async def send_subscription_email(
         self, to_email: str, kind: str, lang: str = "zh-TW", *,
-        plan: str = "", amount=0, next_charge: str = "",
+        plan: str = "", amount=0, next_charge: str = "", period_end: str = "",
     ) -> bool:
-        """訂閱成功側通知（首購開通 / 續扣成功）。比照 send_dunning_email 的形狀。"""
-        variants = self._SUBSCRIPTION_SUCCESS_COPY.get(kind)
+        """訂閱生命週期通知（首購開通 / 續扣成功 / 退款撤訂閱 / 加購完成 /
+        訂閱到期轉免費 / 已排定取消）。比照 send_dunning_email 的形狀。"""
+        variants = self._SUBSCRIPTION_COPY.get(kind)
         if not variants:
             return False
         heading, body_template, cta_label = variants.get(lang) or variants["zh-TW"]
-        body = body_template.format(plan=plan, amount=amount, next_charge=next_charge)
-        cta_url = f"{self.frontend_url.rstrip('/')}/tasks" if kind == "purchase_confirmed" \
-            else f"{self.frontend_url.rstrip('/')}/settings?panel=plan"
+        body = body_template.format(plan=plan, amount=amount, next_charge=next_charge, period_end=period_end)
+        cta_path = self._SUBSCRIPTION_CTA_PATH.get(kind, "/settings?panel=plan")
+        cta_url = f"{self.frontend_url.rstrip('/')}{cta_path}"
         html_content = self._render_branded_email(
             heading=heading,
             intro_html=f'<p>{html.escape(body)}</p>',
