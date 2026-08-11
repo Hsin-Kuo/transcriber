@@ -193,6 +193,8 @@ class OrderSettlement:
 
         if result.outcome.value in _INVOICE_TRIGGER_OUTCOMES:
             await self._trigger_invoice(n.order_no)
+        if result.outcome.value in ("activated", "renewed"):
+            self._trigger_subscription_email(n.order_no, result.outcome.value)
         return result
 
     async def _mark_entitlement_pending(self, order_no: str, exc: Exception) -> None:
@@ -243,6 +245,67 @@ class OrderSettlement:
             )
         except Exception as e:
             log.error("invoice.trigger.failed", order_no=order_no, error=str(e), exc_info=True)
+
+    def _trigger_subscription_email(self, order_no: str, outcome: str) -> None:
+        """成功側訂閱通知背景觸發（首購開通 / 續扣成功）。只掛在 settle() 這個公開入口——
+
+        resettle_entitlement 是 crash 補償重跑，不能跟著寄，否則使用者會收到重複的
+        「訂閱已開通/已續扣」信。create_background_task 本身已用 done-callback 把例外
+        送 Sentry + log（不影響呼叫端），呼叫端零負擔（同步方法，不 await）。
+        """
+        create_background_task(
+            self._send_subscription_email_task(order_no, outcome),
+            name=f"sub_email:{order_no}",
+        )
+
+    async def _send_subscription_email_task(self, order_no: str, outcome: str) -> None:
+        """背景寄送成功側訂閱通知（best-effort，絕不拋例外——由 create_background_task
+        排程，例外只會流向 Sentry，不會回到呼叫端）。"""
+        try:
+            order = await self.order_repo.get_by_order_no(order_no)
+            if not order:
+                log.warning("subscription.success_email.order_not_found", order_no=order_no)
+                return
+            user_id = order["user_id"]
+            user = await self.user_repo.get_by_id(user_id)
+            if not user:
+                log.warning("subscription.success_email.user_not_found", order_no=order_no, user_id=user_id)
+                return
+            to = user.get("email")
+            if not to or user.get("email_bounced"):
+                return
+
+            from ..models.quota import QUOTA_TIERS, QuotaTier
+
+            lang = (user.get("preferences") or {}).get("language", "zh-TW")
+            kind = "purchase_confirmed" if outcome == "activated" else "renewal_succeeded"
+            tier = (user.get("subscription") or {}).get("tier") or order.get("tier")
+            # 方案顯示名依語系:zh-TW 用 QUOTA_TIERS 的繁中 name（免費版/基礎版/專業版/
+            # 企業版）;en 用 tier 值本身 capitalize（Pro/Basic/…）——QUOTA_TIERS.name
+            # 只有繁中,英文信直接塞繁中方案名會很怪。非法 tier 一律 fallback。
+            try:
+                if lang == "en":
+                    plan = str(QuotaTier(tier).value).capitalize()
+                else:
+                    plan = QUOTA_TIERS[QuotaTier(tier)]["name"]
+            except (ValueError, KeyError):
+                plan = str(tier).capitalize()
+            amount = order.get("amount_twd", 0)
+            sub = user.get("subscription") or {}
+            next_charge_ts = sub.get("next_charge_at")
+            next_charge = (
+                datetime.utcfromtimestamp(next_charge_ts).strftime("%Y-%m-%d")
+                if next_charge_ts else ""
+            )
+
+            from ..utils.email_service import get_email_service
+            svc = get_email_service()
+            await svc.send_subscription_success_email(
+                to_email=to, kind=kind, lang=lang,
+                plan=plan, amount=amount, next_charge=next_charge,
+            )
+        except Exception as e:
+            log.error("subscription.success_email.failed", order_no=order_no, outcome=outcome, error=str(e), exc_info=True)
 
     # ── 補結算 entitlement_pending（P1-9 對帳 sweep 第二段）─────────────────────
 
