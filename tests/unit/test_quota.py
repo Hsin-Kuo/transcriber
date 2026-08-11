@@ -10,6 +10,7 @@ import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -259,6 +260,101 @@ class TestMonthlyReset:
         assert expired is False
         assert user["quota"]["tier"] == "basic"  # in-memory quota 未被降級
         assert db.users.calls == 1               # 有嘗試寫，但 guard 擋下
+
+
+class TestExpireSubscriptionEmail:
+    """規格 D：訂閱到期降 free 通知——只在真的降級（guard 命中）才寄
+    subscription_ended；guard-miss 的 no-op 不寄；寄信例外絕不拖垮
+    `_expire_subscription` 本身的降級結果。"""
+
+    @staticmethod
+    def _fake_db(matched_count: int):
+        class _Result:
+            pass
+
+        _Result.matched_count = matched_count
+
+        class _FakeUsers:
+            async def update_one(self, flt, update):
+                return _Result()
+
+        class _FakeDB:
+            def __init__(self):
+                self.users = _FakeUsers()
+
+        return _FakeDB()
+
+    @staticmethod
+    def _patch_email_service(monkeypatch):
+        from src.utils import email_service as email_service_mod
+
+        svc = AsyncMock()
+        svc.send_subscription_email = AsyncMock(return_value=True)
+        monkeypatch.setattr(email_service_mod, "get_email_service", lambda: svc)
+        return svc
+
+    async def test_guard_hit_sends_subscription_ended(self, monkeypatch):
+        db = self._fake_db(matched_count=1)
+        user = {
+            "_id": "507f1f77bcf86cd799439011",
+            "email": "user@example.com",
+            "subscription": {"tier": "pro"},
+            "preferences": {"language": "zh-TW"},
+        }
+        svc = self._patch_email_service(monkeypatch)
+        expired = await QuotaManager._expire_subscription(db, user)
+        assert expired is True
+        svc.send_subscription_email.assert_awaited_once()
+        kwargs = svc.send_subscription_email.await_args.kwargs
+        assert kwargs["kind"] == "subscription_ended"
+        assert kwargs["plan"] == "專業版"  # 快照的 tier（降級前），非已被覆寫成 free 的 quota
+
+    async def test_guard_hit_en_lang_uses_capitalized_tier(self, monkeypatch):
+        db = self._fake_db(matched_count=1)
+        user = {
+            "_id": "507f1f77bcf86cd799439011",
+            "email": "user@example.com",
+            "subscription": {"tier": "pro"},
+            "preferences": {"language": "en"},
+        }
+        svc = self._patch_email_service(monkeypatch)
+        await QuotaManager._expire_subscription(db, user)
+        kwargs = svc.send_subscription_email.await_args.kwargs
+        assert kwargs["lang"] == "en"
+        assert kwargs["plan"] == "Pro"
+
+    async def test_guard_miss_does_not_send_email(self, monkeypatch):
+        db = self._fake_db(matched_count=0)
+        user = {
+            "_id": "507f1f77bcf86cd799439011",
+            "email": "user@example.com",
+            "subscription": {"tier": "pro"},
+        }
+        svc = self._patch_email_service(monkeypatch)
+        expired = await QuotaManager._expire_subscription(db, user)
+        assert expired is False
+        svc.send_subscription_email.assert_not_awaited()
+
+    async def test_no_email_does_not_call_svc(self, monkeypatch):
+        db = self._fake_db(matched_count=1)
+        user = {"_id": "507f1f77bcf86cd799439011", "subscription": {"tier": "pro"}}
+        svc = self._patch_email_service(monkeypatch)
+        expired = await QuotaManager._expire_subscription(db, user)
+        assert expired is True
+        svc.send_subscription_email.assert_not_awaited()
+
+    async def test_email_exception_does_not_break_expire(self, monkeypatch):
+        """寄信例外只 log，`_expire_subscription` 仍要正常回傳 True——不拖垮到期 sweep。"""
+        db = self._fake_db(matched_count=1)
+        user = {
+            "_id": "507f1f77bcf86cd799439011",
+            "email": "user@example.com",
+            "subscription": {"tier": "pro"},
+        }
+        svc = self._patch_email_service(monkeypatch)
+        svc.send_subscription_email = AsyncMock(side_effect=RuntimeError("smtp down"))
+        expired = await QuotaManager._expire_subscription(db, user)
+        assert expired is True
 
 
 class TestMonthlyRefillHelpers:

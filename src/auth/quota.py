@@ -409,7 +409,43 @@ class QuotaManager:
             await reconcile_pinned_audio(db, user_id, "free")
         except Exception as e:
             log.warning("quota.subscription.expire.reconcile_failed", user_id=user_id, error=str(e))
+
+        # 期末取消生效降 free 通知信（best-effort，絕不拖垮到期 sweep）。只在真的降級
+        # （guard 命中，走到這裡）才寄；guard 未命中的 no-op（上方 return False）不寄。
+        await QuotaManager._send_subscription_ended_email(user)
         return True
+
+    @staticmethod
+    async def _send_subscription_ended_email(user: dict) -> None:
+        """訂閱到期轉免費通知（best-effort，例外只 log，絕不拖垮呼叫端的到期 sweep）。
+
+        `user` 是降級前的快照——本函式呼叫時 DB 已被上面的 update_one 改成
+        expired/free，但傳入的 `user` dict 只有 `quota` 欄位被本函式重寫成
+        free_quota，`user["subscription"]` 這個子字典本身沒被動過，因此 tier 仍是
+        降級前的方案（用快照的 tier 才對，不能讀已被覆寫的 quota.tier）。
+        """
+        try:
+            to = user.get("email")
+            if not to or user.get("email_bounced"):
+                return
+            lang = (user.get("preferences") or {}).get("language", "zh-TW")
+            tier = (user.get("subscription") or {}).get("tier")
+            try:
+                if lang == "en":
+                    plan = str(QuotaTier(tier).value).capitalize()
+                else:
+                    plan = QUOTA_TIERS[QuotaTier(tier)]["name"]
+            except (ValueError, KeyError):
+                plan = str(tier).capitalize()
+
+            from src.utils.email_service import get_email_service
+            svc = get_email_service()
+            await svc.send_subscription_email(to_email=to, kind="subscription_ended", lang=lang, plan=plan)
+        except Exception as e:
+            log.error(
+                "quota.subscription_ended_email.failed",
+                user_id=str(user.get("_id")), error=str(e), exc_info=True,
+            )
 
     @staticmethod
     async def reset_user_monthly_quota(db, user_id: str):
