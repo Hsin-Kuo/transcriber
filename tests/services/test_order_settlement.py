@@ -466,6 +466,219 @@ class TestInvoiceTrigger:
         assert s2._invoice_issuer is _default_invoice_issuer
 
 
+# ── settle: 成功側訂閱通知 hook（首購開通 / 續扣成功）─────────────────────────────
+
+class TestSubscriptionSuccessEmailTrigger:
+    """settle() 尾端（開票白名單之後）另掛一道 outcome-keyed 分派點：
+    activated → purchase_confirmed／renewed → renewal_succeeded／granted → addon_confirmed，
+    其餘 outcome 不寄。monkeypatch `_trigger_subscription_email` 本身（同步方法）當 spy，
+    不真的起背景任務——`_trigger_subscription_email`/`_send_subscription_email_task`
+    各自的行為見下方 TestSendSubscriptionEmailTask。
+    """
+
+    async def test_activated_triggers_with_kind_activated(self, monkeypatch):
+        s, order_repo, _ = _make(order=_order(card_token="CT1"))
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_subscription_email", spy)
+        r = await s.settle(PaymentNotification(
+            order_no="SLSUB1", success=True, is_first_payment=True, trade_id="T1",
+        ))
+        assert r.outcome == SettleOutcome.ACTIVATED
+        spy.assert_called_once_with("SLSUB1", "activated")
+
+    async def test_renewed_triggers_with_kind_renewed(self, monkeypatch):
+        user = {"subscription": {"status": "active", "tier": "basic", "created_at": 111, "card_token": "CT1"}}
+        s, order_repo, _ = _make(order=_order(billing_cycle="monthly", status="pending"), user=user)
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_subscription_email", spy)
+        r = await s.settle(PaymentNotification(order_no="SLSUB1", success=True, is_first_payment=False, trade_id="T2"))
+        assert r.outcome == SettleOutcome.RENEWED
+        spy.assert_called_once_with("SLSUB1", "renewed")
+
+    async def test_granted_triggers_with_kind_granted(self, monkeypatch):
+        """extra_quota 加購走開票白名單，也是加購完成信（addon_confirmed）的對象。"""
+        order = _order(merchant_order_no="SLEXT1", type="extra_quota", tier=None, billing_cycle=None,
+                       extra_duration_minutes=120, extra_ai_summaries=0)
+        s, order_repo, _ = _make(order=order)
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_subscription_email", spy)
+        r = await s.settle(PaymentNotification(order_no="SLEXT1", success=True, is_first_payment=True, trade_id="T1"))
+        assert r.outcome == SettleOutcome.GRANTED
+        spy.assert_called_once_with("SLEXT1", "granted")
+
+    async def test_failed_does_not_trigger_subscription_email(self, monkeypatch):
+        s, order_repo, _ = _make(order=_order())
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_subscription_email", spy)
+        r = await s.settle(PaymentNotification(order_no="SLSUB1", success=False, is_first_payment=True))
+        assert r.outcome == SettleOutcome.FAILED
+        spy.assert_not_called()
+
+    async def test_already_paid_does_not_trigger_subscription_email(self, monkeypatch):
+        s, order_repo, _ = _make(order=_order(status="paid"))
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_subscription_email", spy)
+        r = await s.settle(PaymentNotification(order_no="SLSUB1", success=True, is_first_payment=True))
+        assert r.outcome == SettleOutcome.ALREADY_PAID
+        spy.assert_not_called()
+
+    async def test_rejected_duplicate_does_not_trigger_subscription_email(self, monkeypatch):
+        user = {"subscription": {"status": "active", "active_order_no": "OTHER", "cancel_at_period_end": False}}
+        s, order_repo, _ = _make(order=_order(), user=user)
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_subscription_email", spy)
+        r = await s.settle(PaymentNotification(order_no="SLSUB1", success=True, is_first_payment=True))
+        assert r.outcome == SettleOutcome.REJECTED_DUPLICATE
+        spy.assert_not_called()
+
+    async def test_resettle_entitlement_never_triggers_subscription_email(self, monkeypatch):
+        """resettle_entitlement 是 crash 補償重跑，只掛在 settle() 這個公開入口——resettle
+        走的是繞過 claim_paid 的內部路徑，不該重複寄『已開通/已續扣』信。"""
+        order = _order(card_token="CT1")
+        s, order_repo, user_repo = _make(order=order)
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_subscription_email", spy)
+        await s.resettle_entitlement(order)
+        user_repo.update_subscription.assert_awaited_once()  # handler 真的跑了
+        spy.assert_not_called()
+
+
+class TestSendSubscriptionEmailTask:
+    """`_trigger_subscription_email` 本身只是 create_background_task 的 thin wrapper
+    （零負擔）；這裡直接測試背景任務本體 `_send_subscription_email_task`。"""
+
+    def _patch_email_service(self, monkeypatch, svc=None):
+        from src.utils import email_service as email_service_mod
+        svc = svc or AsyncMock()
+        svc.send_subscription_email = AsyncMock(return_value=True)
+        monkeypatch.setattr(email_service_mod, "get_email_service", lambda: svc)
+        return svc
+
+    async def test_trigger_schedules_background_task(self):
+        """`_trigger_subscription_email` 呼叫端零負擔：同步方法，不 await。"""
+        s, order_repo, _ = _make(order=_order())
+        s._send_subscription_email_task = AsyncMock()
+        s._trigger_subscription_email("SLSUB1", "activated")
+        await asyncio.sleep(0)  # 讓出一次 loop，讓 create_background_task 排的 task 真的跑
+        s._send_subscription_email_task.assert_awaited_once_with("SLSUB1", "activated")
+
+    async def test_activated_sends_purchase_confirmed(self, monkeypatch):
+        order = _order(card_token="CT1", amount_twd=299)
+        user = {
+            "email": "user@example.com",
+            "subscription": {"tier": "pro", "next_charge_at": 1893456000},  # 2030-01-01
+            "preferences": {"language": "en"},
+        }
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_subscription_email_task("SLSUB1", "activated")
+        svc.send_subscription_email.assert_awaited_once()
+        kwargs = svc.send_subscription_email.await_args.kwargs
+        assert kwargs["to_email"] == "user@example.com"
+        assert kwargs["kind"] == "purchase_confirmed"
+        assert kwargs["lang"] == "en"
+        assert kwargs["plan"] == "Pro"  # en 語系用 tier 值 capitalize，不塞繁中 name
+        assert kwargs["amount"] == 299
+        assert kwargs["next_charge"] == "2030-01-01"
+
+    async def test_zh_tw_plan_uses_chinese_name(self, monkeypatch):
+        # zh-TW 語系用 QUOTA_TIERS 的繁中 name（對照 en 用 capitalize）。
+        order = _order(card_token="CT1", amount_twd=299)
+        user = {
+            "email": "user@example.com",
+            "subscription": {"tier": "pro", "next_charge_at": 1893456000},
+            "preferences": {"language": "zh-TW"},
+        }
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_subscription_email_task("SLSUB1", "activated")
+        kwargs = svc.send_subscription_email.await_args.kwargs
+        assert kwargs["lang"] == "zh-TW"
+        assert kwargs["plan"] == "專業版"
+
+    async def test_renewed_sends_renewal_succeeded(self, monkeypatch):
+        order = _order(card_token="CT1", amount_twd=99)
+        user = {"email": "user@example.com", "subscription": {"tier": "basic"}}
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_subscription_email_task("SLSUB1", "renewed")
+        kwargs = svc.send_subscription_email.await_args.kwargs
+        assert kwargs["kind"] == "renewal_succeeded"
+        assert kwargs["plan"] == "基礎版"
+        assert kwargs["next_charge"] == ""  # 無 next_charge_at → 空字串
+
+    async def test_granted_sends_addon_confirmed_with_empty_plan(self, monkeypatch):
+        """extra_quota 訂單沒有 tier 概念——addon_confirmed 的 plan 一律傳空字串，
+        不查 tier（也不該因為壞 tier 值而炸）。"""
+        order = _order(merchant_order_no="SLEXT1", type="extra_quota", tier=None,
+                       billing_cycle=None, amount_twd=499)
+        user = {"email": "user@example.com", "subscription": {}}
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_subscription_email_task("SLEXT1", "granted")
+        kwargs = svc.send_subscription_email.await_args.kwargs
+        assert kwargs["kind"] == "addon_confirmed"
+        assert kwargs["plan"] == ""
+        assert kwargs["amount"] == 499
+
+    async def test_tier_fallback_to_order_when_user_has_no_subscription_tier(self, monkeypatch):
+        order = _order(tier="pro")
+        user = {"email": "user@example.com", "subscription": {}}
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_subscription_email_task("SLSUB1", "activated")
+        kwargs = svc.send_subscription_email.await_args.kwargs
+        assert kwargs["plan"] == "專業版"
+
+    async def test_unknown_tier_falls_back_to_capitalized_string(self, monkeypatch):
+        order = _order(tier="mystery_tier")
+        user = {"email": "user@example.com", "subscription": {}}
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_subscription_email_task("SLSUB1", "activated")
+        kwargs = svc.send_subscription_email.await_args.kwargs
+        assert kwargs["plan"] == "Mystery_tier"
+
+    async def test_order_not_found_does_not_call_svc(self, monkeypatch):
+        s, order_repo, user_repo = _make(order=None)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_subscription_email_task("SLSUB1", "activated")
+        svc.send_subscription_email.assert_not_awaited()
+
+    async def test_user_not_found_does_not_call_svc(self, monkeypatch):
+        order = _order()
+        s, order_repo, user_repo = _make(order=order)
+        user_repo.get_by_id = AsyncMock(return_value=None)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_subscription_email_task("SLSUB1", "activated")
+        svc.send_subscription_email.assert_not_awaited()
+
+    async def test_no_email_does_not_call_svc(self, monkeypatch):
+        order = _order()
+        user = {"subscription": {"tier": "basic"}}  # 無 email 欄位
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_subscription_email_task("SLSUB1", "activated")
+        svc.send_subscription_email.assert_not_awaited()
+
+    async def test_email_bounced_does_not_call_svc(self, monkeypatch):
+        order = _order()
+        user = {"email": "user@example.com", "email_bounced": True, "subscription": {"tier": "basic"}}
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_subscription_email_task("SLSUB1", "activated")
+        svc.send_subscription_email.assert_not_awaited()
+
+    async def test_svc_exception_does_not_propagate(self, monkeypatch):
+        """背景任務安全：email service 拋例外絕不能往上冒（呼叫端是 fire-and-forget）。"""
+        order = _order()
+        user = {"email": "user@example.com", "subscription": {"tier": "basic"}}
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        svc.send_subscription_email = AsyncMock(side_effect=RuntimeError("smtp down"))
+        await s._send_subscription_email_task("SLSUB1", "activated")  # 不應拋出
+
+
 # ── settle: 併發重入（P0-1/P0-3 金流體檢核心）───────────────────────────────────
 
 class TestConcurrentReentry:
@@ -1167,6 +1380,163 @@ class TestHandleFullRefund:
         out = await s.handle_full_refund("SLSUB1")
         assert out == "already_processed"
         assert s._dispatch_full_refund.await_count == 1  # 沒有被重新呼叫
+
+
+class TestRefundRevokedEmailTrigger:
+    """`_handle_full_refund_subscription` 只在真正的 "revoked" 成功路徑（所有
+    fail-safe 檢查全過）才寄 refund_revoked——needs_manual 分支（guard-lost、
+    stale order、active_order_no mismatch）一律不寄。monkeypatch
+    `_trigger_lifecycle_email` 當 spy，不真的起背景任務。
+    """
+
+    async def test_revoked_triggers_refund_revoked(self, monkeypatch):
+        order = _order(status="paid", paid_at=1000, type="subscription")
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_lifecycle_email", spy)
+
+        out = await s.handle_full_refund("SLSUB1", trade_id="T1")
+
+        assert out == "revoked"
+        spy.assert_called_once_with("SLSUB1", "refund_revoked")
+
+    async def test_carryover_refund_still_triggers_refund_revoked(self, monkeypatch):
+        # carryover 分支（升級單退款）標 needs_manual（結轉 extra_quota 待人工核對）,但
+        # 訂閱確實已撤（outcome=revoked）——使用者仍該被告知訂閱取消。與 stale/mismatch/
+        # guard-lost「沒撤訂閱就 return」的 needs_manual 分支不同,那些才不寄。
+        order = _order(status="paid", paid_at=1000, type="subscription", carryover_granted=True)
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_lifecycle_email", spy)
+
+        out = await s.handle_full_refund("SLSUB1", trade_id="T1")
+
+        assert out == "revoked"
+        spy.assert_called_once_with("SLSUB1", "refund_revoked")  # 訂閱已撤 → 照寄
+        # 同時仍標 needs_manual（結轉額度待人工），兩件事獨立。
+        assert any(
+            c.args[1].get("needs_manual") is True
+            for c in order_repo.update_by_order_no.await_args_list
+        )
+
+    async def test_stale_order_needs_manual_does_not_trigger(self, monkeypatch):
+        order = _order(status="paid", paid_at=1000, type="subscription")
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=True)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_lifecycle_email", spy)
+
+        out = await s.handle_full_refund("SLSUB1", trade_id="T1")
+
+        assert out == "needs_manual"
+        spy.assert_not_called()
+
+    async def test_active_order_no_mismatch_needs_manual_does_not_trigger(self, monkeypatch):
+        order = _order(status="paid", paid_at=1000, type="subscription")
+        s, order_repo, user_repo = _make(order=order, user=_active_user("OTHER_ORDER"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_lifecycle_email", spy)
+
+        out = await s.handle_full_refund("SLSUB1", trade_id="T1")
+
+        assert out == "needs_manual"
+        spy.assert_not_called()
+
+    async def test_guard_lost_needs_manual_does_not_trigger(self, monkeypatch):
+        order = _order(status="paid", paid_at=1000, type="subscription")
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        user_repo.update_subscription_fields = AsyncMock(return_value=False)  # guard 沒中
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_lifecycle_email", spy)
+
+        out = await s.handle_full_refund("SLSUB1", trade_id="T1")
+
+        assert out == "needs_manual"
+        spy.assert_not_called()
+
+    async def test_non_paid_order_needs_manual_does_not_trigger(self, monkeypatch):
+        order = _order(status="pending")
+        s, order_repo, user_repo = _make(order=order)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_lifecycle_email", spy)
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "needs_manual"
+        spy.assert_not_called()
+
+    async def test_duplicate_refund_resolved_does_not_trigger(self, monkeypatch):
+        order = _order(status="paid", type="subscription", paid_at=2000, is_duplicate=True)
+        s, order_repo, user_repo = _make(order=order, user=_active_user("O1"))
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_lifecycle_email", spy)
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "duplicate_refund_resolved"
+        spy.assert_not_called()
+
+
+class TestSendLifecycleEmailTask:
+    """`_send_lifecycle_email_task` 本體（best-effort，plan 取 order 的 tier）。"""
+
+    def _patch_email_service(self, monkeypatch):
+        from src.utils import email_service as email_service_mod
+        svc = AsyncMock()
+        svc.send_subscription_email = AsyncMock(return_value=True)
+        monkeypatch.setattr(email_service_mod, "get_email_service", lambda: svc)
+        return svc
+
+    async def test_sends_refund_revoked_with_order_tier(self, monkeypatch):
+        order = _order(tier="pro")
+        user = {"email": "user@example.com", "subscription": {}}
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_lifecycle_email_task("SLSUB1", "refund_revoked")
+        kwargs = svc.send_subscription_email.await_args.kwargs
+        assert kwargs["kind"] == "refund_revoked"
+        assert kwargs["plan"] == "專業版"
+
+    async def test_no_email_does_not_call_svc(self, monkeypatch):
+        order = _order(tier="pro")
+        user = {"subscription": {}}  # 無 email
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_lifecycle_email_task("SLSUB1", "refund_revoked")
+        svc.send_subscription_email.assert_not_awaited()
+
+    async def test_email_bounced_does_not_call_svc(self, monkeypatch):
+        order = _order(tier="pro")
+        user = {"email": "user@example.com", "email_bounced": True, "subscription": {}}
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_lifecycle_email_task("SLSUB1", "refund_revoked")
+        svc.send_subscription_email.assert_not_awaited()
+
+    async def test_order_not_found_does_not_call_svc(self, monkeypatch):
+        s, order_repo, user_repo = _make(order=None)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_lifecycle_email_task("SLSUB1", "refund_revoked")
+        svc.send_subscription_email.assert_not_awaited()
+
+    async def test_svc_exception_does_not_propagate(self, monkeypatch):
+        order = _order(tier="pro")
+        user = {"email": "user@example.com", "subscription": {}}
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        svc.send_subscription_email = AsyncMock(side_effect=RuntimeError("smtp down"))
+        await s._send_lifecycle_email_task("SLSUB1", "refund_revoked")  # 不應拋出
 
 
 class TestFlagPartialRefund:

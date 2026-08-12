@@ -7,6 +7,7 @@ POST /pay（送 txnToken，後端 request-by-txnToken BindingCard，捕捉 cardT
 """
 import os
 import json
+from datetime import datetime
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, Query, Request, status
@@ -32,6 +33,7 @@ from ..utils.payments91_service import get_payments91_service, interpret_record_
 from ..utils.card_token_cipher import encrypt
 from ..utils.billing_period import generate_order_no
 from ..utils.time_utils import get_utc_timestamp
+from ..utils.sentry_helpers import create_background_task
 from ..utils.logger import get_logger
 
 router = APIRouter(prefix="/subscriptions", tags=["Subscriptions"])
@@ -696,7 +698,56 @@ async def cancel_subscription(
             status.HTTP_409_CONFLICT,
         )
 
+    # 取消已排定確認信：只在 guard-ok（真的排定了取消）之後才寄；409 併發衝突分支
+    # 不會走到這裡。best-effort、背景觸發，絕不阻塞/影響本端點的成功回應。
+    period_end_val = sub.get("current_period_end")
+    period_end = (
+        datetime.utcfromtimestamp(period_end_val).strftime("%Y-%m-%d")
+        if period_end_val else ""
+    )
+    # 用 full_user（DB doc）而非 current_user：後者由 get_current_user 從 JWT claim 組成,
+    # 只有 email/role,沒有 preferences → 語系會永遠 fallback zh-TW,en 使用者收到繁中信。
+    # full_user 同時有 email 與 preferences.language。
+    _trigger_cancel_scheduled_email(full_user or current_user, sub, period_end)
+
     return {"message": "訂閱將於目前計費週期結束時取消"}
+
+
+def _trigger_cancel_scheduled_email(user: dict, sub: dict, period_end: str) -> None:
+    """取消已排定確認信背景觸發（比照 order_settlement 的 create_background_task
+    模式）。呼叫端零負擔（同步方法，不 await）。"""
+    create_background_task(
+        _send_cancel_scheduled_email_task(user, sub.get("tier"), period_end),
+        name=f"cancel_scheduled_email:{user.get('_id')}",
+    )
+
+
+async def _send_cancel_scheduled_email_task(user: dict, tier: Optional[str], period_end: str) -> None:
+    """背景寄送「已排定取消」確認信（best-effort，絕不拋例外）。"""
+    try:
+        to = user.get("email")
+        if not to or user.get("email_bounced"):
+            return
+        lang = (user.get("preferences") or {}).get("language", "zh-TW")
+        try:
+            if lang == "en":
+                plan = str(QuotaTier(tier).value).capitalize()
+            else:
+                plan = QUOTA_TIERS[QuotaTier(tier)]["name"]
+        except (ValueError, KeyError):
+            plan = str(tier).capitalize()
+
+        from ..utils.email_service import get_email_service
+        svc = get_email_service()
+        await svc.send_subscription_email(
+            to_email=to, kind="cancel_scheduled", lang=lang,
+            plan=plan, period_end=period_end,
+        )
+    except Exception as e:
+        log.error(
+            "subscription.cancel_scheduled_email.failed",
+            user_id=str(user.get("_id")), error=str(e), exc_info=True,
+        )
 
 
 @router.post("/update-card")

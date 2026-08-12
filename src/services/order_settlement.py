@@ -37,6 +37,13 @@ log = get_logger(__name__)
 # （REJECTED_DUPLICATE / FAILED / ALREADY_PAID / EXPIRED / ORDER_NOT_FOUND 都不開票）。
 _INVOICE_TRIGGER_OUTCOMES = frozenset({"activated", "renewed", "granted"})
 
+# settle() outcome → 訂閱生命週期通知信 kind（見 email_service._SUBSCRIPTION_COPY）。
+_OUTCOME_TO_EMAIL_KIND = {
+    "activated": "purchase_confirmed",
+    "renewed": "renewal_succeeded",
+    "granted": "addon_confirmed",
+}
+
 
 async def _default_invoice_issuer(db, order: dict) -> None:
     """lazy import：避免 order_settlement（純 test surface）無條件拉進 httpx/defusedxml 等
@@ -193,6 +200,8 @@ class OrderSettlement:
 
         if result.outcome.value in _INVOICE_TRIGGER_OUTCOMES:
             await self._trigger_invoice(n.order_no)
+        if result.outcome.value in ("activated", "renewed", "granted"):
+            self._trigger_subscription_email(n.order_no, result.outcome.value)
         return result
 
     async def _mark_entitlement_pending(self, order_no: str, exc: Exception) -> None:
@@ -243,6 +252,119 @@ class OrderSettlement:
             )
         except Exception as e:
             log.error("invoice.trigger.failed", order_no=order_no, error=str(e), exc_info=True)
+
+    def _trigger_subscription_email(self, order_no: str, outcome: str) -> None:
+        """成功側訂閱通知背景觸發（首購開通 / 續扣成功 / 加購完成）。只掛在 settle()
+        這個公開入口——
+
+        resettle_entitlement 是 crash 補償重跑，不能跟著寄，否則使用者會收到重複的
+        「訂閱已開通/已續扣/加購已完成」信。create_background_task 本身已用
+        done-callback 把例外送 Sentry + log（不影響呼叫端），呼叫端零負擔（同步方法，
+        不 await）。
+        """
+        create_background_task(
+            self._send_subscription_email_task(order_no, outcome),
+            name=f"sub_email:{order_no}",
+        )
+
+    async def _send_subscription_email_task(self, order_no: str, outcome: str) -> None:
+        """背景寄送成功側訂閱通知（best-effort，絕不拋例外——由 create_background_task
+        排程，例外只會流向 Sentry，不會回到呼叫端）。outcome 為 settle() 的
+        activated/renewed/granted，經 `_OUTCOME_TO_EMAIL_KIND` 映射成 email kind。"""
+        try:
+            order = await self.order_repo.get_by_order_no(order_no)
+            if not order:
+                log.warning("subscription.success_email.order_not_found", order_no=order_no)
+                return
+            user_id = order["user_id"]
+            user = await self.user_repo.get_by_id(user_id)
+            if not user:
+                log.warning("subscription.success_email.user_not_found", order_no=order_no, user_id=user_id)
+                return
+            to = user.get("email")
+            if not to or user.get("email_bounced"):
+                return
+
+            lang = (user.get("preferences") or {}).get("language", "zh-TW")
+            kind = _OUTCOME_TO_EMAIL_KIND.get(outcome, "renewal_succeeded")
+            if kind == "addon_confirmed":
+                # extra_quota 訂單沒有 tier 概念（order.tier 為 None）——template 不
+                # 引用 {plan}，直接傳空字串，不做 tier 查找。
+                plan = ""
+            else:
+                from ..models.quota import QUOTA_TIERS, QuotaTier
+
+                tier = (user.get("subscription") or {}).get("tier") or order.get("tier")
+                # 方案顯示名依語系:zh-TW 用 QUOTA_TIERS 的繁中 name（免費版/基礎版/專業版/
+                # 企業版）;en 用 tier 值本身 capitalize（Pro/Basic/…）——QUOTA_TIERS.name
+                # 只有繁中,英文信直接塞繁中方案名會很怪。非法 tier 一律 fallback。
+                try:
+                    if lang == "en":
+                        plan = str(QuotaTier(tier).value).capitalize()
+                    else:
+                        plan = QUOTA_TIERS[QuotaTier(tier)]["name"]
+                except (ValueError, KeyError):
+                    plan = str(tier).capitalize()
+            amount = order.get("amount_twd", 0)
+            sub = user.get("subscription") or {}
+            next_charge_ts = sub.get("next_charge_at")
+            next_charge = (
+                datetime.utcfromtimestamp(next_charge_ts).strftime("%Y-%m-%d")
+                if next_charge_ts else ""
+            )
+
+            from ..utils.email_service import get_email_service
+            svc = get_email_service()
+            await svc.send_subscription_email(
+                to_email=to, kind=kind, lang=lang,
+                plan=plan, amount=amount, next_charge=next_charge,
+            )
+        except Exception as e:
+            log.error("subscription.success_email.failed", order_no=order_no, outcome=outcome, error=str(e), exc_info=True)
+
+    def _trigger_lifecycle_email(self, order_no: str, kind: str) -> None:
+        """通用生命週期通知背景觸發（比照 `_trigger_subscription_email`，用於非
+        settle-outcome 的通知——目前僅退款撤訂閱的 `refund_revoked` 使用）。"""
+        create_background_task(
+            self._send_lifecycle_email_task(order_no, kind),
+            name=f"lifecycle_email:{order_no}:{kind}",
+        )
+
+    async def _send_lifecycle_email_task(self, order_no: str, kind: str) -> None:
+        """背景寄送生命週期通知（best-effort，絕不拋例外）。plan 取 order 的 tier
+        （目前唯一呼叫端是退款撤訂閱，order.type 為 subscription/upgrade_subscription，
+        必有 tier）。"""
+        try:
+            order = await self.order_repo.get_by_order_no(order_no)
+            if not order:
+                log.warning("subscription.lifecycle_email.order_not_found", order_no=order_no, kind=kind)
+                return
+            user_id = order["user_id"]
+            user = await self.user_repo.get_by_id(user_id)
+            if not user:
+                log.warning("subscription.lifecycle_email.user_not_found", order_no=order_no, user_id=user_id, kind=kind)
+                return
+            to = user.get("email")
+            if not to or user.get("email_bounced"):
+                return
+
+            from ..models.quota import QUOTA_TIERS, QuotaTier
+
+            lang = (user.get("preferences") or {}).get("language", "zh-TW")
+            tier = order.get("tier")
+            try:
+                if lang == "en":
+                    plan = str(QuotaTier(tier).value).capitalize()
+                else:
+                    plan = QUOTA_TIERS[QuotaTier(tier)]["name"]
+            except (ValueError, KeyError):
+                plan = str(tier).capitalize()
+
+            from ..utils.email_service import get_email_service
+            svc = get_email_service()
+            await svc.send_subscription_email(to_email=to, kind=kind, lang=lang, plan=plan)
+        except Exception as e:
+            log.error("subscription.lifecycle_email.failed", order_no=order_no, kind=kind, error=str(e), exc_info=True)
 
     # ── 補結算 entitlement_pending（P1-9 對帳 sweep 第二段）─────────────────────
 
@@ -541,9 +663,15 @@ class OrderSettlement:
             log.warning("payment.refund.carryover_unreclaimed", order_no=order_no)
             self._capture_refund_carryover_unreclaimed_alert(order_no)
 
-        # L8：不寄「已降級」通知信——既有的 "downgraded" 文案是續扣失敗語境
-        # （「您的訂閱因付款失敗已降級」），套在退款情境會誤導使用者。退款情境的
-        # 通知信文案待產品定稿，follow-up。
+        # L8 follow-up 已定稿：退款情境用專屬的 "refund_revoked" 文案（與續扣失敗的
+        # "downgraded" 語境不同，見 email_service._SUBSCRIPTION_COPY），best-effort
+        # 背景寄送，絕不影響本方法回傳。
+        # ⚠️ 上面 carryover 分支雖標 needs_manual,這裡仍寄:那個 needs_manual 只關乎
+        # 「結轉出去的 extra_quota 待人工核對」,與訂閱撤銷無關——訂閱到這裡確實已撤
+        # （guard 命中、_expire_to_free 成功、outcome=revoked、帳號已 free）,使用者本
+        # 就該被告知訂閱取消。與更上面那些 needs_manual 早退分支（stale/mismatch/
+        # guard-lost/非 paid）不同:那些是「根本沒撤訂閱就 return」故不寄。
+        self._trigger_lifecycle_email(order_no, "refund_revoked")
 
         return "revoked"
 
