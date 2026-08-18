@@ -1,7 +1,7 @@
 """付款收據 PDF 產生器（ReportLab，中英雙語）。
 
 注意：這是「付款收據」（付款證明），**非統一發票**。統一發票須另接 ezPay 開立。
-重用 pdf_generator 的字體註冊（NotoSansTC，涵蓋中英）。右上角為黑色品牌 logo。
+重用 pdf_generator 的字體註冊（NotoSansTC，涵蓋中英）。右上角為品牌 logo（向量 SVG）。
 """
 from __future__ import annotations
 
@@ -44,7 +44,31 @@ def _p(text, style) -> "Paragraph":
     """
     return Paragraph(_xml_escape(str(text)), style)
 
-_LOGO_PATH = os.path.join(os.path.dirname(__file__), "assets", "soundlite_logo_black.png")
+_LOGO_SVG_PATH = os.path.join(os.path.dirname(__file__), "assets", "soundlite_logo.svg")
+_LOGO_PNG_PATH = os.path.join(os.path.dirname(__file__), "assets", "soundlite_logo_black.png")
+_LOGO_SIZE = 10 * mm
+
+
+def _load_logo():
+    """回傳 logo Flowable：優先向量 SVG（放大不糊），svglib 不在時退回 PNG。"""
+    if os.path.exists(_LOGO_SVG_PATH):
+        try:
+            from svglib.svglib import svg2rlg
+
+            drawing = svg2rlg(_LOGO_SVG_PATH)
+            if drawing is not None and drawing.width:
+                scale = _LOGO_SIZE / drawing.width
+                drawing.scale(scale, scale)
+                drawing.width = drawing.height = _LOGO_SIZE
+                drawing.hAlign = "RIGHT"
+                return drawing
+        except ImportError:
+            pass
+    if os.path.exists(_LOGO_PNG_PATH):
+        img = Image(_LOGO_PNG_PATH, width=_LOGO_SIZE, height=_LOGO_SIZE)
+        img.hAlign = "RIGHT"
+        return img
+    return ""
 _TW_OFFSET = timedelta(hours=8)  # Asia/Taipei（無 DST）
 
 # 中英字串
@@ -238,13 +262,13 @@ def generate_receipt_pdf(*, order: dict, user: dict, lang: str = "zh-TW") -> byt
 
     story = []
 
-    # ── 標題列：付款收據（左）+ 黑色 logo（右上角）──
-    logo_cell = ""
-    if os.path.exists(_LOGO_PATH):
-        img = Image(_LOGO_PATH, width=13 * mm, height=13 * mm)
-        img.hAlign = "RIGHT"
-        logo_cell = img
-    header = Table([[Paragraph(s["title"], title), logo_cell]], colWidths=[None, 16 * mm])
+    # ── 標題列：付款收據（左）+ 品牌 lockup（右上角：向量 SVG logo + SoundLite 字樣，右緣對齊）──
+    brand_r = ParagraphStyle(
+        "brand", parent=base, fontSize=11, leading=13, alignment=2,
+        textColor=colors.black,
+    )
+    logo_cell = [_load_logo(), Spacer(1, 1.5 * mm), Paragraph("SoundLite", brand_r)]
+    header = Table([[Paragraph(s["title"], title), logo_cell]], colWidths=[None, 20 * mm])
     header.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("ALIGN", (1, 0), (1, 0), "RIGHT"),
