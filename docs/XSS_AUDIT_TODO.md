@@ -2,6 +2,7 @@
 
 > 盤點日期：2026-07-05（三個 read-only agent 分掃 `frontend/`、`admin-frontend/`、`src/`+`deploy/`，主對話彙整）
 > 讀者：執行修復的工程師或 AI model。**每個 TODO 都附了檢查步驟與驗收條件，請逐條照做，不要跳過驗證。**
+> **收案狀態（2026-08-17）：11 項全數處置完畢**（P1×3 + P2×5 修復合併、P3×3 完成/關閉/達最低要求，各項標題有註記）。遺留 optional：TODO-11 grep 掛 CI、app server `unsafe-eval` 根治（接 `@intlify/unplugin-vue-i18n` 預編譯，見 TODO-3 註記）。
 
 ## 0. 總體結論（先讀這段）
 
@@ -200,7 +201,7 @@
 - **修法**：在 `useProductTour.js` 檔頭加註警語（「description 會以 innerHTML 注入，禁止插入任何使用者可控資料；動態值先 escape」）；若 driver.js 版本支援 DOM/函式型 popover 內容，可評估改用。
 - **驗收條件**：註解到位；grep 三個 view 確認 steps 仍全為 `$t()`/`t()` 靜態文案。
 
-### TODO-11【P3】建立 XSS 回歸掃描小抄（一次建立，之後 CI 或定期跑）
+### TODO-11【P3】建立 XSS 回歸掃描小抄（一次建立，之後 CI 或定期跑） — ✅ 最低要求已達成（小抄即下方 grep，2026-08-17 於 main 複核全數符合預期；包成 script 掛 CI 屬 optional 強化，未排程）
 
 - **風險**：本次盤點的「零 sink」結論是時間點快照；沒有回歸機制的話，任何一個未來 PR 都可能無聲引入 `v-html`/`innerHTML` 而沒人發現，整份盤點失效。
 - **修法**：把下方 grep 收進 repo（本檔即可當小抄；進一步可包成 script 掛 CI），任何大型前端 PR 後跑一輪。
