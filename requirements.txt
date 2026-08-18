@@ -10,7 +10,7 @@ ctranslate2==4.7.1
 # unpinned 會抓到 bleeding-edge → 「prod 能跑、新機重建就爆」的典型 drift。
 torch==2.5.1
 torchaudio==2.5.1
-pyannote.audio==3.4.0
+pyannote.audio==4.0.4
 # huggingface_hub 0.26+ 移除了 hf_hub_download 的 use_auth_token 參數，pyannote.audio 3.4.0
 # 仍在用它 → 不釘會抓到新版、diarization 載入即 TypeError。釘在最後支援該參數的 0.25.x。
 huggingface_hub==0.25.2
