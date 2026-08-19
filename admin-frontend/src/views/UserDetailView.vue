@@ -29,11 +29,16 @@
           <h2>基本資訊</h2>
           <div class="info-row">
             <span class="label">用戶 ID：</span>
-            <code class="value">{{ user.id }}</code>
+            <code
+              class="value copyable"
+              :class="{ copied: idCopied }"
+              :title="idCopied ? '已複製' : '點擊複製'"
+              @click="copyUserId"
+            >{{ user.id }}<span class="copy-hint">{{ idCopied ? '✓ 已複製' : '複製' }}</span></code>
           </div>
           <div class="info-row">
             <span class="label">Email：</span>
-            <span class="value">{{ user.display_name || user.email || '—' }}</span>
+            <span class="value">{{ user.email || '—' }}</span>
           </div>
           <div class="info-row">
             <span class="label">角色：</span>
@@ -481,6 +486,33 @@ const showExtraQuotaModal = ref(false)
 const showAdminRoleModal = ref(false)
 const selectedPromoteRole = ref('read_only')
 const selectedAdminRole = ref('read_only')
+const idCopied = ref(false)
+let idCopiedTimer = null
+
+async function copyUserId() {
+  const id = user.value?.id
+  if (!id) return
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(id)
+    } else {
+      // 非 secure context 的 fallback（例如以 IP 直連後台）
+      const ta = document.createElement('textarea')
+      ta.value = id
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+    idCopied.value = true
+    clearTimeout(idCopiedTimer)
+    idCopiedTimer = setTimeout(() => { idCopied.value = false }, 1500)
+  } catch {
+    alert('複製失敗，請手動選取')
+  }
+}
 
 // 與後端 AdminRole enum 對齊；label 給後台顯示用
 const ADMIN_ROLE_OPTIONS = [
@@ -850,6 +882,7 @@ onMounted(() => {
   gap: 10px;
   padding: 10px 0;
   border-bottom: 1px solid rgba(163, 177, 198, 0.2);
+  min-width: 0;
 }
 
 .info-row:last-child { border-bottom: none; }
@@ -858,11 +891,14 @@ onMounted(() => {
   color: var(--color-text-light, #a0917c);
   font-weight: 500;
   min-width: 120px;
+  flex-shrink: 0;
 }
 
 .value {
   color: var(--color-text, rgb(145, 106, 45));
   font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 code {
@@ -871,6 +907,34 @@ code {
   border-radius: 6px;
   font-size: 12px;
   border: 1px solid rgba(163, 177, 198, 0.15);
+  word-break: break-all;
+}
+
+code.copyable {
+  cursor: pointer;
+  user-select: all;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: border-color 0.15s;
+}
+
+code.copyable:hover {
+  border-color: var(--color-primary, #dd8448);
+}
+
+.copy-hint {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--color-primary, #dd8448);
+  opacity: 0;
+  transition: opacity 0.15s;
+  user-select: none;
+}
+
+code.copyable:hover .copy-hint,
+code.copyable.copied .copy-hint {
+  opacity: 1;
 }
 
 .role-badge, .status-badge, .tier-badge {
