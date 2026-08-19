@@ -147,16 +147,16 @@
           <div class="form-group">
             <label>{{ $t('userSettings.checkout.cardNumber') }}</label>
             <!-- SDK 會在此容器內注入 iframe -->
-            <div id="card-number" class="form-input sdk-field"></div>
+            <div id="card-number" class="form-input sdk-field" :class="{ 'field-error': fieldErrors.number }"></div>
           </div>
           <div class="card-fields-row">
             <div class="form-group">
               <label>{{ $t('userSettings.checkout.expiry') }}</label>
-              <div id="card-expiration-date" class="form-input sdk-field"></div>
+              <div id="card-expiration-date" class="form-input sdk-field" :class="{ 'field-error': fieldErrors.expirationDate }"></div>
             </div>
             <div class="form-group">
               <label>{{ $t('userSettings.checkout.cvc') }}</label>
-              <div id="card-ccv" class="form-input sdk-field"></div>
+              <div id="card-ccv" class="form-input sdk-field" :class="{ 'field-error': fieldErrors.ccv }"></div>
             </div>
           </div>
         </div>
@@ -188,7 +188,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useI18n } from 'vue-i18n'
@@ -246,6 +246,8 @@ const saveInvoice = ref(true)
 // ===== 91APP SDK 狀態 =====
 const sdkReady = ref(false)      // setupSDK + card.setup 完成
 const cardCanToken = ref(false)  // card 'update' 事件回報可取 token（三欄填妥且有效）
+// 各欄位驗證失敗時標紅外框（SDK status：-1=Error, 0=Normal, 1=Success, 2=Changing）
+const fieldErrors = reactive({ number: false, expirationDate: false, ccv: false })
 const orderNo = ref(null)        // 建單後的訂單編號
 let publishableKey = null        // /checkout 回傳（商戶層，跟 order 無關）
 let sdkServerType = 'sandbox'    // 'sandbox' | 'production'
@@ -324,15 +326,23 @@ function setupCard() {
       expirationDate: { element: '#card-expiration-date', placeholder: $t('userSettings.checkout.expiryPlaceholder') },
       ccv:            { element: '#card-ccv',              placeholder: $t('userSettings.checkout.cvcPlaceholder') },
     },
+    // iframe 內建 input 自帶會隨狀態變色的邊框，疊在外層 .form-input 裡成「框中框」；
+    // 全狀態 borderColor 設 transparent 讓外框統一呈現，文字顏色也不隨狀態變化。
     styles: {
-      normal:  { color: 'black' },
-      focus:   { color: 'blue' },
-      error:   { color: 'red' },
-      success: { color: 'green' },
+      normal:  { color: 'black', borderColor: 'transparent' },
+      focus:   { color: 'black', borderColor: 'transparent' },
+      error:   { color: 'black', borderColor: 'transparent' },
+      success: { color: 'black', borderColor: 'transparent' },
     },
   })
   // SDK 3.4.0+：canGetToken 為 true 才可取 token
-  cardSdk.on('update', (s) => { cardCanToken.value = !!s?.canGetToken })
+  cardSdk.on('update', (s) => {
+    cardCanToken.value = !!s?.canGetToken
+    // 欄位級錯誤 → 標紅我們自己的外框（iframe 內建變色框已用 borderColor:transparent 關掉）
+    for (const key of Object.keys(fieldErrors)) {
+      fieldErrors[key] = s?.fields?.[key]?.status === -1
+    }
+  })
   sdkReady.value = true
 }
 
@@ -755,6 +765,10 @@ async function handlePay() {
   display: flex;
   align-items: center;
   padding: 0 10px;
+}
+
+.sdk-field.field-error {
+  border-color: var(--color-danger, #dc3545);
 }
 
 /* 換卡挽回說明 */
