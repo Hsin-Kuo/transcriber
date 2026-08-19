@@ -146,7 +146,11 @@
 
         <!-- 使用量統計 -->
         <div class="detail-card">
-          <h2>本月使用量</h2>
+          <h2>本期使用量</h2>
+          <p v-if="user.period_usage" class="card-hint">
+            {{ user.period_usage.period_type === 'billing_cycle' ? '訂閱計費週期' : '日曆月' }}：
+            {{ formatPeriodDate(user.period_usage.period_start) }} ~ {{ formatPeriodEndInclusive(user.period_usage.period_end) }}
+          </p>
           <div class="usage-item">
             <div class="usage-header">
               <span class="label">轉錄次數</span>
@@ -165,13 +169,17 @@
             <div class="usage-header">
               <span class="label">轉錄時長（分鐘）</span>
               <span class="usage-text">
-                {{ (user.usage?.duration_minutes || 0).toFixed(1) }} / {{ user.quota?.max_duration_minutes >= 999999 ? '不限' : user.quota?.max_duration_minutes || 0 }}
+                {{ (user.period_usage?.used_minutes ?? user.usage?.duration_minutes ?? 0).toFixed(1) }} / {{ isUnlimited(user.period_usage?.limit_minutes ?? user.quota?.max_duration_minutes) ? '不限' : (user.period_usage?.limit_minutes ?? user.quota?.max_duration_minutes ?? 0) }}
+                <span v-if="(user.period_usage?.extra_remaining_minutes || 0) > 0" class="extra-badge">
+                  +{{ (user.period_usage.extra_remaining_minutes).toFixed(1) }} 分鐘（加購）
+                </span>
               </span>
             </div>
             <div class="usage-bar">
               <div
                 class="usage-fill"
-                :style="{ width: user.quota?.max_duration_minutes >= 999999 ? '5%' : getUsagePercent(user.usage?.duration_minutes, user.quota?.max_duration_minutes) + '%' }"
+                :class="{ 'usage-fill-warn': getUsagePercent(user.period_usage?.used_minutes ?? user.usage?.duration_minutes, user.period_usage?.limit_minutes ?? user.quota?.max_duration_minutes) >= 80 }"
+                :style="{ width: isUnlimited(user.period_usage?.limit_minutes ?? user.quota?.max_duration_minutes) ? '5%' : getUsagePercent(user.period_usage?.used_minutes ?? user.usage?.duration_minutes, user.period_usage?.limit_minutes ?? user.quota?.max_duration_minutes) + '%' }"
               ></div>
             </div>
           </div>
@@ -206,7 +214,7 @@
           <p class="card-hint">永不重置，可跨月累計（用於補償或購買）</p>
           <div class="info-row">
             <span class="label">額外轉錄時長：</span>
-            <span class="value">{{ (user.extra_quota?.duration_minutes || 0).toFixed(1) }} 分鐘</span>
+            <span class="value">{{ (user.period_usage?.extra_remaining_minutes ?? user.extra_quota?.duration_minutes ?? 0).toFixed(1) }} 分鐘</span>
           </div>
           <div class="info-row">
             <span class="label">額外 AI 摘要：</span>
@@ -718,6 +726,26 @@ function formatTimestamp(timestamp) {
   return timestamp
 }
 
+function isUnlimited(limitMinutes) {
+  return (limitMinutes || 0) >= 999999
+}
+
+function formatPeriodDate(isoString) {
+  if (!isoString) return '-'
+  const d = new Date(isoString)
+  // period_start/period_end 是 UTC ISO 字串，一律用 UTC getters 讀，別讓
+  // formatPeriodEndInclusive（用 setUTCDate 操作）跟這裡混用不同時區基準
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`
+}
+
+// period_end 是「下期起點」（exclusive），顯示上換算成本期最後一天（inclusive）較不易誤解
+function formatPeriodEndInclusive(isoString) {
+  if (!isoString) return '-'
+  const d = new Date(isoString)
+  d.setUTCDate(d.getUTCDate() - 1)
+  return formatPeriodDate(d.toISOString())
+}
+
 onMounted(() => {
   fetchUser()
 })
@@ -926,6 +954,21 @@ code {
   background: var(--color-primary, #dd8448);
   border-radius: 5px;
   transition: width 0.3s;
+}
+
+.usage-fill-warn {
+  background: #e65100;
+}
+
+.extra-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #e8f5e9;
+  color: #2e7d32;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .reset-btn {

@@ -1,6 +1,6 @@
 """配額管理器"""
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dateutil.relativedelta import relativedelta
 from fastapi import HTTPException, status
 
@@ -14,14 +14,57 @@ log = get_logger(__name__)
 # pipeline 在 DB 端無法跑 tier 判斷，缺欄位時對齊 FREE 設定（唯一真實來源）
 _FREE_DURATION_DEFAULT = QUOTA_TIERS[QuotaTier.FREE]["max_duration_minutes"]
 
+_PAID_ACTIVE_STATUSES = ("active", "trialing", "past_due")
+
 
 def _to_datetime(value):
-    """把 timestamp(float) / datetime 統一成 naive UTC datetime；無法辨識回 None。"""
+    """把 timestamp(float) / naive datetime / aware datetime 統一成 naive UTC datetime；
+    無法辨識回 None。
+
+    已知地雷（quota.py 舊版）：last_reset 在不同寫入路徑型別不一致——
+    註冊/admin 手動重置寫 int timestamp，自動重置寫 naive datetime。若混入
+    aware datetime（例如未來改用 timezone-aware 來源）會在 `>` 比較時拋
+    TypeError。這裡統一轍收斂成同一種 naive UTC，讓所有比較安全。
+    """
     if isinstance(value, (int, float)):
         return datetime.utcfromtimestamp(value)
     if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
         return value
     return None
+
+
+def _compute_current_period_start(user: dict, now: datetime, status_override: str = None) -> tuple:
+    """算出「現在」所在週期的起點（naive UTC）與週期類型。
+
+    單一真實來源：`_reset_monthly_quota_if_needed`（是否該重置）與
+    `compute_period_usage`（admin 用量顯示）都呼叫這裡，避免兩套規則漂移。
+
+    - 付費（active/trialing/past_due）且訂閱有 `current_period_start`（anchor）：
+      anchor 制。回傳 anchor 往後推「N 個週月格」後的起點，N = 從 anchor 到
+      now 經過的完整週月數（`_months_elapsed`，year 訂閱在週期內也按月格推進，
+      與 `_due_monthly_refill` 判斷同一套算法）。
+    - 其餘（free / 到期降級 / 無訂閱 / 缺 anchor）：UTC 日曆月（當月 1 號 00:00）。
+
+    status_override：`_reset_monthly_quota_if_needed` 在偵測到訂閱到期
+    （guard 命中降級）後，會把本地變數 `sub_status` 改成 "expired" 再繼續走
+    免費邏輯，但 `_expire_subscription` 不會回寫 `user["subscription"]["status"]`
+    （in-memory 的 subscription 子字典仍是 "active"）。若這裡重新從 user dict
+    讀 status，會誤判成還在付費、走 anchor 制而不重置。呼叫端必須傳入本地判定
+    後的 sub_status 覆寫，才能反映「已到期」這個事實。`compute_period_usage`
+    沒有到期判定邏輯，不傳這個參數、直接讀 user dict 現況即可。
+
+    回傳 (period_start: datetime, period_type: "billing_cycle" | "calendar_month")。
+    """
+    sub = user.get("subscription", {}) or {}
+    sub_status = status_override if status_override is not None else sub.get("status")
+    if sub_status in _PAID_ACTIVE_STATUSES:
+        anchor = _to_datetime(sub.get("current_period_start"))
+        if anchor is not None:
+            months = _months_elapsed(anchor, now)
+            return anchor + relativedelta(months=months), "billing_cycle"
+    return datetime(now.year, now.month, 1), "calendar_month"
 
 
 def _months_elapsed(anchor: datetime, point: datetime) -> int:
@@ -251,8 +294,11 @@ class QuotaManager:
         if not last_reset:
             return usage
 
-        if isinstance(last_reset, (int, float)):
-            last_reset = timestamp_to_datetime(last_reset)
+        # F1：正規化型別（int timestamp / naive / aware datetime 全部收斂成 naive UTC），
+        # 消除舊版 aware/naive 混用比較拋 TypeError 的地雷。
+        last_reset = _to_datetime(last_reset)
+        if last_reset is None:
+            return usage
 
         now = now or datetime.utcnow()
         sub = user.get("subscription", {})
@@ -285,15 +331,27 @@ class QuotaManager:
         # active/trialing/past_due：在「新計費週期開始」或「週期內每跨一個週月」時 refill。
         #   past_due 寬限期沿用付費 tier refill（保留服務）；後者讓年繳週期內也能每月補額。
         if sub_status in ("active", "trialing", "past_due"):
-            period_start_dt = _to_datetime(sub.get("current_period_start"))
-            if period_start_dt:
+            raw_anchor = _to_datetime(sub.get("current_period_start"))
+            if raw_anchor is not None:
+                # F2：與 compute_period_usage 共用同一套「本週期起點」算法
+                # （_compute_current_period_start），避免兩套規則漂移。
+                # 數學上等價於原本的兩條件：
+                #   period_start_dt > last_reset  ⟺  raw_anchor 本身晚於 last_reset
+                #     （新計費週期開始）或 _due_monthly_refill 成立（週期內跨週月）。
+                period_start_dt, _ptype = _compute_current_period_start(user, now, status_override=sub_status)
                 if period_start_dt > last_reset:
-                    should_reset, reset_reason = True, "billing_period_start"
-                elif _due_monthly_refill(period_start_dt, last_reset, now):
-                    should_reset, reset_reason = True, "monthly_anniversary"
+                    should_reset = True
+                    reset_reason = (
+                        "billing_period_start" if raw_anchor > last_reset else "monthly_anniversary"
+                    )
         else:
-            # free / 到期降級 / 無訂閱：日曆月制
-            if now.month != last_reset.month or now.year != last_reset.year:
+            # free / 到期降級 / 無訂閱：日曆月制（與 compute_period_usage 共用同一套算法）。
+            # status_override=sub_status 是關鍵：sub_status 可能已被上面的到期偵測改成
+            # "expired"，但 user["subscription"]["status"] 這個 dict 欄位本身沒被動過
+            # （_expire_subscription 只改 DB + user["quota"]），若讓 helper 重新從 dict
+            # 讀 status 會誤判成仍是 active 而走錯 anchor 制。
+            period_start_dt, _ptype = _compute_current_period_start(user, now, status_override=sub_status)
+            if period_start_dt > last_reset:
                 should_reset, reset_reason = True, "calendar_month"
 
         if should_reset:
@@ -464,6 +522,77 @@ class QuotaManager:
                 }
             }
         )
+
+
+def compute_period_usage(user: dict, now: datetime = None) -> dict:
+    """算出使用者「本週期」的用量 / 額度 / 加購剩餘（純函數，不寫 DB）。
+
+    給 admin 用戶列表 / 詳情頁顯示用——admin 讀取路徑不能觸發 lazy reset 寫入，
+    所以這裡只讀 user snapshot 自行推算，不呼叫 `_reset_monthly_quota_if_needed`。
+
+    週期邊界規則與 `_reset_monthly_quota_if_needed` 共用 `_compute_current_period_start`
+    （同一套 anchor / 日曆月算法），避免兩套規則漂移。
+
+    used_minutes 判定：若 `usage.last_reset` 早於本週期起點，代表 lazy reset
+    尚未被使用者的下一次請求觸發、DB 裡的 `usage.duration_minutes` 是上期舊快照
+    （寫入者才會真正歸零，見 `_reset_monthly_quota_if_needed` 的 `should_reset`
+    分支），此時視為本期已用 0；否則快照本身就是本期最新用量，直接讀。
+
+    顯示不能比 reset 樂觀：`_reset_monthly_quota_if_needed` 在下面兩種情況下永遠
+    是 no-op（不會歸零 usage，也不會寫入任何東西）——
+      1. `usage.last_reset` 根本不存在（`if not last_reset: return usage`）；
+      2. 付費戶（active/trialing/past_due）但 `subscription.current_period_start`
+         缺失或無法解析（`raw_anchor is not None` 這個 guard 沒過，`should_reset`
+         永遠是 False）。
+    這兩種情況下若這裡仍套用「last_reset 早於 period_start → used=0」的判定，
+    會顯示出一個 reset 從未也不會發生的「0」，比實際狀態樂觀、誤導 admin 以為
+    用戶本期還沒用。因此這兩種情況一律直接回讀 `usage.duration_minutes`
+    （不歸零），周期區間仍照常算給 admin 參考。
+
+    extra_remaining_minutes：`extra_quota.duration_minutes` 語義是「剩餘餘額」
+    （非「已用量」）——購買 / 訂閱升級結轉時用 `$inc` 增加
+    （`user_repo.add_extra_quota`），扣抵時用
+    `build_transcription_consumption_pipeline` 的 `$subtract` 原子扣減、並用
+    `$max`/`$min` 保證不為負；沒有任何 expires 欄位（grep 全 repo 找不到
+    extra_quota 相關的到期時間欄位）。因此這裡直接取值、下限夾在 0，
+    不需要另外扣「已用量」。
+    """
+    now = now or datetime.utcnow()
+    period_start, period_type = _compute_current_period_start(user, now)
+    period_end = period_start + relativedelta(months=1)
+
+    usage = user.get("usage", {}) or {}
+    raw_used_minutes = float(usage.get("duration_minutes", 0) or 0)
+    last_reset = _to_datetime(usage.get("last_reset"))
+
+    sub_status = (user.get("subscription", {}) or {}).get("status")
+    anchor_missing_for_paid = (
+        sub_status in _PAID_ACTIVE_STATUSES
+        and _to_datetime((user.get("subscription", {}) or {}).get("current_period_start")) is None
+    )
+
+    if last_reset is None or anchor_missing_for_paid:
+        # reset 路徑在這兩種情況下永遠不會觸發 → 顯示不得比它樂觀，直接回讀快照
+        used_minutes = raw_used_minutes
+    elif last_reset < period_start:
+        used_minutes = 0.0
+    else:
+        used_minutes = raw_used_minutes
+
+    limit_minutes = (user.get("quota", {}) or {}).get("max_duration_minutes") \
+        or _get_tier_default(user, "max_duration_minutes")
+
+    extra_quota = user.get("extra_quota", {}) or {}
+    extra_remaining_minutes = max(0.0, extra_quota.get("duration_minutes", 0) or 0)
+
+    return {
+        "period_type": period_type,
+        "period_start": period_start.replace(tzinfo=timezone.utc).isoformat(),
+        "period_end": period_end.replace(tzinfo=timezone.utc).isoformat(),
+        "used_minutes": used_minutes,
+        "limit_minutes": limit_minutes,
+        "extra_remaining_minutes": extra_remaining_minutes,
+    }
 
 
 def build_transcription_consumption_pipeline(duration_minutes: float, now_ts: int) -> list:
