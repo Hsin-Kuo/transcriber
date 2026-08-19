@@ -1,4 +1,10 @@
 // 新手互動式導覽（方案 C）：driver.js 薄包裝層
+//
+// ⚠️ 安全警語（XSS audit TODO-10）：driver.js 的 popover `title`/`description`
+//   是以 innerHTML 注入的——這是全站唯一的 HTML sink。steps 文案**禁止插入任何
+//   使用者可控資料**（任務名、檔名、speaker 名…都不行）；只准 static i18n 字串。
+//   i18n 插值參數也必須是寫死常數（如 platform.js 的 modifierKeyLabel）。
+//   若未來必須帶動態值，先 escape 或改用 driver.js 的 DOM/函式型 popover 內容。
 // - driver.js 用 dynamic import 延後載入，對首屏 bundle 零影響
 // - disableActiveInteraction: true → 導覽期間禁止點擊被高亮的頁面元素，
 //   使用者只能用 popover 的「下一步」前進。這是核心安全模型：

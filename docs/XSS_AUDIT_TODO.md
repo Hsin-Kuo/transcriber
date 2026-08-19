@@ -2,6 +2,7 @@
 
 > 盤點日期：2026-07-05（三個 read-only agent 分掃 `frontend/`、`admin-frontend/`、`src/`+`deploy/`，主對話彙整）
 > 讀者：執行修復的工程師或 AI model。**每個 TODO 都附了檢查步驟與驗收條件，請逐條照做，不要跳過驗證。**
+> **收案狀態（2026-08-17）：11 項全數處置完畢**（P1×3 + P2×5 修復合併、P3×3 完成/關閉/達最低要求，各項標題有註記）。遺留 optional：app server `unsafe-eval` 根治（接 `@intlify/unplugin-vue-i18n` 預編譯，見 TODO-3 註記）。TODO-11 grep 已於 2026-08-18 CI 化（`scripts/xss-regression-check.sh`）。
 
 ## 0. 總體結論（先讀這段）
 
@@ -185,19 +186,22 @@
 - **評估結論摘要**：兩前端的 access_token 皆存 `localStorage`；`frontend/` 另外有 `<audio>` 播放器與 SSE 兩處把 token 塞進 URL query string（原生元件不支援自訂 header）。評估文件原本建議「先做方案 A、方案 B 排下一週期」，但實際決策是**跳過方案 A、直接做方案 B**——深挖後發現可行性比預期高（CSRF 風險因同源架構+既有 `SameSite=strict` 先例遠比預期小；後端改動雖是 3 個讀取點而非 1 個，但範圍精確可列舉），且 A、B 是兩種互斥實作而非漸進步驟，做 A 再做 B 等於多繞一趟、A 的程式碼還會被 B 整個取代。
 - **實際完成內容**：後端 `get_current_user`/`get_current_user_sse`/`download_audio` 三個讀取點硬切換成只認 httpOnly cookie（比照本 repo 既有的 `refresh_token` 遷移先例，commit `342af34`，不做過渡期雙讀）；兩個前端拿掉 `TokenManager`，SSE/`<audio>` 拿掉 token-in-URL。詳見 `docs/ADMIN_TOKEN_STORAGE_EVALUATION.md`（含深挖查證細節與最終決策的完整推理）、PR #258（向下相容的 cookie 種植階段）、PR #260（硬切換 + 兩輪 code review 修復，原 PR #259 因分支刪除被 GitHub 誤關閉後在 #260 重開)。本地端到端驗證含真實瀏覽器測試（`document.cookie` 證實 httpOnly 生效、真實 `EventSource` 確認 SSE cookie 自動認證）。全專案 pytest 471 個測試全過。
 
-### TODO-9【P3】確認藍新 `gateway_url` 信任邊界（open-redirect，非 XSS）
+### TODO-9【P3】確認藍新 `gateway_url` 信任邊界（open-redirect，非 XSS） — ✅ 已關閉（2026-08-17，藍新已隨 91APP 遷移全數移除）
+
+> **關閉理由**：藍新金流程式碼已全刪（`src/utils/newebpay_service.py` 不存在、`auth.js` 的 form 自動 POST 已移除），原攻擊面消失。
+> **等價檢查（91APP）已做**：前端唯一的金流 redirect 是 `CheckoutView.vue:512` 的 `window.location.href = pay.payment_url`；該值來自後端 `subscriptions.py:489` 從 91APP server-to-server API 回應（`create_first_payment`）取出的 3DS 銀行頁 URL，**非任何請求參數拼出**——信任邊界即 91APP 本身，與本項原驗收的「常數 → 關閉」結論等價。3DS ACS URL 依銀行而異，不做域名白名單。
 
 - **風險**：`frontend/src/stores/auth.js:365-378` 建 form 自動 POST，`form.action = formData.gateway_url` 來自後端 API 回傳。若後端這個值可被任何使用者輸入影響，等於把含 TradeInfo 的付款 form POST 到任意網址。
 - **檢查步驟**：讀 `src/utils/newebpay_service.py:156/203/251` 與 `src/routers/subscriptions.py:161`，確認 `gateway_url` 是否為設定檔常數（`NEWEBPAY_*` 環境變數）而非任何請求參數拼出。
 - **驗收條件**：回報一句結論 + file:line 證據。若是常數 → 關閉此項；若可被輸入影響 → 升級成 P1 修復（後端白名單 `core.newebpay.com` / `ccore.newebpay.com`）。
 
-### TODO-10【P3】driver.js 導覽文案立護欄（規範，非程式碼）
+### TODO-10【P3】driver.js 導覽文案立護欄（規範，非程式碼） — ✅ 已完成（2026-08-17，警語已加在 `useProductTour.js` 檔頭；三個 view 的 steps 經 grep 複核仍全為靜態 i18n，唯一插值 `modifierKeyLabel` 為 `utils/platform.js:11` 寫死常數）
 
 - **風險**：driver.js 的 popover `description` 以 HTML 注入，是全站唯一真正的 HTML sink（`frontend/src/composables/useProductTour.js:30-52`）。目前三個 view 的 steps 全用 static i18n（`TranscriptionView.vue:571-615`、`TasksView.vue:595-597`、`TranscriptDetailView.vue:640-693`），安全；但沒有任何機制防止未來把使用者資料插進去。
 - **修法**：在 `useProductTour.js` 檔頭加註警語（「description 會以 innerHTML 注入，禁止插入任何使用者可控資料；動態值先 escape」）；若 driver.js 版本支援 DOM/函式型 popover 內容，可評估改用。
 - **驗收條件**：註解到位；grep 三個 view 確認 steps 仍全為 `$t()`/`t()` 靜態文案。
 
-### TODO-11【P3】建立 XSS 回歸掃描小抄（一次建立，之後 CI 或定期跑）
+### TODO-11【P3】建立 XSS 回歸掃描小抄（一次建立，之後 CI 或定期跑） — ✅ 已完成（2026-08-18 CI 化：`scripts/xss-regression-check.sh` 掛進 `test.yml`，每個 PR 自動跑；純註解行自動放行、已審例外逐條列在 script 的 allowlist，負面測試驗證過會擋。下方 grep 保留當手動小抄；線上 headers 的兩條 curl 不進 CI，屬部署後抽查）
 
 - **風險**：本次盤點的「零 sink」結論是時間點快照；沒有回歸機制的話，任何一個未來 PR 都可能無聲引入 `v-html`/`innerHTML` 而沒人發現，整份盤點失效。
 - **修法**：把下方 grep 收進 repo（本檔即可當小抄；進一步可包成 script 掛 CI），任何大型前端 PR 後跑一輪。

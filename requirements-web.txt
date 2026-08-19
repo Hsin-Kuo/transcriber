@@ -60,3 +60,4 @@ boto3
 
 # PDF 生成（server-side multi-language CJK PDF；字體在 src/utils/pdf/fonts/）
 reportlab>=4.5.1,<5.0
+svglib==1.5.1  # 收據 logo 走向量 SVG（放大不糊）；>=1.6 會拉 rlpycairo→pycairo 要編系統 cairo，別升
