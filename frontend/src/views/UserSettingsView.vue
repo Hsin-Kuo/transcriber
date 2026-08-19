@@ -122,7 +122,8 @@
             <span class="sub-label">{{ $t('userSettings.subscription.billingCycle') }}</span>
             <span class="sub-value">{{ authStore.subscription?.billing_cycle === 'yearly' ? $t('userSettings.subscription.yearly') : $t('userSettings.subscription.monthly') }}</span>
           </div>
-          <div class="sub-row">
+          <!-- 已排定取消：期末日改由下方 cancelScheduled 提示呈現，不再顯示「下次扣款日」 -->
+          <div v-if="!authStore.subscription?.cancel_at_period_end" class="sub-row">
             <span class="sub-label">{{ $t('userSettings.subscription.nextBillingDate') }}</span>
             <span class="sub-value">{{ formatDate(authStore.subscription?.current_period_end) }}</span>
           </div>
