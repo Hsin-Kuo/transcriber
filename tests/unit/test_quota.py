@@ -6,6 +6,7 @@
 需 DB 的方法（reserve/consume/release_ai_summary、sweep、_expire_subscription）
 不在此檔——那些走 motor，留給整合測試。
 """
+import calendar
 import os
 import sys
 from datetime import datetime, timedelta
@@ -27,6 +28,7 @@ from src.auth.quota import (  # noqa: E402
     _get_tier_default,
     build_ai_summary_consumption_pipeline,
     build_transcription_consumption_pipeline,
+    compute_period_usage,
 )
 from src.models.quota import has_feature, public_tier_plans  # noqa: E402
 
@@ -448,3 +450,205 @@ class TestConsumptionPipelines:
         apply_stage = pipeline[2]["$set"]
         assert apply_stage["updated_at"] == 999
         assert "reserved_ai_summaries" in apply_stage  # 消耗時順帶釋放預扣
+
+
+class TestComputePeriodUsage:
+    """compute_period_usage：admin 用量顯示的純函數（不寫 DB）。
+
+    週期邊界規則與 `_reset_monthly_quota_if_needed` 共用 `_compute_current_period_start`，
+    這裡只驗證 admin 顯示需要的組裝邏輯（used/limit/extra_remaining + 週期邊界）。
+
+    注意：這個類別測的是 `compute_period_usage` 本身，它是新函數、從未有過
+    aware/naive TypeError 的歷史包袋。int-timestamp 相容性在這裡測是為了確保
+    「顯示路徑」也吃得下各種 last_reset 型別，但不等於驗證了
+    `_reset_monthly_quota_if_needed` 的回歸——那支函數的真正回歸測試在
+    `TestResetMonthlyQuotaRegressions`。
+    """
+
+    def test_free_user_uses_utc_calendar_month(self):
+        # 免費戶：週期 = UTC 日曆月（當月 1 號起）
+        now = datetime(2026, 3, 10)
+        user = {
+            "quota": {"tier": "free"},
+            "usage": {"duration_minutes": 50, "last_reset": datetime(2026, 3, 5)},
+            "extra_quota": {},
+        }
+        result = compute_period_usage(user, now=now)
+        assert result["period_type"] == "calendar_month"
+        assert result["period_start"].startswith("2026-03-01")
+        assert result["period_end"].startswith("2026-04-01")
+        assert result["used_minutes"] == 50
+        assert result["limit_minutes"] == 180  # QUOTA_TIERS[FREE].max_duration_minutes
+
+    def test_paid_user_anchor_cycle_crosses_month(self):
+        # 付費戶：anchor 制。anchor=1/10，now=3/15 → 已跨 2 個週月格，本期起點應是 3/10
+        anchor = datetime(2026, 1, 10)
+        now = datetime(2026, 3, 15)
+        user = {
+            "subscription": {
+                "status": "active",
+                "current_period_start": anchor,
+                "current_period_end": datetime(2027, 1, 10),
+            },
+            "quota": {"tier": "pro", "max_duration_minutes": 3000},
+            "usage": {"duration_minutes": 120, "last_reset": datetime(2026, 3, 12)},
+            "extra_quota": {},
+        }
+        result = compute_period_usage(user, now=now)
+        assert result["period_type"] == "billing_cycle"
+        assert result["period_start"].startswith("2026-03-10")
+        assert result["period_end"].startswith("2026-04-10")
+        assert result["used_minutes"] == 120
+        assert result["limit_minutes"] == 3000
+
+    def test_last_reset_as_int_timestamp_does_not_raise(self):
+        # 已知地雷：last_reset 可能是 int timestamp（註冊 / admin 手動重置寫的型別）。
+        # 用 calendar.timegm 明確走 UTC 語義建構 timestamp，避免 naive datetime.timestamp()
+        # 隱含 local timezone 造成的跨機台不一致。
+        now = datetime(2026, 3, 10)
+        last_reset_ts = calendar.timegm(datetime(2026, 3, 5).timetuple())
+        user = {
+            "quota": {"tier": "basic"},
+            "usage": {"duration_minutes": 30, "last_reset": last_reset_ts},
+            "extra_quota": {},
+        }
+        result = compute_period_usage(user, now=now)
+        assert result["used_minutes"] == 30
+
+    def test_paid_user_int_timestamp_anchor_and_last_reset(self):
+        # 付費週期 anchor + last_reset 都是 int/float UTC timestamp 的組合（顯示路徑）。
+        anchor_ts = calendar.timegm(datetime(2026, 1, 10).timetuple())
+        now = datetime(2026, 3, 15)
+        last_reset_ts = calendar.timegm(datetime(2026, 3, 12).timetuple())
+        user = {
+            "subscription": {"status": "active", "current_period_start": anchor_ts},
+            "quota": {"tier": "pro", "max_duration_minutes": 3000},
+            "usage": {"duration_minutes": 200, "last_reset": last_reset_ts},
+            "extra_quota": {},
+        }
+        result = compute_period_usage(user, now=now)
+        assert result["used_minutes"] == 200
+
+    def test_last_reset_before_period_start_used_is_zero(self):
+        # lazy reset 尚未觸發：DB 快照是上期舊值 → 視為本期已用 0
+        now = datetime(2026, 3, 10)
+        user = {
+            "quota": {"tier": "free"},
+            "usage": {"duration_minutes": 175, "last_reset": datetime(2026, 2, 20)},
+            "extra_quota": {},
+        }
+        result = compute_period_usage(user, now=now)
+        assert result["used_minutes"] == 0
+
+    def test_extra_remaining_minutes_reads_balance_directly(self):
+        # extra_quota.duration_minutes 語義是「剩餘餘額」，非「已用量」
+        now = datetime(2026, 3, 10)
+        user = {
+            "quota": {"tier": "free"},
+            "usage": {"duration_minutes": 10, "last_reset": now},
+            "extra_quota": {"duration_minutes": 45.5},
+        }
+        result = compute_period_usage(user, now=now)
+        assert result["extra_remaining_minutes"] == 45.5
+
+    def test_extra_remaining_minutes_floors_at_zero(self):
+        now = datetime(2026, 3, 10)
+        user = {
+            "quota": {"tier": "free"},
+            "usage": {"duration_minutes": 0, "last_reset": now},
+            "extra_quota": {"duration_minutes": -5},
+        }
+        result = compute_period_usage(user, now=now)
+        assert result["extra_remaining_minutes"] == 0
+
+    def test_display_not_more_optimistic_than_reset_when_anchor_missing(self):
+        # LOW-3：付費戶缺 current_period_start（anchor）時，_reset_monthly_quota_if_needed
+        # 的 anchor guard 過不了、should_reset 永遠是 False（no-op，永不歸零）。顯示不能
+        # 因為 fallback 成日曆月、又剛好 last_reset 落在上個日曆月，就顯示成 used=0——
+        # 那是一個從未也不會發生的重置。應直接回讀快照用量。
+        now = datetime(2026, 3, 10)
+        user = {
+            "subscription": {"status": "active"},  # 沒有 current_period_start
+            "quota": {"tier": "pro", "max_duration_minutes": 3000},
+            "usage": {"duration_minutes": 250, "last_reset": datetime(2026, 2, 20)},
+            "extra_quota": {},
+        }
+        result = compute_period_usage(user, now=now)
+        assert result["used_minutes"] == 250
+
+    def test_display_not_more_optimistic_than_reset_when_last_reset_missing(self):
+        # 同理：usage 完全沒有 last_reset 時，reset 路徑是 no-op（`if not last_reset: return usage`），
+        # 顯示也不該把它當「上期舊值」歸零。
+        now = datetime(2026, 3, 10)
+        user = {
+            "quota": {"tier": "free"},
+            "usage": {"duration_minutes": 42},
+            "extra_quota": {},
+        }
+        result = compute_period_usage(user, now=now)
+        assert result["used_minutes"] == 42
+
+
+class TestResetMonthlyQuotaRegressions:
+    """`_reset_monthly_quota_if_needed` 本身的回歸測試（不是 compute_period_usage）。
+
+    這兩個場景是重構過程中真正出過事的地方：
+      1. 付費週期 + last_reset 為 int timestamp：舊版用 `timestamp_to_datetime`（回
+         aware）轉換 last_reset，卻用 `_to_datetime`（回 naive）轉換 anchor，
+         `>` 比較 aware vs naive 會拋 TypeError。
+      2. 到期降級（guard 命中）後，本地 `sub_status` 已被改成 "expired"，但
+         `_expire_subscription` 不會回寫 `user["subscription"]["status"]`——
+         若 `_compute_current_period_start` 沒吃到 override、自己重讀 dict，
+         會誤判成還在付費 anchor 制，該重置卻不重置。
+    """
+
+    async def test_paid_user_int_last_reset_does_not_raise_and_resets_correctly(self):
+        # anchor=1/10，last_reset=2/15(int ts)，now=3/15
+        # months_elapsed(anchor, last_reset)=1；months_elapsed(anchor, now)=2 → 應該 refill
+        anchor_ts = calendar.timegm(datetime(2026, 1, 10).timetuple())
+        last_reset_ts = calendar.timegm(datetime(2026, 2, 15).timetuple())
+        user = {
+            "_id": "u1",
+            "subscription": {"status": "active", "current_period_start": anchor_ts},
+            "quota": {"tier": "pro", "max_duration_minutes": 3000},
+            "usage": {"duration_minutes": 200, "last_reset": last_reset_ts},
+        }
+        now = datetime(2026, 3, 15)
+        result = await QuotaManager._reset_monthly_quota_if_needed(
+            user, user["usage"], db=None, now=now
+        )  # 不應拋 TypeError
+        assert result["duration_minutes"] == 0
+
+    async def test_expired_paid_user_still_resets_by_calendar_month(self):
+        # HIGH 回歸：cancel_at_period_end=True、anchor=6/25、period_end=7/25(已到期)、
+        # last_reset=7/25、now=8/1。真實使用情境：訂閱到期降 free 後，8 月的用量仍該被
+        # 歸零，不可因為誤判成付費 anchor 制而鎖死到 8/25 才重置。
+        class _Result:
+            matched_count = 1
+
+        class _FakeUsers:
+            async def update_one(self, flt, update):
+                return _Result()
+
+        class _FakeDB:
+            def __init__(self):
+                self.users = _FakeUsers()
+
+        db = _FakeDB()
+        user = {
+            "_id": "507f1f77bcf86cd799439011",
+            "subscription": {
+                "status": "active",
+                "cancel_at_period_end": True,
+                "current_period_start": datetime(2026, 6, 25),
+                "current_period_end": datetime(2026, 7, 25),
+            },
+            "quota": {"tier": "basic", "max_duration_minutes": 600},
+            "usage": {"duration_minutes": 300, "last_reset": datetime(2026, 7, 25)},
+        }
+        now = datetime(2026, 8, 1)
+        result = await QuotaManager._reset_monthly_quota_if_needed(
+            user, user["usage"], db=db, now=now
+        )
+        assert result["duration_minutes"] == 0
+        assert user["quota"]["tier"] == "free"
