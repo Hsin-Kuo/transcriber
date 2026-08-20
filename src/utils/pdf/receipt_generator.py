@@ -331,26 +331,24 @@ def generate_receipt_pdf(*, order: dict, user: dict, lang: str = "zh-TW") -> byt
     ]))
     story.append(items)
 
-    # ── 小計 / 合計（靠右）──
-    totals_inner = Table(
+    # ── 小計 / 合計：沿用明細表 colWidths，標籤右緣對齊「數量」欄、金額對齊「金額」欄 ──
+    totals = Table(
         [
-            [Paragraph(s["subtotal"], base), Paragraph(money(amt), amount_r)],
-            [Paragraph(s["total"], total_style), Paragraph(money(amt), total_r)],
+            [Paragraph(s["subtotal"], amount_r), "", "", Paragraph(money(amt), amount_r)],
+            [Paragraph(s["total"], total_r), "", "", Paragraph(money(amt), total_r)],
         ],
-        colWidths=[None, 32 * mm],
+        colWidths=[None] + _num_cols,
     )
-    totals_inner.setStyle(TableStyle([
+    totals.setStyle(TableStyle([
+        # 標籤跨 項目+數量 兩欄（右靠），避免長字串（如英文 Subtotal）塞不進 16mm 的數量欄
+        ("SPAN", (0, 0), (1, 0)),
+        ("SPAN", (0, 1), (1, 1)),
         ("LEFTPADDING", (0, 0), (-1, -1), 0),
         ("RIGHTPADDING", (0, 0), (-1, -1), 0),
         ("TOPPADDING", (0, 0), (-1, -1), 4),
         ("LINEABOVE", (0, 1), (-1, 1), 0.5, colors.HexColor("#eeeeee")),
     ]))
-    totals_wrap = Table([["", totals_inner]], colWidths=[None, 78 * mm])
-    totals_wrap.setStyle(TableStyle([
-        ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-    ]))
-    story.append(totals_wrap)
+    story.append(totals)
     story.append(Spacer(1, 12 * mm))
 
     # ── Payment history（付款紀錄）──

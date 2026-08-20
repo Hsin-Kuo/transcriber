@@ -16,8 +16,8 @@ os.environ.setdefault(
 )
 for k in ("PAYMENTS91_API_KEY", "PAYMENTS91_SHARED_SECRET", "PAYMENTS91_PUBLISHABLE_KEY", "PAYMENTS91_STORE_CODE"):
     os.environ.setdefault(k, "x")
-os.environ.setdefault("SMILEPAY_GRVC", "SEI1004730")
-os.environ.setdefault("SMILEPAY_VERIFY_KEY", "7C623AEFC6C2AEB7F11047CD29B50F4E")
+os.environ.setdefault("SMILEPAY_GRVC", "SEI0000000")
+os.environ.setdefault("SMILEPAY_VERIFY_KEY", "0123456789ABCDEF0123456789ABCDEF")
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
