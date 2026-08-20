@@ -34,10 +34,10 @@ class SmilePayService:
         self.env = os.getenv("SMILEPAY_ENV", "test")
 
         # P1-6 fail-fast：prod-aws 下 SMILEPAY_ENV 必須顯式為 production，否則真客戶
-        # 發票（PII）會開到速買配公開測試帳號 SEI1004730（Verify_key 公開文件明文可得，
-        # 任何人可作廢/讀取）。raise 在背景 sweep 可能被 per-item try/except 吞掉只留
-        # log，但仍是 fail-closed：發票發不出去 ≠ 發到測試帳號。main.py startup 的
-        # validate_payment_env() 負責讓設定錯誤在啟動當下「被人看到」。
+        # 發票（PII）會打到測試 endpoint（/api_test/，不入財政部）——真扣款卻無有效發票。
+        # raise 在背景 sweep 可能被 per-item try/except 吞掉只留 log，但仍是 fail-closed：
+        # 發票發不出去 ≠ 開成無效發票。main.py startup 的 validate_payment_env() 負責讓
+        # 設定錯誤在啟動當下「被人看到」。
         if is_prod_aws() and self.env != "production":
             raise RuntimeError("SMILEPAY_ENV must be 'production' on prod (P1-6 fail-fast)")
 
