@@ -46,7 +46,7 @@ prod `WEB_CONCURRENCY=2`，`RUN_BACKGROUND_JOBS` 是 per-process env（`main.py:
 
 ### P1-6　prod 環境變數 fallback → 可能用公開測試帳號開真客戶發票
 `SMILEPAY_ENV` 預設 `test`、`PAYMENTS91_ENV` 預設 `sandbox`，`deploy/.env.aws` 兩行都還註解著，無啟動驗證；`config_loader.get_parameter` SSM 失敗靜默 fallback 到 env，而 `.env.example` 的 SmilePay 值是**速買配官方公開測試帳號**（`Verify_key` 在公開文件明文可得）。
-- **場景**：上線忘記解註解、或 SSM 一時不通觸發 fallback + 機器 `.env` 殘留範例值（memory 記載 prod 曾因殘留 .env 跑 4 個月 medium，同類故障）→ 真客戶發票（姓名/Email/統編/載具 PII）開到公開帳號 `SEI1004730` → 任何人持公開 `Verify_key` 可作廢我方客戶發票 / 讀發票明細。
+- **場景**：上線忘記解註解、或 SSM 一時不通觸發 fallback + 機器 `.env` 殘留範例值（memory 記載 prod 曾因殘留 .env 跑 4 個月 medium，同類故障）→ 真客戶發票（姓名/Email/統編/載具 PII）開到公開帳號 `SEI0000000` → 任何人持公開 `Verify_key` 可作廢我方客戶發票 / 讀發票明細。
 - **修法**：`__init__` fail-fast：`DEPLOY_ENV=aws` 且 `APP_ENV=prod` 時 `SMILEPAY_ENV!=production` 直接 `RuntimeError`；金流/發票類 SSM 參數讀取失敗不 fallback（`get_parameter(required=True)`）。
 - A-F4。
 

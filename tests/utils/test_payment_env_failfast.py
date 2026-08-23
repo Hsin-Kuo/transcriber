@@ -26,8 +26,8 @@ os.environ.setdefault(
 )
 for _k in ("PAYMENTS91_API_KEY", "PAYMENTS91_SHARED_SECRET", "PAYMENTS91_PUBLISHABLE_KEY", "PAYMENTS91_STORE_CODE"):
     os.environ.setdefault(_k, "test-value")
-os.environ.setdefault("SMILEPAY_GRVC", "SEI1004730")
-os.environ.setdefault("SMILEPAY_VERIFY_KEY", "7C623AEFC6C2AEB7F11047CD29B50F4E")
+os.environ.setdefault("SMILEPAY_GRVC", "SEI0000000")
+os.environ.setdefault("SMILEPAY_VERIFY_KEY", "0123456789ABCDEF0123456789ABCDEF")
 
 from src.utils import config_loader  # noqa: E402
 from src.utils.config_loader import get_parameter, is_prod_aws, validate_payment_env  # noqa: E402
