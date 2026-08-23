@@ -179,6 +179,25 @@ https://ssl.smse.com.tw/api_test/SPEinvoice_Storage.asp?Grvc=SEI0000000&Verify_k
 | `InvoiceType` | `B2C`：無統編一般發票；`B2C2B`：有統編、可接受發票作廢；`B2B`：有統編、無法註銷（`BondedAreaConfirm` 有值時給此） |
 | `CarrierID` | 如申請速買配載具會回應載具號碼 |
 
+### 8.1 正式端點實測（2026-08-23，staging 打 `/api/`）
+
+上線前用正式憑證 + 正式端點 `https://ssl.smse.com.tw/api/` 各開一張後作廢，全部 `Status=0`：
+
+| 案例 | InvoiceNumber | RandomNumber | InvoiceDate | 開立 | 作廢 |
+|------|---------------|--------------|-------------|------|------|
+| B2C 有載具（`CarrierType=3J0002`） | `DV14188900` | `0801` | `2026/8/23` | ✅ | ✅ |
+| B2C 無載具 | `DV14188901` | `0800` | `2026/8/23` | ✅ | ✅ |
+| B2B 統編（`Buyer_id`+`CompanyName`+`UnitTAX=Y`，自開自） | `DV14188902` | `0799` | `2026/8/23` | ✅ | ✅ |
+
+實證重點：
+- **`InvoiceNumber` 為 2 英文 + 8 數字**（例 `DV14188900`），與 §55 規格一致。
+- ⚠️ **`InvoiceDate` 回傳的是「非補零」的 `YYYY/M/D`（`2026/8/23`，非 `2026/08/23`）**——
+  §57 規格雖寫 `YYYY/MM/DD`，實測正式端點回的是單位數不補零。把此原樣字串丟回
+  `SPEinvoice_Storage_Modify.asp` 作廢仍成功，故我方不需正規化；但任何**嚴格以
+  `YYYY/MM/DD` 解析 `InvoiceDate` 的下游**都會炸，勿假設補零。
+- **作廢成功**回應 `Status=0` / `Desc=Succeeded` / `Nowstatus` 為空（失敗才帶 `Nowstatus`）。
+- `Desc` 成功時為 `Succeeded`（非空字串，與 §8 範例的空 `Desc` 不同）。
+
 ## 9. 回應代號（錯誤碼）
 
 | 代號 | 說明 | 代號 | 說明 |
