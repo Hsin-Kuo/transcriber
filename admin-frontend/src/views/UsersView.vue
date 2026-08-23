@@ -81,7 +81,7 @@
               <th>狀態</th>
               <th>登入方式</th>
               <th>配額等級</th>
-              <th>本月使用</th>
+              <th>本期使用</th>
               <th>任務數</th>
               <th>註冊時間</th>
               <th>操作</th>
@@ -123,13 +123,26 @@
               </td>
               <td class="usage">
                 <div class="usage-info">
-                  <span>{{ user.usage?.transcriptions || 0 }} / {{ user.quota?.max_transcriptions >= 999999 ? '不限' : user.quota?.max_transcriptions || 0 }} 次</span>
+                  <span>
+                    {{ formatMinutes(user.period_usage?.used_minutes) }} / {{ isUnlimited(user.period_usage?.limit_minutes) ? '不限' : formatMinutes(user.period_usage?.limit_minutes) }} 分鐘
+                    <span v-if="(user.period_usage?.extra_remaining_minutes || 0) > 0" class="extra-badge">
+                      +{{ formatMinutes(user.period_usage?.extra_remaining_minutes) }} 分鐘
+                    </span>
+                  </span>
                   <div class="usage-bar">
                     <div
                       class="usage-fill"
-                      :style="{ width: user.quota?.max_transcriptions >= 999999 ? '5%' : getUsagePercent(user.usage?.transcriptions, user.quota?.max_transcriptions) + '%' }"
+                      :class="{ 'usage-fill-warn': periodUsagePercent(user.period_usage) >= 80 }"
+                      :style="{ width: isUnlimited(user.period_usage?.limit_minutes) ? '5%' : periodUsagePercent(user.period_usage) + '%' }"
                     ></div>
                   </div>
+                  <span
+                    v-if="user.period_usage?.period_end"
+                    class="period-end-hint"
+                    :title="`週期：${formatPeriodDate(user.period_usage.period_start)} ~ ${formatPeriodEndInclusive(user.period_usage.period_end)}${user.period_usage.period_type === 'billing_cycle' ? '（訂閱計費週期）' : '（日曆月）'}`"
+                  >
+                    週期至 {{ formatPeriodEndInclusive(user.period_usage.period_end) }}
+                  </span>
                 </div>
               </td>
               <td class="task-count">
@@ -289,6 +302,35 @@ function getTierName(tier) {
 function getUsagePercent(used, max) {
   if (!max) return 0
   return Math.min((used || 0) / max * 100, 100)
+}
+
+function isUnlimited(limitMinutes) {
+  return (limitMinutes || 0) >= 999999
+}
+
+function formatMinutes(minutes) {
+  return (minutes || 0).toFixed(1)
+}
+
+function periodUsagePercent(periodUsage) {
+  if (!periodUsage) return 0
+  return getUsagePercent(periodUsage.used_minutes, periodUsage.limit_minutes)
+}
+
+function formatPeriodDate(isoString) {
+  if (!isoString) return '-'
+  const d = new Date(isoString)
+  // period_start/period_end 是 UTC ISO 字串，一律用 UTC getters 讀，別讓
+  // formatPeriodEndInclusive（用 setUTCDate 操作）跟這裡混用不同時區基準
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`
+}
+
+// period_end 是「下期起點」（exclusive），顯示上換算成本期最後一天（inclusive）較不易誤解
+function formatPeriodEndInclusive(isoString) {
+  if (!isoString) return '-'
+  const d = new Date(isoString)
+  d.setUTCDate(d.getUTCDate() - 1)
+  return formatPeriodDate(d.toISOString())
 }
 
 function formatTimestamp(timestamp) {
@@ -513,6 +555,29 @@ onMounted(() => {
   background: var(--color-primary, #dd8448);
   border-radius: 3px;
   transition: width 0.3s;
+}
+
+.usage-fill-warn {
+  background: #e65100;
+}
+
+.extra-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #e8f5e9;
+  color: #2e7d32;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.period-end-hint {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--color-text-light, #a0917c);
+  cursor: help;
 }
 
 .task-count { font-weight: 600; }

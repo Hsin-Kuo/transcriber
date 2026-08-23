@@ -200,6 +200,35 @@ Redirect 規則會 302 到 404。**
 
 ---
 
+## §7 電子發票開立上線（SmilePay）
+
+> **前提決策（2026-08-23，owner）**：SmilePay 正式 Verify_key 曾 commit 進 repo（PR#346
+> 清工作區、git 歷史仍有）。**owner 已知情並決定「不輪換 key、直接上 prod」，此風險由
+> owner 接受**。→ 本節不含「輪換」步驟；後續勿再把此暴露當疏漏重提。殘留風險（repo 歷史/
+> clone/CI）壓低靠：repo 維持 private、偶爾巡速買配後台有無非預期作廢/查詢。
+
+- [ ] **先 merge PR#346**（清 repo 工作區真值 + 改 dummy）——與是否輪換無關，純止血未來 commit。
+- [ ] **seed SmilePay 憑證到 SSM**（值從速買配後台取，貼進終端機執行，勿寫回 repo）：
+  ```bash
+  aws ssm put-parameter --region ap-northeast-1 --type SecureString \
+    --name /transcriber/smilepay-grvc        --value '<Grvc>'
+  aws ssm put-parameter --region ap-northeast-1 --type SecureString \
+    --name /transcriber/smilepay-verify-key  --value '<Verify_key>'
+  # staging 同一組（測試/正式共用，只差 endpoint）：/transcriber-staging/smilepay-*
+  ```
+- [ ] **補 prod 後端 `SENTRY_DSN`**（目前沒開，見 §附錄/prod_findings）——開票失敗
+  （needs_manual / 跨期 / deadline / read-timeout 結果不明）全走 Sentry，沒開就靜默。
+  這比輪不輪換更影響「開票出錯你看不看得到」。
+- [ ] **跟速買配確認字軌**已配發（正式帳號每期別的字軌是自動管理還是需申請）。
+- [ ] **staging 先真開一張**：staging 設 `SMILEPAY_ENV=production`（打 `/api/` 正式端點）+
+  上面 seed 的憑證，開 B2C 載具 / B2C 無載具 / B2B 統編 / 作廢各一，確認都開得出、
+  歸到本商家、發票入財政部；dump 開票 response 回寫 `INVOICE_SMILEPAY_API.md`。
+- [ ] **prod 切正式**：解 `deploy/.env.aws` 的 `SMILEPAY_ENV=production`——⚠️ **必須和
+  `PAYMENTS91_ENV=production` 一起切**（否則對 sandbox 付款開真發票）。走 PR 部署，禁 SSH 手改。
+- [ ] 切完觀察頭幾筆真實交易：發票有開出、通知信（#337/#338）有寄、無 needs_manual 堆積。
+
+---
+
 ## 附錄：ops 待辦速查（誰做什麼）
 
 | 項 | 負責 | 前置 |

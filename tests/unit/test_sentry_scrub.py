@@ -23,12 +23,12 @@ def _event_with_frame_vars(local_vars):
 class TestBeforeSendFrameVars:
     def test_nested_verify_key_in_frame_vars_is_filtered(self):
         event = _event_with_frame_vars(
-            {"body": {"Grvc": "SEI1004730", "Verify_key": "SUPERSECRET"}, "url": "https://x"}
+            {"body": {"Grvc": "SEI0000000", "Verify_key": "SUPERSECRET"}, "url": "https://x"}
         )
         out = _before_send(event, {})
         frame_vars = out["exception"]["values"][0]["stacktrace"]["frames"][0]["vars"]
         assert frame_vars["body"]["Verify_key"] == "[FILTERED]"
-        assert frame_vars["body"]["Grvc"] == "SEI1004730"  # 非敏感欄位不動
+        assert frame_vars["body"]["Grvc"] == "SEI0000000"  # 非敏感欄位不動
         assert frame_vars["url"] == "https://x"
 
     def test_hyphenated_header_key_filtered(self):

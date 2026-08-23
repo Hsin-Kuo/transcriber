@@ -27,6 +27,7 @@ from ..database.repositories.order_repo import OrderRepository
 from ..database.repositories.invoice_repo import InvoiceRepository
 from ..services import invoice_service
 from ..models.quota import QuotaTier, QUOTA_TIERS
+from ..auth.quota import compute_period_usage
 from ..utils.time_utils import get_utc_timestamp
 from ..utils.audit_logger import log_admin_action
 from ..utils.email_service import get_email_service
@@ -260,6 +261,7 @@ async def list_users(
             "has_password": user.get("password_hash") is not None,
             "quota": user.get("quota", {}),
             "usage": user.get("usage", {}),
+            "period_usage": compute_period_usage(user),
             "created_at": user.get("created_at"),
             "updated_at": user.get("updated_at"),
             "task_count": task_count,
@@ -320,6 +322,7 @@ async def get_user_detail(
         "quota": user.get("quota", {}),
         "usage": user.get("usage", {}),
         "extra_quota": user.get("extra_quota", {}),
+        "period_usage": compute_period_usage(user),
         "created_at": user.get("created_at"),
         "updated_at": user.get("updated_at"),
         "stats": {

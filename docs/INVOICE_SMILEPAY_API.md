@@ -27,9 +27,11 @@
 | 回應格式 | XML（`<SmilePayEinvoice>`） |
 | 參數大小寫 | **區分大小寫** |
 
-**測試環境憑證（官方公開測試帳號，非機密）**：
-- `Grvc=SEI1004730`
-- `Verify_key=7C623AEFC6C2AEB7F11047CD29B50F4E`
+**憑證（Grvc / Verify_key）是速買配後台配發的商家專屬機密**——測試與正式共用同一組,
+只差 endpoint（`/api_test/` vs `/api/`）。**勿寫入本文件或 repo 任何檔案**;實際值放 SSM
+`/transcriber/smilepay-*`（staging 為 `/transcriber-staging/smilepay-*`）。下例佔位僅示格式:
+- `Grvc=SEI0000000`（格式:`SEI` + 7 碼）
+- `Verify_key=0123456789ABCDEF0123456789ABCDEF`（格式:32 碼 hex）
 
 正式環境的 `Grvc` / `Verify_key` 由速買配提供 → 應存 SSM Parameter Store（`/transcriber/*`），**禁止硬編碼**。
 
@@ -43,7 +45,7 @@
 
 | 參數 | 名稱 | B2C | B2B | 說明 |
 |------|------|-----|-----|------|
-| `Grvc` | 電子發票帳號 | Ｏ | Ｏ | 由速買配提供，如 `SEI1004730` |
+| `Grvc` | 電子發票帳號 | Ｏ | Ｏ | 由速買配提供，如 `SEI0000000` |
 | `Verify_key` | 驗證碼 | Ｏ | Ｏ | 由速買配提供 |
 
 ## 3. 發票資訊
@@ -130,19 +132,19 @@
 **B2C**（無統編，`Name` 為買受人姓名）：
 
 ```
-https://ssl.smse.com.tw/api_test/SPEinvoice_Storage.asp?Grvc=SEI1004730&Verify_key=7C623AEFC6C2AEB7F11047CD29B50F4E&Name=速買配&Phone=0900000000&Email=Test@testmailserver.net&Intype=07&TaxType=1&LoveKey=&DonateMark=0&Description=商品1|商品2&Quantity=5|8&UnitPrice=10|15&Unit=顆|條&Amount=50|120&ALLAmount=170&InvoiceDate=2026/8/7&InvoiceTime=15:33:33
+https://ssl.smse.com.tw/api_test/SPEinvoice_Storage.asp?Grvc=SEI0000000&Verify_key=0123456789ABCDEF0123456789ABCDEF&Name=速買配&Phone=0900000000&Email=Test@testmailserver.net&Intype=07&TaxType=1&LoveKey=&DonateMark=0&Description=商品1|商品2&Quantity=5|8&UnitPrice=10|15&Unit=顆|條&Amount=50|120&ALLAmount=170&InvoiceDate=2026/8/7&InvoiceTime=15:33:33
 ```
 
 **B2B**（帶 `Buyer_id`、`CompanyName`）：
 
 ```
-https://ssl.smse.com.tw/api_test/SPEinvoice_Storage.asp?Grvc=SEI1004730&Verify_key=7C623AEFC6C2AEB7F11047CD29B50F4E&CompanyName=速買配&Phone=0900000000&Email=Test@testmailserver.net&Intype=07&TaxType=1&LoveKey=&DonateMark=0&Description=商品1|商品2&Quantity=5|8&UnitPrice=10|15&Unit=顆|條&Amount=50|120&ALLAmount=170&InvoiceDate=2026/8/7&InvoiceTime=15:33:33&Buyer_id=80129529
+https://ssl.smse.com.tw/api_test/SPEinvoice_Storage.asp?Grvc=SEI0000000&Verify_key=0123456789ABCDEF0123456789ABCDEF&CompanyName=速買配&Phone=0900000000&Email=Test@testmailserver.net&Intype=07&TaxType=1&LoveKey=&DonateMark=0&Description=商品1|商品2&Quantity=5|8&UnitPrice=10|15&Unit=顆|條&Amount=50|120&ALLAmount=170&InvoiceDate=2026/8/7&InvoiceTime=15:33:33&Buyer_id=80129529
 ```
 
 **B2G**（統編不可空白、金額必須含稅 `UnitTAX=Y`、必帶 `Einvoice_Type=B2B`）：
 
 ```
-https://ssl.smse.com.tw/api_test/SPEinvoice_Storage.asp?Grvc=SEI1004730&Verify_key=7C623AEFC6C2AEB7F11047CD29B50F4E&CompanyName=速買配&Phone=0900000000&Email=Test@testmailserver.net&Intype=07&TaxType=1&LoveKey=&DonateMark=0&Description=商品&Quantity=1&UnitPrice=100&Unit=顆&Amount=100&ALLAmount=100&InvoiceDate=2026/8/7&InvoiceTime=15:33:33&Buyer_id=80129529&UnitTAX=Y&Einvoice_Type=B2B
+https://ssl.smse.com.tw/api_test/SPEinvoice_Storage.asp?Grvc=SEI0000000&Verify_key=0123456789ABCDEF0123456789ABCDEF&CompanyName=速買配&Phone=0900000000&Email=Test@testmailserver.net&Intype=07&TaxType=1&LoveKey=&DonateMark=0&Description=商品&Quantity=1&UnitPrice=100&Unit=顆&Amount=100&ALLAmount=100&InvoiceDate=2026/8/7&InvoiceTime=15:33:33&Buyer_id=80129529&UnitTAX=Y&Einvoice_Type=B2B
 ```
 
 > 注意：官方範例中總金額參數寫作 `ALLAmount`，欄位表寫作 `AllAmount`。**2026-08-07 測試環境實測：兩種拼法都接受**（classic ASP 參數名不分大小寫），實作統一用官方範例的 `ALLAmount`。
@@ -176,6 +178,25 @@ https://ssl.smse.com.tw/api_test/SPEinvoice_Storage.asp?Grvc=SEI1004730&Verify_k
 | `InvoiceDate` / `InvoiceTime` | 開立日期 / 時間 |
 | `InvoiceType` | `B2C`：無統編一般發票；`B2C2B`：有統編、可接受發票作廢；`B2B`：有統編、無法註銷（`BondedAreaConfirm` 有值時給此） |
 | `CarrierID` | 如申請速買配載具會回應載具號碼 |
+
+### 8.1 正式端點實測（2026-08-23，staging 打 `/api/`）
+
+上線前用正式憑證 + 正式端點 `https://ssl.smse.com.tw/api/` 各開一張後作廢，全部 `Status=0`：
+
+| 案例 | InvoiceNumber | RandomNumber | InvoiceDate | 開立 | 作廢 |
+|------|---------------|--------------|-------------|------|------|
+| B2C 有載具（`CarrierType=3J0002`） | `DV14188900` | `0801` | `2026/8/23` | ✅ | ✅ |
+| B2C 無載具 | `DV14188901` | `0800` | `2026/8/23` | ✅ | ✅ |
+| B2B 統編（`Buyer_id`+`CompanyName`+`UnitTAX=Y`，自開自） | `DV14188902` | `0799` | `2026/8/23` | ✅ | ✅ |
+
+實證重點：
+- **`InvoiceNumber` 為 2 英文 + 8 數字**（例 `DV14188900`），與 §55 規格一致。
+- ⚠️ **`InvoiceDate` 回傳的是「非補零」的 `YYYY/M/D`（`2026/8/23`，非 `2026/08/23`）**——
+  §57 規格雖寫 `YYYY/MM/DD`，實測正式端點回的是單位數不補零。把此原樣字串丟回
+  `SPEinvoice_Storage_Modify.asp` 作廢仍成功，故我方不需正規化；但任何**嚴格以
+  `YYYY/MM/DD` 解析 `InvoiceDate` 的下游**都會炸，勿假設補零。
+- **作廢成功**回應 `Status=0` / `Desc=Succeeded` / `Nowstatus` 為空（失敗才帶 `Nowstatus`）。
+- `Desc` 成功時為 `Succeeded`（非空字串，與 §8 範例的空 `Desc` 不同）。
 
 ## 9. 回應代號（錯誤碼）
 
@@ -465,19 +486,19 @@ https://ssl.smse.com.tw/api_test/SPEinvoice_Storage.asp?Grvc=SEI1004730&Verify_k
 B2C 發票（`RaNumber`＝隨機碼）：
 
 ```
-https://einvoice.smilepay.net/einvoice_test/SmilePayCarrier/InvoiceDetails.php?Grvc=SEI1004730&Verify_key=7C623AEFC6C2AEB7F11047CD29B50F4E&InNumber=HG00631928&InvoiceDate=2024/11/06&RaNumber=7572
+https://einvoice.smilepay.net/einvoice_test/SmilePayCarrier/InvoiceDetails.php?Grvc=SEI0000000&Verify_key=0123456789ABCDEF0123456789ABCDEF&InNumber=HG00631928&InvoiceDate=2024/11/06&RaNumber=7572
 ```
 
 B2B 發票（`RaNumber`＝買受人統編）：
 
 ```
-https://einvoice.smilepay.net/einvoice_test/SmilePayCarrier/InvoiceDetails.php?Grvc=SEI1004730&Verify_key=7C623AEFC6C2AEB7F11047CD29B50F4E&InNumber=HG00631929&InvoiceDate=2024/11/06&RaNumber=80129529
+https://einvoice.smilepay.net/einvoice_test/SmilePayCarrier/InvoiceDetails.php?Grvc=SEI0000000&Verify_key=0123456789ABCDEF0123456789ABCDEF&InNumber=HG00631929&InvoiceDate=2024/11/06&RaNumber=80129529
 ```
 
 折讓單：
 
 ```
-https://einvoice.smilepay.net/einvoice_test/SmilePayCarrier/AllowanceDetails.php?Grvc=SEI1004730&Verify_key=7C623AEFC6C2AEB7F11047CD29B50F4E&InNumber=XD65128761&AllowanceNumber=SM00000001209905
+https://einvoice.smilepay.net/einvoice_test/SmilePayCarrier/AllowanceDetails.php?Grvc=SEI0000000&Verify_key=0123456789ABCDEF0123456789ABCDEF&InNumber=XD65128761&AllowanceNumber=SM00000001209905
 ```
 
 ---
