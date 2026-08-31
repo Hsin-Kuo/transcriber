@@ -342,16 +342,18 @@ class TestLeaseGate:
         monkeypatch.setattr(pr, "run_reconciliation_sweep", sweep)
         resettle_sweep = AsyncMock()
         monkeypatch.setattr(pr, "run_entitlement_resettle_sweep", resettle_sweep)
+        capture_audit_sweep = AsyncMock()
+        monkeypatch.setattr(pr, "run_capture_audit_sweep", capture_audit_sweep)
         refund_audit_sweep = AsyncMock()
         monkeypatch.setattr(pr, "run_refund_audit_sweep", refund_audit_sweep)
         monkeypatch.setattr(pr.asyncio, "sleep", AsyncMock(side_effect=asyncio.CancelledError()))
 
         with pytest.raises(asyncio.CancelledError):
             await pr.periodic_payment_reconciliation(MagicMock(), interval_seconds=600)
-        return lease_repo, sweep, resettle_sweep, refund_audit_sweep
+        return lease_repo, sweep, resettle_sweep, refund_audit_sweep, capture_audit_sweep
 
     async def test_lease_lost_skips_both_sweeps(self, monkeypatch):
-        lease_repo, sweep, resettle_sweep, refund_audit_sweep = await self._run_one_round(
+        lease_repo, sweep, resettle_sweep, refund_audit_sweep, capture_audit_sweep = await self._run_one_round(
             monkeypatch, claim_ok=False, refund_audit_claim_ok=False,
         )
         lease_repo.claim_window.assert_any_await("payment_reconciliation", 600)
@@ -359,38 +361,47 @@ class TestLeaseGate:
         sweep.assert_not_awaited()
         resettle_sweep.assert_not_awaited()
         refund_audit_sweep.assert_not_awaited()
+        capture_audit_sweep.assert_not_awaited()
 
     async def test_lease_won_runs_both_sweeps(self, monkeypatch):
-        _, sweep, resettle_sweep, refund_audit_sweep = await self._run_one_round(monkeypatch, claim_ok=True)
+        _, sweep, resettle_sweep, refund_audit_sweep, capture_audit_sweep = await self._run_one_round(
+            monkeypatch, claim_ok=True,
+        )
         sweep.assert_awaited_once()
         resettle_sweep.assert_awaited_once()
         refund_audit_sweep.assert_awaited_once()
+        capture_audit_sweep.assert_awaited_once()
 
     async def test_lease_check_exception_fails_open_and_runs_sweeps(self, monkeypatch):
-        _, sweep, resettle_sweep, refund_audit_sweep = await self._run_one_round(
+        _, sweep, resettle_sweep, refund_audit_sweep, capture_audit_sweep = await self._run_one_round(
             monkeypatch, claim_raises=RuntimeError("mongo down"), refund_audit_claim_raises=RuntimeError("mongo down"),
         )
         sweep.assert_awaited_once()
         resettle_sweep.assert_awaited_once()
         refund_audit_sweep.assert_awaited_once()
+        capture_audit_sweep.assert_awaited_once()
 
     async def test_refund_audit_lease_is_independent_of_main_lease(self, monkeypatch):
-        """主迴圈搶輸（should_run=False）不影響 refund_audit 照自己的節奏判斷。"""
-        _, sweep, resettle_sweep, refund_audit_sweep = await self._run_one_round(
+        """主迴圈搶輸（should_run=False）不影響 refund_audit 照自己的節奏判斷；
+        capture_audit 共用主 lease，搶輸時應跟前兩段一樣不執行。"""
+        _, sweep, resettle_sweep, refund_audit_sweep, capture_audit_sweep = await self._run_one_round(
             monkeypatch, claim_ok=False, refund_audit_claim_ok=True,
         )
         sweep.assert_not_awaited()
         resettle_sweep.assert_not_awaited()
         refund_audit_sweep.assert_awaited_once()
+        capture_audit_sweep.assert_not_awaited()
 
     async def test_main_lease_win_does_not_force_refund_audit_to_run(self, monkeypatch):
-        """反之：主迴圈搶到了，不代表 refund_audit 的一天一輪視窗也一定搶得到。"""
-        _, sweep, resettle_sweep, refund_audit_sweep = await self._run_one_round(
+        """反之：主迴圈搶到了，不代表 refund_audit 的一天一輪視窗也一定搶得到；
+        capture_audit 共用主 lease，主迴圈搶到就會跑。"""
+        _, sweep, resettle_sweep, refund_audit_sweep, capture_audit_sweep = await self._run_one_round(
             monkeypatch, claim_ok=True, refund_audit_claim_ok=False,
         )
         sweep.assert_awaited_once()
         resettle_sweep.assert_awaited_once()
         refund_audit_sweep.assert_not_awaited()
+        capture_audit_sweep.assert_awaited_once()
 
     async def test_reconciliation_sweep_exception_does_not_block_resettle_sweep(self, monkeypatch):
         lease_repo = MagicMock()
@@ -400,6 +411,8 @@ class TestLeaseGate:
         monkeypatch.setattr(pr, "run_reconciliation_sweep", sweep)
         resettle_sweep = AsyncMock()
         monkeypatch.setattr(pr, "run_entitlement_resettle_sweep", resettle_sweep)
+        capture_audit_sweep = AsyncMock()
+        monkeypatch.setattr(pr, "run_capture_audit_sweep", capture_audit_sweep)
         refund_audit_sweep = AsyncMock()
         monkeypatch.setattr(pr, "run_refund_audit_sweep", refund_audit_sweep)
         monkeypatch.setattr(pr.asyncio, "sleep", AsyncMock(side_effect=asyncio.CancelledError()))
@@ -407,10 +420,11 @@ class TestLeaseGate:
         with pytest.raises(asyncio.CancelledError):
             await pr.periodic_payment_reconciliation(MagicMock(), interval_seconds=600)
         resettle_sweep.assert_awaited_once()
+        capture_audit_sweep.assert_awaited_once()
         refund_audit_sweep.assert_awaited_once()
 
     async def test_refund_audit_sweep_exception_is_isolated(self, monkeypatch):
-        """refund_audit sweep 炸掉不可拖累前兩段（也不可讓整個背景迴圈死掉）。"""
+        """refund_audit sweep 炸掉不可拖累前面幾段（也不可讓整個背景迴圈死掉）。"""
         lease_repo = MagicMock()
         lease_repo.claim_window = AsyncMock(return_value=True)
         monkeypatch.setattr(pr, "JobLeaseRepository", lambda db: lease_repo)
@@ -418,7 +432,31 @@ class TestLeaseGate:
         monkeypatch.setattr(pr, "run_reconciliation_sweep", sweep)
         resettle_sweep = AsyncMock()
         monkeypatch.setattr(pr, "run_entitlement_resettle_sweep", resettle_sweep)
+        capture_audit_sweep = AsyncMock()
+        monkeypatch.setattr(pr, "run_capture_audit_sweep", capture_audit_sweep)
         refund_audit_sweep = AsyncMock(side_effect=RuntimeError("boom"))
+        monkeypatch.setattr(pr, "run_refund_audit_sweep", refund_audit_sweep)
+        monkeypatch.setattr(pr.asyncio, "sleep", AsyncMock(side_effect=asyncio.CancelledError()))
+
+        with pytest.raises(asyncio.CancelledError):
+            await pr.periodic_payment_reconciliation(MagicMock(), interval_seconds=600)
+        sweep.assert_awaited_once()
+        resettle_sweep.assert_awaited_once()
+        capture_audit_sweep.assert_awaited_once()
+        refund_audit_sweep.assert_awaited_once()
+
+    async def test_capture_audit_sweep_exception_is_isolated(self, monkeypatch):
+        """capture_audit sweep 炸掉不可拖累其餘段落（也不可讓整個背景迴圈死掉）。"""
+        lease_repo = MagicMock()
+        lease_repo.claim_window = AsyncMock(return_value=True)
+        monkeypatch.setattr(pr, "JobLeaseRepository", lambda db: lease_repo)
+        sweep = AsyncMock()
+        monkeypatch.setattr(pr, "run_reconciliation_sweep", sweep)
+        resettle_sweep = AsyncMock()
+        monkeypatch.setattr(pr, "run_entitlement_resettle_sweep", resettle_sweep)
+        capture_audit_sweep = AsyncMock(side_effect=RuntimeError("boom"))
+        monkeypatch.setattr(pr, "run_capture_audit_sweep", capture_audit_sweep)
+        refund_audit_sweep = AsyncMock()
         monkeypatch.setattr(pr, "run_refund_audit_sweep", refund_audit_sweep)
         monkeypatch.setattr(pr.asyncio, "sleep", AsyncMock(side_effect=asyncio.CancelledError()))
 
@@ -575,3 +613,233 @@ class TestRefundAuditSweep:
         order_repo, svc, settlement = _patch_refund_audit(monkeypatch, orders=[])
         counts = await pr.run_refund_audit_sweep(MagicMock())
         assert counts == {"refund_full": 0, "refund_partial": 0, "unresolved": 0, "errored": 0}
+
+
+# ── run_capture_audit_sweep（唯讀偵測「91APP 自動請款失效」+ Sentry）──────────
+# 授權成功（recordStatus 4）不代表錢真的進帳——91APP 兩段式請款要靠「自動請款」
+# 把 captureStatus 從 0 推到 1。這個 sweep 純唯讀：只查詢 + 告警，不 settle、
+# 不改 order.status、不動權益/發票/退款。
+
+def _paid_order_for_capture(**over):
+    base = {
+        "merchant_order_no": "SLSUB1",
+        "user_id": "u1",
+        "type": "subscription",
+        "status": "paid",
+        "trade_id": "T1",
+        "paid_at": get_utc_timestamp() - 1000,
+    }
+    base.update(over)
+    return base
+
+
+def _patch_capture_audit(monkeypatch, *, orders=None, query_trade=None):
+    order_repo = MagicMock()
+    order_repo.iter_for_capture_audit = MagicMock(side_effect=lambda grace: _aiter(list(orders or [])))
+    order_repo.stamp_capture_audited = AsyncMock(return_value=None)
+    order_repo.stamp_capture_gap_alerted = AsyncMock(return_value=None)
+    monkeypatch.setattr(pr, "OrderRepository", lambda db: order_repo)
+
+    svc = MagicMock()
+    svc.query_trade = AsyncMock(side_effect=query_trade) if callable(query_trade) else \
+        AsyncMock(return_value=query_trade if query_trade is not None else
+                  {"_http_status": 200, "statusCode": "Success", "captureStatus": 1})
+    monkeypatch.setattr(pr, "get_payments91_service", lambda: svc)
+
+    alert = MagicMock()
+    monkeypatch.setattr(pr, "_capture_capture_gap_alert", alert)
+
+    return order_repo, svc, alert
+
+
+class TestCaptureAuditSweep:
+    """純新增、唯讀 lane：statusCode==Success 但 captureStatus==0 → 每輪照舊 log +
+    counts["capture_gap"]++，但 Sentry 受 `CAPTURE_AUDIT_ALERT_THROTTLE_SECONDS`
+    節流（未過節流窗才真的發，發了才 stamp `capture_gap_alerted_at`）；
+    captureStatus>=1 → 標記 capture_audited_at（避免每輪重複 query_trade / 重複
+    告警），不告警。"""
+
+    async def test_capture_status_zero_alerts_and_does_not_mark_audited(self, monkeypatch):
+        order_repo, svc, alert = _patch_capture_audit(
+            monkeypatch, orders=[_paid_order_for_capture()],
+            query_trade={"_http_status": 200, "statusCode": "Success", "captureStatus": 0},
+        )
+        counts = await pr.run_capture_audit_sweep(MagicMock())
+        alert.assert_called_once_with("SLSUB1", "T1", 0)
+        order_repo.stamp_capture_audited.assert_not_awaited()
+        order_repo.stamp_capture_gap_alerted.assert_awaited_once()
+        assert order_repo.stamp_capture_gap_alerted.await_args.args[0] == "SLSUB1"
+        assert counts["capture_gap"] == 1
+        assert counts["alerted"] == 1
+        assert counts["captured_ok"] == 0
+        assert counts["checked"] == 1
+        assert counts["errored"] == 0
+
+    async def test_capture_status_one_marks_audited_and_does_not_alert(self, monkeypatch):
+        order_repo, svc, alert = _patch_capture_audit(
+            monkeypatch, orders=[_paid_order_for_capture()],
+            query_trade={"_http_status": 200, "statusCode": "Success", "captureStatus": 1},
+        )
+        counts = await pr.run_capture_audit_sweep(MagicMock())
+        alert.assert_not_called()
+        order_repo.stamp_capture_audited.assert_awaited_once()
+        assert order_repo.stamp_capture_audited.await_args.args[0] == "SLSUB1"
+        order_repo.stamp_capture_gap_alerted.assert_not_awaited()
+        assert counts["captured_ok"] == 1
+        assert counts["capture_gap"] == 0
+        assert counts["alerted"] == 0
+
+    async def test_capture_status_above_one_also_marks_audited(self, monkeypatch):
+        """captureStatus>=1 一律視為已請款（不只是恰好等於 1）。"""
+        order_repo, svc, alert = _patch_capture_audit(
+            monkeypatch, orders=[_paid_order_for_capture()],
+            query_trade={"_http_status": 200, "statusCode": "Success", "captureStatus": 2},
+        )
+        counts = await pr.run_capture_audit_sweep(MagicMock())
+        alert.assert_not_called()
+        order_repo.stamp_capture_audited.assert_awaited_once()
+        assert counts["captured_ok"] == 1
+
+    async def test_capture_status_zero_as_string_still_alerts(self, monkeypatch):
+        """captureStatus 以字串 "0" 回傳時 int() 能處理——釘住字串路徑。"""
+        order_repo, svc, alert = _patch_capture_audit(
+            monkeypatch, orders=[_paid_order_for_capture()],
+            query_trade={"_http_status": 200, "statusCode": "Success", "captureStatus": "0"},
+        )
+        counts = await pr.run_capture_audit_sweep(MagicMock())
+        alert.assert_called_once_with("SLSUB1", "T1", 0)
+        order_repo.stamp_capture_audited.assert_not_awaited()
+        assert counts["capture_gap"] == 1
+        assert counts["alerted"] == 1
+
+    async def test_capture_status_one_as_string_still_marks_audited(self, monkeypatch):
+        """captureStatus 以字串 "1" 回傳時 int() 能處理——釘住字串路徑。"""
+        order_repo, svc, alert = _patch_capture_audit(
+            monkeypatch, orders=[_paid_order_for_capture()],
+            query_trade={"_http_status": 200, "statusCode": "Success", "captureStatus": "1"},
+        )
+        counts = await pr.run_capture_audit_sweep(MagicMock())
+        alert.assert_not_called()
+        order_repo.stamp_capture_audited.assert_awaited_once()
+        assert counts["captured_ok"] == 1
+
+    async def test_non_200_http_status_is_left_unresolved(self, monkeypatch):
+        order_repo, svc, alert = _patch_capture_audit(
+            monkeypatch, orders=[_paid_order_for_capture()], query_trade={"_http_status": 500},
+        )
+        counts = await pr.run_capture_audit_sweep(MagicMock())
+        alert.assert_not_called()
+        order_repo.stamp_capture_audited.assert_not_awaited()
+        assert counts["capture_gap"] == 0
+        assert counts["captured_ok"] == 0
+        assert counts["errored"] == 0
+
+    async def test_missing_capture_status_is_left_unresolved(self, monkeypatch):
+        order_repo, svc, alert = _patch_capture_audit(
+            monkeypatch, orders=[_paid_order_for_capture()],
+            query_trade={"_http_status": 200, "statusCode": "Success"},
+        )
+        counts = await pr.run_capture_audit_sweep(MagicMock())
+        alert.assert_not_called()
+        order_repo.stamp_capture_audited.assert_not_awaited()
+        assert counts["capture_gap"] == 0
+        assert counts["captured_ok"] == 0
+
+    async def test_status_code_not_success_is_left_unresolved_even_if_capture_status_present(self, monkeypatch):
+        """query 層 statusCode 非 Success 代表查詢本身沒查到結果，不能拿 captureStatus
+        當真——即使 body 剛好帶了這個欄位也不算數。"""
+        order_repo, svc, alert = _patch_capture_audit(
+            monkeypatch, orders=[_paid_order_for_capture()],
+            query_trade={"_http_status": 200, "statusCode": "Fail", "captureStatus": 0},
+        )
+        counts = await pr.run_capture_audit_sweep(MagicMock())
+        alert.assert_not_called()
+        order_repo.stamp_capture_audited.assert_not_awaited()
+        assert counts["capture_gap"] == 0
+
+    async def test_poison_item_does_not_stall_the_whole_sweep(self, monkeypatch):
+        good = _paid_order_for_capture(merchant_order_no="O2")
+        poison = _paid_order_for_capture(merchant_order_no="O1")
+        order_repo, svc, alert = _patch_capture_audit(monkeypatch, orders=[poison, good])
+        svc.query_trade = AsyncMock(
+            side_effect=[
+                ValueError("bad trade_id"),
+                {"_http_status": 200, "statusCode": "Success", "captureStatus": 0},
+            ]
+        )
+        counts = await pr.run_capture_audit_sweep(MagicMock())
+        assert counts["errored"] == 1
+        assert counts["capture_gap"] == 1  # 第二筆仍正常處理
+        assert counts["checked"] == 2
+
+    async def test_no_candidates_returns_zero_counts(self, monkeypatch):
+        order_repo, svc, alert = _patch_capture_audit(monkeypatch, orders=[])
+        counts = await pr.run_capture_audit_sweep(MagicMock())
+        assert counts == {"checked": 0, "captured_ok": 0, "capture_gap": 0, "alerted": 0, "errored": 0}
+
+    async def test_grace_seconds_passed_to_iter(self, monkeypatch):
+        """寬限期常數確實被傳給查詢層，避免跟自動請款流程本身賽跑。"""
+        order_repo, svc, alert = _patch_capture_audit(monkeypatch, orders=[])
+        await pr.run_capture_audit_sweep(MagicMock())
+        order_repo.iter_for_capture_audit.assert_called_once_with(pr.CAPTURE_AUDIT_GRACE_SECONDS)
+
+
+class TestCaptureAuditAlertThrottle:
+    """告警抑制窗（避免 Sentry 風暴）：同一張卡在 0 的單，連續多輪重查，Sentry
+    只在節流窗過期後才重發；`capture_gap` 計數與 log 完全不受節流影響，每輪都
+    照舊反映「現在仍卡在 0」的事實。"""
+
+    async def test_first_encounter_alerts_and_stamps(self, monkeypatch):
+        """第一輪（order 沒有 capture_gap_alerted_at 欄位）→ 發 Sentry + 記錄時間。"""
+        order = _paid_order_for_capture()  # 無 capture_gap_alerted_at 欄位
+        order_repo, svc, alert = _patch_capture_audit(
+            monkeypatch, orders=[order],
+            query_trade={"_http_status": 200, "statusCode": "Success", "captureStatus": 0},
+        )
+        counts = await pr.run_capture_audit_sweep(MagicMock())
+        alert.assert_called_once_with("SLSUB1", "T1", 0)
+        order_repo.stamp_capture_gap_alerted.assert_awaited_once()
+        assert counts["capture_gap"] == 1
+        assert counts["alerted"] == 1
+
+    async def test_within_throttle_window_logs_but_does_not_alert_again(self, monkeypatch):
+        """第二輪：capture_gap_alerted_at 在節流窗內（例如 1 小時前，< 6 小時）→
+        仍然偵測到（capture_gap++）、仍然 log，但**不**重發 Sentry。"""
+        recent_alert = get_utc_timestamp() - 3600  # 1hr 前，在 6hr 節流窗內
+        order = _paid_order_for_capture(capture_gap_alerted_at=recent_alert)
+        order_repo, svc, alert = _patch_capture_audit(
+            monkeypatch, orders=[order],
+            query_trade={"_http_status": 200, "statusCode": "Success", "captureStatus": 0},
+        )
+        counts = await pr.run_capture_audit_sweep(MagicMock())
+        alert.assert_not_called()
+        order_repo.stamp_capture_gap_alerted.assert_not_awaited()
+        assert counts["capture_gap"] == 1  # 偵測本身不受節流影響
+        assert counts["alerted"] == 0
+
+    async def test_after_throttle_window_expires_alerts_again(self, monkeypatch):
+        """超過節流窗（例如 7 小時前，> 6 小時）→ 重新發 Sentry + 更新時間戳。"""
+        stale_alert = get_utc_timestamp() - (pr.CAPTURE_AUDIT_ALERT_THROTTLE_SECONDS + 3600)
+        order = _paid_order_for_capture(capture_gap_alerted_at=stale_alert)
+        order_repo, svc, alert = _patch_capture_audit(
+            monkeypatch, orders=[order],
+            query_trade={"_http_status": 200, "statusCode": "Success", "captureStatus": 0},
+        )
+        counts = await pr.run_capture_audit_sweep(MagicMock())
+        alert.assert_called_once_with("SLSUB1", "T1", 0)
+        order_repo.stamp_capture_gap_alerted.assert_awaited_once()
+        assert counts["alerted"] == 1
+
+    async def test_capture_gap_alerted_at_does_not_suppress_stamp_capture_audited(self, monkeypatch):
+        """capture_gap_alerted_at 只節流 Sentry，跟 capture_audited_at（確認請款
+        成功）完全獨立——即使之前發過 capture_gap 告警，一旦這輪 captureStatus>=1，
+        照樣正常標記終局旗標。"""
+        order = _paid_order_for_capture(capture_gap_alerted_at=get_utc_timestamp() - 100)
+        order_repo, svc, alert = _patch_capture_audit(
+            monkeypatch, orders=[order],
+            query_trade={"_http_status": 200, "statusCode": "Success", "captureStatus": 1},
+        )
+        counts = await pr.run_capture_audit_sweep(MagicMock())
+        alert.assert_not_called()
+        order_repo.stamp_capture_audited.assert_awaited_once()
+        assert counts["captured_ok"] == 1

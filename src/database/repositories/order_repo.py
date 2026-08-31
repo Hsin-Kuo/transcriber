@@ -556,6 +556,75 @@ class OrderRepository:
             {"$set": {"refund_audited_at": ts}},
         )
 
+    # ── 唯讀對帳：91APP 自動請款失效偵測（capture audit）───────────────────────
+    # 91APP 信用卡兩段式：授權（recordStatus 4）→ 請款（capture）。商店現設「自動
+    # 請款」：授權成功後 91APP 會自動把 captureStatus 由 0（未請款）推到 1（請款
+    # 已請求）。若自動請款被關掉/誤設手動，captureStatus 會一直停在 0＝錢沒被
+    # 請款＝靜默漏收。這條 lane 純唯讀偵測 + Sentry 告警，不改任何既有金流行為
+    # （不 settle、不 claim_paid、不動權益/發票/退款）。
+    CAPTURE_AUDIT_BATCH_LIMIT = 200
+    CAPTURE_AUDIT_WINDOW_SECONDS = 7 * 24 * 3600  # lookback 上限，避免掃全歷史
+
+    async def iter_for_capture_audit(self, grace_seconds: int) -> AsyncIterator[Dict[str, Any]]:
+        """撈「已 paid、有 trade_id、paid 超過寬限期、且尚未通過 capture 稽核」的單。
+
+        寬限期（`grace_seconds`，見 `payment_reconciliation.CAPTURE_AUDIT_GRACE_SECONDS`）
+        避免跟 91APP 自動請款流程本身賽跑——授權剛成功那一刻 captureStatus 本來就
+        還是 0，要留時間讓自動請款真的跑過一輪。lookback 上限（`CAPTURE_AUDIT_WINDOW_SECONDS`）
+        避免每輪全量掃歷史 paid 單。
+
+        `capture_audited_at` 是**終局**旗標（只在 captureStatus>=1 時才寫入，見
+        `stamp_capture_audited`），不是輪替用的「最後查詢時間」——capture_status
+        仍卡在 0 的單刻意每輪重新查詢（自動請款失效是需要持續浮現的靜默漏收，
+        不能查過一次就不再管）。查詢層排除已有此欄位者即可天然停止重查已確認
+        請款成功的單。`capture_gap_alerted_at`（見 `stamp_capture_gap_alerted`）
+        只用來節流 Sentry 發送頻率，**不會**被這支查詢排除——卡 0 的單即使已經
+        發過告警，仍要持續被撈到重查（只是 Sentry 暫時不重發）。
+
+        ⚠️ 已知假設（gap）：卡在 0 的真漏收單超過 `CAPTURE_AUDIT_WINDOW_SECONDS`
+        （7 天）lookback window 後會自然掉出這支查詢，不再被本 lane 偵測——本
+        設計依賴營運在 7 天內處理掉 Sentry 告警（例如確認自動請款設定、或聯繫
+        91APP），沒有更長期的兜底機制。
+        """
+        cutoff_grace = get_utc_timestamp() - grace_seconds
+        cutoff_window = get_utc_timestamp() - self.CAPTURE_AUDIT_WINDOW_SECONDS
+        cursor = self.collection.find({
+            "status": "paid",
+            "trade_id": {"$nin": [None, ""]},
+            "paid_at": {"$lte": cutoff_grace, "$gte": cutoff_window},
+            "capture_audited_at": {"$exists": False},
+        }).sort("paid_at", 1).limit(self.CAPTURE_AUDIT_BATCH_LIMIT)
+        async for doc in cursor:
+            yield doc
+
+    async def stamp_capture_audited(self, merchant_order_no: str, ts: float) -> None:
+        """標記「已通過 capture 稽核」——終局旗標，`iter_for_capture_audit` 的排除
+        條件據此天然停止重查這筆單。
+
+        ⚠️ 語意邊界：這只代表 captureStatus>=1，即「請款已請求
+        （capture requested）」，**不等於**「銀行已入帳/請款成功」——那要看
+        `recordStatus 5`（請款成功）。本 lane 只監控「自動請款有沒有被啟動」，
+        不覆蓋「請款已請求後在銀行端才失敗」的情境（已知取捨，目前無 lane
+        覆蓋這個情境）。
+        """
+        await self.collection.update_one(
+            {"merchant_order_no": merchant_order_no},
+            {"$set": {"capture_audited_at": ts}},
+        )
+
+    async def stamp_capture_gap_alerted(self, merchant_order_no: str, ts: float) -> None:
+        """記錄「上次真的發出 capture_gap Sentry 告警」的時間——獨立欄位，**不是**
+        `capture_audited_at`（那是確認請款成功的終局旗標，語意不同、不能共用）。
+
+        純粹用來讓 `payment_reconciliation._capture_audit_one` 節流 Sentry 發送
+        頻率（`CAPTURE_AUDIT_ALERT_THROTTLE_SECONDS`）——不影響 `iter_for_capture_audit`
+        的撈單範圍，卡在 0 的單仍會每輪被重新撈到、重新查詢、重新 log。
+        """
+        await self.collection.update_one(
+            {"merchant_order_no": merchant_order_no},
+            {"$set": {"capture_gap_alerted_at": ts}},
+        )
+
     # P2-13（金流體檢）：開票補洞 sweep——settle() 的 `create_background_task(issue_for_order(...))`
     # 是唯一的開票起點，若該 asyncio task 在 upsert_initial 落地前就被 process kill
     # （部署重啟、OOM），這筆訂單永遠不會有 invoice doc，且不留任何痕跡（沒有例外、
