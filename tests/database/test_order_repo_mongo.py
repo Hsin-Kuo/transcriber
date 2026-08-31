@@ -300,6 +300,91 @@ class TestRefundAuditRealMongo:
         assert [d["merchant_order_no"] for d in docs] == ["NEVER", "OLDEST", "RECENT"]
 
 
+class TestCaptureAuditRealMongo:
+    """唯讀對帳：91APP 自動請款失效偵測（capture audit）的查詢/終局旗標真 Mongo 行為。"""
+
+    GRACE = 900
+
+    async def test_iter_excludes_orders_within_grace_period(self, repo):
+        """寬限期內（授權剛成功）不該被撈到——避免跟自動請款流程本身賽跑。"""
+        now = get_utc_timestamp()
+        await repo.collection.insert_many([
+            {"merchant_order_no": "TOO_RECENT", "status": "paid", "trade_id": "T1", "paid_at": now},
+            {"merchant_order_no": "PAST_GRACE", "status": "paid", "trade_id": "T2",
+             "paid_at": now - self.GRACE - 10},
+        ])
+        docs = [d async for d in repo.iter_for_capture_audit(self.GRACE)]
+        assert {d["merchant_order_no"] for d in docs} == {"PAST_GRACE"}
+
+    async def test_iter_excludes_orders_without_trade_id(self, repo):
+        now = get_utc_timestamp() - self.GRACE - 10
+        await repo.collection.insert_many([
+            {"merchant_order_no": "O1", "status": "paid", "trade_id": "T1", "paid_at": now},
+            {"merchant_order_no": "O2", "status": "paid", "trade_id": "", "paid_at": now},
+            {"merchant_order_no": "O3", "status": "paid", "trade_id": None, "paid_at": now},
+            {"merchant_order_no": "O4", "status": "paid", "paid_at": now},
+        ])
+        docs = [d async for d in repo.iter_for_capture_audit(self.GRACE)]
+        assert {d["merchant_order_no"] for d in docs} == {"O1"}
+
+    async def test_iter_excludes_non_paid_status(self, repo):
+        now = get_utc_timestamp() - self.GRACE - 10
+        await repo.collection.insert_many([
+            {"merchant_order_no": "O1", "status": "paid", "trade_id": "T1", "paid_at": now},
+            {"merchant_order_no": "O2", "status": "pending", "trade_id": "T2", "paid_at": now},
+        ])
+        docs = [d async for d in repo.iter_for_capture_audit(self.GRACE)]
+        assert {d["merchant_order_no"] for d in docs} == {"O1"}
+
+    async def test_iter_excludes_orders_already_audited(self, repo):
+        """capture_audited_at 是終局旗標——已通過稽核的單不再重查（跟 refund_audited_at
+        不同，這裡沒有輪替語意，因為未通過稽核的單刻意每輪重新浮現）。"""
+        now = get_utc_timestamp() - self.GRACE - 10
+        await repo.collection.insert_many([
+            {"merchant_order_no": "NEVER_AUDITED", "status": "paid", "trade_id": "T1", "paid_at": now},
+            {"merchant_order_no": "ALREADY_AUDITED", "status": "paid", "trade_id": "T2",
+             "paid_at": now, "capture_audited_at": now},
+        ])
+        docs = [d async for d in repo.iter_for_capture_audit(self.GRACE)]
+        assert {d["merchant_order_no"] for d in docs} == {"NEVER_AUDITED"}
+
+    async def test_iter_excludes_orders_older_than_window(self, repo):
+        now = get_utc_timestamp() - self.GRACE - 10
+        await repo.collection.insert_many([
+            {"merchant_order_no": "O1", "status": "paid", "trade_id": "T1", "paid_at": now},
+            {"merchant_order_no": "O2", "status": "paid", "trade_id": "T2",
+             "paid_at": now - OrderRepository.CAPTURE_AUDIT_WINDOW_SECONDS - 10},
+        ])
+        docs = [d async for d in repo.iter_for_capture_audit(self.GRACE)]
+        assert {d["merchant_order_no"] for d in docs} == {"O1"}
+
+    async def test_stamp_capture_audited_writes_timestamp(self, repo):
+        await repo.collection.insert_one({"merchant_order_no": "O1"})
+        t1 = get_utc_timestamp()
+        await repo.stamp_capture_audited("O1", t1)
+        doc = await repo.collection.find_one({"merchant_order_no": "O1"})
+        assert doc["capture_audited_at"] == t1
+        # capture_audited_at 一旦寫入即天然排除在下一次查詢之外。
+        docs = [d async for d in repo.iter_for_capture_audit(0)]
+        assert doc["merchant_order_no"] not in {d["merchant_order_no"] for d in docs}
+
+    async def test_stamp_capture_gap_alerted_writes_timestamp_without_excluding_from_iter(self, repo):
+        """capture_gap_alerted_at 只節流 Sentry，不是查詢排除鍵——寫入後這張單
+        仍要繼續被 iter_for_capture_audit 撈到重查（跟 capture_audited_at 的
+        終局排除語意完全不同）。"""
+        now = get_utc_timestamp() - self.GRACE - 10
+        await repo.collection.insert_one(
+            {"merchant_order_no": "O1", "status": "paid", "trade_id": "T1", "paid_at": now}
+        )
+        t1 = get_utc_timestamp()
+        await repo.stamp_capture_gap_alerted("O1", t1)
+        doc = await repo.collection.find_one({"merchant_order_no": "O1"})
+        assert doc["capture_gap_alerted_at"] == t1
+        assert "capture_audited_at" not in doc
+        docs = [d async for d in repo.iter_for_capture_audit(self.GRACE)]
+        assert {d["merchant_order_no"] for d in docs} == {"O1"}
+
+
 class TestIterPaidInvoiceGapCandidatesRealMongo:
     """P2-13 開票補洞 sweep 的撈單查詢——真 Mongo 驗證 filter 形狀。"""
 
