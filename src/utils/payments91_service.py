@@ -117,6 +117,24 @@ class Payments91APPService:
 
     # ── 首購（request-by-txnToken, BindingCard）────────────────────
 
+    @staticmethod
+    def _subscription_product_info(
+        prod_name: str, amount: int, billing_cycle: str, periods: Optional[int] = None
+    ) -> Dict:
+        """`extensionInfo.subscriptionProductInfo`——91APP **正式環境**對
+        `productType=Subscription` 的必填欄位（缺了回 400 `SubscriptionProductInfoRequired`
+        「定期定額交易須帶入 SubscriptionProductInfo」；**sandbox 不驗**，2026-09-01
+        go-live 首筆實測才炸出）。schema 見官方 admin-payments 文件：
+        priceName(≤100)/amount 必填；recurring.type=Day|Week|Month|Year、interval、
+        periods(未帶=無限期) 選填。加購（一次性）帶 periods=1 表達單期。"""
+        recurring: Dict = {
+            "type": "Year" if billing_cycle == "yearly" else "Month",
+            "interval": 1,
+        }
+        if periods is not None:
+            recurring["periods"] = periods
+        return {"priceName": prod_name[:100], "amount": amount, "recurring": recurring}
+
     async def create_first_payment(
         self,
         txn_token: str,
@@ -126,6 +144,8 @@ class Payments91APPService:
         redirect_url: str,
         callback_url: str,
         prod_name: str,
+        billing_cycle: str = "monthly",
+        periods: Optional[int] = None,
     ) -> Dict:
         """訂閱首期綁卡付款。回傳含 paymentUrl（3D）或直接成交結果 + cardToken。
 
@@ -138,7 +158,12 @@ class Payments91APPService:
             "merchantOrderId": order_no,
             "paymentMethods": [{"payType": "CreditCard", "amount": amount}],
             "productType": "Subscription",
-            "extensionInfo": {"subscriptionType": "First"},
+            "extensionInfo": {
+                "subscriptionType": "First",
+                "subscriptionProductInfo": self._subscription_product_info(
+                    prod_name, amount, billing_cycle, periods
+                ),
+            },
             "currency": "TWD",
             "products": [
                 {"name": prod_name, "totalAmount": amount, "productType": "Subscription"}
@@ -161,6 +186,7 @@ class Payments91APPService:
         redirect_url: str,
         callback_url: str,
         prod_name: str,
+        billing_cycle: str = "monthly",
     ) -> Dict:
         """MIT 免 3D 續扣。productType=Subscription + subscriptionType=Renewal（缺一不可）。"""
         body = {
@@ -169,7 +195,12 @@ class Payments91APPService:
             "merchantOrderId": order_no,
             "paymentMethods": [{"payType": "CreditCard", "amount": amount}],
             "productType": "Subscription",
-            "extensionInfo": {"subscriptionType": "Renewal"},
+            "extensionInfo": {
+                "subscriptionType": "Renewal",
+                "subscriptionProductInfo": self._subscription_product_info(
+                    prod_name, amount, billing_cycle
+                ),
+            },
             "currency": "TWD",
             "products": [
                 {"name": prod_name, "totalAmount": amount, "productType": "Subscription"}

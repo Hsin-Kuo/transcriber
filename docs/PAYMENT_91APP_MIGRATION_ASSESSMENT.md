@@ -272,7 +272,16 @@ script-src  (無金流網域)
   "merchantOrderId": "<訂單號,≤50字>",
   "paymentMethods": [{"payType": "CreditCard", "amount": 100}],  // amount 在此,單位=元
   "productType": "Subscription",
-  "extensionInfo": {"subscriptionType": "First"},
+  "extensionInfo": {
+    "subscriptionType": "First",
+    // ⚠️ 正式環境必填、sandbox 不驗（2026-09-01 go-live 首筆實測 400
+    //   SubscriptionProductInfoRequired 才炸出）。priceName(≤100)/amount 必填；
+    //   recurring.type=Day|Week|Month|Year、interval、periods(未帶=無限期) 選填。
+    "subscriptionProductInfo": {
+      "priceName": "...", "amount": 100,
+      "recurring": {"type": "Month", "interval": 1}
+    }
+  },
   "currency": "TWD",
   "products": [{"name": "...", "totalAmount": 100, "productType": "Subscription"}],
   "cardHolder": {"name": "...", "phoneNumber": "+886...", "email": "..."},
