@@ -165,10 +165,16 @@ class Payments91APPService:
             "initCardTokenType": "BindingCard",
             "merchantConsumerId": consumer_id,
             "merchantOrderId": order_no,
-            # ⚠️ 首期金額必須為 0（正式環境 400 SubscriptionFirstPaymentAmountNotAllowed
-            # 「定期定額首期交易請勿帶入金額」，sandbox 不驗）——實際首期扣款額由
-            # extensionInfo.subscriptionProductInfo.amount 決定，授權成功後隨即扣款。
-            "paymentMethods": [{"payType": "CreditCard", "amount": 0}],
+            # ⚠️ 首期金額規則**兩環境互相矛盾**（2026-09-01/02 實測，無固定值可同時滿足）：
+            #   正式：必須 0（400 SubscriptionFirstPaymentAmountNotAllowed「首期請勿帶入
+            #        金額」；amount=0 實測已通過該關），實際首期扣款額 =
+            #        extensionInfo.subscriptionProductInfo.amount，授權成功後隨即扣款。
+            #   sandbox：必須 >0（400 AmountMustGreaterThanZero；歷來 sandbox 交易
+            #        amount>0 全數成功）。
+            # → 只能依 env 切換。若 91APP 日後統一兩環境行為，這裡要跟著收斂。
+            "paymentMethods": [
+                {"payType": "CreditCard", "amount": 0 if self.env == "production" else amount}
+            ],
             "productType": "Subscription",
             "extensionInfo": {
                 "subscriptionType": "First",
