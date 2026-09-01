@@ -124,14 +124,37 @@ class TestRequestBodies:
         assert b["merchantConsumerId"] == "u1"
         assert b["productType"] == "Subscription"
         assert b["extensionInfo"]["subscriptionType"] == "First"
-        # 首期 paymentMethods.amount 必須為 0（prod 400 SubscriptionFirstPaymentAmountNotAllowed）,
-        # 實際扣款額走 extensionInfo.subscriptionProductInfo.amount
-        assert b["paymentMethods"] == [{"payType": "CreditCard", "amount": 0}]
+        # 首期 paymentMethods.amount 兩環境矛盾：sandbox 必須 >0（AmountMustGreaterThanZero）、
+        # 正式必須 0（SubscriptionFirstPaymentAmountNotAllowed）→ 依 env 切換。
+        # 實際扣款額（兩環境皆然）走 extensionInfo.subscriptionProductInfo.amount。
+        assert b["paymentMethods"] == [{"payType": "CreditCard", "amount": 299}]  # sandbox
         assert b["extensionInfo"]["subscriptionProductInfo"]["amount"] == 299
         assert b["redirectUrl"] == "https://x/return"
         assert b["callbackUrl"] == "https://x/cb"
         # cardHolder（91APP 正式環境對綁卡交易必填；PHONE_REQUIRED 專案功能）
         assert b["cardHolder"] == {"phoneNumber": "+886912345678", "email": "user@example.com"}
+
+    async def test_first_payment_amount_zero_on_production(self):
+        """正式環境首期 amount 必須為 0（prod 400 SubscriptionFirstPaymentAmountNotAllowed）。"""
+        svc = _svc()
+        svc.env = "production"
+        captured = {}
+
+        async def fake_post(path, body, idempotency_key=None):
+            captured["body"] = body
+            return {"statusCode": "Success"}
+
+        svc._post = fake_post
+        await svc.create_first_payment(
+            txn_token="TXN", order_no="SLSUB1", consumer_id="u1", amount=299,
+            redirect_url="https://x/return", callback_url="https://x/cb",
+            prod_name="SoundLite Basic 方案",
+            holder_phone="+886912345678", holder_email="u@x.tw",
+        )
+        b = captured["body"]
+        assert b["paymentMethods"] == [{"payType": "CreditCard", "amount": 0}]
+        assert b["extensionInfo"]["subscriptionProductInfo"]["amount"] == 299
+        assert b["cardHolder"] == {"phoneNumber": "+886912345678", "email": "u@x.tw"}
 
     async def test_first_payment_includes_holder_name_when_given(self):
         svc = _svc()
