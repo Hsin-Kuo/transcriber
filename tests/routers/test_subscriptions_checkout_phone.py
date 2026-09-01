@@ -104,7 +104,7 @@ class TestPurchaseExtraPhoneResolution:
     async def test_purchase_extra_stores_normalized_phone(self, monkeypatch):
         user_repo = _user_repo(monkeypatch, billing_phone=None,
                                 subscription={"status": "active"})
-        svc = _svc(monkeypatch)
+        _svc(monkeypatch)
 
         db = MagicMock()
         pkg = {"_id": "6a96fbe37599f21264010c17", "price_twd": 39, "amount": 60, "type": "duration",
@@ -144,8 +144,8 @@ class TestPurchaseExtraPhoneResolution:
 
 class TestUpdateCardPhoneResolution:
     async def test_update_card_uses_request_phone_when_given(self, monkeypatch):
-        user_repo = _user_repo(monkeypatch, billing_phone=None,
-                                subscription={"status": "past_due", "tier": "basic", "billing_cycle": "monthly"})
+        _user_repo(monkeypatch, billing_phone=None,
+                   subscription={"status": "past_due", "tier": "basic", "billing_cycle": "monthly"})
         _svc(monkeypatch)
         order_repo = MagicMock()
         order_repo.create = AsyncMock(return_value={})
