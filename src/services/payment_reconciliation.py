@@ -201,8 +201,6 @@ async def run_reconciliation_sweep(db) -> Dict[str, int]:
     更精確的鍵）／gave_up／errored。
     """
     order_repo = OrderRepository(db)
-    svc = get_payments91_service()
-    settlement = build_order_settlement(db)
     counts = {
         "resolved_success": 0, "activated": 0, "renewed": 0, "already_paid": 0,
         "resolved_failed": 0, "still_pending": 0, "unresolved": 0,
@@ -213,6 +211,13 @@ async def run_reconciliation_sweep(db) -> Dict[str, int]:
     # 都可能觸發 91APP query_trade（httpx，最長 30s），沿用 async for 直接吃 motor
     # cursor 會在長時間掛在迴圈中時撞 Mongo cursor idle timeout。
     orders = [o async for o in order_repo.iter_for_reconciliation(RECONCILE_AGE_GATE_SECONDS)]
+    # lazy init：0 候選就不建 service——get_payments91_service() 在金流未設定
+    # （PAYMENTS91_ENV 未設，fail-closed）時會 raise，eager 建構會讓「沒單可對帳」
+    # 的環境每輪白噴一次 ERROR（prod 上碼→切金流的空窗期灌爆 Sentry）。
+    if not orders:
+        return counts
+    svc = get_payments91_service()
+    settlement = build_order_settlement(db)
 
     for order in orders:
         order_no = order.get("merchant_order_no", "")
@@ -441,14 +446,18 @@ async def run_refund_audit_sweep(db) -> Dict[str, int]:
     回傳計數（測試用）：refund_full／refund_partial／unresolved／errored。
     """
     order_repo = OrderRepository(db)
-    svc = get_payments91_service()
-    settlement = build_order_settlement(db)
     counts = {"refund_full": 0, "refund_partial": 0, "unresolved": 0, "errored": 0}
 
     # ★物化成 list：理由同 run_reconciliation_sweep——迴圈體對每筆都可能觸發 91APP
     # query_trade（httpx，最長 30s），沿用 async for 直接吃 motor cursor 會在長時間
     # 掛在迴圈中時撞 Mongo cursor idle timeout。
     orders = [o async for o in order_repo.iter_for_refund_audit()]
+    # lazy init：理由同 run_reconciliation_sweep——0 候選就不建 service，避免
+    # 金流 fail-closed 環境每輪白噴 ERROR。
+    if not orders:
+        return counts
+    svc = get_payments91_service()
+    settlement = build_order_settlement(db)
 
     for order in orders:
         order_no = order.get("merchant_order_no", "")
@@ -555,13 +564,17 @@ async def run_capture_audit_sweep(db) -> Dict[str, int]:
     poison trade_id 的 ValueError，隔離不癱瘓整輪）。
     """
     order_repo = OrderRepository(db)
-    svc = get_payments91_service()
     counts = {"checked": 0, "captured_ok": 0, "capture_gap": 0, "alerted": 0, "errored": 0}
 
     # ★物化成 list：理由同其餘三段——迴圈體對每筆都可能觸發 91APP query_trade
     # （httpx，最長 30s），沿用 async for 直接吃 motor cursor 會在長時間掛在迴圈
     # 中時撞 Mongo cursor idle timeout。
     orders = [o async for o in order_repo.iter_for_capture_audit(CAPTURE_AUDIT_GRACE_SECONDS)]
+    # lazy init：理由同 run_reconciliation_sweep——0 候選就不建 service，避免
+    # 金流 fail-closed 環境每輪白噴 ERROR。
+    if not orders:
+        return counts
+    svc = get_payments91_service()
 
     for order in orders:
         order_no = order.get("merchant_order_no", "")
