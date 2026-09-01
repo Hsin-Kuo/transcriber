@@ -141,37 +141,79 @@
           </label>
         </div>
 
-        <!-- 91APP Web SDK 信用卡欄位（tokenize，卡號不經過我方伺服器）。所有需收款的模式共用 -->
-        <div class="card-fields">
-          <h3 class="invoice-title">{{ $t('userSettings.checkout.payment') }}</h3>
+        <!-- 換卡挽回缺電話：先收電話，收到才建單/顯示信用卡欄位（見 startRecovery） -->
+        <div v-if="isRecovery && recoveryNeedsPhone" class="phone-confirm-section">
           <div class="form-group">
-            <label>{{ $t('userSettings.checkout.cardNumber') }}</label>
-            <!-- SDK 會在此容器內注入 iframe -->
-            <div id="card-number" class="form-input sdk-field" :class="{ 'field-error': fieldErrors.number }"></div>
+            <label>{{ $t('userSettings.checkout.phoneLabel') }}</label>
+            <input
+              v-model="phoneNumber"
+              type="tel"
+              inputmode="numeric"
+              maxlength="10"
+              :placeholder="$t('userSettings.checkout.phonePlaceholder')"
+              class="form-input"
+              :class="{ 'field-error': phoneTouched && !phoneValid }"
+              @blur="phoneTouched = true"
+            />
+            <span class="form-hint">{{ $t('userSettings.checkout.phoneHint') }}</span>
+            <span v-if="phoneTouched && !phoneValid" class="form-hint error-hint">{{ $t('userSettings.checkout.phoneInvalidHint') }}</span>
           </div>
-          <div class="card-fields-row">
-            <div class="form-group">
-              <label>{{ $t('userSettings.checkout.expiry') }}</label>
-              <div id="card-expiration-date" class="form-input sdk-field" :class="{ 'field-error': fieldErrors.expirationDate }"></div>
-            </div>
-            <div class="form-group">
-              <label>{{ $t('userSettings.checkout.cvc') }}</label>
-              <div id="card-ccv" class="form-input sdk-field" :class="{ 'field-error': fieldErrors.ccv }"></div>
-            </div>
-          </div>
+          <button class="pay-btn" :disabled="!phoneValid" @click="confirmRecoveryPhone">
+            {{ $t('userSettings.checkout.phoneConfirm') }}
+          </button>
         </div>
 
-        <button
-          class="pay-btn"
-          :disabled="paying || !sdkReady || !cardCanToken"
-          @click="handlePay"
-        >
-          <svg v-if="!paying" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-          </svg>
-          {{ paying ? $t('userSettings.checkout.processing') : (isRecovery ? $t('userSettings.updateCard.submit') : $t('userSettings.checkout.pay')) }}
-        </button>
+        <template v-else>
+          <!-- 手機號碼（91APP cardHolder 必填）：新訂閱 / 加購顯示可編輯欄位；換卡挽回
+               已在上方解決（沿用 billing_phone 或已補填），此處不重複顯示。 -->
+          <div v-if="showPhoneFieldInMainSection" class="form-group">
+            <label>{{ $t('userSettings.checkout.phoneLabel') }}</label>
+            <input
+              v-model="phoneNumber"
+              type="tel"
+              inputmode="numeric"
+              maxlength="10"
+              :placeholder="$t('userSettings.checkout.phonePlaceholder')"
+              class="form-input"
+              :class="{ 'field-error': phoneTouched && !phoneValid }"
+              @blur="phoneTouched = true"
+            />
+            <span class="form-hint">{{ $t('userSettings.checkout.phoneHint') }}</span>
+            <span v-if="phoneTouched && !phoneValid" class="form-hint error-hint">{{ $t('userSettings.checkout.phoneInvalidHint') }}</span>
+          </div>
+
+          <!-- 91APP Web SDK 信用卡欄位（tokenize，卡號不經過我方伺服器）。所有需收款的模式共用 -->
+          <div class="card-fields">
+            <h3 class="invoice-title">{{ $t('userSettings.checkout.payment') }}</h3>
+            <div class="form-group">
+              <label>{{ $t('userSettings.checkout.cardNumber') }}</label>
+              <!-- SDK 會在此容器內注入 iframe -->
+              <div id="card-number" class="form-input sdk-field" :class="{ 'field-error': fieldErrors.number }"></div>
+            </div>
+            <div class="card-fields-row">
+              <div class="form-group">
+                <label>{{ $t('userSettings.checkout.expiry') }}</label>
+                <div id="card-expiration-date" class="form-input sdk-field" :class="{ 'field-error': fieldErrors.expirationDate }"></div>
+              </div>
+              <div class="form-group">
+                <label>{{ $t('userSettings.checkout.cvc') }}</label>
+                <div id="card-ccv" class="form-input sdk-field" :class="{ 'field-error': fieldErrors.ccv }"></div>
+              </div>
+            </div>
+          </div>
+
+          <button
+            class="pay-btn"
+            :disabled="paying || !sdkReady || !cardCanToken || (showPhoneFieldInMainSection && !phoneValid)"
+            @click="handlePay"
+          >
+            <svg v-if="!paying" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+            </svg>
+            {{ paying ? $t('userSettings.checkout.processing') : (isRecovery ? $t('userSettings.updateCard.submit') : $t('userSettings.checkout.pay')) }}
+          </button>
+        </template>
 
         <p v-if="errorMsg" class="error-msg">{{ errorMsg }}</p>
 
@@ -243,6 +285,34 @@ const companyTaxId = ref('')
 const companyName = ref('')
 const saveInvoice = ref(true)
 
+// ===== 手機號碼（91APP cardHolder 專案，正式環境對綁卡交易必填）=====
+// 'new'（訂閱）/'extra'（加購）：結帳表單內的必填欄位，送出隨 checkout/purchase-extra
+// request 一起帶（buildInvoiceData 併入）。'update-card'：優先沿用 billing_phone，
+// 後端回 PHONE_REQUIRED 時才顯示這個欄位讓使用者補填（見 startRecovery）。
+const phoneNumber = ref('')
+const phoneTouched = ref(false)
+const PHONE_LOCAL_RE = /^09\d{8}$/
+const phoneValid = computed(() => PHONE_LOCAL_RE.test((phoneNumber.value || '').trim()))
+const showPhoneFieldInMainSection = computed(() => mode.value === 'new' || isAddon.value)
+const recoveryNeedsPhone = ref(false)  // update-card 首次建單缺電話 → true，顯示補填欄
+
+// +8869xxxxxxxx（後端已正規化的 billing_phone）轉回 09xxxxxxxx 供輸入框顯示/編輯
+function toLocalPhoneDisplay(intlPhone) {
+  const m = /^\+8869(\d{8})$/.exec(intlPhone || '')
+  return m ? '09' + m[1] : (intlPhone || '')
+}
+
+// 嘗試從 /subscriptions/status 撈 billing_phone 供 prefill（新訂閱 / 加購）；
+// 撈不到就留空讓使用者手填，不阻塞流程。
+async function prefillPhone() {
+  try {
+    const status = await authStore.getSubscriptionStatus()
+    if (status?.billing_phone) phoneNumber.value = toLocalPhoneDisplay(status.billing_phone)
+  } catch (e) {
+    // best-effort，撈失敗不影響結帳流程
+  }
+}
+
 // ===== 91APP SDK 狀態 =====
 const sdkReady = ref(false)      // setupSDK + card.setup 完成
 const cardCanToken = ref(false)  // card 'update' 事件回報可取 token（三欄填妥且有效）
@@ -261,6 +331,8 @@ function buildInvoiceData() {
     company_tax_id: invoiceType.value === 'company' ? companyTaxId.value : '',
     company_name: invoiceType.value === 'company' ? companyName.value : '',
     save_invoice: saveInvoice.value,
+    // 91APP cardHolder.phoneNumber（正式環境對綁卡交易必填）；後端會再正規化一次。
+    phone_number: (phoneNumber.value || '').trim(),
   }
 }
 
@@ -346,22 +418,41 @@ function setupCard() {
   sdkReady.value = true
 }
 
+// 換卡挽回建單：phone 為 null 時沿用後端 billing_phone fallback；後端缺電話會回
+// 422 PHONE_REQUIRED，這裡攔下轉成「請補填電話」的 UI 狀態，而非直接顯示錯誤退出。
+async function startRecovery(phone) {
+  try {
+    const rec = await authStore.updateCard(phone)
+    orderNo.value = rec.order_no
+    recoveryAmount.value = rec.amount
+    publishableKey = rec.publishable_key
+    sdkServerType = rec.sdk_server_type || 'sandbox'
+    recoveryNeedsPhone.value = false
+    await loadSdk()
+    await nextTick()   // 確保三個 card 容器已 render
+    setupCard()
+  } catch (err) {
+    const code = err?.response?.data?.detail?.code
+    if (code === 'PHONE_REQUIRED' || code === 'PHONE_INVALID') {
+      recoveryNeedsPhone.value = true
+    }
+    errorMsg.value = resolveErr(err)
+  }
+}
+
+// 使用者在「換卡挽回缺電話」補填欄位送出後呼叫
+async function confirmRecoveryPhone() {
+  phoneTouched.value = true
+  if (!phoneValid.value) return
+  errorMsg.value = null
+  await startRecovery(phoneNumber.value.trim())
+}
+
 onMounted(async () => {
   if (isRecovery.value) {
     // 換卡挽回：建 recovery 單，取 SDK 參數 + 補扣金額，然後 setupSDK 讓使用者填卡。
     // 建單在此一次完成（update-card 由後端保證 past_due 才建，非冷卻型 checkout）。
-    try {
-      const rec = await authStore.updateCard()
-      orderNo.value = rec.order_no
-      recoveryAmount.value = rec.amount
-      publishableKey = rec.publishable_key
-      sdkServerType = rec.sdk_server_type || 'sandbox'
-      await loadSdk()
-      await nextTick()   // 確保三個 card 容器已 render
-      setupCard()
-    } catch (err) {
-      errorMsg.value = resolveErr(err)
-    }
+    await startRecovery(null)
     return
   }
 
@@ -407,6 +498,7 @@ onMounted(async () => {
       return
     }
     prefillInvoice()
+    await prefillPhone()
     // SDK 參數用 payment-config（商戶層，不建單）
     try {
       const cfg = await authStore.getPaymentConfig()
@@ -426,8 +518,9 @@ onMounted(async () => {
     return
   }
 
-  // 預填已儲存的發票資訊
+  // 預填已儲存的發票資訊 + 電話
   prefillInvoice()
+  await prefillPhone()
 
   // 訂閱模式：先取 SDK 參數（不建單）setupSDK 讓使用者填卡；
   // 建單延到按付款時一次完成（/checkout 有 30s 建單冷卻，onMounted 建單會導致付款時 429）。
@@ -445,6 +538,12 @@ onMounted(async () => {
 
 function resolveErr(err) {
   const detail = err?.response?.data?.detail
+  const code = detail && typeof detail === 'object' ? detail.code : null
+  // PHONE_REQUIRED/PHONE_INVALID：後端 91APP cardHolder 電話檢查失敗，統一顯示
+  // 「請填寫手機號碼」，不把英文 fallback message 丟給使用者。
+  if (code === 'PHONE_REQUIRED' || code === 'PHONE_INVALID') {
+    return $t('userSettings.checkout.phoneRequiredError')
+  }
   return (typeof detail === 'string' ? detail : detail?.message) || $t('userSettings.checkout.error')
 }
 
@@ -495,6 +594,10 @@ function decQty() { quantity.value = Math.max(1, effectiveQty.value - 1) }
 function clampQty() { quantity.value = effectiveQty.value }
 
 async function handlePay() {
+  if (showPhoneFieldInMainSection.value) {
+    phoneTouched.value = true
+    if (!phoneValid.value) return
+  }
   paying.value = true
   errorMsg.value = null
   try {
@@ -733,6 +836,18 @@ async function handlePay() {
   color: var(--main-text-light);
   margin-top: 3px;
   display: block;
+}
+
+.form-hint.error-hint {
+  color: var(--color-danger, #dc3545);
+}
+
+.form-input.field-error {
+  border-color: var(--color-danger, #dc3545);
+}
+
+.phone-confirm-section {
+  margin: 4px 0 0;
 }
 
 .save-label {

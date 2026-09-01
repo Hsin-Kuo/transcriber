@@ -31,6 +31,7 @@ from ..services.invoice_service import (
 from ..services.order_settlement import build_order_settlement, PaymentNotification
 from ..utils.payments91_service import get_payments91_service, interpret_record_status, TRADE_ID_RE
 from ..utils.card_token_cipher import encrypt
+from ..utils.phone import normalize_tw_phone
 from ..utils.billing_period import generate_order_no
 from ..utils.time_utils import get_utc_timestamp
 from ..utils.sentry_helpers import create_background_task
@@ -140,8 +141,12 @@ class CheckoutRequest(BaseModel):
     company_tax_id: Optional[str] = Field(default=None, pattern=_TAX_ID_PATTERN)
     company_name: Optional[str] = None
     save_invoice: bool = True
+    # 91APP cardHolder.phoneNumber（正式環境對綁卡交易必填）；未帶時 fallback
+    # user.billing_phone（見 _resolve_buyer_phone）。
+    phone_number: Optional[str] = None
 
-    @field_validator("carrier_type", "carrier_num", "company_tax_id", "company_name", mode="before")
+    @field_validator("carrier_type", "carrier_num", "company_tax_id", "company_name",
+                     "phone_number", mode="before")
     @classmethod
     def _normalize_blank(cls, v):
         return _blank_to_none(v)
@@ -185,8 +190,11 @@ class PurchaseExtraRequest(BaseModel):
     company_tax_id: Optional[str] = Field(default=None, pattern=_TAX_ID_PATTERN)
     company_name: Optional[str] = None
     save_invoice: bool = True
+    # 91APP cardHolder.phoneNumber（加購走 /pay 的 create_first_payment，同樣是綁卡交易）
+    phone_number: Optional[str] = None
 
-    @field_validator("carrier_type", "carrier_num", "company_tax_id", "company_name", mode="before")
+    @field_validator("carrier_type", "carrier_num", "company_tax_id", "company_name",
+                     "phone_number", mode="before")
     @classmethod
     def _normalize_blank(cls, v):
         return _blank_to_none(v)
@@ -194,6 +202,40 @@ class PurchaseExtraRequest(BaseModel):
     @model_validator(mode="after")
     def _validate_invoice(self) -> "PurchaseExtraRequest":
         return _require_company_fields_if_company(self)
+
+
+class UpdateCardRequest(BaseModel):
+    """換卡挽回（past_due）建單請求。電話為 optional——優先 fallback user.billing_phone。"""
+    phone_number: Optional[str] = None
+
+    @field_validator("phone_number", mode="before")
+    @classmethod
+    def _normalize_blank(cls, v):
+        return _blank_to_none(v)
+
+
+# ── 買家電話（91APP cardHolder，正式環境對綁卡交易必填）───────────────────────
+
+async def _resolve_buyer_phone(
+    request_phone: Optional[str], full_user: Optional[dict],
+    user_repo: UserRepository, user_id: str,
+) -> str:
+    """正規化 `request_phone`（優先）或 fallback `user.billing_phone`；兩者皆無 →
+    PHONE_REQUIRED 422。格式不符（含 fallback 值，理論上不該發生，防禦性）→ PHONE_INVALID 422。
+
+    request 帶新電話時回寫 `user.billing_phone`，供之後加購/換卡/升級沿用；純 fallback
+    命中時不重複寫入（值已在 DB，省一次 update）。
+    """
+    raw = request_phone or (full_user or {}).get("billing_phone")
+    if not raw:
+        raise api_error("PHONE_REQUIRED", "Phone number is required for payment", 422)
+    try:
+        phone = normalize_tw_phone(raw)
+    except ValueError:
+        raise api_error("PHONE_INVALID", "Invalid phone number format", 422)
+    if request_phone:
+        await user_repo.update(user_id, {"billing_phone": phone})
+    return phone
 
 
 # ── 發票資訊處理 ─────────────────────────────────────────────────────────────
@@ -382,6 +424,8 @@ async def create_checkout(
     if not amount:
         raise api_error("SUBSCRIPTION_PRICE_NOT_CONFIGURED", "Price is not configured", 500)
 
+    buyer_phone = await _resolve_buyer_phone(request.phone_number, full_user, user_repo, user_id)
+
     order_no = generate_order_no("SLSUB")
     await build_order_settlement(db).open_pending({
         "user_id": user_id,
@@ -396,6 +440,7 @@ async def create_checkout(
         "extra_duration_minutes": 0,
         "extra_ai_summaries": 0,
         "invoice_snapshot": build_invoice_snapshot_from_request(request),
+        "buyer_phone": buyer_phone,
     })
 
     await _handle_invoice_save(request, user_id, user_repo)
@@ -434,6 +479,23 @@ async def pay(
     if expires_at is not None and expires_at < get_utc_timestamp():
         raise api_error("ORDER_EXPIRED", "Order has expired, please checkout again", 400)
 
+    # cardHolder（91APP 正式環境對綁卡交易必填，sandbox 不驗）：order.buyer_phone
+    # 為主（建單時已正規化並存入），缺（理論上不該發生，防禦性 fallback）才回頭查
+    # user.billing_phone；兩者皆無 → PHONE_REQUIRED。
+    user_repo = UserRepository(db)
+    full_user = await user_repo.get_by_id(user_id)
+    raw_phone = order.get("buyer_phone") or (full_user or {}).get("billing_phone")
+    if not raw_phone:
+        raise api_error("PHONE_REQUIRED", "Phone number is required for payment", 422)
+    try:
+        buyer_phone = normalize_tw_phone(raw_phone)
+    except ValueError:
+        raise api_error("PHONE_INVALID", "Invalid phone number format", 422)
+    holder_email = (full_user or {}).get("email") or current_user.get("email")
+    # user doc 目前沒有 name/username 欄位（get_current_user 的 username 是從 email
+    # local-part 推導，非真實姓名）——有值才帶，不硬湊。
+    holder_name = (full_user or {}).get("name")
+
     svc = get_payments91_service()
     # subscriptionProductInfo（91APP 正式環境必填，sandbox 不驗）：訂閱單帶實際週期、
     # 無限期；加購（extra_quota，一次性）帶 periods=1 表達單期扣款。
@@ -446,8 +508,11 @@ async def pay(
         redirect_url=_redirect_url(order["merchant_order_no"]),
         callback_url=_callback_url(),
         prod_name=f"SoundLite {str(order.get('tier', '')).capitalize()} 方案",
+        holder_phone=buyer_phone,
+        holder_email=holder_email,
         billing_cycle=order.get("billing_cycle") or "monthly",
         periods=1 if is_one_time else None,
+        holder_name=holder_name,
     )
 
     # 診斷用：91APP 非成功回應記錄 errorCode/message/statusCode（不含卡號等敏感資料）
@@ -668,6 +733,8 @@ async def get_subscription_status(
             "ai_summaries": extra_quota.get("ai_summaries", 0),
         },
         "invoice_info": invoice_info,
+        # 供結帳/加購/換卡頁 prefill；91APP cardHolder.phoneNumber 用（見 phone.py）。
+        "billing_phone": full_user.get("billing_phone") if full_user else None,
     }
 
 
@@ -757,6 +824,7 @@ async def _send_cancel_scheduled_email_task(user: dict, tier: Optional[str], per
 
 @router.post("/update-card")
 async def update_card(
+    request: UpdateCardRequest = UpdateCardRequest(),
     current_user: dict = Depends(get_current_user),
     db=Depends(get_database),
 ):
@@ -764,6 +832,9 @@ async def update_card(
 
     前端接著用既有 /pay 送新卡 txnToken（request-by-txnToken 綁新卡）→ 3D → /callback →
     settle 續扣分支（回 active、清 dunning、搬新 card_token）。
+
+    這條路徑走的是綁新卡（BindingCard），/pay 會帶 cardHolder——電話沿用
+    request.phone_number（optional）或 fallback user.billing_phone，皆無 → PHONE_REQUIRED。
     """
     user_repo = UserRepository(db)
     user_id = str(current_user["_id"])
@@ -778,6 +849,8 @@ async def update_card(
     if not amount:
         raise api_error("SUBSCRIPTION_PRICE_NOT_CONFIGURED", "Price is not configured", 500)
 
+    buyer_phone = await _resolve_buyer_phone(request.phone_number, full_user, user_repo, user_id)
+
     # recovery order 用 type=renewal（與續扣同分支），直接建（非 open_pending，免連點冷卻）
     order_no = generate_order_no("SLREC")
     await OrderRepository(db).create({
@@ -791,6 +864,7 @@ async def update_card(
         "card_token": None,
         # 換卡挽回沒有 request model 帶發票欄位，快照當下 user.invoice_info（經 key 對映）。
         "invoice_snapshot": build_invoice_snapshot_from_user_invoice_info(full_user.get("invoice_info")),
+        "buyer_phone": buyer_phone,
     })
     return {
         "order_no": order_no,
@@ -986,6 +1060,8 @@ async def purchase_extra_quota(
     unit = pkg.get("amount", 0)
     svc = get_payments91_service()
 
+    buyer_phone = await _resolve_buyer_phone(request.phone_number, full_user, user_repo, user_id)
+
     order_no = generate_order_no("SLEXT")
     await OrderRepository(db).create({
         "user_id": user_id,
@@ -1003,6 +1079,7 @@ async def purchase_extra_quota(
         "extra_duration_minutes": unit * qty if pkg["type"] == "duration" else 0,
         "extra_ai_summaries": unit * qty if pkg["type"] == "ai_summaries" else 0,
         "invoice_snapshot": build_invoice_snapshot_from_request(request),
+        "buyer_phone": buyer_phone,
     })
     await _handle_invoice_save(request, user_id, user_repo)
     return {

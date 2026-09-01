@@ -378,8 +378,11 @@ export const useAuthStore = defineStore('auth', () => {
   // 換卡挽回：僅 past_due 可用。後端建立一張 recovery 單並回
   // { order_no, amount, publishable_key, sdk_server_type }。
   // 前端接著用 91APP SDK 取 txn_token → payOrder(order_no, txn_token) 完成扣款。
-  async function updateCard() {
-    const response = await api.post('/subscriptions/update-card')
+  // phoneNumber：91APP cardHolder 必填，優先沿用 user.billing_phone；後端沒有可用電話時
+  // 回 422 PHONE_REQUIRED，CheckoutView 會顯示電話輸入欄後帶著 phoneNumber 重call 一次。
+  async function updateCard(phoneNumber) {
+    const response = await api.post('/subscriptions/update-card',
+      phoneNumber ? { phone_number: phoneNumber } : {})
     return response.data
   }
 

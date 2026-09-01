@@ -339,7 +339,13 @@
       "companyNamePlaceholder": "某某股份有限公司",
       "saveInvoice": "記住我的發票資訊",
       "upgradeTitle": "升級方案",
-      "upgradeItem": "升級至"
+      "upgradeItem": "升級至",
+      "phoneLabel": "手機號碼",
+      "phonePlaceholder": "0912345678",
+      "phoneHint": "刷卡驗證使用，格式：09 開頭 10 碼數字",
+      "phoneInvalidHint": "請輸入正確的手機號碼格式（09 開頭 10 碼數字）",
+      "phoneRequiredError": "請填寫手機號碼",
+      "phoneConfirm": "確認並繼續"
     },
     "pastDue": {
       "title": "訂閱付款失敗",

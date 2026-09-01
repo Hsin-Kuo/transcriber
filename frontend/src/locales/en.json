@@ -339,7 +339,13 @@
       "companyNamePlaceholder": "Acme Inc.",
       "saveInvoice": "Remember my invoice info",
       "upgradeTitle": "Upgrade Plan",
-      "upgradeItem": "Upgrade to"
+      "upgradeItem": "Upgrade to",
+      "phoneLabel": "Phone Number",
+      "phonePlaceholder": "0912345678",
+      "phoneHint": "Used for card verification. Format: starts with 09, 10 digits",
+      "phoneInvalidHint": "Please enter a valid phone number (starts with 09, 10 digits)",
+      "phoneRequiredError": "Please enter your phone number",
+      "phoneConfirm": "Confirm & Continue"
     },
     "pastDue": {
       "title": "Subscription payment failed",

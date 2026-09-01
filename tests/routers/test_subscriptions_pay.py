@@ -34,16 +34,27 @@ def _pending_order(**over):
         "status": "pending",
         "tier": "basic",
         "amount_twd": 299,
+        # cardHolder 專案（PHONE_REQUIRED）：/pay 現在需要 order.buyer_phone 或
+        # user.billing_phone 其一，預設帶已正規化的電話免逐一改動既有測試。
+        "buyer_phone": "+886912345678",
     }
     base.update(over)
     return base
 
 
-def _patch(monkeypatch, *, resp, order=None):
+def _patch(monkeypatch, *, resp, order=None, full_user=None):
     order_repo = MagicMock()
     order_repo.get_by_order_no = AsyncMock(return_value=order or _pending_order())
     order_repo.update_by_order_no = AsyncMock(return_value=True)
     monkeypatch.setattr(subs, "OrderRepository", lambda db: order_repo)
+
+    # /pay 會查 UserRepository 補 cardHolder.email/name + billing_phone fallback。
+    user_repo = MagicMock()
+    user_repo.get_by_id = AsyncMock(return_value=(
+        full_user if full_user is not None
+        else {"_id": "u1", "email": "user@example.com", "billing_phone": "+886912345678"}
+    ))
+    monkeypatch.setattr(subs, "UserRepository", lambda db: user_repo)
 
     svc = MagicMock()
     svc.create_first_payment = AsyncMock(return_value=resp)
@@ -164,3 +175,51 @@ class TestPayExpiresAtGate:
         out = await subs.pay(request, current_user={"_id": "u1"}, db=MagicMock())
         assert out["status"] == "pending_3ds"
         svc.create_first_payment.assert_awaited_once()
+
+
+class TestPayCardHolder:
+    """cardHolder 專案：/pay 呼叫 create_first_payment 時要帶 phone/email/name
+    （91APP 正式環境對 BindingCard 交易必填，sandbox 不驗，prod 400
+    CardHolderPhoneNumberRequired）。"""
+
+    async def test_pay_passes_card_holder_from_order_buyer_phone(self, monkeypatch):
+        order_repo, svc, _ = _patch(monkeypatch, resp={
+            "statusCode": "Success", "paymentUrl": "https://bank.example/3ds",
+        }, order=_pending_order(buyer_phone="+886987654321"),
+           full_user={"_id": "u1", "email": "user@example.com", "billing_phone": None})
+        request = subs.PayRequest(order_no="SLSUB1", txn_token="tok")
+        await subs.pay(request, current_user={"_id": "u1"}, db=MagicMock())
+        kwargs = svc.create_first_payment.await_args.kwargs
+        assert kwargs["holder_phone"] == "+886987654321"
+        assert kwargs["holder_email"] == "user@example.com"
+        assert kwargs["holder_name"] is None
+
+    async def test_pay_falls_back_to_user_billing_phone_when_order_missing_it(self, monkeypatch):
+        order_repo, svc, _ = _patch(monkeypatch, resp={
+            "statusCode": "Success", "paymentUrl": "https://bank.example/3ds",
+        }, order=_pending_order(buyer_phone=None),
+           full_user={"_id": "u1", "email": "user@example.com", "billing_phone": "0912345678"})
+        request = subs.PayRequest(order_no="SLSUB1", txn_token="tok")
+        await subs.pay(request, current_user={"_id": "u1"}, db=MagicMock())
+        kwargs = svc.create_first_payment.await_args.kwargs
+        assert kwargs["holder_phone"] == "+886912345678"  # 09→+886 正規化
+
+    async def test_pay_raises_phone_required_when_no_phone_anywhere(self, monkeypatch):
+        order_repo, svc, _ = _patch(monkeypatch, resp={"statusCode": "Success"},
+           order=_pending_order(buyer_phone=None),
+           full_user={"_id": "u1", "email": "user@example.com", "billing_phone": None})
+        request = subs.PayRequest(order_no="SLSUB1", txn_token="tok")
+        with pytest.raises(HTTPException) as exc_info:
+            await subs.pay(request, current_user={"_id": "u1"}, db=MagicMock())
+        assert exc_info.value.status_code == 422
+        assert exc_info.value.detail["code"] == "PHONE_REQUIRED"
+        svc.create_first_payment.assert_not_awaited()
+
+    async def test_pay_raises_phone_invalid_for_malformed_stored_phone(self, monkeypatch):
+        order_repo, svc, _ = _patch(monkeypatch, resp={"statusCode": "Success"},
+           order=_pending_order(buyer_phone="0800123456"))  # 不是 09 開頭手機
+        request = subs.PayRequest(order_no="SLSUB1", txn_token="tok")
+        with pytest.raises(HTTPException) as exc_info:
+            await subs.pay(request, current_user={"_id": "u1"}, db=MagicMock())
+        assert exc_info.value.status_code == 422
+        assert exc_info.value.detail["code"] == "PHONE_INVALID"
