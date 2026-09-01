@@ -123,7 +123,10 @@ class TestRequestBodies:
         assert b["merchantConsumerId"] == "u1"
         assert b["productType"] == "Subscription"
         assert b["extensionInfo"]["subscriptionType"] == "First"
-        assert b["paymentMethods"] == [{"payType": "CreditCard", "amount": 299}]  # amount 在此
+        # 首期 paymentMethods.amount 必須為 0（prod 400 SubscriptionFirstPaymentAmountNotAllowed）,
+        # 實際扣款額走 extensionInfo.subscriptionProductInfo.amount
+        assert b["paymentMethods"] == [{"payType": "CreditCard", "amount": 0}]
+        assert b["extensionInfo"]["subscriptionProductInfo"]["amount"] == 299
         assert b["redirectUrl"] == "https://x/return"
         assert b["callbackUrl"] == "https://x/cb"
 
