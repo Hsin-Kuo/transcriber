@@ -61,3 +61,8 @@ boto3
 # PDF 生成（server-side multi-language CJK PDF；字體在 src/utils/pdf/fonts/）
 reportlab>=4.5.1,<5.0
 svglib==1.5.1  # 收據 logo 走向量 SVG（放大不糊）；>=1.6 會拉 rlpycairo→pycairo 要編系統 cairo，別升
+
+# Error tracking——⚠️ 一定要在本檔（web 部署只裝 requirements-web.txt）。
+# 2026-09-01 go-live 才發現只在 requirements.txt（worker 用）→ prod web 的
+# sentry_sdk 缺席，SENTRY_DSN 白設、金流/發票所有 Sentry 告警靜默 no-op。
+sentry-sdk[fastapi]

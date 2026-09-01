@@ -156,7 +156,10 @@ class Payments91APPService:
             "initCardTokenType": "BindingCard",
             "merchantConsumerId": consumer_id,
             "merchantOrderId": order_no,
-            "paymentMethods": [{"payType": "CreditCard", "amount": amount}],
+            # ⚠️ 首期金額必須為 0（正式環境 400 SubscriptionFirstPaymentAmountNotAllowed
+            # 「定期定額首期交易請勿帶入金額」，sandbox 不驗）——實際首期扣款額由
+            # extensionInfo.subscriptionProductInfo.amount 決定，授權成功後隨即扣款。
+            "paymentMethods": [{"payType": "CreditCard", "amount": 0}],
             "productType": "Subscription",
             "extensionInfo": {
                 "subscriptionType": "First",

@@ -270,7 +270,10 @@ script-src  (無金流網域)
   "initCardTokenType": "BindingCard",          // ★ 非 RememberCard
   "merchantConsumerId": "<商店會員ID>",         // ★ BindingCard 必填,續扣要用同一個
   "merchantOrderId": "<訂單號,≤50字>",
-  "paymentMethods": [{"payType": "CreditCard", "amount": 100}],  // amount 在此,單位=元
+  // ⚠️ 首期 amount 必須為 0（正式環境 400 SubscriptionFirstPaymentAmountNotAllowed
+  //   「首期交易請勿帶入金額」，sandbox 不驗）——實際首期扣款額=subscriptionProductInfo.amount，
+  //   授權成功後隨即扣款。續扣（request-by-cardToken）amount 照常帶實際金額。
+  "paymentMethods": [{"payType": "CreditCard", "amount": 0}],
   "productType": "Subscription",
   "extensionInfo": {
     "subscriptionType": "First",
