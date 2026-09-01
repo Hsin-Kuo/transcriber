@@ -435,6 +435,9 @@ async def pay(
         raise api_error("ORDER_EXPIRED", "Order has expired, please checkout again", 400)
 
     svc = get_payments91_service()
+    # subscriptionProductInfo（91APP 正式環境必填，sandbox 不驗）：訂閱單帶實際週期、
+    # 無限期；加購（extra_quota，一次性）帶 periods=1 表達單期扣款。
+    is_one_time = order.get("type") == "extra_quota"
     resp = await svc.create_first_payment(
         txn_token=request.txn_token,
         order_no=order["merchant_order_no"],
@@ -443,6 +446,8 @@ async def pay(
         redirect_url=_redirect_url(order["merchant_order_no"]),
         callback_url=_callback_url(),
         prod_name=f"SoundLite {str(order.get('tier', '')).capitalize()} 方案",
+        billing_cycle=order.get("billing_cycle") or "monthly",
+        periods=1 if is_one_time else None,
     )
 
     # 診斷用：91APP 非成功回應記錄 errorCode/message/statusCode（不含卡號等敏感資料）
