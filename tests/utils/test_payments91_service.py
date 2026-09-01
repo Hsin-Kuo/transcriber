@@ -149,6 +149,66 @@ class TestRequestBodies:
         assert b["extensionInfo"]["subscriptionType"] == "Renewal"  # ★ 免 3D 關鍵
         assert "initCardTokenType" not in b
 
+    # ── subscriptionProductInfo（91APP 正式環境必填，sandbox 不驗；2026-09-01
+    #    go-live 首筆實測 400 SubscriptionProductInfoRequired 才炸出）────────────
+
+    async def test_first_payment_includes_subscription_product_info(self):
+        svc = _svc()
+        captured = {}
+
+        async def fake_post(path, body, idempotency_key=None):
+            captured["body"] = body
+            return {"statusCode": "Success"}
+
+        svc._post = fake_post
+        await svc.create_first_payment(
+            txn_token="TXN", order_no="SLSUB1", consumer_id="u1", amount=3289,
+            redirect_url="https://x/return", callback_url="https://x/cb",
+            prod_name="SoundLite Basic 方案", billing_cycle="yearly",
+        )
+        spi = captured["body"]["extensionInfo"]["subscriptionProductInfo"]
+        assert spi["priceName"] == "SoundLite Basic 方案"
+        assert spi["amount"] == 3289
+        assert spi["recurring"] == {"type": "Year", "interval": 1}  # 無 periods=無限期
+
+    async def test_first_payment_one_time_uses_periods_1(self):
+        """加購（extra_quota）：periods=1 表達單期扣款。"""
+        svc = _svc()
+        captured = {}
+
+        async def fake_post(path, body, idempotency_key=None):
+            captured["body"] = body
+            return {"statusCode": "Success"}
+
+        svc._post = fake_post
+        await svc.create_first_payment(
+            txn_token="TXN", order_no="SLEXT1", consumer_id="u1", amount=39,
+            redirect_url="https://x/return", callback_url="https://x/cb",
+            prod_name="加購 AI 總結", billing_cycle="monthly", periods=1,
+        )
+        spi = captured["body"]["extensionInfo"]["subscriptionProductInfo"]
+        assert spi["recurring"] == {"type": "Month", "interval": 1, "periods": 1}
+
+    async def test_renewal_includes_subscription_product_info(self):
+        svc = _svc()
+        captured = {}
+
+        async def fake_post(path, body, idempotency_key=None):
+            captured["body"] = body
+            return {"statusCode": "Success"}
+
+        svc._post = fake_post
+        await svc.charge_renewal(
+            card_token="CT1", consumer_id="u1", order_no="SLREN1", amount=299,
+            redirect_url="https://x/return", callback_url="https://x/cb",
+            prod_name="SoundLite Basic 方案（續扣）", billing_cycle="monthly",
+        )
+        spi = captured["body"]["extensionInfo"]["subscriptionProductInfo"]
+        assert spi["amount"] == 299
+        assert spi["recurring"] == {"type": "Month", "interval": 1}
+        # subscriptionType 不被 subscriptionProductInfo 蓋掉
+        assert captured["body"]["extensionInfo"]["subscriptionType"] == "Renewal"
+
     async def test_query_trade_signs_get(self):
         svc = _svc()
         captured = {}

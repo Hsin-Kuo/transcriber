@@ -249,6 +249,7 @@ async def _attempt_charge(db, user: dict) -> Optional[str]:
             redirect_url=f"{BACKEND_URL}/subscriptions/payment-return?order_no={order_no}",
             callback_url=f"{BACKEND_URL}/subscriptions/callback",
             prod_name=f"SoundLite {str(tier).capitalize()} 方案（續扣）",
+            billing_cycle=billing,
         )
     except Exception as e:
         # 結果未知：release 讓下輪重試（order_no=idempotency key 保護不重扣）
