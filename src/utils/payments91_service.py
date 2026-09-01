@@ -125,15 +125,17 @@ class Payments91APPService:
         `productType=Subscription` 的必填欄位（缺了回 400 `SubscriptionProductInfoRequired`
         「定期定額交易須帶入 SubscriptionProductInfo」；**sandbox 不驗**，2026-09-01
         go-live 首筆實測才炸出）。schema 見官方 admin-payments 文件：
-        priceName(≤100)/amount 必填；recurring.type=Day|Week|Month|Year、interval、
-        periods(未帶=無限期) 選填。加購（一次性）帶 periods=1 表達單期。"""
+        priceName(≤100)/amount 必填；recurring.type=Day|Week|Month|Year、interval 選填；
+        **periods 是 subscriptionProductInfo 的頂層欄位（與 recurring 同層，不在其內）**，
+        未帶=無限期。加購（一次性）帶 periods=1 表達單期。"""
         recurring: Dict = {
             "type": "Year" if billing_cycle == "yearly" else "Month",
             "interval": 1,
         }
+        info: Dict = {"priceName": prod_name[:100], "amount": amount, "recurring": recurring}
         if periods is not None:
-            recurring["periods"] = periods
-        return {"priceName": prod_name[:100], "amount": amount, "recurring": recurring}
+            info["periods"] = periods
+        return info
 
     async def create_first_payment(
         self,
@@ -144,22 +146,35 @@ class Payments91APPService:
         redirect_url: str,
         callback_url: str,
         prod_name: str,
+        holder_phone: str,
+        holder_email: str,
         billing_cycle: str = "monthly",
         periods: Optional[int] = None,
+        holder_name: Optional[str] = None,
     ) -> Dict:
         """訂閱首期綁卡付款。回傳含 paymentUrl（3D）或直接成交結果 + cardToken。
 
         BindingCard + merchantConsumerId 才拿得到可 MIT 續扣的 cardToken（非 RememberCard）。
+
+        cardHolder：91APP **正式環境**對 `initCardTokenType=BindingCard` 交易必填
+        （prod 400 CardHolderPhoneNumberRequired；sandbox 不驗）。schema：
+        phoneNumber(必填,+886開頭,≤40)/email(必填,≤40)/name(選填,≤40)。
         """
         body = {
             "txnToken": txn_token,
             "initCardTokenType": "BindingCard",
             "merchantConsumerId": consumer_id,
             "merchantOrderId": order_no,
-            # ⚠️ 首期金額必須為 0（正式環境 400 SubscriptionFirstPaymentAmountNotAllowed
-            # 「定期定額首期交易請勿帶入金額」，sandbox 不驗）——實際首期扣款額由
-            # extensionInfo.subscriptionProductInfo.amount 決定，授權成功後隨即扣款。
-            "paymentMethods": [{"payType": "CreditCard", "amount": 0}],
+            # ⚠️ 首期金額規則**兩環境互相矛盾**（2026-09-01/02 實測，無固定值可同時滿足）：
+            #   正式：必須 0（400 SubscriptionFirstPaymentAmountNotAllowed「首期請勿帶入
+            #        金額」；amount=0 實測已通過該關），實際首期扣款額 =
+            #        extensionInfo.subscriptionProductInfo.amount，授權成功後隨即扣款。
+            #   sandbox：必須 >0（400 AmountMustGreaterThanZero；歷來 sandbox 交易
+            #        amount>0 全數成功）。
+            # → 只能依 env 切換。若 91APP 日後統一兩環境行為，這裡要跟著收斂。
+            "paymentMethods": [
+                {"payType": "CreditCard", "amount": 0 if self.env == "production" else amount}
+            ],
             "productType": "Subscription",
             "extensionInfo": {
                 "subscriptionType": "First",
@@ -173,6 +188,11 @@ class Payments91APPService:
             ],
             "redirectUrl": redirect_url,
             "callbackUrl": callback_url,
+            "cardHolder": {
+                "phoneNumber": holder_phone[:40],
+                "email": holder_email[:40],
+                **({"name": holder_name[:40]} if holder_name else {}),
+            },
         }
         return await self._post(
             "/v2/payments/request-by-txnToken", body, idempotency_key=order_no
