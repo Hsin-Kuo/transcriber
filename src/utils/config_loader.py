@@ -98,7 +98,12 @@ def _get_ssm():
 _param_cache: dict[tuple, str] = {}
 
 
-def get_parameter(name: str, fallback_env: Optional[str] = None, default: str = "") -> str:
+def get_parameter(
+    name: str,
+    fallback_env: Optional[str] = None,
+    default: str = "",
+    required: bool = False,
+) -> str:
     """讀取設定參數
 
     AWS 模式：從 SSM Parameter Store 讀取
@@ -112,34 +117,116 @@ def get_parameter(name: str, fallback_env: Optional[str] = None, default: str = 
     讓 staging 環境讀自己那組 SSM secret（與 prod 完全隔離）。所有 19 處 SSM 讀取都經過本
     函式，故路由集中在此單點。在呼叫時讀 APP_ENV（而非 module 全域）以避開 import 時序疑慮。
 
+    `required` 語意（金流體檢 P1-6）：某些憑證（91APP / SmilePay API key）一旦靜默
+    fallback 到 env 殘留的範例值，後果是真客戶資料打到公開測試帳號，比「服務打不開」
+    更糟。required=True 時：
+      - AWS 模式：SSM 讀取失敗（拋例外）或回空值 → **不 fallback 到 env**，直接
+        `raise RuntimeError`。只 log 參數名稱，絕不 log 值。
+      - 非 AWS 模式：讀 env 後仍是空值 → 同樣 raise（本地要跑金流也不該無憑證靜默）。
+      - required=False（預設）：行為完全不變，維持既有 fallback。
+    raise 前不寫入 cache（維持「只 cache 非空值」的既有語意）。
+
     Args:
         name: SSM 參數名稱（例如 /transcriber/jwt-secret）
         fallback_env: 本地環境變數名稱（例如 JWT_SECRET_KEY）
         default: 預設值
+        required: True 時關閉 SSM 失敗 fallback env 的行為，空值直接 raise
 
     Returns:
         參數值
+
+    Raises:
+        RuntimeError: required=True 且無法取得非空值
     """
     if os.getenv("APP_ENV", "prod") == "staging" and name.startswith("/transcriber/"):
         name = name.replace("/transcriber/", "/transcriber-staging/", 1)
 
-    cache_key = (name, fallback_env, default)
+    # cache key 含 required（第二意見審查 F2）：同名參數若同時存在 required=False 的
+    # 呼叫端，其 env fallback 值不得被 required=True 的讀取命中——那正是 required 要
+    # 擋的靜默降級。兩種讀法各自成 cache 條目。
+    cache_key = (name, fallback_env, default, required)
     cached = _param_cache.get(cache_key)
     if cached:
         return cached
 
-    if DEPLOY_ENV == "aws":
+    # 即時讀 env 而非 module 級 DEPLOY_ENV 常數（第二意見審查 F1）：required 的
+    # 「aws 上只認 SSM」保證不可建立在 import 時序上——常數若在 env 就緒前凍結成
+    # local，required 會走本地分支直接吃殘留 .env 的範例憑證，第二層防護空轉。
+    if os.getenv("DEPLOY_ENV", "local") == "aws":
         try:
             resp = _get_ssm().get_parameter(Name=name, WithDecryption=True)
             value = resp["Parameter"]["Value"]
         except Exception as e:
+            if required:
+                log.error("config.required_parameter_unavailable", parameter=name, reason="ssm_read_failed")
+                raise RuntimeError(f"required parameter {name} unavailable from SSM") from e
             log.warning("config.ssm_read_failed", parameter=name, error=str(e))
             # Fallback 到環境變數
             value = os.getenv(fallback_env, default) if fallback_env else default
+        else:
+            if required and not value:
+                log.error("config.required_parameter_unavailable", parameter=name, reason="ssm_empty_value")
+                raise RuntimeError(f"required parameter {name} unavailable from SSM")
     else:
         # 本地模式：直接讀環境變數
         value = os.getenv(fallback_env, default) if fallback_env else default
+        if required and not value:
+            log.error("config.required_parameter_unavailable", parameter=name, reason="env_empty_value")
+            raise RuntimeError(f"required parameter {name} unavailable")
 
     if value:
         _param_cache[cache_key] = value
     return value
+
+
+def is_prod_aws() -> bool:
+    """正式生產環境判定：DEPLOY_ENV=aws 且 APP_ENV 非 staging。
+
+    ⚠️ 必須即時讀 os.getenv，不可用 module 級 DEPLOY_ENV 常數（import 時定型，
+    測試與動態環境會失準）。APP_ENV 在 prod 是「未設 → 預設 prod」（deploy/.env.aws
+    全檔無此行），staging 顯式 APP_ENV=staging（deploy/.env.aws.staging:12），所以
+    條件寫「!= staging」而非「== prod」。
+    """
+    return os.getenv("DEPLOY_ENV", "local") == "aws" and os.getenv("APP_ENV", "prod") != "staging"
+
+
+def validate_payment_env() -> None:
+    """啟動時檢查金流環境變數是否為三態之一（金流體檢 P1-6，只在 prod-aws 檢查）。
+
+    三態語意（刻意分級，不是單純「非 production 就炸」）：
+      - 值 == "production"：OK，正常上線狀態。
+      - 未設（None）：警告但不 crash——金流可能還沒 seed SSM/env（尚未上線的
+        預期狀態），無條件 crash 會把還沒排上金流的 prod 服務整個打掛；
+        service __init__ 的 fail-closed 硬擋（P1-6 規格 C）已經兜底，
+        確保「沒設」不會誤用測試帳號跑真實操作。
+      - 顯式設成非 production 的值（例如殘留 test/sandbox）：這是主動設定錯誤，
+        必須擋下啟動，避免真客戶資料打到公開測試帳號。
+
+    staging 環境不受此檢查約束（staging 本來就該打 sandbox/test）。
+    """
+    if not is_prod_aws():
+        return
+
+    for var_name in ("PAYMENTS91_ENV", "SMILEPAY_ENV"):
+        value = os.getenv(var_name)
+        if value is None:
+            log.warning("payment.env.not_configured", var=var_name)
+        elif value != "production":
+            raise RuntimeError(
+                f"{var_name} is set to a non-production value on prod (P1-6 fail-fast)"
+            )
+
+    # F3（跨 PR 複檢）：card_token 加密金鑰(KEK)在「金流已上線」時必須可取得——否則第一筆
+    # /pay 的 encrypt 會失敗，靠 subscriptions._encrypt_card_token_safe 的 F2 兜底雖不會
+    # 靜默存明文，但每筆首購都拿不到續扣憑證。綁在 PAYMENTS91_ENV=production（與上面
+    # 同一個「金流真的上線」訊號）而非無條件：金流未上線時 KEK 可缺（同 env 未設分支的
+    # 語意，避免把還沒排上金流的 prod 打掛）。go-live 設 production 卻忘了 seed KEK 時，
+    # 這裡會在啟動就 fail-fast，而不是等到第一筆真實付款。
+    if os.getenv("PAYMENTS91_ENV") == "production":
+        try:
+            from .card_token_cipher import _get_kek
+            _get_kek()
+        except Exception as e:
+            raise RuntimeError(
+                "card_token KEK unavailable while payments are live (P2-10 fail-fast)"
+            ) from e

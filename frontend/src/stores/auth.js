@@ -45,6 +45,14 @@ export const useAuthStore = defineStore('auth', () => {
     subscription.value?.status === 'active'
   )
 
+  // Dunning（付款失敗挽回）狀態：權威來源為 /subscriptions/status（含 grace_deadline /
+  // needs_card_update，/auth/me 不保證帶這些欄位）。getSubscriptionStatus() 會寫入此 ref，
+  // 橫幅元件從這裡讀。
+  const subscriptionStatus = ref(null)
+  const isPastDue = computed(() => subscriptionStatus.value?.status === 'past_due')
+  const needsCardUpdate = computed(() => !!subscriptionStatus.value?.needs_card_update)
+  const graceDeadline = computed(() => subscriptionStatus.value?.grace_deadline ?? null)
+
   // 計算配額使用百分比
   const quotaPercentage = computed(() => {
     if (!user.value) return { transcriptions: 0, duration: 0 }
@@ -336,9 +344,43 @@ export const useAuthStore = defineStore('auth', () => {
   // extra_quota（分開顯示）
   const extraQuota = computed(() => user.value?.extra_quota || { duration_minutes: 0, ai_summaries: 0 })
 
+  // 建立（或取回）待付訂單。91APP 流程：先建單拿 publishable_key + order_no，
+  // 前端才能 setupSDK 並讓使用者填卡。回 { order_no, amount, publishable_key, sdk_server_type }。
+  // 取 SDK 初始化參數（publishable_key / sdk_server_type），不建單。
+  // 結帳頁 onMounted 用此 setupSDK；建單另由 createCheckoutSession 在按付款時一次完成
+  // （/checkout 有 30s 建單冷卻，重複呼叫會 429，故 SDK 初始化不可綁建單）。
+  async function getPaymentConfig() {
+    const response = await api.get('/subscriptions/payment-config')
+    return response.data
+  }
+
   async function createCheckoutSession(tier, billing, invoiceData = {}) {
     const response = await api.post('/subscriptions/checkout', { tier, billing, ...invoiceData })
-    return response.data  // { form, order_no }
+    return response.data
+  }
+
+  // 用 91APP SDK 取得的 txn_token 對已建立的訂單發動扣款。
+  // 回 { payment_url, status }：payment_url 非空 → 需 3D，前端導去該 URL；
+  // status="success" 且無 payment_url → 直接成功。
+  async function payOrder(orderNo, txnToken) {
+    const response = await api.post('/subscriptions/pay', { order_no: orderNo, txn_token: txnToken })
+    return response.data
+  }
+
+  // 訂閱狀態輪詢用（PaymentReturnView 在 3D 導回後輪詢至 active）。
+  // 同時寫入 subscriptionStatus，讓 past_due 橫幅（PastDueBanner）讀到最新狀態。
+  async function getSubscriptionStatus() {
+    const response = await api.get('/subscriptions/status')
+    subscriptionStatus.value = response.data
+    return response.data
+  }
+
+  // 換卡挽回：僅 past_due 可用。後端建立一張 recovery 單並回
+  // { order_no, amount, publishable_key, sdk_server_type }。
+  // 前端接著用 91APP SDK 取 txn_token → payOrder(order_no, txn_token) 完成扣款。
+  async function updateCard() {
+    const response = await api.post('/subscriptions/update-card')
+    return response.data
   }
 
   async function cancelSubscription() {
@@ -355,6 +397,26 @@ export const useAuthStore = defineStore('auth', () => {
   async function changePlan(tier, billing, invoiceData = {}) {
     const response = await api.post('/subscriptions/change', { tier, billing, ...invoiceData })
     return response.data  // { form, order_no, action, ... }
+  }
+
+  // 取消已排定的期末方案變更（降級）→ 維持目前方案
+  async function cancelPlanChange() {
+    const response = await api.post('/subscriptions/cancel-plan-change')
+    await fetchCurrentUser()
+    return response.data
+  }
+
+  // 查單一訂單狀態/類型（付款完成頁輪詢用）→ { order_no, type, status, tier }
+  async function getOrder(orderNo) {
+    const response = await api.get(`/subscriptions/order/${orderNo}`)
+    return response.data
+  }
+
+  // 下載付款收據 PDF → Blob（lang: 'zh-TW' | 'en'，未指定用使用者語言偏好）
+  async function getReceipt(orderNo, lang) {
+    const q = lang ? `?lang=${encodeURIComponent(lang)}` : ''
+    const response = await api.get(`/subscriptions/order/${orderNo}/receipt${q}`, { responseType: 'blob' })
+    return response.data
   }
 
   async function purchaseExtraQuota(packageId, quantity = 1, invoiceData = {}) {
@@ -387,22 +449,6 @@ export const useAuthStore = defineStore('auth', () => {
   async function getOrders(skip = 0, limit = 6) {
     const response = await api.get('/subscriptions/orders', { params: { skip, limit } })
     return response.data  // { orders, has_more }
-  }
-
-  function submitNewebpayForm(formData) {
-    const form = document.createElement('form')
-    form.method = 'POST'
-    form.action = formData.gateway_url
-    Object.entries(formData).forEach(([key, value]) => {
-      if (key === 'gateway_url') return
-      const input = document.createElement('input')
-      input.type = 'hidden'
-      input.name = key
-      input.value = value
-      form.appendChild(input)
-    })
-    document.body.appendChild(form)
-    form.submit()
   }
 
   async function deleteAccount(password, confirmation) {
@@ -473,6 +519,10 @@ export const useAuthStore = defineStore('auth', () => {
     preferences,
     subscription,
     hasActiveSubscription,
+    subscriptionStatus,
+    isPastDue,
+    needsCardUpdate,
+    graceDeadline,
     extraQuota,
     // Actions
     register,
@@ -488,14 +538,20 @@ export const useAuthStore = defineStore('auth', () => {
     deleteAccount,
     setPassword,
     updatePreferences,
+    getPaymentConfig,
     createCheckoutSession,
+    updateCard,
+    payOrder,
+    getSubscriptionStatus,
     cancelSubscription,
     reactivateSubscription,
     changePlan,
+    cancelPlanChange,
+    getOrder,
+    getReceipt,
     purchaseExtraQuota,
     getPackages,
     getTiers,
     getOrders,
-    submitNewebpayForm,
   }
 })

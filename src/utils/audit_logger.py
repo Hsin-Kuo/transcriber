@@ -6,6 +6,7 @@ from fastapi import Request
 import time
 
 from src.utils.logger import get_logger
+from src.utils.client_ip import get_client_ip as _get_client_ip
 
 log = get_logger(__name__)
 
@@ -17,22 +18,9 @@ class AuditLogger:
         self.repo = audit_log_repo
 
     def get_client_ip(self, request: Request) -> str:
-        """獲取客戶端 IP 地址"""
-        # 優先從 X-Forwarded-For header 獲取（通過代理時）
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-
-        # 從 X-Real-IP header 獲取
-        real_ip = request.headers.get("X-Real-IP")
-        if real_ip:
-            return real_ip
-
-        # 從 request.client 獲取
-        if request.client:
-            return request.client.host
-
-        return "unknown"
+        """獲取客戶端 IP 地址（delegate 到 src.utils.client_ip.get_client_ip；
+        金流體檢 P2-15 4b：X-Forwarded-For[0] 可偽造，統一改讀 X-Real-IP）。"""
+        return _get_client_ip(request)
 
     def sanitize_request_body(self, body: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """清理請求內容中的敏感資訊"""
@@ -299,15 +287,12 @@ async def log_admin_action(
         if "email" in details:
             message += f" ({details['email']})"
 
-    # 從 request 抽 IP（信 X-Forwarded-For 第一段，否則 client.host）/ user-agent
+    # 從 request 抽 IP（統一權威來源：X-Real-IP，見 src.utils.client_ip）/ user-agent
     ip_address = "admin-panel"
     user_agent = "AdminPanel"
     if request is not None:
         try:
-            xff = request.headers.get("X-Forwarded-For", "")
-            ip_address = xff.split(",")[0].strip() if xff else (
-                request.client.host if request.client else "unknown"
-            )
+            ip_address = _get_client_ip(request)
             user_agent = request.headers.get("User-Agent", "")[:255] or "unknown"
         except Exception:
             pass

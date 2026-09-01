@@ -21,6 +21,7 @@ from ..database.repositories.processed_webhook_repo import ProcessedWebhookRepos
 from ..database.repositories.user_repo import UserRepository
 from ..utils.api_errors import api_error
 from ..utils.audit_logger import get_audit_logger
+from ..utils.client_ip import get_client_ip
 from ..utils.config_loader import get_parameter
 from ..utils.logger import get_logger
 from ..utils.privacy import mask_email
@@ -84,12 +85,12 @@ async def resend_webhook(
         # 簽名驗證失敗一律 log.warning（廉價），但 audit_log 為避免被
         # 大量假請求灌爆，只在能成功 claim 「signature_failed:<IP>:<minute>」
         # bucket 時寫入 — 每 IP 每分鐘最多 1 筆 audit。
+        client_ip = get_client_ip(request)
         log.warning(
             "resend_webhook.signature_failed",
             reason=str(e),
-            remote=request.client.host if request.client else None,
+            remote=client_ip,
         )
-        client_ip = request.client.host if request.client else "unknown"
         minute_bucket = int(time.time()) // 60
         bucket_repo = ProcessedWebhookRepository(db)
         if await bucket_repo.claim(

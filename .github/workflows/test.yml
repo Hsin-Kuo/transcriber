@@ -66,6 +66,15 @@ jobs:
             -v "$PWD/deploy/nginx-staging.conf:/etc/nginx/conf.d/test.conf:ro" \
             nginx:alpine nginx -t
 
+  xss-regression:
+    name: XSS 回歸掃描
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+      # 守住「全站零 HTML sink」基線（docs/XSS_AUDIT_TODO.md TODO-11）
+      - name: Scan for XSS sinks
+        run: bash scripts/xss-regression-check.sh
+
   frontend-lint:
     name: Frontend ESLint + type-check + test
     runs-on: ubuntu-latest

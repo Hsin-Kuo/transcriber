@@ -33,6 +33,14 @@
         </button>
       </div>
 
+      <!-- 已排定期末方案變更（降級）：提示 + 取消排定 -->
+      <div v-if="pendingPlanTier" class="pending-change-notice">
+        <span class="pending-change-text">{{ pendingChangeText }}</span>
+        <button class="pending-change-undo" :disabled="cancelingChange" @click="onCancelPlanChange">
+          {{ cancelingChange ? $t('userSettings.planPanel.processing') : $t('userSettings.planPanel.cancelChangeBtn') }}
+        </button>
+      </div>
+
       <!-- Plans -->
       <div class="plans-grid">
         <div
@@ -53,7 +61,7 @@
             v-if="currentTier !== plan.key"
             class="plan-select-btn"
             :class="{ 'upgrade-btn': isUpgrade(plan.key), 'downgrade-btn': isDowngrade(plan.key) }"
-            :disabled="changingPlan"
+            :disabled="changingPlan || (plan.key === 'free' && cancelScheduled) || plan.key === pendingPlanTier"
             @click="selectPlan(plan.key)"
           >
             {{ getButtonLabel(plan.key) }}
@@ -123,21 +131,30 @@
       </div>
     </div>
   </Teleport>
+
+  <CancelConfirmModal
+    v-model="showCancelConfirm"
+    :period-end-label="cancelPeriodEndLabel"
+    @confirm="onConfirmCancel"
+  />
 </template>
 
 <script setup>
-import { ref, toRef, watch, onMounted } from 'vue'
+import { ref, toRef, watch, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
 import { useFocusTrap } from '../composables/useFocusTrap'
 import { useAddonLabel } from '../composables/useAddonLabel'
+import { useDateFormatter } from '../composables/useDateFormatter'
+import CancelConfirmModal from './CancelConfirmModal.vue'
 import { TIER_PRICES } from '../constants/pricing'
 
 const { t: $t } = useI18n()
 const router = useRouter()
 const authStore = useAuthStore()
 const addonLabel = useAddonLabel()
+const { formatDate: formatDateTz } = useDateFormatter()
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -151,6 +168,45 @@ useFocusTrap(panelRef, toRef(props, 'modelValue'))
 
 const changingPlan = ref(false)
 const tierOrder = { free: 0, basic: 1, pro: 2 }
+
+// 已排定期末取消：Free 方案的「取消」動作要 disable，避免重複送出（後端會 400）
+const cancelScheduled = computed(() => authStore.subscription?.cancel_at_period_end === true)
+
+// 已排定期末降級：目標方案按鈕要標「已排定變更」且 disable（避免重複送出）
+const pendingPlanTier = computed(() => authStore.subscription?.pending_plan_change?.tier || null)
+const cancelingChange = ref(false)
+const pendingChangeText = computed(() => {
+  const t = pendingPlanTier.value
+  if (!t) return ''
+  const planName = $t('userSettings.planPanel.' + t)
+  const periodEnd = authStore.subscription?.current_period_end
+  const dateStr = periodEnd ? formatDateTz(periodEnd, { month: 'long', day: 'numeric' }) : ''
+  return dateStr
+    ? $t('userSettings.planPanel.pendingChangeDated', { plan: planName, date: dateStr })
+    : $t('userSettings.planPanel.pendingChange', { plan: planName })
+})
+async function onCancelPlanChange() {
+  cancelingChange.value = true
+  try {
+    await authStore.cancelPlanChange()  // store 內已 fetchCurrentUser
+  } catch (e) {
+    // 靜默：banner 會依 store 狀態自動更新
+  } finally {
+    cancelingChange.value = false
+  }
+}
+
+// 取消訂閱確認 modal（含權益說明）
+const showCancelConfirm = ref(false)
+const cancelPeriodEndLabel = computed(() => {
+  const ts = authStore.subscription?.current_period_end
+  return ts ? formatDateTz(ts) : ''
+})
+function onConfirmCancel() {
+  showCancelConfirm.value = false
+  emit('update:modelValue', false)
+  emit('planChanged', { action: 'cancel' })
+}
 
 // 加購額度套餐（一次性購買）— basic/pro 用戶開啟面板時才載入
 const addons = ref([])
@@ -173,7 +229,8 @@ watch(() => props.modelValue, (open) => {
 
 function buyAddon(addon) {
   emit('update:modelValue', false)
-  router.push({ path: '/checkout', query: { addon: addon._id } })
+  // 加購走一般化的結帳頁（mode=extra），份數預設 1（可於結帳頁調整）
+  router.push({ path: '/checkout', query: { mode: 'extra', package_id: addon._id, quantity: 1 } })
 }
 
 function isUpgrade(planKey) {
@@ -186,17 +243,17 @@ function isDowngrade(planKey) {
 
 function getButtonLabel(planKey) {
   if (changingPlan.value) return $t('userSettings.planPanel.processing')
+  if (planKey === pendingPlanTier.value) return $t('userSettings.planPanel.changeScheduled')
+  if (planKey === 'free' && cancelScheduled.value) return $t('userSettings.planPanel.cancelScheduled')
   if (props.currentTier === 'free') return $t('userSettings.planPanel.selectPlan')
-  if (isUpgrade(planKey)) return $t('userSettings.planPanel.upgrade')
-  if (isDowngrade(planKey)) {
-    return planKey === 'free'
-      ? $t('userSettings.planPanel.cancelSubscription')
-      : $t('userSettings.planPanel.downgrade')
-  }
-  return $t('userSettings.planPanel.selectPlan')
+  if (planKey === 'free') return $t('userSettings.planPanel.cancelSubscription')  // 付費→免費 = 取消
+  return isUpgrade(planKey)
+    ? $t('userSettings.planPanel.upgrade')   // 付費→更高 tier
+    : $t('userSettings.planPanel.downgrade') // 付費→更低付費 tier
 }
 
 async function selectPlan(planKey) {
+  if (planKey === pendingPlanTier.value) return  // 已排定變更至此方案，不重複送出
   if (props.currentTier === 'free') {
     if (planKey === 'free') return
     emit('update:modelValue', false)
@@ -205,38 +262,42 @@ async function selectPlan(planKey) {
   }
 
   if (planKey === 'free') {
-    emit('update:modelValue', false)
-    emit('planChanged', { action: 'cancel' })
+    if (cancelScheduled.value) return  // 已排定取消，不重複送出（避免後端 400）
+    showCancelConfirm.value = true     // 顯示含權益說明的取消確認 modal
     return
   }
 
+  // 付費→更高 tier：升級（需付款）→ 導向一般化結帳頁，於該頁建 upgrade 單並走 SDK 收款
+  if (isUpgrade(planKey)) {
+    emit('update:modelValue', false)
+    router.push({ path: '/checkout', query: { mode: 'upgrade', plan: planKey, billing: billing.value } })
+    return
+  }
+
+  // 付費→更低付費 tier：降級（不扣款、期末生效）。
+  // 先用本地已知的期末日做確認（送出後即由後端排定，故確認須在送出前），
+  // 使用者確認後才呼叫 /change，成功即 emit downgraded（App.vue 顯示 toast）。
+  const periodEnd = authStore.subscription?.current_period_end
+  const dateStr = periodEnd ? formatDateTz(periodEnd, { month: 'long', day: 'numeric' }) : ''
+  const planName = $t('userSettings.planPanel.' + planKey)
+  const confirmMsg = dateStr
+    ? $t('userSettings.planPanel.downgradeConfirmDated', { plan: planName, date: dateStr })
+    : $t('userSettings.planPanel.downgradeConfirm', { plan: planName })
+  if (!window.confirm(confirmMsg)) return
+
   changingPlan.value = true
   try {
-    const result = await authStore.changePlan(planKey, billing.value)
-
-    if (result.form) {
-      // 升級或降級需要付款：auto-submit 到藍新
+    const res = await authStore.changePlan(planKey, billing.value)
+    // 後端降級回 { action:"downgrade", effective:"end_of_period", scheduled_date }
+    if (res.action === 'downgrade' || res.effective === 'end_of_period') {
+      await authStore.fetchCurrentUser()  // 刷新 subscription（pending downgrade 標記）
       emit('update:modelValue', false)
-      if (result.action === 'upgrade' && (result.extra_duration_minutes > 0 || result.extra_ai_summaries > 0)) {
-        const durMsg = result.extra_duration_minutes > 0 ? $t('userSettings.planPanel.extraMinutes', { n: result.extra_duration_minutes }) : ''
-        const aiMsg = result.extra_ai_summaries > 0 ? $t('userSettings.planPanel.extraAiSummaries', { n: result.extra_ai_summaries }) : ''
-        const parts = [durMsg, aiMsg].filter(Boolean).join($t('common.listSeparator'))
-        alert($t('userSettings.planPanel.upgradeKeepQuota', { parts }))
-      }
-      if (result.action === 'downgrade') {
-        const msg = result.effective === 'end_of_period'
-          ? $t('userSettings.planPanel.downgradeScheduled', { date: result.scheduled_date, plan: planKey })
-          : $t('userSettings.planPanel.downgradeImmediate')
-        if (!confirm(msg)) {
-          changingPlan.value = false
-          return
-        }
-      }
-      authStore.submitNewebpayForm(result.form)
+      emit('planChanged', { action: 'downgraded' })
+    } else {
+      alert($t('userSettings.planPanel.changeFailed'))
     }
-  } catch (err) {
-    const detail = err.response?.data?.detail || $t('userSettings.planPanel.changeFailed')
-    alert(detail)
+  } catch (e) {
+    alert($t('userSettings.planPanel.changeFailed'))
   } finally {
     changingPlan.value = false
   }
@@ -373,6 +434,35 @@ function getPrice(plan) {
 }
 
 /* Plans grid */
+.pending-change-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 28px 16px;
+  padding: 12px 16px;
+  background: #fff3cd;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  color: #856404;
+  font-size: 13px;
+}
+.pending-change-text { flex: 1; min-width: 200px; }
+.pending-change-undo {
+  padding: 6px 14px;
+  border: 1px solid #b8762d;
+  border-radius: 6px;
+  background: transparent;
+  color: #b8762d;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pending-change-undo:hover:not(:disabled) { background: rgba(184, 118, 45, 0.1); }
+.pending-change-undo:disabled { opacity: 0.6; cursor: not-allowed; }
+
 .plans-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

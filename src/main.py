@@ -230,6 +230,11 @@ async def startup_event():
         validate_aws_config()
         logger.info("app.startup.aws_config_validated")
 
+        # 金流體檢 P1-6：prod-aws 分級告警（staging 內部直接 return 不檢查）
+        from src.utils.config_loader import validate_payment_env
+        validate_payment_env()
+        logger.info("app.startup.payment_env_validated")
+
     # Email 服務設定驗證（resend/ses 漏設 FROM_EMAIL 在第一個用戶註冊時才爆炸太晚）
     from src.utils.email_service import get_email_service
     get_email_service()  # 觸發 __init__ 的 _validate_config()
@@ -313,6 +318,10 @@ async def startup_event():
     order_repo_init = OrderRepository(db)
     await _safe_create("orders", order_repo_init.create_indexes())
 
+    from src.database.repositories.invoice_repo import InvoiceRepository
+    invoice_repo_init = InvoiceRepository(db)
+    await _safe_create("invoices", invoice_repo_init.create_indexes())
+
     from src.database.repositories.reservation_repo import ReservationRepository
     reservation_repo_init = ReservationRepository(db)
     await _safe_create("reservations", reservation_repo_init.create_indexes())
@@ -324,6 +333,11 @@ async def startup_event():
     from src.database.repositories.processed_webhook_repo import ProcessedWebhookRepository
     processed_webhook_repo_init = ProcessedWebhookRepository(db)
     await _safe_create("processed_webhooks", processed_webhook_repo_init.create_indexes())
+
+    # job_leases：背景 sweep 的 per-window leader lease（P0-2(a)，多 uvicorn worker 防重複掃描）
+    from src.database.repositories.job_lease_repo import JobLeaseRepository
+    job_lease_repo_init = JobLeaseRepository(db)
+    await _safe_create("job_leases", job_lease_repo_init.create_indexes())
 
     # 建立 chunk_uploads 索引（分片上傳 metadata；過期由 periodic_chunk_upload_cleanup 處理）
     from src.database.repositories.chunk_upload_repo import ChunkUploadRepository
@@ -416,11 +430,32 @@ async def startup_event():
             name="periodic_order_cleanup",
         )
 
-        # 5.4 定期訂閱到期掃描（主動降級未登入但已過期的用戶）
+        # 5.3b 定期金流對帳補償 sweep（P1-9：callback 遺失主動回查收斂 + entitlement_pending 補償）
+        from src.services.payment_reconciliation import periodic_payment_reconciliation
+        create_background_task(
+            periodic_payment_reconciliation(db),
+            name="periodic_payment_reconciliation",
+        )
+
+        # 5.4 定期訂閱到期掃描（已排定取消者到期 lapse 為 free）
         from src.auth.quota import periodic_subscription_expiry_check
         create_background_task(
             periodic_subscription_expiry_check(db),
             name="periodic_subscription_expiry_check",
+        )
+
+        # 5.4b 續扣排程器（91APP merchant-initiated：到期自動續扣 + Dunning 重試 + 寬限滿降 free）
+        from src.services.renewal_service import periodic_renewal_check
+        create_background_task(
+            periodic_renewal_check(db),
+            name="periodic_renewal_check",
+        )
+
+        # 5.4c SmilePay 發票補救 sweep（每 10 分鐘：到期重試 + deadline 告警 + 跨期 gate）
+        from src.services.invoice_service import periodic_invoice_retry
+        create_background_task(
+            periodic_invoice_retry(db),
+            name="periodic_invoice_retry",
         )
 
         # 5.5 定期 chunk uploads 清掃（過期 metadata + temp_dir）

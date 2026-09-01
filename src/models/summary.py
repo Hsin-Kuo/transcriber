@@ -34,7 +34,7 @@ class SummaryContent(BaseModel):
 
 class SummaryMetadata(BaseModel):
     """摘要元數據"""
-    model: str = Field("gemini-2.0-flash", description="使用的 AI 模型")
+    model: str = Field("gemini-2.5-flash", description="使用的 AI 模型")
     language: str = Field("zh", description="語言代碼")
     source_length: int = Field(0, description="原文長度")
 

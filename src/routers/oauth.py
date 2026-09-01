@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, status, Response, Request
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
+from ..utils.client_ip import get_client_ip
+
 
 class _BoundedTimeoutRequest(google_requests.Request):
     """google.auth Request 的 10s timeout 版本。
@@ -197,9 +199,7 @@ async def google_auth(
                 status.HTTP_400_BAD_REQUEST,
             )
 
-        client_ip = http_request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-        if not client_ip:
-            client_ip = http_request.client.host if http_request.client else "unknown"
+        client_ip = get_client_ip(http_request)
 
         now = get_utc_timestamp()
         user = await user_repo.create({

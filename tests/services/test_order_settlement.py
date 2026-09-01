@@ -1,12 +1,12 @@
-"""OrderSettlement 單元測試。
+"""OrderSettlement 單元測試（91APP）。
 
-驗證 deepening 的價值——付款狀態機的每一條 transition 都能用 typed
-PaymentNotification + fake repos 覆蓋，不需要 AES / webhook_repo / Mongo / FastAPI。
+付款狀態機的每一條 transition 都能用 typed PaymentNotification + fake repos 覆蓋，
+不需要真金流 provider / webhook_repo / Mongo / FastAPI。
 """
+import asyncio
 import os
 import sys
 from pathlib import Path
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -28,29 +28,52 @@ from src.services.order_settlement import (  # noqa: E402
 )
 
 
-def _make(order=None, user=None, orphans=None):
-    """建一個 OrderSettlement，三個依賴全 fake。"""
+def _make(order=None, user=None, invoice_issuer=None):
+    """建一個 OrderSettlement，兩個 repo 全 fake（不再依賴金流 provider）。
+
+    invoice_issuer 預設是 no-op AsyncMock：settle() 白名單 outcome 會透過
+    create_background_task 觸發它，不 inject 的話會 fire 到真正的
+    invoice_service.issue_for_order（打真 InvoiceRepository/UserRepository，在這裡的
+    fake db 上會噴 TypeError），污染測試 stderr。開票 hook 本身的行為見 TestInvoiceTrigger。
+    """
     order_repo = MagicMock()
     order_repo.get_by_order_no = AsyncMock(return_value=order)
     order_repo.update_by_order_no = AsyncMock(return_value=True)
-    order_repo.find_orphan_contracts = AsyncMock(return_value=orphans or [])
     order_repo.has_recent_pending_order = AsyncMock(return_value=False)
     order_repo.supersede_pending_orders = AsyncMock(return_value=0)
     order_repo.create = AsyncMock(side_effect=lambda d: {**d, "_id": "oid"})
+    # P0-1/P0-3：settle 的權威閘門，預設「一定搶得到 / 一定寫得進去」，讓既有測試
+    # 聚焦在其他行為上；併發重入專屬測試會覆寫成 False 來驗證短路。
+    order_repo.claim_paid = AsyncMock(return_value=True)
+    order_repo.mark_failed_unless_paid = AsyncMock(return_value=True)
+    # P1-9：$inc 副作用（升級結轉/加購）改走 claim_marker 先搶後施；預設一定搶得到，
+    # 讓既有測試聚焦其他行為，marker gate 本身的行為見 TestClaimMarkerGate。
+    order_repo.claim_marker = AsyncMock(return_value=True)
+    order_repo.increment_entitlement_retry = AsyncMock(return_value=1)
+    # P1-5：退款處置閘門，預設「一定搶得到 / 沒有更新的單」，讓既有測試不受影響；
+    # 閘門本身的行為見 TestHandleFullRefund/TestFlagPartialRefund。
+    order_repo.claim_refund_processed = AsyncMock(return_value=True)
+    order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+    # P2-10：settle 搬完 card_token 進 subscription 後 $unset orders 那份，預設「一定
+    # 成功」，讓既有測試不受影響；閘門本身的行為見 TestCardTokenUnsetAfterSettle。
+    order_repo.clear_card_token = AsyncMock(return_value=True)
 
     user_repo = MagicMock()
+    user_repo.db = MagicMock()
     user_repo.get_by_id = AsyncMock(return_value=user or {"subscription": {}})
     user_repo.update_subscription = AsyncMock(return_value=True)
+    user_repo.update_subscription_fields = AsyncMock(return_value=True)
     user_repo.update_quota = AsyncMock(return_value=True)
     user_repo.reset_monthly_usage = AsyncMock(return_value=True)
     user_repo.add_extra_quota = AsyncMock(return_value=True)
+    # P1-5：extra_quota 退款扣回，預設「一定扣得到」（非 None）。
+    user_repo.adjust_extra_quota_atomic = AsyncMock(return_value={"extra_quota": {}})
 
-    newebpay = MagicMock()
-    newebpay.calc_period_end.return_value = datetime(2026, 7, 1)
-    newebpay.terminate_period_contract = AsyncMock(return_value=(True, "OK"))
-
-    s = OrderSettlement(order_repo=order_repo, user_repo=user_repo, newebpay=newebpay)
-    return s, order_repo, user_repo, newebpay
+    s = OrderSettlement(
+        order_repo=order_repo, user_repo=user_repo,
+        invoice_issuer=invoice_issuer or AsyncMock(),
+    )
+    return s, order_repo, user_repo
 
 
 def _order(**over):
@@ -70,62 +93,105 @@ def _order(**over):
 
 class TestSubscriptionSettle:
     async def test_first_subscription_activates(self):
-        s, order_repo, user_repo, _ = _make(order=_order())
+        s, order_repo, user_repo = _make(order=_order(card_token="CT1"))
         r = await s.settle(PaymentNotification(
-            order_no="SLSUB1", success=True, is_first_payment=True, period_no="P1", trade_no="T1",
+            order_no="SLSUB1", success=True, is_first_payment=True, trade_id="T1",
         ))
         assert r.outcome == SettleOutcome.ACTIVATED
         sub = user_repo.update_subscription.await_args.args[1]
         assert sub["status"] == "active" and sub["tier"] == "basic"
-        assert sub["active_order_no"] == "SLSUB1" and sub["period_no"] == "P1"
+        assert sub["active_order_no"] == "SLSUB1"
+        assert sub["payment_provider"] == "91app"
+        # cardToken 從 order 搬進 subscription；consumer_id = user_id；next_charge_at 有值
+        assert sub["card_token"] == "CT1"
+        assert sub["merchant_consumer_id"] == "u1"
+        assert isinstance(sub["next_charge_at"], (int, float)) and sub["next_charge_at"] > 0
         user_repo.update_quota.assert_awaited_once_with("u1", build_quota_from_tier("basic"))
         user_repo.reset_monthly_usage.assert_awaited_once()
-        # order 最終標 paid
-        assert any(
-            c.args[1].get("status") == "paid"
-            for c in order_repo.update_by_order_no.await_args_list
-        )
+        # order 標 paid + 記 trade_id 由 settle() 的 claim_paid 權威閘門完成（P0-1/P0-3）
+        order_repo.claim_paid.assert_awaited_once_with("SLSUB1", extra_updates={"trade_id": "T1"})
 
     async def test_monthly_renewal_reapplies_latest_quota(self):
-        # D4：月繳續扣 → 重套最新方案額度（短週期，等同每月重新訂閱）
-        user = {"subscription": {"status": "active", "tier": "basic", "created_at": 111}}
-        s, order_repo, user_repo, _ = _make(order=_order(billing_cycle="monthly", status="paid"), user=user)
+        # status="pending"：settle 的 order-already-paid 快路徑現在不分首購/續扣，
+        # 短路改成全類型（P0-1），fixture 必須是未結清的單才能走到 RENEWED 分支。
+        user = {"subscription": {"status": "active", "tier": "basic", "created_at": 111, "card_token": "CT1"}}
+        s, order_repo, user_repo = _make(order=_order(billing_cycle="monthly", status="pending"), user=user)
         r = await s.settle(PaymentNotification(
-            order_no="SLSUB1", success=True, is_first_payment=False, period_no="P2", auth_times=2,
+            order_no="SLSUB1", success=True, is_first_payment=False, trade_id="T2",
         ))
         assert r.outcome == SettleOutcome.RENEWED
-        user_repo.update_subscription.assert_awaited_once()
+        sub = user_repo.update_subscription_fields.await_args.args[1]
+        assert sub["next_charge_at"] > 0  # 續扣滾動下次扣款時間
         user_repo.reset_monthly_usage.assert_awaited_once()
         user_repo.update_quota.assert_awaited_once_with("u1", build_quota_from_tier("basic"))
+        # renewal order 標 paid（+ trade_id）由 claim_paid 權威閘門完成
+        order_repo.claim_paid.assert_awaited_once_with("SLSUB1", extra_updates={"trade_id": "T2"})
 
-    async def test_yearly_renewal_keeps_quota_frozen(self):
-        # D4：年繳續扣不重套 tier quota，維持繳費當下方案直到換約（週期內由 lazy refill 補額但不改額度）
-        user = {"subscription": {"status": "active", "tier": "pro", "created_at": 111}}
-        s, order_repo, user_repo, _ = _make(order=_order(tier="pro", billing_cycle="yearly", status="paid"), user=user)
+    async def test_renewal_from_past_due_clears_dunning_and_swaps_card(self):
+        # 重試/換卡成功：past_due→active、清 dunning、recovery order 帶新 token → 更新綁定
+        user = {"subscription": {"status": "past_due", "tier": "basic", "created_at": 111,
+                                 "card_token": "OLD", "dunning_attempts": 2, "needs_card_update": True}}
+        order = _order(type="renewal", billing_cycle="monthly", card_token="NEWTOKEN")
+        s, order_repo, user_repo = _make(order=order, user=user)
         r = await s.settle(PaymentNotification(
-            order_no="SLSUB1", success=True, is_first_payment=False, period_no="P2", auth_times=2,
+            order_no="SLSUB1", success=True, is_first_payment=False, trade_id="T3",
         ))
         assert r.outcome == SettleOutcome.RENEWED
-        user_repo.update_subscription.assert_awaited_once()
+        sub = user_repo.update_subscription_fields.await_args.args[1]
+        assert sub["status"] == "active"
+        assert sub["dunning_attempts"] == 0 and sub["needs_card_update"] is False
+        assert sub["next_retry_at"] is None and sub["dunning_started_at"] is None
+        assert sub["card_token"] == "NEWTOKEN"  # 換卡搬新 token
+
+    async def test_renewal_applies_pending_downgrade(self):
+        # 期末降級生效：續扣單帶目標 tier(basic) → 套用 basic + 清 pending_plan_change + reconcile
+        user = {"subscription": {"status": "active", "tier": "pro", "billing_cycle": "monthly",
+                                 "created_at": 1, "card_token": "CT",
+                                 "pending_plan_change": {"tier": "basic", "billing_cycle": "monthly"}}}
+        order = _order(type="renewal", tier="basic", billing_cycle="monthly")
+        s, order_repo, user_repo = _make(order=order, user=user)
+        from unittest.mock import AsyncMock as _AM
+        s._reconcile_pinned_audio = _AM()  # 攔截以斷言降級有觸發釘選核對
+        r = await s.settle(PaymentNotification(
+            order_no="SLSUB1", success=True, is_first_payment=False, trade_id="T",
+        ))
+        assert r.outcome == SettleOutcome.RENEWED
+        sub = user_repo.update_subscription_fields.await_args.args[1]
+        assert sub["tier"] == "basic"                    # 降級生效
+        assert sub["pending_plan_change"] is None         # 已套用 → 清空
+        # 方案有變更 → 一律 reapply 目標 tier 額度（不論月/年）
+        user_repo.update_quota.assert_awaited_once_with("u1", build_quota_from_tier("basic"))
+        # 降級生效 → 釋放超額釘選音檔
+        s._reconcile_pinned_audio.assert_awaited_once_with("u1", "basic")
+
+    async def test_yearly_renewal_keeps_quota_frozen(self):
+        # status="pending"：見 test_monthly_renewal_reapplies_latest_quota 的註解（P0-1 短路改全類型）
+        user = {"subscription": {"status": "active", "tier": "pro", "created_at": 111}}
+        s, order_repo, user_repo = _make(order=_order(tier="pro", billing_cycle="yearly", status="pending"), user=user)
+        r = await s.settle(PaymentNotification(
+            order_no="SLSUB1", success=True, is_first_payment=False, trade_id="T2",
+        ))
+        assert r.outcome == SettleOutcome.RENEWED
         user_repo.reset_monthly_usage.assert_awaited_once()
         user_repo.update_quota.assert_not_awaited()
 
-    async def test_renewal_failure_expires_to_free(self):
+    async def test_renewal_failure_only_marks_failed(self):
+        # Phase 2：續扣失敗不在 settle 即時降 free（改由 renewal_service 的 Dunning 接手）。
+        # settle 僅標記 order failed，不動 subscription/quota。
+        # status="pending"：見上方註解（成功/失敗都共用同一條「已 paid 短路」快路徑，
+        # 若用 status="paid" 會在走到失敗分支前就被短路成 ALREADY_PAID）。
         user = {"subscription": {"status": "active", "tier": "pro"}}
-        s, order_repo, user_repo, _ = _make(order=_order(tier="pro", status="paid"), user=user)
+        s, order_repo, user_repo = _make(order=_order(tier="pro", status="pending"), user=user)
         r = await s.settle(PaymentNotification(
             order_no="SLSUB1", success=False, is_first_payment=False,
         ))
-        assert r.outcome == SettleOutcome.EXPIRED
-        assert any(
-            c.args[1].get("status") == "failed"
-            for c in order_repo.update_by_order_no.await_args_list
-        )
-        user_repo.update_quota.assert_awaited_once_with("u1", build_quota_from_tier("free"))
-        assert user_repo.update_subscription.await_args.args[1]["status"] == "expired"
+        assert r.outcome == SettleOutcome.FAILED
+        order_repo.mark_failed_unless_paid.assert_awaited_once_with("SLSUB1", {"status": "failed"})
+        user_repo.update_quota.assert_not_awaited()
+        user_repo.update_subscription.assert_not_awaited()
 
     async def test_first_payment_failure_does_not_expire(self):
-        s, order_repo, user_repo, _ = _make(order=_order())
+        s, order_repo, user_repo = _make(order=_order())
         r = await s.settle(PaymentNotification(
             order_no="SLSUB1", success=False, is_first_payment=True,
         ))
@@ -133,92 +199,93 @@ class TestSubscriptionSettle:
         user_repo.update_subscription.assert_not_awaited()
 
 
-# ── settle: 升級 / 降級的差異 ────────────────────────────────────────────────
+# ── settle: card_token 搬移後 $unset orders 那份（P2-10，金流體檢）───────────────
+
+class TestCardTokenUnsetAfterSettle:
+    async def test_first_payment_clears_order_card_token_after_move(self):
+        s, order_repo, user_repo = _make(order=_order(card_token="CT1"))
+        await s.settle(PaymentNotification(
+            order_no="SLSUB1", success=True, is_first_payment=True, trade_id="T1",
+        ))
+        order_repo.clear_card_token.assert_awaited_once_with("SLSUB1")
+
+    async def test_first_payment_without_card_token_does_not_call_clear(self):
+        s, order_repo, user_repo = _make(order=_order())  # 無 card_token
+        await s.settle(PaymentNotification(
+            order_no="SLSUB1", success=True, is_first_payment=True, trade_id="T1",
+        ))
+        order_repo.clear_card_token.assert_not_awaited()
+
+    async def test_resettle_after_unset_preserves_subscription_card_token(self):
+        """P2-10 回歸（第二意見審查 Medium）：首購 settle 成功後 orders.card_token 被
+        $unset；若 handler 後段 crash → 對帳 resettle_entitlement 繞過 claim_paid 重跑
+        _settle_subscription，此時 order 已無 token。必須 fallback 到現有 subscription 的
+        密文副本，否則整包覆寫會把免 CVV 續扣憑證抹成空、逼使用者重新綁卡。"""
+        order = _order(status="paid")  # 已 $unset，order 無 card_token
+        user = {"subscription": {"status": "active", "tier": "basic", "billing_cycle": "monthly",
+                                 "created_at": 111, "card_token": "v1:ENCRYPTED_TOKEN"}}
+        s, order_repo, user_repo = _make(order=order, user=user)
+        await s.resettle_entitlement(order)
+        saved = user_repo.update_subscription.await_args.args[1]
+        assert saved["card_token"] == "v1:ENCRYPTED_TOKEN"  # 未被抹成空
+
+    async def test_card_swap_renewal_clears_order_card_token_after_move(self):
+        user = {"subscription": {"status": "past_due", "tier": "basic", "created_at": 111,
+                                 "card_token": "OLD", "dunning_attempts": 2, "needs_card_update": True}}
+        order = _order(type="renewal", billing_cycle="monthly", card_token="NEWTOKEN")
+        s, order_repo, user_repo = _make(order=order, user=user)
+        await s.settle(PaymentNotification(
+            order_no="SLSUB1", success=True, is_first_payment=False, trade_id="T3",
+        ))
+        order_repo.clear_card_token.assert_awaited_once_with("SLSUB1")
+
+    async def test_renewal_without_new_token_does_not_call_clear(self):
+        # 一般排程續扣（非換卡挽回）order 不帶新 card_token → 沒有搬移，不該呼叫 $unset。
+        user = {"subscription": {"status": "active", "tier": "basic", "created_at": 111, "card_token": "CT1"}}
+        s, order_repo, user_repo = _make(order=_order(billing_cycle="monthly", status="pending"), user=user)
+        await s.settle(PaymentNotification(
+            order_no="SLSUB1", success=True, is_first_payment=False, trade_id="T2",
+        ))
+        order_repo.clear_card_token.assert_not_awaited()
+
+    async def test_clear_card_token_failure_does_not_break_settle(self):
+        # $unset 失敗（例如短暫 DB 異常）不得拖垮 settle 本身——續扣/首購已經是權益
+        # 生效的權威路徑，不能因為清理中繼欄位失敗而整筆 settle 掛掉。
+        s, order_repo, user_repo = _make(order=_order(card_token="CT1"))
+        order_repo.clear_card_token = AsyncMock(side_effect=RuntimeError("mongo hiccup"))
+        r = await s.settle(PaymentNotification(
+            order_no="SLSUB1", success=True, is_first_payment=True, trade_id="T1",
+        ))
+        assert r.outcome == SettleOutcome.ACTIVATED
+
+
+# ── settle: 升級 / 降級 ──────────────────────────────────────────────────────
 
 class TestUpgradeDowngrade:
-    async def test_upgrade_carries_extra_quota_and_terminates_prev(self):
+    async def test_upgrade_carries_extra_quota(self):
         order = _order(
             merchant_order_no="SLUPG1", type="upgrade_subscription", tier="pro",
-            prev_order_no="SLSUB0", prev_period_no="P0",
+            prev_order_no="SLSUB0",
             extra_duration_minutes=42.5, extra_ai_summaries=3,
         )
-        s, order_repo, user_repo, newebpay = _make(order=order)
+        s, order_repo, user_repo = _make(order=order)
         r = await s.settle(PaymentNotification(
-            order_no="SLUPG1", success=True, is_first_payment=True, period_no="P9",
+            order_no="SLUPG1", success=True, is_first_payment=True, trade_id="T9",
         ))
         assert r.outcome == SettleOutcome.ACTIVATED
         user_repo.add_extra_quota.assert_awaited_once_with("u1", 42.5, 3)
-        newebpay.terminate_period_contract.assert_any_await("SLSUB0", "P0")
 
-    async def test_downgrade_terminates_prev_but_no_carry(self):
+    async def test_downgrade_no_carry(self):
         order = _order(
             merchant_order_no="SLDWN1", type="downgrade_subscription", tier="basic",
-            prev_order_no="SLSUB0", prev_period_no="P0",
+            prev_order_no="SLSUB0",
         )
-        s, order_repo, user_repo, newebpay = _make(order=order)
+        s, order_repo, user_repo = _make(order=order)
         r = await s.settle(PaymentNotification(
-            order_no="SLDWN1", success=True, is_first_payment=True, period_no="P9",
+            order_no="SLDWN1", success=True, is_first_payment=True, trade_id="T9",
         ))
         assert r.outcome == SettleOutcome.ACTIVATED
         user_repo.add_extra_quota.assert_not_awaited()
-        newebpay.terminate_period_contract.assert_any_await("SLSUB0", "P0")
-
-    async def test_scheduled_downgrade_before_first_charge_defers(self):
-        # 排程降級：first-payment Notify 在首扣日「之前」到達（藍新委託建立完成通知），
-        # 應延後——不動 tier / quota，status 不可設 paid。用未來首扣日確保判別為「尚未到期」。
-        order = _order(
-            merchant_order_no="SLDWN1", type="downgrade_subscription", tier="basic",
-            prev_order_no="SLSUB0", prev_period_no="P0", scheduled_date="2099/07/01",
-        )
-        s, order_repo, user_repo, newebpay = _make(order=order)
-        r = await s.settle(PaymentNotification(
-            order_no="SLDWN1", success=True, is_first_payment=True, period_no="P9",
-        ))
-        assert r.outcome == SettleOutcome.SCHEDULED
-        # tier / quota / 用量全部不動，pending_plan_change 保留（未被 update_subscription 清掉）
-        user_repo.update_subscription.assert_not_awaited()
-        user_repo.update_quota.assert_not_awaited()
-        user_repo.reset_monthly_usage.assert_not_awaited()
-        # 舊委託此時不重複終止（checkout 已終止）；絕不可把 order 標成 paid
-        newebpay.terminate_period_contract.assert_not_awaited()
-        assert not any(
-            c.args[1].get("status") == "paid"
-            for c in order_repo.update_by_order_no.await_args_list
-        )
-        # 委託編號仍要記到 order 上（供期末對帳 / 追蹤）
-        assert any(
-            c.args[1].get("period_no") == "P9"
-            for c in order_repo.update_by_order_no.await_args_list
-        )
-
-    async def test_scheduled_downgrade_on_first_charge_applies(self):
-        # 首扣日當天（今日 ≥ 首扣日）到達的 Notify → 此時才真正降級。
-        # 用過去首扣日模擬「已到首扣日」，不依賴 Notify 欄位格式（AuthTimes / AlreadyTimes）。
-        order = _order(
-            merchant_order_no="SLDWN1", type="downgrade_subscription", tier="basic",
-            prev_order_no="SLSUB0", prev_period_no="P0", scheduled_date="2020/01/01",
-        )
-        s, order_repo, user_repo, newebpay = _make(order=order)
-        r = await s.settle(PaymentNotification(
-            order_no="SLDWN1", success=True, is_first_payment=True, period_no="P9",
-        ))
-        assert r.outcome == SettleOutcome.ACTIVATED
-        sub = user_repo.update_subscription.await_args.args[1]
-        assert sub["tier"] == "basic" and sub["pending_plan_change"] is None
-        user_repo.update_quota.assert_awaited_once_with("u1", build_quota_from_tier("basic"))
-
-    async def test_immediate_downgrade_no_scheduled_date_applies(self):
-        # 立即降級分支（剩餘 <2 天，scheduled_date=None）不受延後 gate 影響、仍即時生效。
-        order = _order(
-            merchant_order_no="SLDWN2", type="downgrade_subscription", tier="basic",
-            prev_order_no="SLSUB0", prev_period_no="P0", scheduled_date=None,
-        )
-        s, order_repo, user_repo, newebpay = _make(order=order)
-        r = await s.settle(PaymentNotification(
-            order_no="SLDWN2", success=True, is_first_payment=True, period_no="P9",
-        ))
-        assert r.outcome == SettleOutcome.ACTIVATED
-        user_repo.update_quota.assert_awaited_once_with("u1", build_quota_from_tier("basic"))
 
 
 # ── settle: 重複完成防護 ─────────────────────────────────────────────────────
@@ -227,34 +294,34 @@ class TestDuplicateCompletion:
     async def test_sibling_already_active_is_rejected(self):
         # 既有 active 訂閱，active_order_no 指向別張 → 這張是重複完成
         user = {"subscription": {"status": "active", "active_order_no": "OTHER", "cancel_at_period_end": False}}
-        s, order_repo, user_repo, newebpay = _make(order=_order(), user=user)
+        s, order_repo, user_repo = _make(order=_order(), user=user)
         r = await s.settle(PaymentNotification(
-            order_no="SLSUB1", success=True, is_first_payment=True, period_no="P9",
+            order_no="SLSUB1", success=True, is_first_payment=True, trade_id="T9",
         ))
         assert r.outcome == SettleOutcome.REJECTED_DUPLICATE
-        # 不重複啟用 / 不加值；標 needs_refund + 終止多出來的委託
+        # 不重複啟用 / 不加值；標 needs_refund（91APP 無委託可終止）
         user_repo.update_subscription.assert_not_awaited()
         user_repo.add_extra_quota.assert_not_awaited()
-        newebpay.terminate_period_contract.assert_awaited_once_with("SLSUB1", "P9")
         marked = order_repo.update_by_order_no.await_args.args[1]
         assert marked["needs_refund"] is True and marked["is_duplicate"] is True
 
 
-# ── settle: 額外額度 MPG ─────────────────────────────────────────────────────
+# ── settle: 額外額度 ─────────────────────────────────────────────────────────
 
 class TestExtraQuota:
-    async def test_mpg_success_grants_quota(self):
+    async def test_extra_quota_success_grants_quota(self):
         order = _order(
             merchant_order_no="SLEXT1", type="extra_quota", tier=None, billing_cycle=None,
             extra_duration_minutes=120, extra_ai_summaries=0,
         )
-        s, order_repo, user_repo, _ = _make(order=order)
+        s, order_repo, user_repo = _make(order=order)
         r = await s.settle(PaymentNotification(
-            order_no="SLEXT1", success=True, is_first_payment=True, trade_no="T1",
+            order_no="SLEXT1", success=True, is_first_payment=True, trade_id="T1",
         ))
         assert r.outcome == SettleOutcome.GRANTED
         user_repo.add_extra_quota.assert_awaited_once_with("u1", 120, 0)
-        assert order_repo.update_by_order_no.await_args.args[1]["status"] == "paid"
+        # order 標 paid（+ trade_id）由 claim_paid 權威閘門完成（P0-1/P0-3）
+        order_repo.claim_paid.assert_awaited_once_with("SLEXT1", extra_updates={"trade_id": "T1"})
 
 
 # ── settle: order 生命週期 idempotency ───────────────────────────────────────
@@ -266,50 +333,37 @@ class TestIdempotency:
         assert r.outcome == SettleOutcome.ORDER_NOT_FOUND
 
     async def test_first_payment_already_paid_short_circuits(self):
-        s, order_repo, user_repo, _ = _make(order=_order(status="paid"))
+        s, order_repo, user_repo = _make(order=_order(status="paid"))
         r = await s.settle(PaymentNotification(order_no="SLSUB1", success=True, is_first_payment=True))
         assert r.outcome == SettleOutcome.ALREADY_PAID
         user_repo.update_subscription.assert_not_awaited()
 
-
-# ── settle: 孤兒委託對帳收斂 ─────────────────────────────────────────────────
-
-class TestOrphanReconciliation:
-    async def test_activation_terminates_orphan_contracts(self):
-        orphans = [{"merchant_order_no": "OLD1", "period_no": "POLD"}]
-        s, order_repo, user_repo, newebpay = _make(order=_order(), orphans=orphans)
-        await s.settle(PaymentNotification(
-            order_no="SLSUB1", success=True, is_first_payment=True, period_no="P9",
-        ))
-        newebpay.terminate_period_contract.assert_any_await("OLD1", "POLD")
-        # 終止成功 → 標記 contract_terminated_at（避免每次啟動重打）
-        assert any(
-            "contract_terminated_at" in c.args[1]
-            for c in order_repo.update_by_order_no.await_args_list
-        )
-
-    async def test_orphan_scan_failure_does_not_break_activation(self):
-        s, order_repo, user_repo, newebpay = _make(order=_order())
-        order_repo.find_orphan_contracts.side_effect = RuntimeError("mongo down")
-        # 啟用已成功，孤兒掃描炸掉不可拖垮整筆 settle
-        r = await s.settle(PaymentNotification(
-            order_no="SLSUB1", success=True, is_first_payment=True, period_no="P9",
-        ))
-        assert r.outcome == SettleOutcome.ACTIVATED
+    async def test_renewal_already_paid_also_short_circuits(self):
+        """P0-1 補測（第二意見審查 補測(a)）：舊版短路只擋 is_first_payment=True，續扣
+        重放沒有防線。這裡直接驗證 is_first_payment=False + order 已 paid 一樣要短路，
+        不能碰任何 handler 副作用（claim_paid 都不該被呼叫到，因為快路徑更早就擋下）。
+        """
+        s, order_repo, user_repo = _make(order=_order(status="paid"))
+        r = await s.settle(PaymentNotification(order_no="SLSUB1", success=True, is_first_payment=False))
+        assert r.outcome == SettleOutcome.ALREADY_PAID
+        order_repo.claim_paid.assert_not_awaited()
+        user_repo.update_subscription.assert_not_awaited()
+        user_repo.update_subscription_fields.assert_not_awaited()
+        user_repo.update_quota.assert_not_awaited()
 
 
 # ── open_pending: 付款防重 ───────────────────────────────────────────────────
 
 class TestOpenPending:
     async def test_creates_pending_order(self):
-        s, order_repo, *_ = _make()
+        s, order_repo, _ = _make()
         out = await s.open_pending({"user_id": "u1", "type": "subscription", "status": "pending"})
         assert out["_id"] == "oid"
         order_repo.supersede_pending_orders.assert_awaited_once_with("u1", "subscription")
         order_repo.create.assert_awaited_once()
 
     async def test_cooldown_blocks_with_429(self):
-        s, order_repo, *_ = _make()
+        s, order_repo, _ = _make()
         order_repo.has_recent_pending_order.return_value = True
         with pytest.raises(HTTPException) as ei:
             await s.open_pending({"user_id": "u1", "type": "subscription", "status": "pending"})
@@ -318,8 +372,1243 @@ class TestOpenPending:
 
     async def test_concurrent_duplicate_becomes_429(self):
         from src.database.repositories.order_repo import DuplicatePendingOrderError
-        s, order_repo, *_ = _make()
+        s, order_repo, _ = _make()
         order_repo.create.side_effect = DuplicatePendingOrderError("u1", "subscription")
         with pytest.raises(HTTPException) as ei:
             await s.open_pending({"user_id": "u1", "type": "subscription", "status": "pending"})
         assert ei.value.status_code == 429
+
+
+# ── settle: 開票 hook（91APP 付款成功 → 自動開立電子發票，設計 §4.2）─────────────
+
+class TestInvoiceTrigger:
+    """settle() 尾端白名單 outcome 觸發背景開票；create_background_task 是 fire-and-forget，
+    故每個測試在 settle() 後 `await asyncio.sleep(0)` 讓 event loop 跑到那顆背景 task。
+    """
+
+    async def test_activated_triggers_invoice_issuer(self):
+        issuer = AsyncMock()
+        s, order_repo, _ = _make(order=_order(card_token="CT1"), invoice_issuer=issuer)
+        r = await s.settle(PaymentNotification(
+            order_no="SLSUB1", success=True, is_first_payment=True, trade_id="T1",
+        ))
+        assert r.outcome == SettleOutcome.ACTIVATED
+        await asyncio.sleep(0)
+        issuer.assert_awaited_once()
+        db_arg, order_arg = issuer.await_args.args
+        assert order_arg["merchant_order_no"] == "SLSUB1"
+
+    async def test_renewed_triggers_invoice_issuer(self):
+        # status="pending"：見 TestSubscriptionSettle 續扣測試群組的註解（P0-1 短路改全類型）
+        issuer = AsyncMock()
+        user = {"subscription": {"status": "active", "tier": "basic", "created_at": 111, "card_token": "CT1"}}
+        s, order_repo, _ = _make(order=_order(billing_cycle="monthly", status="pending"), user=user,
+                                  invoice_issuer=issuer)
+        r = await s.settle(PaymentNotification(order_no="SLSUB1", success=True, is_first_payment=False, trade_id="T2"))
+        assert r.outcome == SettleOutcome.RENEWED
+        await asyncio.sleep(0)
+        issuer.assert_awaited_once()
+
+    async def test_granted_triggers_invoice_issuer(self):
+        issuer = AsyncMock()
+        order = _order(merchant_order_no="SLEXT1", type="extra_quota", tier=None, billing_cycle=None,
+                       extra_duration_minutes=120, extra_ai_summaries=0)
+        s, order_repo, _ = _make(order=order, invoice_issuer=issuer)
+        r = await s.settle(PaymentNotification(order_no="SLEXT1", success=True, is_first_payment=True, trade_id="T1"))
+        assert r.outcome == SettleOutcome.GRANTED
+        await asyncio.sleep(0)
+        issuer.assert_awaited_once()
+
+    async def test_failed_does_not_trigger_invoice(self):
+        issuer = AsyncMock()
+        s, order_repo, _ = _make(order=_order(), invoice_issuer=issuer)
+        r = await s.settle(PaymentNotification(order_no="SLSUB1", success=False, is_first_payment=True))
+        assert r.outcome == SettleOutcome.FAILED
+        await asyncio.sleep(0)
+        issuer.assert_not_awaited()
+
+    async def test_already_paid_does_not_trigger_invoice(self):
+        issuer = AsyncMock()
+        s, order_repo, _ = _make(order=_order(status="paid"), invoice_issuer=issuer)
+        r = await s.settle(PaymentNotification(order_no="SLSUB1", success=True, is_first_payment=True))
+        assert r.outcome == SettleOutcome.ALREADY_PAID
+        await asyncio.sleep(0)
+        issuer.assert_not_awaited()
+
+    async def test_rejected_duplicate_does_not_trigger_invoice(self):
+        issuer = AsyncMock()
+        user = {"subscription": {"status": "active", "active_order_no": "OTHER", "cancel_at_period_end": False}}
+        s, order_repo, _ = _make(order=_order(), user=user, invoice_issuer=issuer)
+        r = await s.settle(PaymentNotification(order_no="SLSUB1", success=True, is_first_payment=True))
+        assert r.outcome == SettleOutcome.REJECTED_DUPLICATE
+        await asyncio.sleep(0)
+        issuer.assert_not_awaited()
+
+    async def test_issuer_exception_is_swallowed_settle_still_returns(self):
+        """create_background_task 本身已把例外導去 Sentry/log；settle() 的回傳不受影響。"""
+        issuer = AsyncMock(side_effect=RuntimeError("smilepay down"))
+        s, order_repo, _ = _make(order=_order(card_token="CT1"), invoice_issuer=issuer)
+        r = await s.settle(PaymentNotification(order_no="SLSUB1", success=True, is_first_payment=True, trade_id="T1"))
+        assert r.outcome == SettleOutcome.ACTIVATED  # settle 本身完全不受開票失敗影響
+        await asyncio.sleep(0)
+        issuer.assert_awaited_once()
+
+    async def test_default_issuer_lazy_imports_invoice_service(self):
+        """不注入 invoice_issuer 時（build_order_settlement/OrderSettlement 建構皆同），
+        預設走真正的 invoice_service.issue_for_order（lazy import）——驗證『有真的接上』，
+        實際開票邏輯由 test_invoice_service.py 覆蓋。`_make()` 測試 helper 為避免其他測試
+        噴噪音一律注入 fake issuer，這裡改直接建構 OrderSettlement 驗證真正的預設值。
+        """
+        from src.services.order_settlement import OrderSettlement, _default_invoice_issuer, build_order_settlement
+        s = OrderSettlement(order_repo=MagicMock(), user_repo=MagicMock())
+        assert s._invoice_issuer is _default_invoice_issuer
+        s2 = build_order_settlement(MagicMock())
+        assert s2._invoice_issuer is _default_invoice_issuer
+
+
+# ── settle: 成功側訂閱通知 hook（首購開通 / 續扣成功）─────────────────────────────
+
+class TestSubscriptionSuccessEmailTrigger:
+    """settle() 尾端（開票白名單之後）另掛一道 outcome-keyed 分派點：
+    activated → purchase_confirmed／renewed → renewal_succeeded／granted → addon_confirmed，
+    其餘 outcome 不寄。monkeypatch `_trigger_subscription_email` 本身（同步方法）當 spy，
+    不真的起背景任務——`_trigger_subscription_email`/`_send_subscription_email_task`
+    各自的行為見下方 TestSendSubscriptionEmailTask。
+    """
+
+    async def test_activated_triggers_with_kind_activated(self, monkeypatch):
+        s, order_repo, _ = _make(order=_order(card_token="CT1"))
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_subscription_email", spy)
+        r = await s.settle(PaymentNotification(
+            order_no="SLSUB1", success=True, is_first_payment=True, trade_id="T1",
+        ))
+        assert r.outcome == SettleOutcome.ACTIVATED
+        spy.assert_called_once_with("SLSUB1", "activated")
+
+    async def test_renewed_triggers_with_kind_renewed(self, monkeypatch):
+        user = {"subscription": {"status": "active", "tier": "basic", "created_at": 111, "card_token": "CT1"}}
+        s, order_repo, _ = _make(order=_order(billing_cycle="monthly", status="pending"), user=user)
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_subscription_email", spy)
+        r = await s.settle(PaymentNotification(order_no="SLSUB1", success=True, is_first_payment=False, trade_id="T2"))
+        assert r.outcome == SettleOutcome.RENEWED
+        spy.assert_called_once_with("SLSUB1", "renewed")
+
+    async def test_granted_triggers_with_kind_granted(self, monkeypatch):
+        """extra_quota 加購走開票白名單，也是加購完成信（addon_confirmed）的對象。"""
+        order = _order(merchant_order_no="SLEXT1", type="extra_quota", tier=None, billing_cycle=None,
+                       extra_duration_minutes=120, extra_ai_summaries=0)
+        s, order_repo, _ = _make(order=order)
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_subscription_email", spy)
+        r = await s.settle(PaymentNotification(order_no="SLEXT1", success=True, is_first_payment=True, trade_id="T1"))
+        assert r.outcome == SettleOutcome.GRANTED
+        spy.assert_called_once_with("SLEXT1", "granted")
+
+    async def test_failed_does_not_trigger_subscription_email(self, monkeypatch):
+        s, order_repo, _ = _make(order=_order())
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_subscription_email", spy)
+        r = await s.settle(PaymentNotification(order_no="SLSUB1", success=False, is_first_payment=True))
+        assert r.outcome == SettleOutcome.FAILED
+        spy.assert_not_called()
+
+    async def test_already_paid_does_not_trigger_subscription_email(self, monkeypatch):
+        s, order_repo, _ = _make(order=_order(status="paid"))
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_subscription_email", spy)
+        r = await s.settle(PaymentNotification(order_no="SLSUB1", success=True, is_first_payment=True))
+        assert r.outcome == SettleOutcome.ALREADY_PAID
+        spy.assert_not_called()
+
+    async def test_rejected_duplicate_does_not_trigger_subscription_email(self, monkeypatch):
+        user = {"subscription": {"status": "active", "active_order_no": "OTHER", "cancel_at_period_end": False}}
+        s, order_repo, _ = _make(order=_order(), user=user)
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_subscription_email", spy)
+        r = await s.settle(PaymentNotification(order_no="SLSUB1", success=True, is_first_payment=True))
+        assert r.outcome == SettleOutcome.REJECTED_DUPLICATE
+        spy.assert_not_called()
+
+    async def test_resettle_entitlement_never_triggers_subscription_email(self, monkeypatch):
+        """resettle_entitlement 是 crash 補償重跑，只掛在 settle() 這個公開入口——resettle
+        走的是繞過 claim_paid 的內部路徑，不該重複寄『已開通/已續扣』信。"""
+        order = _order(card_token="CT1")
+        s, order_repo, user_repo = _make(order=order)
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_subscription_email", spy)
+        await s.resettle_entitlement(order)
+        user_repo.update_subscription.assert_awaited_once()  # handler 真的跑了
+        spy.assert_not_called()
+
+
+class TestSendSubscriptionEmailTask:
+    """`_trigger_subscription_email` 本身只是 create_background_task 的 thin wrapper
+    （零負擔）；這裡直接測試背景任務本體 `_send_subscription_email_task`。"""
+
+    def _patch_email_service(self, monkeypatch, svc=None):
+        from src.utils import email_service as email_service_mod
+        svc = svc or AsyncMock()
+        svc.send_subscription_email = AsyncMock(return_value=True)
+        monkeypatch.setattr(email_service_mod, "get_email_service", lambda: svc)
+        return svc
+
+    async def test_trigger_schedules_background_task(self):
+        """`_trigger_subscription_email` 呼叫端零負擔：同步方法，不 await。"""
+        s, order_repo, _ = _make(order=_order())
+        s._send_subscription_email_task = AsyncMock()
+        s._trigger_subscription_email("SLSUB1", "activated")
+        await asyncio.sleep(0)  # 讓出一次 loop，讓 create_background_task 排的 task 真的跑
+        s._send_subscription_email_task.assert_awaited_once_with("SLSUB1", "activated")
+
+    async def test_activated_sends_purchase_confirmed(self, monkeypatch):
+        order = _order(card_token="CT1", amount_twd=299)
+        user = {
+            "email": "user@example.com",
+            "subscription": {"tier": "pro", "next_charge_at": 1893456000},  # 2030-01-01
+            "preferences": {"language": "en"},
+        }
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_subscription_email_task("SLSUB1", "activated")
+        svc.send_subscription_email.assert_awaited_once()
+        kwargs = svc.send_subscription_email.await_args.kwargs
+        assert kwargs["to_email"] == "user@example.com"
+        assert kwargs["kind"] == "purchase_confirmed"
+        assert kwargs["lang"] == "en"
+        assert kwargs["plan"] == "Pro"  # en 語系用 tier 值 capitalize，不塞繁中 name
+        assert kwargs["amount"] == 299
+        assert kwargs["next_charge"] == "2030-01-01"
+
+    async def test_zh_tw_plan_uses_chinese_name(self, monkeypatch):
+        # zh-TW 語系用 QUOTA_TIERS 的繁中 name（對照 en 用 capitalize）。
+        order = _order(card_token="CT1", amount_twd=299)
+        user = {
+            "email": "user@example.com",
+            "subscription": {"tier": "pro", "next_charge_at": 1893456000},
+            "preferences": {"language": "zh-TW"},
+        }
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_subscription_email_task("SLSUB1", "activated")
+        kwargs = svc.send_subscription_email.await_args.kwargs
+        assert kwargs["lang"] == "zh-TW"
+        assert kwargs["plan"] == "專業版"
+
+    async def test_renewed_sends_renewal_succeeded(self, monkeypatch):
+        order = _order(card_token="CT1", amount_twd=99)
+        user = {"email": "user@example.com", "subscription": {"tier": "basic"}}
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_subscription_email_task("SLSUB1", "renewed")
+        kwargs = svc.send_subscription_email.await_args.kwargs
+        assert kwargs["kind"] == "renewal_succeeded"
+        assert kwargs["plan"] == "基礎版"
+        assert kwargs["next_charge"] == ""  # 無 next_charge_at → 空字串
+
+    async def test_granted_sends_addon_confirmed_with_empty_plan(self, monkeypatch):
+        """extra_quota 訂單沒有 tier 概念——addon_confirmed 的 plan 一律傳空字串，
+        不查 tier（也不該因為壞 tier 值而炸）。"""
+        order = _order(merchant_order_no="SLEXT1", type="extra_quota", tier=None,
+                       billing_cycle=None, amount_twd=499)
+        user = {"email": "user@example.com", "subscription": {}}
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_subscription_email_task("SLEXT1", "granted")
+        kwargs = svc.send_subscription_email.await_args.kwargs
+        assert kwargs["kind"] == "addon_confirmed"
+        assert kwargs["plan"] == ""
+        assert kwargs["amount"] == 499
+
+    async def test_tier_fallback_to_order_when_user_has_no_subscription_tier(self, monkeypatch):
+        order = _order(tier="pro")
+        user = {"email": "user@example.com", "subscription": {}}
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_subscription_email_task("SLSUB1", "activated")
+        kwargs = svc.send_subscription_email.await_args.kwargs
+        assert kwargs["plan"] == "專業版"
+
+    async def test_unknown_tier_falls_back_to_capitalized_string(self, monkeypatch):
+        order = _order(tier="mystery_tier")
+        user = {"email": "user@example.com", "subscription": {}}
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_subscription_email_task("SLSUB1", "activated")
+        kwargs = svc.send_subscription_email.await_args.kwargs
+        assert kwargs["plan"] == "Mystery_tier"
+
+    async def test_order_not_found_does_not_call_svc(self, monkeypatch):
+        s, order_repo, user_repo = _make(order=None)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_subscription_email_task("SLSUB1", "activated")
+        svc.send_subscription_email.assert_not_awaited()
+
+    async def test_user_not_found_does_not_call_svc(self, monkeypatch):
+        order = _order()
+        s, order_repo, user_repo = _make(order=order)
+        user_repo.get_by_id = AsyncMock(return_value=None)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_subscription_email_task("SLSUB1", "activated")
+        svc.send_subscription_email.assert_not_awaited()
+
+    async def test_no_email_does_not_call_svc(self, monkeypatch):
+        order = _order()
+        user = {"subscription": {"tier": "basic"}}  # 無 email 欄位
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_subscription_email_task("SLSUB1", "activated")
+        svc.send_subscription_email.assert_not_awaited()
+
+    async def test_email_bounced_does_not_call_svc(self, monkeypatch):
+        order = _order()
+        user = {"email": "user@example.com", "email_bounced": True, "subscription": {"tier": "basic"}}
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_subscription_email_task("SLSUB1", "activated")
+        svc.send_subscription_email.assert_not_awaited()
+
+    async def test_svc_exception_does_not_propagate(self, monkeypatch):
+        """背景任務安全：email service 拋例外絕不能往上冒（呼叫端是 fire-and-forget）。"""
+        order = _order()
+        user = {"email": "user@example.com", "subscription": {"tier": "basic"}}
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        svc.send_subscription_email = AsyncMock(side_effect=RuntimeError("smtp down"))
+        await s._send_subscription_email_task("SLSUB1", "activated")  # 不應拋出
+
+
+# ── settle: 併發重入（P0-1/P0-3 金流體檢核心）───────────────────────────────────
+
+class TestConcurrentReentry:
+    """claim_paid 是 settle() 唯一的權威閘門：搶不到就一定不能施加任何權益副作用。
+
+    模擬「兩個 settle() 幾乎同時通過 order.status=='paid' 快路徑」的場景——快路徑本身
+    只看 get_by_order_no 當下讀到的（可能過期的）status，claim_paid 的 DB 層原子
+    status!=paid→paid 才是真正的仲裁點。這裡直接把 claim_paid mock 成 False 來模擬
+    「輸掉這場競賽」的那個 settle()。
+    """
+
+    async def test_renewal_loses_race_grants_nothing(self):
+        user = {"subscription": {"status": "active", "tier": "basic", "card_token": "CT1"}}
+        s, order_repo, user_repo = _make(order=_order(billing_cycle="monthly", status="pending"), user=user)
+        order_repo.claim_paid = AsyncMock(return_value=False)
+        r = await s.settle(PaymentNotification(
+            order_no="SLSUB1", success=True, is_first_payment=False, trade_id="T2",
+        ))
+        assert r.outcome == SettleOutcome.ALREADY_PAID
+        user_repo.update_subscription.assert_not_awaited()
+        user_repo.update_subscription_fields.assert_not_awaited()
+        user_repo.update_quota.assert_not_awaited()
+        user_repo.reset_monthly_usage.assert_not_awaited()
+
+    async def test_extra_quota_loses_race_grants_nothing(self):
+        order = _order(
+            merchant_order_no="SLEXT1", type="extra_quota", tier=None, billing_cycle=None,
+            extra_duration_minutes=120, extra_ai_summaries=0,
+        )
+        s, order_repo, user_repo = _make(order=order)
+        order_repo.claim_paid = AsyncMock(return_value=False)
+        r = await s.settle(PaymentNotification(
+            order_no="SLEXT1", success=True, is_first_payment=True, trade_id="T1",
+        ))
+        assert r.outcome == SettleOutcome.ALREADY_PAID
+        user_repo.add_extra_quota.assert_not_awaited()
+
+    async def test_first_payment_loses_race_grants_nothing(self):
+        s, order_repo, user_repo = _make(order=_order(card_token="CT1"))
+        order_repo.claim_paid = AsyncMock(return_value=False)
+        r = await s.settle(PaymentNotification(
+            order_no="SLSUB1", success=True, is_first_payment=True, trade_id="T1",
+        ))
+        assert r.outcome == SettleOutcome.ALREADY_PAID
+        user_repo.update_subscription.assert_not_awaited()
+        user_repo.update_quota.assert_not_awaited()
+
+
+# ── settle: 失敗通知不得覆寫已 paid 單（P0-3）────────────────────────────────────
+
+class TestMarkFailedUnlessPaid:
+    async def test_late_failure_notify_on_already_paid_order_is_a_noop(self):
+        """order 已被別的 trade 結算成功後，一封遲到的舊 trade 失敗通知抵達：
+        mark_failed_unless_paid 回 False（DB 層擋下覆寫），settle 不炸、仍回 FAILED
+        （outcome 本身只反映『這封通知宣稱失敗』，不代表 order 真的被改成 failed）。
+        """
+        s, order_repo, user_repo = _make(order=_order(status="pending"))
+        order_repo.mark_failed_unless_paid = AsyncMock(return_value=False)
+        r = await s.settle(PaymentNotification(
+            order_no="SLSUB1", success=False, is_first_payment=False,
+        ))
+        assert r.outcome == SettleOutcome.FAILED
+        order_repo.mark_failed_unless_paid.assert_awaited_once_with("SLSUB1", {"status": "failed"})
+        user_repo.update_subscription.assert_not_awaited()
+
+
+# ── _expire_to_free：P0-2(b) 樂觀併發 guard ──────────────────────────────────────
+
+class TestExpireToFreeGuard:
+    async def test_guard_failure_returns_false_and_skips_quota_and_reconcile(self):
+        s, order_repo, user_repo = _make()
+        user_repo.update_subscription_fields = AsyncMock(return_value=False)
+        from unittest.mock import AsyncMock as _AM
+        s._reconcile_pinned_audio = _AM()
+
+        ok = await s._expire_to_free("u1", guard={"subscription.next_charge_at": 999})
+
+        assert ok is False
+        user_repo.update_quota.assert_not_awaited()
+        s._reconcile_pinned_audio.assert_not_awaited()
+
+    async def test_guard_none_always_writes(self):
+        from src.models.quota import build_quota_from_tier as _bqft
+        s, order_repo, user_repo = _make()
+        from unittest.mock import AsyncMock as _AM
+        s._reconcile_pinned_audio = _AM()
+
+        ok = await s._expire_to_free("u1")
+
+        assert ok is True
+        user_repo.update_subscription_fields.assert_awaited_once()
+        assert user_repo.update_subscription_fields.await_args.kwargs.get("guard") is None
+        user_repo.update_quota.assert_awaited_once_with("u1", _bqft("free"))
+        s._reconcile_pinned_audio.assert_awaited_once_with("u1", "free")
+
+    async def test_clears_card_token_on_downgrade(self):
+        # F6（跨 PR 複檢）：降 free 時清空 card_token——退款撤訂閱與 dunning 降級兩條路徑都
+        # 讓使用者變 expired/free、無有效訂閱可續扣，留著免 CVV 憑證只擴大留存面。
+        s, order_repo, user_repo = _make()
+        from unittest.mock import AsyncMock as _AM
+        s._reconcile_pinned_audio = _AM()
+
+        ok = await s._expire_to_free("u1")
+
+        assert ok is True
+        fields = user_repo.update_subscription_fields.await_args.args[1]
+        assert fields["card_token"] == ""       # 免 CVV 續扣憑證已清
+        assert fields["status"] == "expired"
+
+
+# ── settle: handler crash 留下 entitlement_pending 旗標（F5，第二意見審查）────────
+
+class TestEntitlementPendingOnCrash:
+    async def test_subscription_handler_exception_marks_entitlement_pending_and_reraises(self):
+        s, order_repo, user_repo = _make(order=_order(card_token="CT1"))
+        s._settle_subscription = AsyncMock(side_effect=RuntimeError("boom"))
+        with pytest.raises(RuntimeError, match="boom"):
+            await s.settle(PaymentNotification(
+                order_no="SLSUB1", success=True, is_first_payment=True, trade_id="T1",
+            ))
+        assert any(
+            c.args[1].get("entitlement_pending") is True
+            for c in order_repo.update_by_order_no.await_args_list
+        )
+
+    async def test_extra_quota_handler_exception_marks_entitlement_pending(self):
+        order = _order(
+            merchant_order_no="SLEXT1", type="extra_quota", tier=None, billing_cycle=None,
+            extra_duration_minutes=120, extra_ai_summaries=0,
+        )
+        s, order_repo, user_repo = _make(order=order)
+        s._settle_extra_quota = AsyncMock(side_effect=ValueError("boom"))
+        with pytest.raises(ValueError, match="boom"):
+            await s.settle(PaymentNotification(
+                order_no="SLEXT1", success=True, is_first_payment=True, trade_id="T1",
+            ))
+        assert any(
+            c.args[1].get("entitlement_pending") is True
+            for c in order_repo.update_by_order_no.await_args_list
+        )
+
+    async def test_flag_write_failure_does_not_mask_original_exception(self):
+        """_mark_entitlement_pending 本身失敗（例如連 DB 都掛了）不能蓋掉原始例外——
+        呼叫端需要看到真正的錯誤原因，而不是旗標寫入失敗的次要錯誤。"""
+        s, order_repo, user_repo = _make(order=_order(card_token="CT1"))
+        s._settle_subscription = AsyncMock(side_effect=RuntimeError("original"))
+        order_repo.update_by_order_no = AsyncMock(side_effect=ConnectionError("db down"))
+        with pytest.raises(RuntimeError, match="original"):
+            await s.settle(PaymentNotification(
+                order_no="SLSUB1", success=True, is_first_payment=True, trade_id="T1",
+            ))
+
+
+# ── settle: claim_marker 一次性閘門（P1-9：$inc 副作用重跑安全化）───────────────
+
+class TestClaimMarkerGate:
+    async def test_upgrade_carryover_only_grants_when_marker_won(self):
+        order = _order(
+            merchant_order_no="SLUPG1", type="upgrade_subscription", tier="pro",
+            prev_order_no="SLSUB0", extra_duration_minutes=42.5, extra_ai_summaries=3,
+        )
+        s, order_repo, user_repo = _make(order=order)
+        order_repo.claim_marker = AsyncMock(return_value=False)
+        r = await s.settle(PaymentNotification(
+            order_no="SLUPG1", success=True, is_first_payment=True, trade_id="T9",
+        ))
+        assert r.outcome == SettleOutcome.ACTIVATED
+        order_repo.claim_marker.assert_awaited_once_with("SLUPG1", "carryover_granted")
+        user_repo.add_extra_quota.assert_not_awaited()
+
+    async def test_extra_quota_only_grants_when_marker_won(self):
+        order = _order(
+            merchant_order_no="SLEXT1", type="extra_quota", tier=None, billing_cycle=None,
+            extra_duration_minutes=120, extra_ai_summaries=0,
+        )
+        s, order_repo, user_repo = _make(order=order)
+        order_repo.claim_marker = AsyncMock(return_value=False)
+        r = await s.settle(PaymentNotification(
+            order_no="SLEXT1", success=True, is_first_payment=True, trade_id="T1",
+        ))
+        assert r.outcome == SettleOutcome.GRANTED  # settle 本身仍照常回報成功（權益已由第一次呼叫施加過）
+        order_repo.claim_marker.assert_awaited_once_with("SLEXT1", "quota_granted")
+        user_repo.add_extra_quota.assert_not_awaited()
+
+    async def test_marker_won_still_grants(self):
+        order = _order(
+            merchant_order_no="SLEXT1", type="extra_quota", tier=None, billing_cycle=None,
+            extra_duration_minutes=120, extra_ai_summaries=0,
+        )
+        s, order_repo, user_repo = _make(order=order)
+        r = await s.settle(PaymentNotification(
+            order_no="SLEXT1", success=True, is_first_payment=True, trade_id="T1",
+        ))
+        assert r.outcome == SettleOutcome.GRANTED
+        user_repo.add_extra_quota.assert_awaited_once_with("u1", 120, 0)
+
+
+# ── resettle_entitlement：P1-9 對帳 sweep 第二段補償 ─────────────────────────────
+
+class TestResettleEntitlement:
+    async def test_subscription_success_clears_flag_and_triggers_invoice(self):
+        issuer = AsyncMock()
+        order = _order(card_token="CT1")
+        s, order_repo, user_repo = _make(order=order, invoice_issuer=issuer)
+        await s.resettle_entitlement(order)
+        user_repo.update_subscription.assert_awaited_once()  # 首購 handler 真的被喚
+        cleared = order_repo.update_by_order_no.await_args.args
+        assert cleared[0] == "SLSUB1"
+        assert cleared[1]["entitlement_pending"] is False
+        assert "entitlement_resettled_at" in cleared[1]
+        await asyncio.sleep(0)
+        issuer.assert_awaited_once()  # _trigger_invoice 走的是 create_background_task，需讓出一次 loop
+
+    async def test_resettle_skips_refunded_order(self):
+        """F1（跨 PR 複檢）：已被退款流程處置（refund_seen）的 entitlement_pending 單，
+        resettle 絕不能重跑 handler——否則把已撤銷的訂閱開回付費 tier、對已作廢的發票
+        重開一張真發票。改成清 entitlement_pending 旗標 + 標 needs_manual 讓 admin 收斂。"""
+        order = _order(status="paid", card_token="CT1", entitlement_pending=True, refund_seen=True)
+        s, order_repo, user_repo = _make(order=order)
+        await s.resettle_entitlement(order)
+        user_repo.update_subscription.assert_not_awaited()   # handler 未被喚（不重開訂閱）
+        cleared = order_repo.update_by_order_no.await_args.args
+        assert cleared[1]["entitlement_pending"] is False
+        assert cleared[1]["needs_manual"] is True
+
+    async def test_resettle_does_not_go_through_claim_paid(self):
+        """order 已經是 paid——resettle 直接呼叫 handler，不能再經過 claim_paid 那道
+        『status!=paid 才施加』的閘門，否則會被自己的 ALREADY_PAID 短路擋死。"""
+        order = _order(status="paid", card_token="CT1")
+        s, order_repo, user_repo = _make(order=order)
+        await s.resettle_entitlement(order)
+        order_repo.claim_paid.assert_not_awaited()
+        user_repo.update_subscription.assert_awaited_once()
+
+    async def test_extra_quota_second_call_does_not_double_grant(self):
+        order = _order(
+            merchant_order_no="SLEXT1", type="extra_quota", tier=None, billing_cycle=None,
+            status="paid", extra_duration_minutes=120, extra_ai_summaries=0,
+        )
+        s, order_repo, user_repo = _make(order=order)
+        order_repo.claim_marker = AsyncMock(side_effect=[True, False])
+        await s.resettle_entitlement(order)
+        await s.resettle_entitlement(order)
+        user_repo.add_extra_quota.assert_awaited_once_with("u1", 120, 0)
+
+    async def test_handler_failure_increments_retry_and_reraises(self):
+        order = _order(card_token="CT1")
+        s, order_repo, user_repo = _make(order=order)
+        s._settle_subscription = AsyncMock(side_effect=RuntimeError("boom"))
+        order_repo.increment_entitlement_retry = AsyncMock(return_value=2)
+        with pytest.raises(RuntimeError, match="boom"):
+            await s.resettle_entitlement(order)
+        order_repo.increment_entitlement_retry.assert_awaited_once_with("SLSUB1")
+        # 未達上限：不寫 needs_manual
+        assert not any(
+            c.args[1].get("needs_manual") is True
+            for c in order_repo.update_by_order_no.await_args_list
+        )
+
+    async def test_retry_exhausted_marks_needs_manual_and_alerts(self, monkeypatch):
+        # patch 我方的 _capture_* wrapper 而非真的 sentry_sdk 模組——CI 沒裝
+        # sentry_sdk，`import sentry_sdk` 會 ModuleNotFoundError（2026-08-09 CI 事故）。
+        order = _order(card_token="CT1")
+        s, order_repo, user_repo = _make(order=order)
+        alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_entitlement_manual_alert", alert)
+        s._settle_subscription = AsyncMock(side_effect=RuntimeError("boom"))
+        order_repo.increment_entitlement_retry = AsyncMock(return_value=5)
+        with pytest.raises(RuntimeError, match="boom"):
+            await s.resettle_entitlement(order)
+        assert any(
+            c.args[1].get("needs_manual") is True
+            for c in order_repo.update_by_order_no.await_args_list
+        )
+        alert.assert_called_once()
+        assert alert.call_args.args[0] == "SLSUB1"
+
+    async def test_retry_inc_failure_does_not_mask_original_exception(self):
+        order = _order(card_token="CT1")
+        s, order_repo, user_repo = _make(order=order)
+        s._settle_subscription = AsyncMock(side_effect=RuntimeError("original"))
+        order_repo.increment_entitlement_retry = AsyncMock(side_effect=ConnectionError("db down"))
+        with pytest.raises(RuntimeError, match="original"):
+            await s.resettle_entitlement(order)
+
+    async def test_unknown_type_is_a_noop(self):
+        order = _order(type="something_weird")
+        s, order_repo, user_repo = _make(order=order)
+        await s.resettle_entitlement(order)
+        order_repo.update_by_order_no.assert_not_awaited()
+
+    async def test_rejected_duplicate_outcome_clears_flag_but_does_not_trigger_invoice(self):
+        """handler 沒拋例外 ≠ 該開票——撞上重複完成防護（sibling 已先啟動）時，
+        settle_fn 正常回傳 REJECTED_DUPLICATE（標 needs_refund，不啟用），旗標仍要
+        清（handler 已跑完），但不能觸發開票（同 settle() 的白名單口徑）。"""
+        issuer = AsyncMock()
+        user = {"subscription": {"status": "active", "active_order_no": "OTHER", "cancel_at_period_end": False}}
+        order = _order(card_token="CT1")
+        s, order_repo, user_repo = _make(order=order, user=user, invoice_issuer=issuer)
+        await s.resettle_entitlement(order)
+        cleared = order_repo.update_by_order_no.await_args.args
+        assert cleared[1]["entitlement_pending"] is False
+        await asyncio.sleep(0)
+        issuer.assert_not_awaited()
+
+    async def test_clear_flag_failure_increments_retry_without_rerunning_handler(self):
+        """P1-B（第二意見審查）：handler 已經成功——清 entitlement_pending 這個
+        update_by_order_no 呼叫本身失敗（DB 抖動），不能被吞掉不記帳，否則這筆單
+        會在 entitlement_pending 仍是 True 的狀態下被下一輪 sweep 無限重跑（訂閱型
+        還會重複 reset_monthly_usage + 重算期別），且永遠不會因為『重試太多次』
+        轉人工。必須走 `_handle_resettle_failure` 的 $inc 記帳 + re-raise，且**不能
+        重新呼叫 handler**（handler 已經確定成功，沒理由重放它的副作用）。
+        """
+        order = _order(card_token="CT1")
+        s, order_repo, user_repo = _make(order=order)
+        # 只有「清旗標」那一次 update_by_order_no 呼叫失敗；handler 本身（
+        # _settle_subscription）不呼叫 order_repo.update_by_order_no，所以這裡讓它
+        # 對所有呼叫都失敗一樣能精準命中「清旗標」這一步。
+        order_repo.update_by_order_no = AsyncMock(side_effect=ConnectionError("db down"))
+        order_repo.increment_entitlement_retry = AsyncMock(return_value=1)
+        with pytest.raises(ConnectionError, match="db down"):
+            await s.resettle_entitlement(order)
+        order_repo.increment_entitlement_retry.assert_awaited_once_with("SLSUB1")
+        # handler 只跑一次（成功那一次），沒有因為清旗標失敗而被重新呼叫。
+        user_repo.update_subscription.assert_awaited_once()
+
+
+# ── P1-5：全額退款(7) 自動降級 / 部分退款(6) 轉人工 ───────────────────────────────
+# 第二意見審查追加：H1（重複完成單誤殺 / active_order_no 精確歸屬 / guard 收斂）、
+# H2（claim 後動作失敗要留耐久旗標）、M4（extra_quota gate + 結轉未回收）、
+# M5（部分/全額退款用獨立閘門，互不卡住）。
+
+def _patch_invoice_lookup(monkeypatch, invoice=None, void_result=None, void_side_effect=None):
+    """換掉 handle_full_refund 內 lazy import 的 InvoiceRepository/void_invoice_for。
+
+    兩者都在方法內用 `from ... import ...` 動態匯入，monkeypatch 對應模組上的名字即可
+    在呼叫當下生效（比照本檔案其餘 lazy-import 慣例）。
+    """
+    from src.database.repositories import invoice_repo as invoice_repo_mod
+    from src.services import invoice_service as invoice_service_mod
+
+    fake_repo = MagicMock()
+    fake_repo.get_active_by_order_no = AsyncMock(return_value=invoice)
+    monkeypatch.setattr(invoice_repo_mod, "InvoiceRepository", lambda db: fake_repo)
+
+    void_mock = AsyncMock(
+        side_effect=void_side_effect,
+        return_value=void_result if void_side_effect is None else None,
+    )
+    monkeypatch.setattr(invoice_service_mod, "void_invoice_for", void_mock)
+    return fake_repo, void_mock
+
+
+def _active_user(order_no: str = "SLSUB1", **extra):
+    """H1 第 2 層的測試 fixture：user.subscription.active_order_no 指向這張退款單，
+    是自動降級唯一安全的前提（見 _handle_full_refund_subscription）。"""
+    sub = {"active_order_no": order_no}
+    sub.update(extra)
+    return {"subscription": sub}
+
+
+class TestHandleFullRefund:
+    async def test_order_not_found(self, monkeypatch):
+        s, order_repo, user_repo = _make(order=None)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+        out = await s.handle_full_refund("NOPE")
+        assert out == "order_not_found"
+        order_repo.claim_refund_processed.assert_not_awaited()
+
+    async def test_already_processed_is_a_noop(self, monkeypatch):
+        order = _order(status="paid", paid_at=1000)
+        s, order_repo, user_repo = _make(order=order)
+        order_repo.claim_refund_processed = AsyncMock(return_value=False)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+        out = await s.handle_full_refund("SLSUB1", trade_id="T1")
+        assert out == "already_processed"
+        user_repo.update_subscription_fields.assert_not_awaited()
+        order_repo.update_by_order_no.assert_not_awaited()
+
+    async def test_non_paid_order_flags_needs_manual(self, monkeypatch):
+        order = _order(status="pending")
+        s, order_repo, user_repo = _make(order=order)
+        alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_on_unpaid_order_alert", alert)
+        _fake_repo, void_mock = _patch_invoice_lookup(monkeypatch, invoice=None)
+        out = await s.handle_full_refund("SLSUB1")
+        assert out == "needs_manual"
+        order_repo.update_by_order_no.assert_any_await("SLSUB1", {"needs_manual": True})
+        alert.assert_called_once_with("SLSUB1")
+        user_repo.update_subscription_fields.assert_not_awaited()
+        # L11：needs_manual 不搶著自動作廢——這裡甚至不該去查發票。
+        void_mock.assert_not_awaited()
+
+    # ── H1 場景：重複完成單的退款不能誤殺正常訂閱 ───────────────────────────
+
+    @pytest.mark.parametrize("flag", ["is_duplicate", "needs_refund"])
+    async def test_duplicate_order_refund_is_resolved_without_touching_subscription(self, monkeypatch, flag):
+        """審查場景：O1 啟用訂閱（active_order_no=O1），O2 撞重複完成標
+        is_duplicate/needs_refund（同樣 paid）。退 O2 時絕不能去動 O1 建立的訂閱——
+        即使 user 目前的 active_order_no 根本不是這張單，也要在碰時效/歸屬檢查之前
+        就短路掉。"""
+        order = _order(status="paid", type="subscription", paid_at=2000, **{flag: True})
+        # active_order_no 刻意指向「別張單」(O1)，證明這條路徑完全不看它就短路了。
+        s, order_repo, user_repo = _make(order=order, user=_active_user("O1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(
+            side_effect=AssertionError("不該呼叫——is_duplicate/needs_refund 應該更早短路")
+        )
+        resolved_alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_duplicate_refund_resolved_alert", resolved_alert)
+        _fake_repo, void_mock = _patch_invoice_lookup(monkeypatch, invoice=None)
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "duplicate_refund_resolved"
+        user_repo.update_subscription_fields.assert_not_awaited()
+        user_repo.update_quota.assert_not_awaited()
+        resolved_alert.assert_called_once_with("SLSUB1")
+        # L11：duplicate_refund_resolved 不在自動作廢白名單——這張單本來就沒有發票。
+        void_mock.assert_not_awaited()
+
+    async def test_stale_order_via_has_newer_check_needs_manual(self, monkeypatch):
+        """時效檢查（fail-safe 核心）：使用者已重新付款（例如續扣，續扣不更新
+        active_order_no）→ 不自動降級，轉人工。"""
+        order = _order(status="paid", paid_at=1000, type="subscription")
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=True)
+        stale_alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_stale_order_alert", stale_alert)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+
+        out = await s.handle_full_refund("SLSUB1", trade_id="T1")
+
+        assert out == "needs_manual"
+        user_repo.update_subscription_fields.assert_not_awaited()
+        order_repo.update_by_order_no.assert_any_await("SLSUB1", {"needs_manual": True})
+        stale_alert.assert_called_once_with("SLSUB1")
+
+    async def test_active_order_no_mismatch_needs_manual(self, monkeypatch):
+        """H1 第 2 層——精確歸屬：這張單不是 active_order_no，代表使用者目前的訂閱
+        是別張單（升降級換約/reactivate）在撐著，自動降級會誤殺，轉人工。"""
+        order = _order(status="paid", paid_at=1000, type="subscription")
+        s, order_repo, user_repo = _make(order=order, user=_active_user("OTHER_ORDER"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        not_active_alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_order_not_active_alert", not_active_alert)
+        _fake_repo, void_mock = _patch_invoice_lookup(monkeypatch, invoice=None)
+
+        out = await s.handle_full_refund("SLSUB1", trade_id="T1")
+
+        assert out == "needs_manual"
+        user_repo.update_subscription_fields.assert_not_awaited()
+        order_repo.update_by_order_no.assert_any_await("SLSUB1", {"needs_manual": True})
+        not_active_alert.assert_called_once_with("SLSUB1")
+        void_mock.assert_not_awaited()
+
+    async def test_active_order_no_match_and_no_newer_order_is_revoked(self, monkeypatch):
+        order = _order(status="paid", paid_at=1000, type="subscription")
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        revoked_alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_revoked_alert", revoked_alert)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+
+        out = await s.handle_full_refund("SLSUB1", trade_id="T1")
+
+        assert out == "revoked"
+        order_repo.has_newer_paid_subscription_order.assert_awaited_once_with("u1", 1000)
+        fields = user_repo.update_subscription_fields.await_args
+        assert fields.args[1]["status"] == "expired"
+        # H1 第 3 層：guard 收斂成 active_order_no 的原子條件（不再是 None）。
+        assert fields.kwargs["guard"] == {"subscription.active_order_no": "SLSUB1"}
+        user_repo.update_quota.assert_awaited_once()
+        revoked_alert.assert_called_once_with("SLSUB1")
+
+    async def test_expire_to_free_guard_lost_needs_manual(self, monkeypatch):
+        """H1 第 3 層：check-then-act 縫隙裡 active_order_no 被併發改掉——guard 沒中
+        不能靜默當作『降級成功』，轉人工。"""
+        order = _order(status="paid", paid_at=1000, type="subscription")
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        user_repo.update_subscription_fields = AsyncMock(return_value=False)  # guard 沒中
+        guard_lost_alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_guard_lost_alert", guard_lost_alert)
+        _fake_repo, void_mock = _patch_invoice_lookup(monkeypatch, invoice=None)
+
+        out = await s.handle_full_refund("SLSUB1", trade_id="T1")
+
+        assert out == "needs_manual"
+        user_repo.update_quota.assert_not_awaited()  # 降級沒真的發生，quota 不能動
+        order_repo.update_by_order_no.assert_any_await("SLSUB1", {"needs_manual": True})
+        guard_lost_alert.assert_called_once_with("SLSUB1")
+        void_mock.assert_not_awaited()
+
+    # ── M4 場景：升級結轉的 extra_quota 不自動回收 ───────────────────────────
+
+    async def test_carryover_granted_still_revokes_but_flags_needs_manual(self, monkeypatch):
+        order = _order(
+            status="paid", paid_at=1000, type="upgrade_subscription", carryover_granted=True,
+        )
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        carryover_alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_carryover_unreclaimed_alert", carryover_alert)
+        invoice = {"_id": "inv1", "status": "issued", "invoice_number": "AB123", "order_no": "SLSUB1"}
+        _fake_repo, void_mock = _patch_invoice_lookup(monkeypatch, invoice=invoice, void_result={"success": True})
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        # outcome 仍是 revoked（訂閱本身確實降級了）——carryover 只是額外標記，
+        # 不改變 outcome、也不阻擋發票作廢（兩者是獨立關注點）。
+        assert out == "revoked"
+        order_repo.update_by_order_no.assert_any_await("SLSUB1", {"needs_manual": True})
+        carryover_alert.assert_called_once_with("SLSUB1")
+        void_mock.assert_awaited_once()
+
+    # ── M4 場景：extra_quota 扣減前置 gate ───────────────────────────────────
+
+    async def test_extra_quota_not_granted_needs_manual_without_deducting(self, monkeypatch):
+        """quota_granted 非 True＝額度從未真正發放過（entitlement_pending 中途
+        crash）——沒有東西可扣，不能硬扣。"""
+        order = _order(status="paid", type="extra_quota", extra_duration_minutes=120, extra_ai_summaries=5)
+        s, order_repo, user_repo = _make(order=order)
+        alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_quota_not_granted_alert", alert)
+        _fake_repo, void_mock = _patch_invoice_lookup(monkeypatch, invoice=None)
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "needs_manual"
+        user_repo.adjust_extra_quota_atomic.assert_not_awaited()
+        order_repo.update_by_order_no.assert_any_await("SLSUB1", {"needs_manual": True})
+        alert.assert_called_once_with("SLSUB1", "not_granted")
+        void_mock.assert_not_awaited()
+
+    async def test_extra_quota_amount_missing_needs_manual_without_deducting(self, monkeypatch):
+        """quota_granted=True 但金額欄位都缺/為 0 是矛盾狀態——沒東西可扣，不能回報
+        『已扣回』。"""
+        order = _order(
+            status="paid", type="extra_quota", quota_granted=True,
+            extra_duration_minutes=0, extra_ai_summaries=0,
+        )
+        s, order_repo, user_repo = _make(order=order)
+        alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_quota_not_granted_alert", alert)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "needs_manual"
+        user_repo.adjust_extra_quota_atomic.assert_not_awaited()
+        alert.assert_called_once_with("SLSUB1", "amount_missing")
+
+    async def test_extra_quota_refund_deducts_when_sufficient(self, monkeypatch):
+        order = _order(
+            status="paid", type="extra_quota", quota_granted=True,
+            extra_duration_minutes=120, extra_ai_summaries=5,
+        )
+        s, order_repo, user_repo = _make(order=order)
+        user_repo.adjust_extra_quota_atomic = AsyncMock(return_value={"extra_quota": {}})
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "quota_deducted"
+        user_repo.adjust_extra_quota_atomic.assert_awaited_once_with(
+            "u1", duration_minutes=-120, ai_summaries=-5,
+        )
+        order_repo.update_by_order_no.assert_not_awaited()  # 沒標 needs_manual
+
+    async def test_extra_quota_refund_insufficient_balance_needs_manual(self, monkeypatch):
+        """不足以全扣時不部分扣——轉人工，不做『能扣多少扣多少』。"""
+        order = _order(
+            status="paid", type="extra_quota", quota_granted=True,
+            extra_duration_minutes=120, extra_ai_summaries=0,
+        )
+        s, order_repo, user_repo = _make(order=order)
+        user_repo.adjust_extra_quota_atomic = AsyncMock(return_value=None)
+        quota_alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_quota_insufficient_alert", quota_alert)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "needs_manual"
+        order_repo.update_by_order_no.assert_any_await("SLSUB1", {"needs_manual": True})
+        quota_alert.assert_called_once_with("SLSUB1")
+
+    # ── 發票作廢（L11：只在 revoked/quota_deducted 才嘗試）───────────────────
+
+    async def test_issued_invoice_gets_voided_on_revoked(self, monkeypatch):
+        order = _order(status="paid", type="subscription", paid_at=1000)
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        invoice = {"_id": "inv1", "status": "issued", "invoice_number": "AB12345678", "order_no": "SLSUB1"}
+        _fake_repo, void_mock = _patch_invoice_lookup(monkeypatch, invoice=invoice, void_result={"success": True})
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "revoked"
+        void_mock.assert_awaited_once()
+        assert void_mock.await_args.args[1] == invoice
+
+    async def test_issued_invoice_gets_voided_on_quota_deducted(self, monkeypatch):
+        order = _order(
+            status="paid", type="extra_quota", quota_granted=True,
+            extra_duration_minutes=60, extra_ai_summaries=0,
+        )
+        s, order_repo, user_repo = _make(order=order)
+        invoice = {"_id": "inv1", "status": "issued", "invoice_number": "AB999", "order_no": "SLSUB1"}
+        _fake_repo, void_mock = _patch_invoice_lookup(monkeypatch, invoice=invoice, void_result={"success": True})
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "quota_deducted"
+        void_mock.assert_awaited_once()
+
+    async def test_non_issued_invoice_is_not_voided(self, monkeypatch):
+        order = _order(status="paid", type="subscription", paid_at=1000)
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        invoice = {"_id": "inv1", "status": "pending", "invoice_number": None, "order_no": "SLSUB1"}
+        _fake_repo, void_mock = _patch_invoice_lookup(monkeypatch, invoice=invoice)
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "revoked"
+        void_mock.assert_not_awaited()
+
+    async def test_invoice_void_exception_does_not_fail_refund(self, monkeypatch):
+        """發票作廢是 best-effort：例外絕不可拖垮已經成功的退款/降級主流程。"""
+        order = _order(status="paid", type="subscription", paid_at=1000)
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        invoice = {"_id": "inv1", "status": "issued", "invoice_number": "AB12345678", "order_no": "SLSUB1"}
+        _patch_invoice_lookup(monkeypatch, invoice=invoice, void_side_effect=RuntimeError("smilepay down"))
+        fail_alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_invoice_void_failed_alert", fail_alert)
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "revoked"  # 主流程不受影響
+        fail_alert.assert_called_once_with("SLSUB1", "exception")
+
+    async def test_invoice_void_rejection_alerts_but_does_not_fail_refund(self, monkeypatch):
+        order = _order(status="paid", type="subscription", paid_at=1000)
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        invoice = {"_id": "inv1", "status": "issued", "invoice_number": "AB12345678", "order_no": "SLSUB1"}
+        _patch_invoice_lookup(
+            monkeypatch, invoice=invoice, void_result={"success": False, "status_code": "-2008"},
+        )
+        fail_alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_invoice_void_failed_alert", fail_alert)
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "revoked"
+        fail_alert.assert_called_once_with("SLSUB1", "-2008")
+
+    # ── H2：claim 消耗後動作失敗要留耐久旗標，不能靜默 ────────────────────────
+
+    async def test_action_failure_after_claim_marks_refund_action_failed_and_reraises(self, monkeypatch):
+        order = _order(status="paid", type="subscription", paid_at=1000)
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        s._dispatch_full_refund = AsyncMock(side_effect=RuntimeError("boom"))
+        action_failed_alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_action_failed_alert", action_failed_alert)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await s.handle_full_refund("SLSUB1")
+
+        order_repo.update_by_order_no.assert_awaited_once_with(
+            "SLSUB1", {"needs_manual": True, "refund_action_failed": True}
+        )
+        action_failed_alert.assert_called_once()
+        assert action_failed_alert.call_args.args[0] == "SLSUB1"
+
+    async def test_action_failure_flag_write_itself_failing_does_not_mask_original_exception(self, monkeypatch):
+        """`_mark_refund_action_failed` 本身絕不可拋例外——否則會蓋掉正在外拋的
+        原始例外。"""
+        order = _order(status="paid", type="subscription", paid_at=1000)
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        s._dispatch_full_refund = AsyncMock(side_effect=RuntimeError("original"))
+        order_repo.update_by_order_no = AsyncMock(side_effect=ConnectionError("db down"))
+
+        with pytest.raises(RuntimeError, match="original"):
+            await s.handle_full_refund("SLSUB1")
+
+    async def test_retry_after_action_failure_short_circuits_on_already_processed(self, monkeypatch):
+        """91APP 重送：claim 已經被第一次呼叫消耗掉，第二次呼叫應該快速回
+        already_processed，不會再跑一次（也不會再失敗一次）——旗標已經寫在單上了。"""
+        order = _order(status="paid", type="subscription", paid_at=1000)
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        s._dispatch_full_refund = AsyncMock(side_effect=RuntimeError("boom"))
+        with pytest.raises(RuntimeError):
+            await s.handle_full_refund("SLSUB1")
+
+        order_repo.claim_refund_processed = AsyncMock(return_value=False)  # 重送：閘門已被佔用
+        out = await s.handle_full_refund("SLSUB1")
+        assert out == "already_processed"
+        assert s._dispatch_full_refund.await_count == 1  # 沒有被重新呼叫
+
+
+class TestRefundRevokedEmailTrigger:
+    """`_handle_full_refund_subscription` 只在真正的 "revoked" 成功路徑（所有
+    fail-safe 檢查全過）才寄 refund_revoked——needs_manual 分支（guard-lost、
+    stale order、active_order_no mismatch）一律不寄。monkeypatch
+    `_trigger_lifecycle_email` 當 spy，不真的起背景任務。
+    """
+
+    async def test_revoked_triggers_refund_revoked(self, monkeypatch):
+        order = _order(status="paid", paid_at=1000, type="subscription")
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_lifecycle_email", spy)
+
+        out = await s.handle_full_refund("SLSUB1", trade_id="T1")
+
+        assert out == "revoked"
+        spy.assert_called_once_with("SLSUB1", "refund_revoked")
+
+    async def test_carryover_refund_still_triggers_refund_revoked(self, monkeypatch):
+        # carryover 分支（升級單退款）標 needs_manual（結轉 extra_quota 待人工核對）,但
+        # 訂閱確實已撤（outcome=revoked）——使用者仍該被告知訂閱取消。與 stale/mismatch/
+        # guard-lost「沒撤訂閱就 return」的 needs_manual 分支不同,那些才不寄。
+        order = _order(status="paid", paid_at=1000, type="subscription", carryover_granted=True)
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_lifecycle_email", spy)
+
+        out = await s.handle_full_refund("SLSUB1", trade_id="T1")
+
+        assert out == "revoked"
+        spy.assert_called_once_with("SLSUB1", "refund_revoked")  # 訂閱已撤 → 照寄
+        # 同時仍標 needs_manual（結轉額度待人工），兩件事獨立。
+        assert any(
+            c.args[1].get("needs_manual") is True
+            for c in order_repo.update_by_order_no.await_args_list
+        )
+
+    async def test_stale_order_needs_manual_does_not_trigger(self, monkeypatch):
+        order = _order(status="paid", paid_at=1000, type="subscription")
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=True)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_lifecycle_email", spy)
+
+        out = await s.handle_full_refund("SLSUB1", trade_id="T1")
+
+        assert out == "needs_manual"
+        spy.assert_not_called()
+
+    async def test_active_order_no_mismatch_needs_manual_does_not_trigger(self, monkeypatch):
+        order = _order(status="paid", paid_at=1000, type="subscription")
+        s, order_repo, user_repo = _make(order=order, user=_active_user("OTHER_ORDER"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_lifecycle_email", spy)
+
+        out = await s.handle_full_refund("SLSUB1", trade_id="T1")
+
+        assert out == "needs_manual"
+        spy.assert_not_called()
+
+    async def test_guard_lost_needs_manual_does_not_trigger(self, monkeypatch):
+        order = _order(status="paid", paid_at=1000, type="subscription")
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        user_repo.update_subscription_fields = AsyncMock(return_value=False)  # guard 沒中
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_lifecycle_email", spy)
+
+        out = await s.handle_full_refund("SLSUB1", trade_id="T1")
+
+        assert out == "needs_manual"
+        spy.assert_not_called()
+
+    async def test_non_paid_order_needs_manual_does_not_trigger(self, monkeypatch):
+        order = _order(status="pending")
+        s, order_repo, user_repo = _make(order=order)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_lifecycle_email", spy)
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "needs_manual"
+        spy.assert_not_called()
+
+    async def test_duplicate_refund_resolved_does_not_trigger(self, monkeypatch):
+        order = _order(status="paid", type="subscription", paid_at=2000, is_duplicate=True)
+        s, order_repo, user_repo = _make(order=order, user=_active_user("O1"))
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+        spy = MagicMock()
+        monkeypatch.setattr(s, "_trigger_lifecycle_email", spy)
+
+        out = await s.handle_full_refund("SLSUB1")
+
+        assert out == "duplicate_refund_resolved"
+        spy.assert_not_called()
+
+
+class TestSendLifecycleEmailTask:
+    """`_send_lifecycle_email_task` 本體（best-effort，plan 取 order 的 tier）。"""
+
+    def _patch_email_service(self, monkeypatch):
+        from src.utils import email_service as email_service_mod
+        svc = AsyncMock()
+        svc.send_subscription_email = AsyncMock(return_value=True)
+        monkeypatch.setattr(email_service_mod, "get_email_service", lambda: svc)
+        return svc
+
+    async def test_sends_refund_revoked_with_order_tier(self, monkeypatch):
+        order = _order(tier="pro")
+        user = {"email": "user@example.com", "subscription": {}}
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_lifecycle_email_task("SLSUB1", "refund_revoked")
+        kwargs = svc.send_subscription_email.await_args.kwargs
+        assert kwargs["kind"] == "refund_revoked"
+        assert kwargs["plan"] == "專業版"
+
+    async def test_no_email_does_not_call_svc(self, monkeypatch):
+        order = _order(tier="pro")
+        user = {"subscription": {}}  # 無 email
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_lifecycle_email_task("SLSUB1", "refund_revoked")
+        svc.send_subscription_email.assert_not_awaited()
+
+    async def test_email_bounced_does_not_call_svc(self, monkeypatch):
+        order = _order(tier="pro")
+        user = {"email": "user@example.com", "email_bounced": True, "subscription": {}}
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_lifecycle_email_task("SLSUB1", "refund_revoked")
+        svc.send_subscription_email.assert_not_awaited()
+
+    async def test_order_not_found_does_not_call_svc(self, monkeypatch):
+        s, order_repo, user_repo = _make(order=None)
+        svc = self._patch_email_service(monkeypatch)
+        await s._send_lifecycle_email_task("SLSUB1", "refund_revoked")
+        svc.send_subscription_email.assert_not_awaited()
+
+    async def test_svc_exception_does_not_propagate(self, monkeypatch):
+        order = _order(tier="pro")
+        user = {"email": "user@example.com", "subscription": {}}
+        s, order_repo, user_repo = _make(order=order, user=user)
+        svc = self._patch_email_service(monkeypatch)
+        svc.send_subscription_email = AsyncMock(side_effect=RuntimeError("smtp down"))
+        await s._send_lifecycle_email_task("SLSUB1", "refund_revoked")  # 不應拋出
+
+
+class TestFlagPartialRefund:
+    async def test_order_not_found(self):
+        s, order_repo, user_repo = _make(order=None)
+        out = await s.flag_partial_refund("NOPE", record_status=6)
+        assert out == "order_not_found"
+        order_repo.claim_marker.assert_not_awaited()
+
+    async def test_already_processed_when_marker_lost(self):
+        order = _order(status="paid")
+        s, order_repo, user_repo = _make(order=order)
+        order_repo.claim_marker = AsyncMock(return_value=False)
+        out = await s.flag_partial_refund("SLSUB1", record_status=6)
+        assert out == "already_processed"
+        order_repo.update_by_order_no.assert_not_awaited()
+
+    async def test_flags_needs_manual_using_independent_marker_gate(self):
+        """M5：閘門用 claim_marker("refund_partial_flagged")，完全不碰
+        claim_refund_processed（那把鎖保留給 handle_full_refund 獨佔）。"""
+        order = _order(status="paid", type="subscription")
+        s, order_repo, user_repo = _make(order=order)
+        alert = MagicMock()
+        s._capture_partial_refund_alert = alert
+
+        out = await s.flag_partial_refund("SLSUB1", record_status=6)
+
+        assert out == "needs_manual"
+        order_repo.claim_marker.assert_awaited_once_with("SLSUB1", "refund_partial_flagged")
+        order_repo.claim_refund_processed.assert_not_awaited()
+        order_repo.update_by_order_no.assert_awaited_once_with(
+            "SLSUB1", {"refund_seen": True, "needs_manual": True}
+        )
+        alert.assert_called_once_with("SLSUB1", 6)
+        user_repo.update_subscription_fields.assert_not_awaited()
+        user_repo.adjust_extra_quota_atomic.assert_not_awaited()
+
+    async def test_action_failure_after_marker_marks_refund_action_failed_and_reraises(self, monkeypatch):
+        """H2 同款：claim_marker 已消耗，後續寫入中途失敗要留耐久旗標 + re-raise。"""
+        order = _order(status="paid", type="subscription")
+        s, order_repo, user_repo = _make(order=order)
+        # 第一次呼叫（寫 refund_seen/needs_manual）失敗；第二次呼叫（
+        # _mark_refund_action_failed 補寫 refund_action_failed）成功。
+        order_repo.update_by_order_no = AsyncMock(side_effect=[RuntimeError("db down"), True])
+        action_failed_alert = MagicMock()
+        monkeypatch.setattr(s, "_capture_refund_action_failed_alert", action_failed_alert)
+
+        with pytest.raises(RuntimeError, match="db down"):
+            await s.flag_partial_refund("SLSUB1", record_status=6)
+
+        assert order_repo.update_by_order_no.await_count == 2
+        second_call = order_repo.update_by_order_no.await_args_list[1]
+        assert second_call.args == ("SLSUB1", {"needs_manual": True, "refund_action_failed": True})
+        action_failed_alert.assert_called_once()
+
+
+class TestPartialThenFullRefundIndependentGates:
+    """M5 回歸：部分退款(6)先到不能卡住之後抵達的全額退款(7)——兩者用完全獨立的
+    冪等閘門（claim_marker vs claim_refund_processed），互不消耗對方的鎖。"""
+
+    async def test_partial_first_does_not_block_full_afterwards(self, monkeypatch):
+        order = _order(status="paid", type="subscription", paid_at=1000)
+        s, order_repo, user_repo = _make(order=order, user=_active_user("SLSUB1"))
+        order_repo.has_newer_paid_subscription_order = AsyncMock(return_value=False)
+        _patch_invoice_lookup(monkeypatch, invoice=None)
+
+        partial_outcome = await s.flag_partial_refund("SLSUB1", record_status=6)
+        assert partial_outcome == "needs_manual"
+        order_repo.claim_marker.assert_awaited_once_with("SLSUB1", "refund_partial_flagged")
+
+        # 全額退款隨後抵達：claim_refund_processed 是獨立的鎖，預設仍是「一定搶得到」
+        # （_make() 的 fixture 沒有因為上面呼叫過 flag_partial_refund 而被影響）。
+        full_outcome = await s.handle_full_refund("SLSUB1", trade_id="T1")
+        assert full_outcome == "revoked"
+        order_repo.claim_refund_processed.assert_awaited_once_with("SLSUB1")

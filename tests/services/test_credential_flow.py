@@ -43,6 +43,7 @@ def _make(user=None):
     user_repo.create = AsyncMock(side_effect=lambda d: {**d, "_id": "uid"})
     user_repo.update = AsyncMock(return_value=True)
     user_repo.delete = AsyncMock(return_value=True)
+    user_repo.revoke_all_refresh_tokens = AsyncMock(return_value=True)  # P2-12
     return CredentialFlow(user_repo=user_repo), user_repo
 
 
@@ -260,6 +261,8 @@ class TestConsumeResetPassword:
         assert updates["password_reset_requested_at"] is None  # 清冷卻
         assert out.audit.action == "reset_password"
         assert out.email is None
+        # P2-12：自助重設密碼要撤銷全部 refresh token（舊 session 全失效）
+        user_repo.revoke_all_refresh_tokens.assert_awaited_once_with("u1")
 
     async def test_weak_password_rejected_before_write(self):
         user = {"_id": "u1", "email": "a@x.com", "password_reset_expires": get_utc_timestamp() + 999}
@@ -268,6 +271,7 @@ class TestConsumeResetPassword:
         with pytest.raises(WeakPassword):
             await flow.consume(CredentialPurpose.RESET_PASSWORD, "tok", new_password="alllowercase")
         user_repo.update.assert_not_awaited()  # 弱密碼不可寫進 DB
+        user_repo.revoke_all_refresh_tokens.assert_not_awaited()  # 沒寫成功不該撤 session
 
     async def test_unknown_token_raises_invalid(self):
         flow, _ = _make(user=None)
@@ -279,6 +283,16 @@ class TestConsumeResetPassword:
         flow, _ = _make(user=user)
         with pytest.raises(CredentialTokenExpired):
             await flow.consume(CredentialPurpose.RESET_PASSWORD, "old", new_password="NewPass123")
+
+    async def test_revoke_failure_does_not_block_password_reset_success(self):
+        """revoke_all_refresh_tokens 掛掉（DB 抖動）不該讓密碼重設本身回傳失敗——
+        密碼已經寫入成功，這步只是連動清理，包 try/except 吞掉例外。"""
+        user = {"_id": "u1", "email": "a@x.com", "password_reset_expires": get_utc_timestamp() + 999}
+        flow, user_repo = _make(user=user)
+        user_repo.revoke_all_refresh_tokens = AsyncMock(side_effect=RuntimeError("db down"))
+
+        out = await flow.consume(CredentialPurpose.RESET_PASSWORD, "tok", new_password="NewPass123")
+        assert out.audit.action == "reset_password"  # 主流程仍然成功
 
 
 class TestPreflight:

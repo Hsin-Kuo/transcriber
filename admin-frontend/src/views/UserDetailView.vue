@@ -29,11 +29,16 @@
           <h2>基本資訊</h2>
           <div class="info-row">
             <span class="label">用戶 ID：</span>
-            <code class="value">{{ user.id }}</code>
+            <code
+              class="value copyable"
+              :class="{ copied: idCopied }"
+              :title="idCopied ? '已複製' : '點擊複製'"
+              @click="copyUserId"
+            >{{ user.id }}<span class="copy-hint">{{ idCopied ? '✓ 已複製' : '複製' }}</span></code>
           </div>
           <div class="info-row">
             <span class="label">Email：</span>
-            <span class="value">{{ user.display_name || user.email || '—' }}</span>
+            <span class="value">{{ user.email || '—' }}</span>
           </div>
           <div class="info-row">
             <span class="label">角色：</span>
@@ -146,7 +151,11 @@
 
         <!-- 使用量統計 -->
         <div class="detail-card">
-          <h2>本月使用量</h2>
+          <h2>本期使用量</h2>
+          <p v-if="user.period_usage" class="card-hint">
+            {{ user.period_usage.period_type === 'billing_cycle' ? '訂閱計費週期' : '日曆月' }}：
+            {{ formatPeriodDate(user.period_usage.period_start) }} ~ {{ formatPeriodEndInclusive(user.period_usage.period_end) }}
+          </p>
           <div class="usage-item">
             <div class="usage-header">
               <span class="label">轉錄次數</span>
@@ -165,13 +174,17 @@
             <div class="usage-header">
               <span class="label">轉錄時長（分鐘）</span>
               <span class="usage-text">
-                {{ (user.usage?.duration_minutes || 0).toFixed(1) }} / {{ user.quota?.max_duration_minutes >= 999999 ? '不限' : user.quota?.max_duration_minutes || 0 }}
+                {{ (user.period_usage?.used_minutes ?? user.usage?.duration_minutes ?? 0).toFixed(1) }} / {{ isUnlimited(user.period_usage?.limit_minutes ?? user.quota?.max_duration_minutes) ? '不限' : (user.period_usage?.limit_minutes ?? user.quota?.max_duration_minutes ?? 0) }}
+                <span v-if="(user.period_usage?.extra_remaining_minutes || 0) > 0" class="extra-badge">
+                  +{{ (user.period_usage.extra_remaining_minutes).toFixed(1) }} 分鐘（加購）
+                </span>
               </span>
             </div>
             <div class="usage-bar">
               <div
                 class="usage-fill"
-                :style="{ width: user.quota?.max_duration_minutes >= 999999 ? '5%' : getUsagePercent(user.usage?.duration_minutes, user.quota?.max_duration_minutes) + '%' }"
+                :class="{ 'usage-fill-warn': getUsagePercent(user.period_usage?.used_minutes ?? user.usage?.duration_minutes, user.period_usage?.limit_minutes ?? user.quota?.max_duration_minutes) >= 80 }"
+                :style="{ width: isUnlimited(user.period_usage?.limit_minutes ?? user.quota?.max_duration_minutes) ? '5%' : getUsagePercent(user.period_usage?.used_minutes ?? user.usage?.duration_minutes, user.period_usage?.limit_minutes ?? user.quota?.max_duration_minutes) + '%' }"
               ></div>
             </div>
           </div>
@@ -206,7 +219,7 @@
           <p class="card-hint">永不重置，可跨月累計（用於補償或購買）</p>
           <div class="info-row">
             <span class="label">額外轉錄時長：</span>
-            <span class="value">{{ (user.extra_quota?.duration_minutes || 0).toFixed(1) }} 分鐘</span>
+            <span class="value">{{ (user.period_usage?.extra_remaining_minutes ?? user.extra_quota?.duration_minutes ?? 0).toFixed(1) }} 分鐘</span>
           </div>
           <div class="info-row">
             <span class="label">額外 AI 摘要：</span>
@@ -473,6 +486,33 @@ const showExtraQuotaModal = ref(false)
 const showAdminRoleModal = ref(false)
 const selectedPromoteRole = ref('read_only')
 const selectedAdminRole = ref('read_only')
+const idCopied = ref(false)
+let idCopiedTimer = null
+
+async function copyUserId() {
+  const id = user.value?.id
+  if (!id) return
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(id)
+    } else {
+      // 非 secure context 的 fallback（例如以 IP 直連後台）
+      const ta = document.createElement('textarea')
+      ta.value = id
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+    idCopied.value = true
+    clearTimeout(idCopiedTimer)
+    idCopiedTimer = setTimeout(() => { idCopied.value = false }, 1500)
+  } catch {
+    alert('複製失敗，請手動選取')
+  }
+}
 
 // 與後端 AdminRole enum 對齊；label 給後台顯示用
 const ADMIN_ROLE_OPTIONS = [
@@ -718,6 +758,26 @@ function formatTimestamp(timestamp) {
   return timestamp
 }
 
+function isUnlimited(limitMinutes) {
+  return (limitMinutes || 0) >= 999999
+}
+
+function formatPeriodDate(isoString) {
+  if (!isoString) return '-'
+  const d = new Date(isoString)
+  // period_start/period_end 是 UTC ISO 字串，一律用 UTC getters 讀，別讓
+  // formatPeriodEndInclusive（用 setUTCDate 操作）跟這裡混用不同時區基準
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`
+}
+
+// period_end 是「下期起點」（exclusive），顯示上換算成本期最後一天（inclusive）較不易誤解
+function formatPeriodEndInclusive(isoString) {
+  if (!isoString) return '-'
+  const d = new Date(isoString)
+  d.setUTCDate(d.getUTCDate() - 1)
+  return formatPeriodDate(d.toISOString())
+}
+
 onMounted(() => {
   fetchUser()
 })
@@ -822,6 +882,7 @@ onMounted(() => {
   gap: 10px;
   padding: 10px 0;
   border-bottom: 1px solid rgba(163, 177, 198, 0.2);
+  min-width: 0;
 }
 
 .info-row:last-child { border-bottom: none; }
@@ -830,11 +891,14 @@ onMounted(() => {
   color: var(--color-text-light, #a0917c);
   font-weight: 500;
   min-width: 120px;
+  flex-shrink: 0;
 }
 
 .value {
   color: var(--color-text, rgb(145, 106, 45));
   font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 code {
@@ -843,6 +907,34 @@ code {
   border-radius: 6px;
   font-size: 12px;
   border: 1px solid rgba(163, 177, 198, 0.15);
+  word-break: break-all;
+}
+
+code.copyable {
+  cursor: pointer;
+  user-select: all;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: border-color 0.15s;
+}
+
+code.copyable:hover {
+  border-color: var(--color-primary, #dd8448);
+}
+
+.copy-hint {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--color-primary, #dd8448);
+  opacity: 0;
+  transition: opacity 0.15s;
+  user-select: none;
+}
+
+code.copyable:hover .copy-hint,
+code.copyable.copied .copy-hint {
+  opacity: 1;
 }
 
 .role-badge, .status-badge, .tier-badge {
@@ -926,6 +1018,21 @@ code {
   background: var(--color-primary, #dd8448);
   border-radius: 5px;
   transition: width 0.3s;
+}
+
+.usage-fill-warn {
+  background: #e65100;
+}
+
+.extra-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #e8f5e9;
+  color: #2e7d32;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .reset-btn {
