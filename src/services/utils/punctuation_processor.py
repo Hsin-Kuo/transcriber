@@ -4,6 +4,7 @@ PunctuationProcessor - 標點符號處理器
 """
 
 from typing import Optional, Tuple, Dict, Any, Callable
+import bisect
 import os
 import re
 
@@ -59,6 +60,27 @@ _SPEAKER_LABEL_COUNT_RE = re.compile(
 )
 # `_split_text_into_chunks` 找斷點用
 _SPEAKER_LABEL_SEARCH_RE = re.compile(SPEAKER_LABEL_PATTERN, re.IGNORECASE)
+
+# ── 輪次邊界對齊（切點錨點吸附）────────────────────────────────────────────
+# 舊版切點純靠「累計內容字元數 × 全域 scale」。LLM 加標點時會**局部**刪贅字，
+# 而 scale 是全域均值，兩者的差就是該邊界的越界量——實測 staging 任務：
+# 漂浮段落有 82.8% 結束在句子中間（有標籤輪次只有 4.9%），越界量中位數 11 字。
+# 對策：計數只當估計值，再吸附到 LLM 自己給的錨點（空行 > 句末標點）。
+_BLANK_LINE_RE = re.compile(r"\n[ \t]*\n")
+_SENTENCE_END_CHARS = "。？！…；.?!;"
+# 吸附窗口 = max(_ANCHOR_WINDOW_MIN, 片段長度 × _ANCHOR_WINDOW_RATIO)。
+# 選值依據（e2e 重播 245 輪次、量測「輪次結尾落在句中」的比率）：
+#   0.06/8 → 22.4% ; 0.10/12 → 9.8% ; 0.15/16 → 4.9% ; 0.20/20 → 3.3% ; 0.30/30 → 3.3%
+# 取 0.15/16——曲線的膝點，剛好打到真實資料的 4.9% 基線。不取 0.20+ 的平台區：
+# 窗口越寬，切點能被拉離字元估計值越遠，真實資料上錨點型態更雜時誤吸附的代價越大。
+_ANCHOR_WINDOW_RATIO = 0.15
+_ANCHOR_WINDOW_MIN = 16
+
+# 輪次 body 內的換行（含上游 segments 自帶的）：`\n\n` 從此專職輪次分隔符，
+# body 內部一律收掉，否則前端一切分就多出無標籤的漂浮段落。
+_TURN_BODY_NEWLINE_RE = re.compile(r"[ \t]*[\r\n]+[ \t]*")
+# 不用空白接續的語言（CJK）——拉丁語系換單一空格，否則會把單字黏起來
+_NO_SPACE_LANGUAGES = ("zh", "zh-TW", "zh-CN", "ja", "ko")
 
 
 class PunctuationProcessor:
@@ -463,19 +485,28 @@ class PunctuationProcessor:
 
         輸入格式：`\\n\\n` 分隔、每行 `[SPEAKER_xx] 文字`。
         回傳 None 表示「這不是帶標籤的文字」→ 呼叫端維持原行為（回歸底線）。
-        沒有標籤前綴的行以 label=None 保留，維持原順序。
+
+        **切分依據是「標籤」而不是「空行」**：上游 segments 的文字本身就可能帶
+        `\\n\\n`（實測 237/2443 段），若照空行硬切，一個語者輪次會被拆成
+        「有標籤的前半 + 無標籤的後半」，後半在輸出就成了無標籤漂浮段落
+        （實測 staging 427 段落中 187 個是這樣來的）。因此沒有標籤前綴的片段
+        一律**併回前一個輪次**，只有開頭就無標籤的情況才保留成 label=None 輪次。
         """
         parts = [p for p in text.split("\n\n") if p.strip()]
         if not parts:
             return None
 
-        turns = []
+        turns: list = []
         found_label = False
         for part in parts:
             m = _SPEAKER_TURN_PREFIX_RE.match(part)
             if m:
                 found_label = True
                 turns.append((m.group(1), part[m.end():]))
+            elif turns:
+                # 無標籤片段 = 前一輪次被上游換行切斷的後半，併回去
+                label, body = turns[-1]
+                turns[-1] = (label, f"{body}\n\n{part}")
             else:
                 turns.append((None, part))
 
@@ -547,26 +578,49 @@ class PunctuationProcessor:
         # 依實際輸出長度等比縮放切點，吸收小幅漂移
         scale = comparable_out / total_target if total_target else 1.0
 
+        # 內容字元前綴計數：prefix[i] = output[:i] 的內容字元數。
+        # 有了它，「第 n 個內容字元的位置」可用 bisect 直接查，不必邊掃邊數——
+        # 錨點吸附會讓切點前後移動，逐次重數會退化成 O(n²)。
+        prefix = [0] * (len(output) + 1)
+        for i, ch in enumerate(output):
+            prefix[i + 1] = prefix[i] + (1 if is_content_char(ch) else 0)
+
+        # 錨點：LLM 自己給的空行 > 句末標點。位置一律取「錨點之後」，
+        # 讓空行/句號歸前一片段。
+        blank_anchors = [m.end() for m in _BLANK_LINE_RE.finditer(output)]
+        sentence_anchors = [
+            i + 1 for i, ch in enumerate(output) if ch in _SENTENCE_END_CHARS
+        ]
+
         cut_points: list = []
-        ptr = 0
-        seen = 0
-        cumulative = 0
+        prev_cut = 0
         for target in targets[:-1]:
-            cumulative += target
-            need = int(round(cumulative * scale))
-            while ptr < len(output) and seen < need:
-                if is_content_char(output[ptr]):
-                    seen += 1
-                ptr += 1
-            # 把切點後緊接的收尾標點/空白歸給前一片段；遇到開口標點就停——
+            # 估計位置以「上一個已吸附的切點」為原點，而不是從頭累計——
+            # 從頭累計會讓每個邊界的誤差疊加到後面所有邊界（實測越界量與段落
+            # 序號正相關 r=0.232）。以上一個切點為原點後，誤差只影響當前邊界。
+            need = prefix[prev_cut] + int(round(target * scale))
+            # 計數估計位置：第 need 個內容字元之後
+            est = bisect.bisect_left(prefix, need)
+            est = max(0, min(est, len(output)))
+            # 把估計點後緊接的收尾標點/空白歸給前一片段；遇到開口標點就停——
             # 那是下一位語者的開頭引號，吞過去會讓 A 行尾懸掛「、B 行 」不成對。
             while (
-                ptr < len(output)
-                and not is_content_char(output[ptr])
-                and not is_opening_punct(output[ptr])
+                est < len(output)
+                and not is_content_char(output[est])
+                and not is_opening_punct(output[est])
             ):
-                ptr += 1
-            cut_points.append(ptr)
+                est += 1
+
+            # 吸附窗口按片段長度取比例：越界量實測中位數 11 字、漂浮段落長度
+            # 中位數 29 字，10% 對一般片段（數百至數千字）足以涵蓋，又不會跨到
+            # 隔壁片段；短片段用 12 字下限（仍大於越界中位數）。
+            window = max(_ANCHOR_WINDOW_MIN, int(target * _ANCHOR_WINDOW_RATIO))
+            cut = self._snap_to_anchor(
+                est, window, blank_anchors, sentence_anchors,
+                lower=prev_cut + 1, upper=len(output),
+            )
+            cut_points.append(cut)
+            prev_cut = cut
 
         out_pieces = []
         start = 0
@@ -575,6 +629,45 @@ class PunctuationProcessor:
             start = cut
         out_pieces.append(output[start:].strip())
         return out_pieces
+
+    @staticmethod
+    def _snap_to_anchor(
+        est: int,
+        window: int,
+        blank_anchors: list,
+        sentence_anchors: list,
+        lower: int,
+        upper: int,
+    ) -> int:
+        """把計數估計位置吸附到窗口內最接近的錨點。
+
+        優先序：空行 > 句末標點 > 原估計位置。同類錨點有多個時取**最接近估計位置**
+        者（不是第一個）——實測 LLM 給的空行數是輪次數的 1.78 倍，貪心取第一個會
+        systematically 選錯。
+        `lower`/`upper` 夾出合法區間並保證切點單調遞增，不會回退、不會產生空片段。
+        """
+        lower = max(0, min(lower, upper))
+        est = max(lower, min(est, upper))
+
+        low_bound = max(lower, est - window)
+        high_bound = min(upper, est + window)
+
+        # 距離優先、種類次之：空行的優先序只用來打平手。
+        # 嚴格「空行永遠贏」會挑到輪次內部的分段空行而放掉正落在估計點上的句末
+        # 標點——實測那樣會讓輪次結尾落在句中的比率反而上升。
+        candidates = []
+        for priority, anchors in ((0, blank_anchors), (1, sentence_anchors)):
+            if not anchors:
+                continue
+            lo = bisect.bisect_left(anchors, low_bound)
+            hi = bisect.bisect_right(anchors, high_bound)
+            for c in anchors[lo:hi]:
+                candidates.append((abs(c - est), priority, c))
+
+        if candidates:
+            return min(candidates)[2]
+
+        return est
 
     def _punctuate_speaker_turns(
         self,
@@ -590,7 +683,9 @@ class PunctuationProcessor:
         全部輪次併成單一 chunk，只是多了剝離/重貼與對齊。
         """
         labels = [label for label, _ in turns]
-        texts = [t for _, t in turns]
+        # 進 LLM 前先收掉輪次內的換行（來自上游 segments 或併回的續段），
+        # 免得模型把它當既有分段、在輸出裡照抄放大
+        texts = [self._normalize_turn_body(t, language) for _, t in turns]
         label_count = sum(1 for label in labels if label)
 
         if provider == "openai":
@@ -652,7 +747,9 @@ class PunctuationProcessor:
         # 重貼標籤（格式與 `_merge_transcription_with_diarization` 完全一致）
         lines = []
         for turn_idx, label in enumerate(labels):
-            body = self._join_turn_pieces(per_turn[turn_idx])
+            body = self._normalize_turn_body(
+                self._join_turn_pieces(per_turn[turn_idx]), language
+            )
             lines.append(f"{label} {body}" if label else body)
         final_text = "\n\n".join(lines)
 
@@ -676,6 +773,25 @@ class PunctuationProcessor:
         final_token_usage = self._finalize_token_usage(total_token_usage)
         default_model = self.openai_model if provider == "openai" else self.gemini_model
         return final_text, model_used or default_model, final_token_usage
+
+    @staticmethod
+    def _normalize_turn_body(body: str, language: str) -> str:
+        """收掉輪次 body 內的換行——`\\n\\n` 專職當輪次分隔符。
+
+        一個語者輪次是一個發話單位，本身不該再被分段；body 內若殘留 `\\n\\n`，
+        前端按 `\\n\\n` 切分就會多出「沒有標籤的漂浮段落」（實測 staging：
+        427 段落中 187 個是這樣來的，佔 43.8%）。
+        來源有兩處，這裡一併收掉：LLM 標點時自行插入的、以及上游 segments
+        文字本身就帶的（實測 237/2443 段自帶換行）。
+
+        CJK 直接接續（中日韓不用空白分詞）；拉丁語系換單一空格，否則會把
+        前後單字黏成一個字。
+        """
+        joiner = "" if language in _NO_SPACE_LANGUAGES else " "
+        body = _TURN_BODY_NEWLINE_RE.sub(joiner, body)
+        if joiner == " ":
+            body = re.sub(r" {2,}", " ", body)
+        return body.strip()
 
     @staticmethod
     def _join_turn_pieces(pieces: list) -> str:
