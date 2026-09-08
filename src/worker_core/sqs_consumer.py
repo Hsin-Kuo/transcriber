@@ -45,6 +45,7 @@ from src.worker_core.heartbeat import (
 )
 from src.worker_core.model_cache import get_whisper_processor, get_diarization_pipeline
 from src.worker_core.spot_monitor import run_spot_monitor, shutdown_instance
+from src.worker_core.visibility_extender import start_visibility_extender
 from src.worker_core.transcription_job import process_task
 from src.services.progress_store import MongoProgressStore
 from src.utils.logger import get_logger
@@ -169,6 +170,10 @@ def main() -> None:
     )
     monitor_thread.start()
     log.info("spot.monitor.started", interval_seconds=SPOT_CHECK_INTERVAL_SECONDS)
+
+    # SQS visibility 續命：超過 SQS_VISIBILITY_TIMEOUT_SECONDS 的任務不被重投
+    # （長音檔走 sequential 後 ~40 分鐘的檔就會超過 600s）
+    start_visibility_extender(sqs)
 
     get_whisper_processor()
     get_diarization_pipeline()
