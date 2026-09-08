@@ -238,3 +238,181 @@ def test_truncated_chunk_falls_back_to_original_text(monkeypatch):
 def test_single_piece_chunk_returns_output_as_is():
     proc = _proc()
     assert proc._align_output_to_pieces("  加了標點。 ", ["加了標點"]) == ["加了標點。"]
+
+
+# ── code review 回歸測試 ─────────────────────────────────────────────────
+
+def test_single_piece_chunk_still_checks_truncation():
+    """review #1：單 piece 早退不得繞過容差守門。
+
+    超長輪次被切成的每個片段都是單 piece chunk（長獨白場景），
+    早退會讓 LLM 截斷輸出被靜默接受。
+    """
+    proc = _proc()
+    pieces = ["內容" * 100]
+    truncated = "內容" * 20  # 只剩 20%
+
+    assert proc._align_output_to_pieces(truncated, pieces) is None
+
+
+def test_oversized_turn_truncation_falls_back_without_content_loss(monkeypatch):
+    """review #1 端到端：長獨白 + LLM 截斷 → 回退原文，內容一字不少。"""
+    proc = _proc()
+
+    def truncate(chunk_text):
+        return chunk_text[: int(len(chunk_text) * 0.3)]
+
+    monkeypatch.setattr(proc, "_punctuate_chunk", _fake_chunk(truncate))
+
+    body = "這是一段沒有標點的長獨白內容" * 30
+    out, _, _ = proc.process(
+        f"[SPEAKER_00] {body}", provider="gemini", language="zh", chunk_size=200
+    )
+
+    assert out.count("[SPEAKER_00]") == 1
+    assert proc._comparable_len(out) >= proc._comparable_len(body)
+
+
+def test_align_tolerance_does_not_let_small_pieces_vanish():
+    """絕對下限 50 必須再以總量 25% 封頂，否則短片段可被整段吃掉仍靜默通過。"""
+    proc = _proc()
+
+    assert proc._align_tolerance(20) < 14, "20 字的片段不該容忍掉 14 字"
+    assert proc._align_tolerance(770) >= 77, "大片段維持 10% 比例容差"
+    # 端到端：短片段被砍七成必須被攔下
+    assert proc._align_output_to_pieces("內容" * 3, ["內容" * 10]) is None
+
+
+def test_oversized_english_turn_rejoins_without_gluing_words(monkeypatch):
+    """review #2：切點在空格處，rejoin 不得把單字黏成 'thelazy'。"""
+    proc = _proc()
+    monkeypatch.setattr(proc, "_punctuate_chunk", _fake_chunk())
+
+    body = "The quick brown fox jumps over the lazy dog and keeps running. " * 8
+    body = body.strip()
+    out, _, _ = proc.process(
+        f"[SPEAKER_00] {body}", provider="en", language="en", chunk_size=100
+    )
+
+    rebuilt = out.replace("[SPEAKER_00] ", "")
+    assert rebuilt.split() == body.split(), "切點不得吃掉分隔空白"
+    assert "thelazy" not in rebuilt and "dogand" not in rebuilt
+
+
+def test_comparable_len_ignores_curly_quotes_and_dashes():
+    """review #3：手列字元集漏掉的標點必須一律視為非內容字元。"""
+    proc = _proc()
+    strays = "‘’“”–—·・．…"
+
+    assert proc._comparable_len(strays) == 0
+    assert proc._comparable_len(f"甲{strays}乙") == 2
+
+
+def test_stray_punctuation_does_not_drift_speaker_boundary():
+    """review #3：LLM 插入的 curly quotes 不得把下一語者的字併進上一段。"""
+    proc = _proc()
+    pieces = ["甲" * 20, "乙" * 20]
+    # 在第二位語者的段落裡塞入大量非內容標點
+    output = "甲" * 20 + "。" + "“乙”" * 20
+
+    aligned = proc._align_output_to_pieces(output, pieces)
+
+    assert aligned is not None
+    assert "乙" not in aligned[0], "上一段不得混入下一語者的內容字"
+    assert aligned[1].count("乙") == 20
+
+
+def test_opening_punctuation_is_not_swallowed_by_previous_piece():
+    """review #6：切點後的開口標點屬於下一段，吞過去會讓引號不成對。"""
+    proc = _proc()
+    pieces = ["甲" * 5, "乙" * 5]
+    output = "甲甲甲甲甲。「乙乙乙乙乙」"
+
+    aligned = proc._align_output_to_pieces(output, pieces)
+
+    assert aligned[0] == "甲甲甲甲甲。"
+    assert aligned[1].startswith("「")
+    assert aligned[0].count("「") == 0
+
+
+def test_openai_provider_also_protects_labels(monkeypatch):
+    """review #4：openai 也在 routers 白名單內，必須同樣受保護。"""
+    proc = _proc()
+    seen = []
+
+    def fake_openai(text, language):
+        seen.append(text)
+        return text + "。", "gpt-4o-mini", {"total": 3, "prompt": 2, "completion": 1}
+
+    monkeypatch.setattr(proc, "_punctuate_with_openai", fake_openai)
+
+    text = "[SPEAKER_00] 甲說的話\n\n[SPEAKER_01] 乙說的話"
+    out, model, _ = proc.process(text, provider="openai", language="zh")
+
+    assert seen, "應該有呼叫 openai"
+    for sent in seen:
+        assert "[SPEAKER" not in sent.upper(), "標籤不得送進 openai"
+    assert out.count("[SPEAKER_00]") == 1
+    assert out.count("[SPEAKER_01]") == 1
+    assert model == "gpt-4o-mini"
+
+
+def test_openai_unlabelled_input_unchanged(monkeypatch):
+    """review #4 回歸底線：openai + 無標籤 → 維持原本一次送完的行為。"""
+    proc = _proc()
+    calls = []
+
+    def fake_openai(text, language):
+        calls.append(text)
+        return "標點後", "gpt-4o-mini", None
+
+    monkeypatch.setattr(proc, "_punctuate_with_openai", fake_openai)
+
+    out, model, usage = proc.process("沒有標籤的文字", provider="openai", language="zh")
+
+    assert calls == ["沒有標籤的文字"]
+    assert (out, model, usage) == ("標點後", "gpt-4o-mini", None)
+
+
+def test_single_chunk_uses_unchunked_prompt(monkeypatch):
+    """review #5：只有一個 chunk 時不該用「這是第 1 部分」的分段提示語。"""
+    proc = _proc()
+    seen_idx = []
+
+    def spy(chunk_text, language, chunk_idx=None, total_chunks=None):
+        seen_idx.append(chunk_idx)
+        return chunk_text, MODEL, None
+
+    monkeypatch.setattr(proc, "_punctuate_chunk", spy)
+
+    proc.process(
+        "[SPEAKER_00] 甲\n\n[SPEAKER_01] 乙", provider="gemini", language="zh"
+    )
+
+    assert seen_idx == [None], f"單 chunk 應傳 chunk_idx=None，實際 {seen_idx}"
+
+
+def test_multi_chunk_still_uses_chunked_prompt(monkeypatch):
+    proc = _proc()
+    seen_idx = []
+
+    def spy(chunk_text, language, chunk_idx=None, total_chunks=None):
+        seen_idx.append(chunk_idx)
+        return chunk_text, MODEL, None
+
+    monkeypatch.setattr(proc, "_punctuate_chunk", spy)
+
+    turns = "\n\n".join(f"[SPEAKER_{i % 2:02d}] " + "內容" * 30 for i in range(6))
+    proc.process(turns, provider="gemini", language="zh", chunk_size=100)
+
+    assert len(seen_idx) > 1
+    assert seen_idx == list(range(1, len(seen_idx) + 1))
+
+
+def test_speaker_label_patterns_are_consistent():
+    """review #7：prefix / count 兩個 regex 必須同源，否則 labels_lost 檢查失效。"""
+    from src.services.utils import punctuation_processor as pp
+
+    for label in ("[SPEAKER_00]", "[SPEAKER_7]", "[Speaker A]", "[speaker_12]"):
+        assert pp._SPEAKER_TURN_PREFIX_RE.match(f"{label} 內容"), label
+        assert pp._SPEAKER_LABEL_COUNT_RE.match(f"{label} 內容"), label

@@ -8,8 +8,35 @@ import re
 import unicodedata
 from typing import List, Dict
 
+# ── 說話者標籤：全專案唯一來源 ────────────────────────────────────────────
+# 過去這個 pattern 被手抄成四份變體（text_utils 一份、punctuation_processor 三份），
+# 且已經分歧——本檔舊版只認 `[SPEAKER_00]`，認不得 `[Speaker A]`，導致剝標籤漏網。
+# 一律從這裡取，各處自行套需要的 flags 編譯。
+SPEAKER_LABEL_PATTERN = r'\[SPEAKER[_\s]?\d*\]|\[Speaker\s*\w*\]'
+
 # diarization 開啟時 full_text 內嵌的說話者標籤；對齊前需剝除（segments 文字裡沒有）
-_SPEAKER_LABEL_RE = re.compile(r'\[SPEAKER_\d+\]')
+_SPEAKER_LABEL_RE = re.compile(SPEAKER_LABEL_PATTERN, re.IGNORECASE)
+
+
+def is_content_char(ch: str) -> bool:
+    """內容字元判定：字母/數字/組合記號為內容，其餘（標點、空白、符號）不是。
+
+    對齊演算法的共用基準——標點處理只該增刪標點與空白，內容字元序列應保持不變。
+    用 unicodedata category 而非手列字元集：手列必然漏掉 Gemini 常吐的
+    curly quotes（U+2018-201D）、en dash（U+2013）、間隔號（·／・）、全形句點等，
+    漏列的字元會被誤當成內容字，使語者切點線性漂移且不會觸發容差告警。
+    """
+    return unicodedata.category(ch)[0] in ('L', 'N', 'M')
+
+
+def is_opening_punct(ch: str) -> bool:
+    """開口標點（`「`、`（`、`“` 等）判定。
+
+    切點後吞併尾隨標點時必須排除開口標點，否則下一語者開頭的引號會被歸給上一段，
+    造成 A 行尾懸掛「、B 行 」不成對。
+    注意：ASCII 直引號 `"` `'` 的 category 是 Po，開閉不可分辨，無法在此處理。
+    """
+    return unicodedata.category(ch) in ('Ps', 'Pi')
 
 # 半形轉全形標點符號對照表
 HALFWIDTH_TO_FULLWIDTH_PUNCTUATION = {
@@ -116,8 +143,7 @@ def align_segments_to_punctuated_text(segments: List[Dict], punctuated_text: str
         return segments
 
     try:
-        def is_content(ch: str) -> bool:
-            return unicodedata.category(ch)[0] in ('L', 'N', 'M')
+        is_content = is_content_char  # 與 punctuation_processor 對齊共用同一定義
 
         clean = _SPEAKER_LABEL_RE.sub("", punctuated_text)
 

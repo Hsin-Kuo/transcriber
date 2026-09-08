@@ -8,6 +8,11 @@ import os
 import re
 
 from src.utils.logger import get_logger
+from src.utils.text_utils import (
+    SPEAKER_LABEL_PATTERN,
+    is_content_char,
+    is_opening_punct,
+)
 
 log = get_logger(__name__)
 
@@ -41,19 +46,19 @@ _FENCE_OPEN_RE = re.compile(r"^```[A-Za-z0-9_\-]*$")
 # 使用者回報「一半之後才有語者」的成因。
 # 對策：標籤根本不進 LLM。剝標籤 → 只把純文字送去標點 → 依字元對齊切回逐輪次
 # → 重貼標籤。labels_out == labels_in 由構造保證，與模型行為無關。
+# 標籤 pattern 單一來源在 text_utils；此處只套需要的 flags 編譯，避免手抄變體分歧。
 _SPEAKER_TURN_PREFIX_RE = re.compile(
-    r"^(\[SPEAKER[_\s]?\d*\]|\[Speaker\s*\w*\])[ \t]?",
+    rf"^({SPEAKER_LABEL_PATTERN})[ \t]?",
     re.IGNORECASE,
 )
-# 重貼後的結構性驗證用（只數行首標籤）
+# 重貼後的結構性驗證用（只數行首標籤）——必須與上面的 prefix regex 同源，
+# 否則 labels_lost 檢查會因為兩套 pattern 不一致而失去意義。
 _SPEAKER_LABEL_COUNT_RE = re.compile(
-    r"^(?:\[SPEAKER[_\s]?\d*\]|\[Speaker\s*\w*\])",
+    rf"^(?:{SPEAKER_LABEL_PATTERN})",
     re.IGNORECASE | re.MULTILINE,
 )
-# 對齊用：LLM 只該增刪標點/空白，不該改字。比對時忽略這些字元。
-_ALIGN_SKIP_RE = re.compile(
-    r"[\s。，、；：？！…—～「」『』（）《》〈〉【】,.;:?!\"'`()\[\]\-~]"
-)
+# `_split_text_into_chunks` 找斷點用
+_SPEAKER_LABEL_SEARCH_RE = re.compile(SPEAKER_LABEL_PATTERN, re.IGNORECASE)
 
 
 class PunctuationProcessor:
@@ -110,15 +115,32 @@ class PunctuationProcessor:
         """
         provider = provider or self.default_provider
 
+        # 語者標籤保全在 provider 分派「之上」——兩個 provider 共用，
+        # 否則 punct_provider='openai'（routers 白名單允許）仍會把標籤送進 LLM。
+        turns = self._parse_speaker_turns(text)
+        if turns is not None:
+            return self._punctuate_speaker_turns(
+                turns, provider, language, chunk_size, progress_callback
+            )
+
+        return self._punctuate_plain(
+            text, provider, language, chunk_size, progress_callback
+        )
+
+    def _punctuate_plain(
+        self,
+        text: str,
+        provider: str,
+        language: str,
+        chunk_size: Optional[int],
+        progress_callback: Optional[Callable[[int, int], None]],
+    ) -> Tuple[str, str, Optional[Dict[str, int]]]:
+        """無標籤文字的原有分派路徑（行為未變）。"""
         if provider == "openai":
             return self._punctuate_with_openai(text, language)
-        else:
-            return self._punctuate_with_gemini(
-                text,
-                language,
-                chunk_size,
-                progress_callback
-            )
+        return self._punctuate_with_gemini(
+            text, language, chunk_size, progress_callback
+        )
 
     # ========== 私有方法 ==========
 
@@ -284,15 +306,8 @@ class PunctuationProcessor:
             (處理後的文字, 使用的模型名稱, token_usage) 元組
         """
         # 自動決定 chunk_size（考慮輸出限制 65,536 tokens）
+        # 標籤保全的分流已上移到 `process()`，此處只處理無標籤文字。
         chunk_size = self._resolve_chunk_size(language, chunk_size)
-
-        # 帶語者標籤的輸入（paragraph 模式 + diarization）走標籤保全路徑：
-        # 標籤不進 LLM，事後依字元對齊重貼。無標籤輸入完全不受影響。
-        turns = self._parse_speaker_turns(text)
-        if turns is not None:
-            return self._punctuate_speaker_turns(
-                turns, language, chunk_size, progress_callback
-            )
 
         # 如果文字不長，直接處理
         if len(text) <= chunk_size:
@@ -351,6 +366,50 @@ class PunctuationProcessor:
         return "\n\n".join(results), model_used or self.gemini_model, final_token_usage
 
     # ── 語者標籤保全路徑 ────────────────────────────────────────────────
+
+    @staticmethod
+    def _align_tolerance(total_target: int) -> int:
+        """對齊容差：允許的可比字元漂移量。
+
+        單純用 `max(50, 10%)` 會在小片段上失效——一個 20 字的片段就算被砍到只剩 6 字
+        （70% 內容消失）仍在 50 的絕對下限內，靜默通過。故絕對下限本身再以
+        總量的 25% 封頂：大片段維持 10% 比例容差，小片段不可能整段被吃掉。
+        """
+        proportional = int(total_target * 0.1)
+        absolute_floor = min(50, int(total_target * 0.25))
+        return max(proportional, absolute_floor)
+
+    def _comparable_len(self, text: str) -> int:
+        """可比字元數：只數內容字元（字母/數字/組合記號），忽略標點與空白。"""
+        return sum(1 for ch in text if is_content_char(ch))
+
+    @staticmethod
+    def _new_token_usage() -> Dict[str, int]:
+        return {"total": 0, "prompt": 0, "completion": 0}
+
+    @staticmethod
+    def _accumulate_token_usage(
+        total: Dict[str, int], chunk_usage: Optional[Dict[str, int]]
+    ) -> None:
+        """把單次呼叫的 token 用量累加進總計（原本在兩條路徑各抄一份）。"""
+        if not chunk_usage:
+            return
+        for key in ("total", "prompt", "completion"):
+            total[key] += chunk_usage.get(key, 0)
+
+    @staticmethod
+    def _finalize_token_usage(total: Dict[str, int]) -> Optional[Dict[str, int]]:
+        """有用量才 log 總計並回傳，全零視為無資料（維持原行為）。"""
+        if total["total"] <= 0:
+            return None
+        log.info(
+            "punctuation.token_usage_total",
+            provider="gemini",
+            total=total["total"],
+            prompt=total["prompt"],
+            completion=total["completion"],
+        )
+        return total
 
     def _resolve_chunk_size(self, language: str, chunk_size: Optional[int]) -> int:
         """決定分段大小（字元數）。原本內嵌在 `_punctuate_with_gemini`，抽出供兩條路徑共用。"""
@@ -463,17 +522,17 @@ class PunctuationProcessor:
         所以用累計可比字元數決定切點，不依賴模型保留任何分隔符號。
         輸出與輸入的可比字元數若差距過大（截斷/暴走），回傳 None 讓呼叫端回退原文。
         """
-        if len(pieces) == 1:
-            return [output.strip()]
-
-        targets = [len(_ALIGN_SKIP_RE.sub("", p)) for p in pieces]
+        targets = [self._comparable_len(p) for p in pieces]
         total_target = sum(targets)
-        comparable_out = len(_ALIGN_SKIP_RE.sub("", output))
+        comparable_out = self._comparable_len(output)
 
         if total_target == 0:
             return None
-        # 容差：允許 10%（或 50 字元）的漂移，超出視為輸出不可信
-        if abs(comparable_out - total_target) > max(50, int(total_target * 0.1)):
+        # 容差：允許 10%（或 50 字元）的漂移，超出視為輸出不可信。
+        # 這道守門必須在「單 piece 早退」之前——超長輪次被切成的每個片段都是
+        # 單 piece chunk，正是長獨白（本次修復的動機場景）走的路；若早退繞過檢查，
+        # LLM 截斷輸出會被靜默接受，還照樣 log labels_preserved。
+        if abs(comparable_out - total_target) > self._align_tolerance(total_target):
             log.warning(
                 "punctuation.align_mismatch",
                 input_comparable=total_target,
@@ -481,6 +540,9 @@ class PunctuationProcessor:
                 pieces=len(pieces),
             )
             return None
+
+        if len(pieces) == 1:
+            return [output.strip()]
 
         # 依實際輸出長度等比縮放切點，吸收小幅漂移
         scale = comparable_out / total_target if total_target else 1.0
@@ -493,11 +555,16 @@ class PunctuationProcessor:
             cumulative += target
             need = int(round(cumulative * scale))
             while ptr < len(output) and seen < need:
-                if not _ALIGN_SKIP_RE.match(output[ptr]):
+                if is_content_char(output[ptr]):
                     seen += 1
                 ptr += 1
-            # 把切點後緊接的標點/空白歸給前一片段
-            while ptr < len(output) and _ALIGN_SKIP_RE.match(output[ptr]):
+            # 把切點後緊接的收尾標點/空白歸給前一片段；遇到開口標點就停——
+            # 那是下一位語者的開頭引號，吞過去會讓 A 行尾懸掛「、B 行 」不成對。
+            while (
+                ptr < len(output)
+                and not is_content_char(output[ptr])
+                and not is_opening_punct(output[ptr])
+            ):
                 ptr += 1
             cut_points.append(ptr)
 
@@ -512,21 +579,34 @@ class PunctuationProcessor:
     def _punctuate_speaker_turns(
         self,
         turns: list,
+        provider: str,
         language: str,
-        chunk_size: int,
+        chunk_size: Optional[int],
         progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> Tuple[str, str, Optional[Dict[str, int]]]:
-        """標籤保全版標點：標籤留在本地，只有純文字進 LLM，事後重貼。"""
+        """標籤保全版標點：標籤留在本地，只有純文字進 LLM，事後重貼。
+
+        兩個 provider 共用。openai 原本就不分段（整份送出），這裡維持該語意：
+        全部輪次併成單一 chunk，只是多了剝離/重貼與對齊。
+        """
         labels = [label for label, _ in turns]
         texts = [t for _, t in turns]
-        chunks = self._group_turns_into_chunks(texts, chunk_size)
-        total_chunks = len(chunks)
         label_count = sum(1 for label in labels if label)
+
+        if provider == "openai":
+            # 維持 openai 既有語意：不分段，一次送完
+            chunks = [[(i, t) for i, t in enumerate(texts)]]
+            resolved_chunk_size = None
+        else:
+            resolved_chunk_size = self._resolve_chunk_size(language, chunk_size)
+            chunks = self._group_turns_into_chunks(texts, resolved_chunk_size)
+        total_chunks = len(chunks)
 
         log.info(
             "punctuation.chunking",
+            provider=provider,
             input_chars=sum(len(t) for t in texts),
-            chunk_size=chunk_size,
+            chunk_size=resolved_chunk_size,
             total_chunks=total_chunks,
             speaker_turns=len(turns),
             speaker_labels=label_count,
@@ -535,7 +615,7 @@ class PunctuationProcessor:
 
         per_turn: list = [[] for _ in texts]
         model_used = None
-        total_token_usage = {"total": 0, "prompt": 0, "completion": 0}
+        total_token_usage = self._new_token_usage()
 
         for chunk_idx, chunk_pieces in enumerate(chunks, start=1):
             if progress_callback:
@@ -543,9 +623,17 @@ class PunctuationProcessor:
 
             piece_texts = [p for _, p in chunk_pieces]
             chunk_text = "\n\n".join(piece_texts)
-            result, chunk_model, chunk_token_usage = self._punctuate_chunk(
-                chunk_text, language, chunk_idx, total_chunks
-            )
+            if provider == "openai":
+                result, chunk_model, chunk_token_usage = self._punctuate_with_openai(
+                    chunk_text, language
+                )
+            else:
+                # 只有一個 chunk 時用單次提示語——否則最常見尺寸的 diarized 任務
+                # 會平白吃到「這是第 1 部分」的分段 prompt，是純粹的回歸。
+                idx = chunk_idx if total_chunks > 1 else None
+                result, chunk_model, chunk_token_usage = self._punctuate_chunk(
+                    chunk_text, language, idx, total_chunks if idx else None
+                )
 
             aligned = self._align_output_to_pieces(result, piece_texts)
             if aligned is None:
@@ -555,28 +643,16 @@ class PunctuationProcessor:
             # 與 whisper_processor 同慣例改用 enumerate。
             for pos, (turn_idx, original) in enumerate(chunk_pieces):
                 piece_out = aligned[pos] if pos < len(aligned) else ""
-                per_turn[turn_idx].append(piece_out or original)
+                per_turn[turn_idx].append((original, piece_out or original))
 
             if model_used is None:
                 model_used = chunk_model
-            if chunk_token_usage:
-                total_token_usage["total"] += chunk_token_usage.get("total", 0)
-                total_token_usage["prompt"] += chunk_token_usage.get("prompt", 0)
-                total_token_usage["completion"] += chunk_token_usage.get("completion", 0)
-
-        if total_token_usage["total"] > 0:
-            log.info(
-                "punctuation.token_usage_total",
-                provider="gemini",
-                total=total_token_usage["total"],
-                prompt=total_token_usage["prompt"],
-                completion=total_token_usage["completion"],
-            )
+            self._accumulate_token_usage(total_token_usage, chunk_token_usage)
 
         # 重貼標籤（格式與 `_merge_transcription_with_diarization` 完全一致）
         lines = []
         for turn_idx, label in enumerate(labels):
-            body = "".join(per_turn[turn_idx]).strip()
+            body = self._join_turn_pieces(per_turn[turn_idx])
             lines.append(f"{label} {body}" if label else body)
         final_text = "\n\n".join(lines)
 
@@ -597,8 +673,29 @@ class PunctuationProcessor:
                 turns=len(turns),
             )
 
-        final_token_usage = total_token_usage if total_token_usage["total"] > 0 else None
-        return final_text, model_used or self.gemini_model, final_token_usage
+        final_token_usage = self._finalize_token_usage(total_token_usage)
+        default_model = self.openai_model if provider == "openai" else self.gemini_model
+        return final_text, model_used or default_model, final_token_usage
+
+    @staticmethod
+    def _join_turn_pieces(pieces: list) -> str:
+        """把同一輪次的切片接回一行，保留切點原本的空白。
+
+        `_split_text_into_chunks` 會在空格後斷開（片段尾端帶著那個空格），
+        而對齊輸出經過 `.strip()`——直接 `"".join` 會把分隔空白吃掉，
+        讓英文在切點黏成 'thelazy' / 'dogand'。CJK 無空格，不受影響。
+        """
+        out: list = []
+        for pos, (original, punctuated) in enumerate(pieces):
+            if pos > 0:
+                boundary_had_space = (
+                    pieces[pos - 1][0][-1:].isspace() or original[:1].isspace()
+                )
+                already_separated = bool(out) and out[-1][-1:].isspace()
+                if boundary_had_space and not already_separated:
+                    out.append(" ")
+            out.append(punctuated)
+        return "".join(out).strip()
 
     def _call_gemini_with_retry(
         self,
@@ -943,7 +1040,7 @@ class PunctuationProcessor:
             best_break = None
 
             # 優先找說話者標籤（如 [SPEAKER_00]、[Speaker A] 等）
-            speaker_matches = list(re.finditer(r'\[SPEAKER[_\s]?\d*\]|\[Speaker\s*\w*\]', search_region, re.IGNORECASE))
+            speaker_matches = list(_SPEAKER_LABEL_SEARCH_RE.finditer(search_region))
             if speaker_matches:
                 # 使用最後一個說話者標籤的位置作為斷點
                 best_break = search_start + speaker_matches[-1].start()
