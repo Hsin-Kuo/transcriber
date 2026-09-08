@@ -991,6 +991,18 @@ class WhisperProcessor:
         full_text = " ".join(all_text_parts)
         detected_language = sorted_results[0][2] if sorted_results else None
 
+        # 觀測點（issue #374）：時間戳塌陷只告警、不中斷任務
+        collapse = self._detect_timestamp_collapse(all_segments)
+        if collapse:
+            collapse_sec, collapse_count = collapse
+            log.warning(
+                "whisper.segments.timestamp_collapse",
+                second=collapse_sec,
+                segment_count=collapse_count,
+                total_segments=len(all_segments),
+                num_chunks=num_chunks,
+            )
+
         log.info(
             "transcribe.parallel.completed",
             num_chunks=num_chunks,
@@ -1199,9 +1211,15 @@ class WhisperProcessor:
             silence_ends = re.findall(r'silence_end:\s*([\d.]+)', stderr)
 
             for i in range(min(len(silence_starts), len(silence_ends))):
-                # ffmpeg 輸出的時間是相對於 search_start_s 的
-                abs_start_ms = int((float(silence_starts[i]) + search_start_s) * 1000)
-                abs_end_ms = int((float(silence_ends[i]) + search_start_s) * 1000)
+                # `-ss` 放在 `-i` **之後**（output seeking）：ffmpeg 會先解碼再丟棄，
+                # silencedetect 報的是**輸入時間軸上的絕對時間**，不是相對於 -ss。
+                # 舊版誤當成相對值又加了 search_start_s，等於把切點加倍
+                # （≈ 2×target − 30s），造成 chunk 遠大於設定值 → 見 issue #374。
+                # 實測（ffmpeg 7）：檔案 43s、靜音在 20~23s，
+                #   `-i f -ss 15 -t 30` → silence_start: 19.999（絕對）
+                #   `-ss 15 -t 30 -i f` → silence_start:  4.999（相對）
+                abs_start_ms = int(float(silence_starts[i]) * 1000)
+                abs_end_ms = int(float(silence_ends[i]) * 1000)
                 mid_ms = (abs_start_ms + abs_end_ms) // 2
                 silences.append(mid_ms)
 
@@ -1210,6 +1228,19 @@ class WhisperProcessor:
 
             # 選離目標切點最近的靜音中點
             best = min(silences, key=lambda s: abs(s - target_ms))
+
+            # 防禦：結果必須落在搜尋窗口內。窗口外代表解析出了問題（例如上面那個
+            # 絕對/相對時間搞錯的 bug），寧可退回原始目標切點也不要用壞值——
+            # 壞切點會讓 chunk 長度失控，進而觸發 whisper 時間戳崩壞。
+            if abs(best - target_ms) > search_range_ms:
+                log.warning(
+                    "whisper.split.silence_out_of_range",
+                    target_ms=target_ms,
+                    best_ms=best,
+                    search_range_ms=search_range_ms,
+                )
+                return target_ms
+
             log.debug(
                 "whisper.split.cutpoint_adjusted",
                 target_minutes=round(target_ms / 1000 / 60, 1),
@@ -1220,6 +1251,86 @@ class WhisperProcessor:
         except Exception as e:
             log.warning("whisper.split.silence_detect_failed", error=str(e))
             return target_ms
+
+    @staticmethod
+    def _plan_cut_points(
+        total_duration_ms: int,
+        chunk_duration_ms: int,
+        find_silence,
+    ) -> List[int]:
+        """規劃分段切點（不含 0 與 total_duration_ms）。
+
+        `find_silence(target_ms) -> adjusted_ms` 由呼叫端注入（正式路徑是靜音偵測）。
+
+        不變式（issue #374 的教訓——壞切點會讓 chunk 長度失控，進而觸發
+        faster-whisper 在超長輸入上的時間戳崩壞，整份逐字稿被重複輸出一次）：
+          1. 嚴格遞增
+          2. 與前一個切點至少相隔 chunk_duration_ms 的 20%
+          3. 與前一個切點至多相隔 chunk_duration_ms 的 150%
+          4. 嚴格小於 total_duration_ms
+        第 3 條是關鍵：真正造成 #374 傷害的是**超長 chunk**（切點加倍後變成
+        30~39 分鐘），faster-whisper 在那種長度上時間戳對齊會崩壞。切點只要
+        讓 chunk 長度失控就退回原始目標切點；連目標切點都不合法就停止繼續切
+        （寧可少切一刀，也不要產出長度失控或負長度的 chunk）。
+        """
+        cut_points: List[int] = []
+        min_gap_ms = max(1, int(chunk_duration_ms * 0.2))
+        max_gap_ms = max(min_gap_ms + 1, int(chunk_duration_ms * 1.5))
+        pos = chunk_duration_ms
+
+        while pos < total_duration_ms:
+            adjusted = find_silence(pos)
+            prev = cut_points[-1] if cut_points else 0
+            lower = prev + min_gap_ms
+            upper = prev + max_gap_ms
+
+            if not (lower <= adjusted <= upper) or adjusted >= total_duration_ms:
+                log.warning(
+                    "whisper.split.cutpoint_rejected",
+                    target_ms=pos,
+                    adjusted_ms=adjusted,
+                    lower_bound_ms=lower,
+                    upper_bound_ms=upper,
+                    total_duration_ms=total_duration_ms,
+                )
+                adjusted = pos  # 退回未經靜音調整的目標切點
+
+            if not (lower <= adjusted < total_duration_ms):
+                log.warning(
+                    "whisper.split.cutpoint_abandoned",
+                    target_ms=pos,
+                    lower_bound_ms=lower,
+                    total_duration_ms=total_duration_ms,
+                )
+                break
+
+            cut_points.append(adjusted)
+            pos = adjusted + chunk_duration_ms
+
+        return cut_points
+
+    @staticmethod
+    def _detect_timestamp_collapse(
+        segments: List[Dict],
+        max_per_second: int = 40,
+    ) -> Optional[Tuple[int, int]]:
+        """偵測「一大堆 segment 時間戳塌在同一秒」的病徵（純觀測，不改資料）。
+
+        issue #374 的病徵：309 個 segment 全塌在 0.25 秒內、其中 112 個長度為 0，
+        文字則是整份逐字稿的重複。這是 whisper 在超長 chunk 上時間戳對齊失敗的
+        結果。留一個觀測點，之後同類問題能直接在 log 看到，而不必再撈 DB 反推。
+        回傳 (該秒, segment 數) 或 None。**刻意只告警不中斷任務。**
+        """
+        if not segments:
+            return None
+        buckets: Dict[int, int] = {}
+        for seg in segments:
+            sec = int(seg.get("start") or 0)
+            buckets[sec] = buckets.get(sec, 0) + 1
+        worst_sec = max(buckets, key=lambda s: buckets[s])
+        if buckets[worst_sec] > max_per_second:
+            return worst_sec, buckets[worst_sec]
+        return None
 
     def _split_audio_into_chunks(
         self,
@@ -1244,13 +1355,12 @@ class WhisperProcessor:
         if isinstance(audio_path, str):
             audio_path = Path(audio_path)
 
-        # 1. 計算切點並用靜音偵測調整
-        cut_points = []  # 不含 0 和 total_duration_ms
-        pos = chunk_duration_ms
-        while pos < total_duration_ms:
-            adjusted = self._find_silence_near(audio_path, pos)
-            cut_points.append(adjusted)
-            pos = adjusted + chunk_duration_ms
+        # 1. 計算切點並用靜音偵測調整（切點規劃抽成純函數，便於單元測試）
+        cut_points = self._plan_cut_points(
+            total_duration_ms,
+            chunk_duration_ms,
+            lambda target: self._find_silence_near(audio_path, target),
+        )
 
         # 2. 短尾合併：最後一段 < 20% 目標長度時，移除最後一個切點
         if cut_points:
