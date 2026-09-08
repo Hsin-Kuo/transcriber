@@ -6,8 +6,6 @@ A/B 實證（staging 同一支 89.9 分鐘 zh 音檔）：
 根因：batched 的 repetition 安全網失效（`temperature[:1]` +
 `compression_ratio_threshold` 只在 sequential 的 fallback 路徑比對）。
 """
-import importlib
-
 import src.services.utils.whisper_processor as wp
 from src.services.utils.whisper_processor import WhisperProcessor
 
@@ -16,14 +14,9 @@ def _proc():
     return WhisperProcessor.__new__(WhisperProcessor)
 
 
-def _reload(monkeypatch, **env):
-    """用指定 env 重新載入模組，讓 module 層常數重新計算。"""
-    for k, v in env.items():
-        if v is None:
-            monkeypatch.delenv(k, raising=False)
-        else:
-            monkeypatch.setenv(k, v)
-    return importlib.reload(wp)
+# 刻意不用 importlib.reload：reload 會把改過的 module 層常數留在整個 pytest
+# process 裡污染其他測試（而且被 reload 的 class 與已 import 的不是同一個物件）。
+# 直接 monkeypatch 常數，pytest 會自動還原。
 
 
 # ── 門檻上下的路由 ──────────────────────────────────────────────────────
@@ -63,51 +56,37 @@ def test_unknown_duration_keeps_batched():
 
 # ── env 覆寫 ────────────────────────────────────────────────────────────
 
-def test_threshold_env_override_lowers_bar(monkeypatch):
-    mod = _reload(monkeypatch, WHISPER_SEQUENTIAL_MIN_MINUTES="5",
-                  WHISPER_BATCHED=None)
-    try:
-        proc = mod.WhisperProcessor.__new__(mod.WhisperProcessor)
-        assert mod._SEQUENTIAL_MIN_MINUTES == 5
-        assert proc._should_use_batched(10 * 60) is False  # 10 分鐘 > 5
-        assert proc._should_use_batched(2 * 60) is True
-    finally:
-        _reload(monkeypatch, WHISPER_SEQUENTIAL_MIN_MINUTES=None, WHISPER_BATCHED=None)
+def test_threshold_override_lowers_bar(monkeypatch):
+    monkeypatch.setattr(wp, "_SEQUENTIAL_MIN_MINUTES", 5.0)
+    proc = _proc()
+
+    assert proc._should_use_batched(10 * 60) is False  # 10 分鐘 >= 5
+    assert proc._should_use_batched(2 * 60) is True
 
 
 def test_threshold_zero_forces_sequential(monkeypatch):
-    mod = _reload(monkeypatch, WHISPER_SEQUENTIAL_MIN_MINUTES="0",
-                  WHISPER_BATCHED=None)
-    try:
-        proc = mod.WhisperProcessor.__new__(mod.WhisperProcessor)
-        assert proc._should_use_batched(60) is False
-        assert proc._should_use_batched(None) is False
-    finally:
-        _reload(monkeypatch, WHISPER_SEQUENTIAL_MIN_MINUTES=None, WHISPER_BATCHED=None)
+    monkeypatch.setattr(wp, "_SEQUENTIAL_MIN_MINUTES", 0.0)
+    proc = _proc()
+
+    assert proc._should_use_batched(60) is False
+    assert proc._should_use_batched(None) is False
 
 
 def test_huge_threshold_preserves_current_behaviour(monkeypatch):
     """極大值＝維持現狀（全走 batched）。"""
-    mod = _reload(monkeypatch, WHISPER_SEQUENTIAL_MIN_MINUTES="999999",
-                  WHISPER_BATCHED=None)
-    try:
-        proc = mod.WhisperProcessor.__new__(mod.WhisperProcessor)
-        assert proc._should_use_batched(5396.5) is True
-    finally:
-        _reload(monkeypatch, WHISPER_SEQUENTIAL_MIN_MINUTES=None, WHISPER_BATCHED=None)
+    monkeypatch.setattr(wp, "_SEQUENTIAL_MIN_MINUTES", 999999.0)
+
+    assert _proc()._should_use_batched(5396.5) is True
 
 
 def test_global_switch_off_beats_threshold(monkeypatch):
     """`WHISPER_BATCHED=false` 是總開關，優先於門檻。"""
-    mod = _reload(monkeypatch, WHISPER_BATCHED="false",
-                  WHISPER_SEQUENTIAL_MIN_MINUTES="999999")
-    try:
-        proc = mod.WhisperProcessor.__new__(mod.WhisperProcessor)
-        assert proc._should_use_batched(60) is False
-        assert proc._should_use_batched(None) is False
-    finally:
-        _reload(monkeypatch, WHISPER_BATCHED=None,
-                WHISPER_SEQUENTIAL_MIN_MINUTES=None)
+    monkeypatch.setattr(wp, "_USE_BATCHED", False)
+    monkeypatch.setattr(wp, "_SEQUENTIAL_MIN_MINUTES", 999999.0)
+    proc = _proc()
+
+    assert proc._should_use_batched(60) is False
+    assert proc._should_use_batched(None) is False
 
 
 def test_default_threshold_is_thirty_minutes():
@@ -182,3 +161,79 @@ def test_transcribe_single_entry_passes_duration_to_router():
     proc.transcribe("dummy.mp3", audio_duration_seconds=1234.0)
 
     assert seen["duration"] == 1234.0
+
+
+# ── env 解析防護（review #3）─────────────────────────────────────────────
+
+def test_invalid_threshold_env_falls_back_to_default(monkeypatch):
+    """壞值不能讓 import 期 float() 爆掉——這個模組被 web app import，
+    import 期例外會造成 crash-loop。"""
+    monkeypatch.setenv("WHISPER_SEQUENTIAL_MIN_MINUTES", "abc")
+    assert wp._parse_sequential_min_minutes() == 30.0
+
+    monkeypatch.setenv("WHISPER_SEQUENTIAL_MIN_MINUTES", "")
+    assert wp._parse_sequential_min_minutes() == 30.0
+
+    monkeypatch.delenv("WHISPER_SEQUENTIAL_MIN_MINUTES", raising=False)
+    assert wp._parse_sequential_min_minutes() == 30.0
+
+
+def test_nan_and_inf_threshold_rejected(monkeypatch):
+    """`float('nan')` 合法但會讓所有比較變 False → 門檻靜默失效且記錯 reason。"""
+    for bad in ("nan", "NaN", "inf", "-inf"):
+        monkeypatch.setenv("WHISPER_SEQUENTIAL_MIN_MINUTES", bad)
+        assert wp._parse_sequential_min_minutes() == 30.0, bad
+
+
+def test_valid_threshold_env_is_parsed(monkeypatch):
+    monkeypatch.setenv("WHISPER_SEQUENTIAL_MIN_MINUTES", "12.5")
+    assert wp._parse_sequential_min_minutes() == 12.5
+
+
+# ── GPU 偵測不得吃掉遙測（review #5）───────────────────────────────────
+
+def test_no_gpu_still_emits_route_log(monkeypatch):
+    """GPU 掛掉時也要有 route log，否則 on-call 分不出
+    「GPU 死了」還是「門檻路由」。"""
+    events = []
+    monkeypatch.setattr(wp.log, "info", lambda event, **kw: events.append((event, kw)))
+    monkeypatch.setattr(wp.log, "debug", lambda *a, **k: None)
+
+    proc = _proc()
+    proc._has_gpu = lambda: False
+    proc._sanitize_segments = lambda segments, path: segments
+
+    class FakeInfo:
+        language = "zh"
+        duration = 60.0
+
+    class FakeModel:
+        def transcribe(self, *a, **k):
+            return [], FakeInfo()
+
+    proc.model = FakeModel()
+    proc._transcribe_with_timestamps("dummy.mp3", "zh", audio_duration_seconds=60.0)
+
+    routes = [kw for ev, kw in events if ev == "whisper.route"]
+    assert routes, "無 GPU 時仍必須記 route log"
+    assert routes[-1]["reason"] == "no_gpu"
+    assert routes[-1]["path"] == "sequential"
+
+
+def test_gpu_detect_failure_is_logged(monkeypatch):
+    """`_has_gpu` 靜默回 False 會讓「偵測壞了」看起來像「這台沒 GPU」。"""
+    warnings = []
+    monkeypatch.setattr(wp.log, "warning", lambda event, **kw: warnings.append(event))
+
+    import builtins
+    real_import = builtins.__import__
+
+    def boom(name, *a, **k):
+        if name == "torch":
+            raise RuntimeError("torch broken")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", boom)
+
+    assert _proc()._has_gpu() is False
+    assert "whisper.gpu_detect_failed" in warnings

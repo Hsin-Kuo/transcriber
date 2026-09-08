@@ -9,6 +9,7 @@ import bisect
 import subprocess
 import json
 import re
+import math
 import os
 from pydub import AudioSegment
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -61,7 +62,28 @@ _USE_BATCHED = os.getenv("WHISPER_BATCHED", "true").strip().lower() not in ("fal
 # 代價：sequential 實測比 batched 慢 2.64 倍（1275s vs 482s / 89.9 分鐘音檔）。
 # 語意：<=0 → 一律 sequential；極大值 → 維持現狀（全 batched）；
 #       `WHISPER_BATCHED=false` 為全域總開關，優先於本門檻。
-_SEQUENTIAL_MIN_MINUTES = float(os.getenv("WHISPER_SEQUENTIAL_MIN_MINUTES", "30"))
+def _parse_sequential_min_minutes() -> float:
+    """解析門檻 env，任何壞值都退回預設 30。
+
+    不能讓 `float()` 直接爆——這個模組被 web app import，import 期例外會造成
+    crash-loop。另外 `float("nan")` 是合法的但會讓所有比較變 False（門檻靜默
+    失效、還會記成 short_audio 的錯誤 reason），所以 NaN/inf 也要拒絕。
+    """
+    raw = os.getenv("WHISPER_SEQUENTIAL_MIN_MINUTES")
+    if raw is None or not raw.strip():
+        return 30.0
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        log.warning("whisper.route.threshold_invalid", raw=raw, fallback=30.0)
+        return 30.0
+    if math.isnan(value) or math.isinf(value):
+        log.warning("whisper.route.threshold_not_finite", raw=raw, fallback=30.0)
+        return 30.0
+    return value
+
+
+_SEQUENTIAL_MIN_MINUTES = _parse_sequential_min_minutes()
 
 
 def _normalize_language(language: Optional[str]) -> Optional[str]:
@@ -851,7 +873,9 @@ class WhisperProcessor:
         try:
             import torch
             return torch.cuda.is_available()
-        except Exception:
+        except Exception as e:
+            # 靜默回 False 會讓「GPU 偵測壞了」看起來像「這台沒有 GPU」
+            log.warning("whisper.gpu_detect_failed", error=str(e))
             return False
 
     def _get_batched_model(self):
@@ -1080,8 +1104,12 @@ class WhisperProcessor:
 
         if total_duration_ms <= chunk_duration_ms:
             log.debug("transcribe.direct.started", chunk_threshold_minutes=chunk_duration_ms / 1000 / 60)
-            # audio_path 已 normalize，跳過重複 probe
-            segments_list, detected_language = self._transcribe_with_timestamps(audio_path, language)
+            # audio_path 已 normalize，跳過重複 probe。
+            # 時長七行前就算好了，直接餵給路由（別讓這條子路徑漏掉路由資訊）
+            segments_list, detected_language = self._transcribe_with_timestamps(
+                audio_path, language,
+                audio_duration_seconds=total_duration_ms / 1000.0,
+            )
             full_text = " ".join(seg["text"] for seg in segments_list)
             return full_text, segments_list, detected_language
 
@@ -1322,9 +1350,21 @@ class WhisperProcessor:
             word_timestamps=True,
             hallucination_silence_threshold=2.0,
         )
-        use_batched = self._has_gpu() and self._should_use_batched(
-            audio_duration_seconds
-        )
+        has_gpu = self._has_gpu()
+        # 刻意不用 `has_gpu and self._should_use_batched(...)` 短路——GPU 掛掉時
+        # 那樣會完全沒有 route log，on-call 分不出「GPU 死了」還是「門檻路由」。
+        if has_gpu:
+            use_batched = self._should_use_batched(audio_duration_seconds)
+        else:
+            use_batched = False
+            log.info(
+                "whisper.route",
+                path="sequential",
+                reason="no_gpu",
+                audio_duration_seconds=audio_duration_seconds,
+                threshold_minutes=_SEQUENTIAL_MIN_MINUTES,
+                global_batched_enabled=_USE_BATCHED,
+            )
         if use_batched:
             # GPU + batched：把 VAD 視窗批次餵 GPU，吞吐高；但只轉 VAD 區段、單一溫度無
             # fallback → 困難音段(低音量/雜訊)可能整段掉。WHISPER_BATCHED=false 改走下面
