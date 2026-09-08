@@ -362,13 +362,75 @@ class TranscriptionOrchestrator:
                     message=f"轉錄中（{int(elapsed_s)}s / {int(total_s)}s）...",
                 )
 
+        audio_duration_seconds = self._resolve_audio_duration(task_id, mp3_path)
+
         if use_chunking:
             return self.whisper.transcribe_in_chunks(
-                mp3_path, language=language, progress_callback=_on_progress
+                mp3_path, language=language, progress_callback=_on_progress,
+                audio_duration_seconds=audio_duration_seconds,
             )
         return self.whisper.transcribe(
-            mp3_path, language=language, progress_callback=_on_progress
+            mp3_path, language=language, progress_callback=_on_progress,
+            audio_duration_seconds=audio_duration_seconds,
         )
+
+    def _task_audio_duration(self, task: Optional[dict]) -> Optional[float]:
+        """從任務紀錄取音檔秒數；缺值/非正數一律視為「沒有」。"""
+        if not task:
+            return None
+        value = (task.get("stats") or {}).get("audio_duration_seconds")
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
+
+    def _resolve_audio_duration(
+        self, task_id: str, mp3_path: Path
+    ) -> Optional[float]:
+        """音檔時長，供 batched/sequential 路由用（issue #374）。
+
+        優先用 intake 階段寫好的 `stats.audio_duration_seconds`，但**不能 fail-open**：
+        兩個實際會發生的情況都會讓時長變成 0/None——
+          1. intake 的 probe 失敗回 0（例如 MediaRecorder 產生的 webm 沒有
+             format.duration），且 intake 端沒有 <=0 守門
+          2. `_get_task` 把 Mongo 例外吞掉回 None
+        任一發生時若直接傳 None，90 分鐘的檔就會靜默走回會塌的 batched，
+        等於這個路由白做。所以退一步用本地 ffprobe——mp3 就在本機磁碟，很便宜。
+        回退原因記成不同 reason，之後看 log 就知道是哪一條路。
+        """
+        # 只取需要的欄位——不必為了一個數字把整份任務文件拉回來
+        duration = self._task_audio_duration(
+            self._get_task(task_id, {"stats.audio_duration_seconds": 1})
+        )
+        if duration is not None:
+            return duration
+
+        try:
+            duration_ms = self.whisper._get_audio_duration(mp3_path)
+            # `_get_audio_duration` 回傳**毫秒**
+            duration = float(duration_ms) / 1000.0 if duration_ms else 0.0
+        except Exception as e:
+            log.warning(
+                "transcription.audio_duration.fallback_failed",
+                task_id=task_id, error=str(e),
+            )
+            return None
+
+        if duration <= 0:
+            log.warning(
+                "transcription.audio_duration.unavailable",
+                task_id=task_id, reason="db_missing_and_probe_zero",
+            )
+            return None
+
+        log.info(
+            "transcription.audio_duration.local_probe_fallback",
+            task_id=task_id,
+            audio_duration_seconds=duration,
+            reason="db_missing_or_nonpositive",
+        )
+        return duration
 
     def _run_diarization(self, wav_path: Path, max_speakers: Optional[int]):
         """說話者辨識。失敗讓例外傳播,由 caller 降級。"""
@@ -515,7 +577,7 @@ class TranscriptionOrchestrator:
 
     def _consume_quota(self, task_id, task, user_id, language) -> None:
         """兩步式扣款:刪預扣 → 套 consumption pipeline。論證見 reservation_repo。"""
-        audio_duration_seconds = (task.get("stats") or {}).get("audio_duration_seconds", 0)
+        audio_duration_seconds = self._task_audio_duration(task) or 0
         if audio_duration_seconds <= 0:
             return
         from bson import ObjectId
@@ -557,8 +619,11 @@ class TranscriptionOrchestrator:
 
     # ── private:DB helpers ───────────────────────────
 
-    def _get_task(self, task_id: str) -> Optional[dict]:
+    def _get_task(self, task_id: str, projection: Optional[dict] = None) -> Optional[dict]:
+        """讀任務紀錄。`projection` 可只取需要的欄位，避免為了一個數字拉整份文件。"""
         try:
+            if projection is not None:
+                return self.db.tasks.find_one({"_id": task_id}, projection)
             return self.db.tasks.find_one({"_id": task_id})
         except Exception as e:
             log.warning("task.fetch_failed", error=str(e))
