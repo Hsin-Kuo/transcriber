@@ -208,3 +208,129 @@ def test_dedupe_is_noop_without_collapse_detection():
 
 def test_sanitize_handles_empty_input():
     assert _proc()._sanitize_segments([], path="gpu_batched") == []
+
+
+# ── code review 回歸測試 ─────────────────────────────────────────────────
+
+def test_zero_duration_twin_cannot_authorize_deleting_both_copies():
+    """review #1（最嚴重）：窗外零長度壞段不得被當成「正常孿生段」。
+
+    若 healthy_texts 只用 `not is_candidate` 篩，窗外的零長度段會授權刪掉窗內
+    候選，自己隨後又被零長度清理刪掉 → **兩份都消失＝永久內容遺失**。
+    實測確認過這條路徑真的會 0 份存活。
+    """
+    healthy = _healthy(60)
+    outside_zero = {"start": 9000.0, "end": 9000.0, "text": "獨特內容A"}
+    collapsed = _collapsed_copy([s["text"] for s in healthy])
+    collapsed.append({"start": 3565.5, "end": 3565.501, "text": "獨特內容A"})
+    segments = healthy + [outside_zero] + collapsed
+
+    out = _proc()._sanitize_segments(segments, path="gpu_batched")
+    texts = [s["text"] for s in out]
+
+    assert texts.count("獨特內容A") >= 1, "兩份副本都被刪＝永久內容遺失"
+    assert all(f"這是第{i}句正常的話。" in texts for i in range(60)), "正常內容不得遺失"
+
+
+def test_short_duration_twin_also_cannot_authorize_deletion():
+    """孿生資格必須是「時長正常」，0.1 秒的壞段同樣不夠格授權刪除。"""
+    healthy = _healthy(60)
+    short_twin = {"start": 8000.0, "end": 8000.1, "text": "獨特內容B"}
+    collapsed = _collapsed_copy([s["text"] for s in healthy])
+    collapsed.append({"start": 3565.5, "end": 3565.501, "text": "獨特內容B"})
+
+    out = _proc()._sanitize_segments(healthy + [short_twin] + collapsed,
+                                     path="gpu_batched")
+    texts = [s["text"] for s in out]
+
+    assert texts.count("獨特內容B") >= 1
+
+
+def test_zero_duration_signal_alone_does_not_trigger_dedupe():
+    """review #5：零長度訊號單獨觸發時，window_start 可能落在正常密集對話窗，
+    在那裡去重會誤刪正常短句 → 只做零長度清理。"""
+    segs = []
+    for i in range(60):
+        segs.append({"start": i * 6.0, "end": i * 6.0 + 3.0, "text": f"內容{i}"})
+        segs.append({"start": i * 6.0 + 3.2, "end": i * 6.0 + 3.9, "text": "對。"})
+    # 45 個零長度散落全檔（超過門檻 40），但任何 1 秒窗內的段數都很低
+    segs += [{"start": 1000.0 + i * 7.0, "end": 1000.0 + i * 7.0, "text": f"零{i}"}
+             for i in range(45)]
+
+    out = _proc()._sanitize_segments(segs, path="gpu_batched")
+
+    assert sum(1 for s in out if s["text"] == "對。") == 60, "正常短句被誤刪"
+    assert not any(s["text"].startswith("零") for s in out), "零長度段仍應清掉"
+
+
+def test_first_segment_of_cluster_is_not_missed_by_rounding():
+    """review #4：window_start 若捨入後向上越過叢集首段，那一條會殘留。"""
+    healthy = _healthy(60)
+    # 刻意讓叢集起點落在第 4 位小數，round(…,3) 會向上越過它
+    at = 3565.38749
+    collapsed = _collapsed_copy([s["text"] for s in healthy], at=at)
+
+    out = _proc()._sanitize_segments(healthy + collapsed, path="gpu_batched")
+
+    survivors = [s for s in out if abs(s["start"] - at) < 1e-9]
+    assert not survivors, f"叢集首段因捨入而殘留: {survivors}"
+    assert len(out) == 60
+
+
+def test_detector_reports_actual_cluster_range():
+    """review #7：detector 要回報叢集實際範圍，供去重共用（不再兩處硬編碼 1.0）。"""
+    segs = _healthy(20) + _collapsed_copy([f"重複{i}" for i in range(60)], at=100.0)
+
+    got = WhisperProcessor._detect_timestamp_collapse(segs)
+
+    assert got is not None
+    assert got["window_signal"] is True
+    assert got["window_start"] >= 100.0 - 1e-6
+    assert got["window_end"] >= got["window_start"]
+    # 未捨入（比對用）
+    assert isinstance(got["window_start"], float)
+
+
+def test_transcribe_single_call_entry_is_sanitized():
+    """review #2：`transcribe()`（chunk_audio=false）走的單次轉錄入口也必須過保險網。
+
+    保險網掛在 `_transcribe_with_timestamps` 尾端，因此 `transcribe()`、
+    `transcribe_in_chunks` 的 GPU 分支、CPU 單 chunk 直轉三個入口一次覆蓋。
+    """
+    proc = _proc()
+    proc._batch_size = 8
+    seen = {}
+
+    healthy = _healthy(60)
+    dirty = healthy + _collapsed_copy([s["text"] for s in healthy])
+
+    class FakeSeg:
+        def __init__(self, d):
+            self.start, self.end, self.text = d["start"], d["end"], d["text"]
+            self.words = None
+            self.compression_ratio = 1.0
+
+    class FakeInfo:
+        language = "zh"
+        duration = 5396.0
+
+    class FakeModel:
+        def transcribe(self, *a, **k):
+            return [FakeSeg(d) for d in dirty], FakeInfo()
+
+    def fake_sanitize(segments, path):
+        seen["called"] = True
+        seen["path"] = path
+        return segments
+
+    proc._has_gpu = lambda: True
+    proc._get_batched_model = lambda: FakeModel()
+    proc.model = FakeModel()
+    proc._sanitize_segments = fake_sanitize
+
+    out, lang = proc._transcribe_with_timestamps("dummy.mp3", "zh")
+
+    assert seen.get("called"), "單次轉錄入口未過保險網"
+    assert seen["path"] == "gpu_batched"
+    assert lang == "zh"
+    assert out

@@ -10,6 +10,7 @@ request 路徑，背景 task 默默吞掉的錯誤抓不到。
 - 同時印 stderr，保留原始除錯資訊
 """
 import asyncio
+from contextlib import contextmanager
 from typing import Any, Coroutine, Optional
 
 from src.utils.logger import get_logger
@@ -34,15 +35,42 @@ def _capture_task_exception(task: "asyncio.Task[Any]") -> None:
         exc_info=exc,
     )
 
-    # Sentry capture（未初始化時為 no-op）
+    # Sentry capture（未初始化時為 no-op；共用 _sentry_scope 的相容處理）
+    with _sentry_scope() as scope:
+        if scope is None:
+            return
+        import sentry_sdk
+        scope.set_tag("task_name", name)
+        scope.set_context("background_task", {"name": name})
+        sentry_sdk.capture_exception(exc)
+
+
+@contextmanager
+def _sentry_scope():
+    """取得一個 Sentry scope，並吸收所有失敗（未安裝/未初始化/自己壞掉）。
+
+    `push_scope()` 在 sentry-sdk 2.x 已 deprecated、3.x 移除——直接用它會在
+    升級後拋 AttributeError 被外層 except 吞掉，變成「告警靜默消失」。
+    這裡優先用 `new_scope()`，舊版才退回 `push_scope()`。
+    yield None 表示這次不要送（呼叫端就別做事）。
+    """
     try:
         import sentry_sdk
-        with sentry_sdk.push_scope() as scope:
-            scope.set_tag("task_name", name)
-            scope.set_context("background_task", {"name": name})
-            sentry_sdk.capture_exception(exc)
     except ImportError:
-        pass
+        yield None
+        return
+
+    factory = getattr(sentry_sdk, "new_scope", None) or getattr(
+        sentry_sdk, "push_scope", None
+    )
+    if factory is None:
+        logger.warning("sentry.scope_api_missing")
+        yield None
+        return
+
+    try:
+        with factory() as scope:
+            yield scope
     except Exception as e:
         # Sentry 自己壞掉也不能影響主流程
         logger.warning("sentry.capture_failed", error=str(e))
@@ -56,17 +84,14 @@ def capture_message(event: str, level: str = "warning", **context: Any) -> None:
     2. 測試 patch 這一支就好，不必去 patch sentry_sdk 內部
        （金流體檢的教訓：patch 第三方內部的測試很脆）
     """
-    try:
+    with _sentry_scope() as scope:
+        if scope is None:
+            return
         import sentry_sdk
-        with sentry_sdk.push_scope() as scope:
-            for key, value in context.items():
-                scope.set_extra(key, value)
-            scope.set_tag("event", event)
-            sentry_sdk.capture_message(event, level=level)
-    except ImportError:
-        pass
-    except Exception as e:
-        logger.warning("sentry.capture_failed", error=str(e))
+        for key, value in context.items():
+            scope.set_extra(key, value)
+        scope.set_tag("event", event)
+        sentry_sdk.capture_message(event, level=level)
 
 
 def create_background_task(

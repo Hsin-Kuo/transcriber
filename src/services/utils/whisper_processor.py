@@ -43,6 +43,11 @@ RESEG_MIN_SEGMENT_SEC = float(os.getenv("RESEG_MIN_SEGMENT_SEC", "1.0"))    # �
 # 困難音段較不會整段掉，但較慢（無批次平行）。env 可調，方便比較。
 # faster-whisper 的預設 compression_ratio_threshold；batched 路徑不會拿它比對，
 # 我們自己記 log 用（見 _transcribe_with_timestamps）。
+# 塌陷叢集偵測/清理共用參數（避免兩處各自硬編碼 1.0 秒後只改一邊而靜默壞掉）
+_COLLAPSE_WINDOW_SEC = 1.0            # 滑動窗口寬度
+_COLLAPSE_MAX_CANDIDATE_SEC = 0.25    # 候選（壞副本）的時長上限；正常短句都比這長
+_COLLAPSE_EDGE_EPSILON = 1e-6         # 邊界比較容差
+
 _COMPRESSION_RATIO_THRESHOLD = 2.4
 
 _USE_BATCHED = os.getenv("WHISPER_BATCHED", "true").strip().lower() not in ("false", "0", "no")
@@ -829,8 +834,8 @@ class WhisperProcessor:
             segments_list, detected_language = self._transcribe_with_timestamps(
                 audio_path, language, progress_callback=progress_callback,
             )
-            # 先清理再組 full_text——順序反了會讓文字保留已被丟棄的壞段
-            segments_list = self._sanitize_segments(segments_list, path="gpu_batched")
+            # segments 在 `_transcribe_with_timestamps` 內已過保險網，
+            # 這裡組 full_text 自然吃到清理後的結果
             full_text = " ".join(seg["text"] for seg in segments_list)
             return full_text, segments_list, detected_language
         # 平行版 callback 是 (completed, total[, processing])；統一收斂成 (done, total)
@@ -844,9 +849,13 @@ class WhisperProcessor:
             language=language,
             progress_callback=cb,
         )
-        # CPU 路徑的 full_text 是各 chunk 的文字串接（不是從 segments 組的），
-        # 這裡刻意不重算：崩壞發生在 GPU batched，動 CPU 的文字組裝只是多餘風險。
+        # 多 chunk 合併路徑的 full_text 是各 chunk 文字的串接，不會隨 sanitize 更新
+        # （單 chunk 子路徑則已在 `_transcribe_with_timestamps` 內清理完）。
+        # 丟了段卻不更新文字，下游標點對齊會把被丟掉的文字塞回鄰段，故此處重組。
+        before = len(segments)
         segments = self._sanitize_segments(segments, path="cpu_parallel")
+        if len(segments) != before:
+            full_text = " ".join(seg["text"] for seg in segments)
         return full_text, segments, detected_language
 
     @staticmethod
@@ -863,18 +872,35 @@ class WhisperProcessor:
 
         #374 實例：309 段塌在 0.25 秒內、其中 112 段零長度、57 條逐字重複。
         """
-        window_start = collapse["window_start"]
-        window_end = window_start + 1.0
+        # 用 detector 回報的實際叢集範圍（未捨入）並加 epsilon：
+        # 捨入過的 window_start 可能向上越過叢集首段，讓那一條逃過候選判定而殘留。
+        window_start = float(collapse["window_start"]) - _COLLAPSE_EDGE_EPSILON
+        window_end = float(
+            collapse.get("window_end", collapse["window_start"] + _COLLAPSE_WINDOW_SEC)
+        ) + _COLLAPSE_EDGE_EPSILON
 
         def is_candidate(seg: Dict) -> bool:
             start = float(seg.get("start") or 0)
             end = float(seg.get("end") or 0)
-            return window_start <= start <= window_end and (end - start) <= 0.25
+            in_window = window_start <= start <= window_end
+            return in_window and (end - start) <= _COLLAPSE_MAX_CANDIDATE_SEC
+
+        def is_healthy(seg: Dict) -> bool:
+            """能當「正常孿生段」的資格：時長必須正常。
+
+            這是最關鍵的防護。若只用 `not is_candidate`，**窗外的零長度壞段**
+            也會被當成正常孿生段，授權刪掉窗內候選；它自己隨後又被
+            `_drop_zero_duration_segments` 丟掉 → 兩份副本都消失 = 永久內容遺失。
+            實測確認過這條路徑真的會 0 份存活，故此處要求時長 > 候選門檻。
+            """
+            start = float(seg.get("start") or 0)
+            end = float(seg.get("end") or 0)
+            return (end - start) > _COLLAPSE_MAX_CANDIDATE_SEC
 
         healthy_texts = {
             (seg.get("text") or "").strip()
             for seg in segments
-            if not is_candidate(seg) and (seg.get("text") or "").strip()
+            if is_healthy(seg) and (seg.get("text") or "").strip()
         }
 
         kept = []
@@ -925,7 +951,10 @@ class WhisperProcessor:
         try:
             collapse = self._detect_timestamp_collapse(segments)
             result = segments
-            if collapse:
+            # 去重**只認窗口訊號**。零長度訊號單獨觸發時（例如 41 個零長度散落全檔），
+            # window_start 指向的可能是完全正常的密集對話窗，在那裡去重會誤刪
+            # 正常短句。這種情況只做零長度清理 + 告警。
+            if collapse and collapse.get("window_signal"):
                 result = self._dedupe_collapsed_duplicates(result, collapse)
             result, dropped = self._drop_zero_duration_segments(result)
 
@@ -944,17 +973,21 @@ class WhisperProcessor:
                     log.info("whisper.segments.zero_duration_dropped", **payload)
 
             if collapse:
+                # log/Sentry 才捨入（比對邏輯一律用未捨入值）
+                reported = dict(collapse)
+                reported["window_start"] = round(reported["window_start"], 3)
+                reported["window_end"] = round(reported["window_end"], 3)
                 log.warning(
                     "whisper.segments.timestamp_collapse",
                     transcribe_path=path,
-                    **collapse,
+                    **reported,
                 )
                 capture_message(
                     "whisper.segments.timestamp_collapse",
                     level="warning",
                     transcribe_path=path,
                     segments_after_sanitize=len(result),
-                    **collapse,
+                    **reported,
                 )
             return result
         except Exception as e:
@@ -1286,6 +1319,14 @@ class WhisperProcessor:
         segments_list = _collapse_repeated_segments(segments_list)
         segments_list = _filter_hallucination_segments(segments_list)
         segments_list = _resegment_by_words(segments_list)
+        # 保險網掛在這裡＝單點覆蓋所有走 batched/sequential 單次轉錄的入口：
+        # `transcribe()`（chunk_audio=false，API 可直接指定）、`transcribe_in_chunks`
+        # 的 GPU 分支、以及 CPU 平行路徑裡「音檔短於一個 chunk」的直轉子路徑。
+        # 三者的 full_text 都是從本函數回傳的 segments 組出來的，所以清理後自動一致。
+        batched_used = self._has_gpu() and _USE_BATCHED
+        segments_list = self._sanitize_segments(
+            segments_list, path="gpu_batched" if batched_used else "sequential"
+        )
         return segments_list, detected_language
 
     def _get_audio_duration(self, audio_path: Path) -> int:
@@ -1525,22 +1566,32 @@ class WhisperProcessor:
 
         # 滑動窗口：右端逐一前進，左端收縮到窗口內
         worst_count = 0
-        worst_at = 0.0
+        worst_start = 0.0
+        worst_end = 0.0
         left = 0
         for right in range(len(starts)):
-            while starts[right] - starts[left] > 1.0:
+            while starts[right] - starts[left] > _COLLAPSE_WINDOW_SEC:
                 left += 1
             count = right - left + 1
             if count > worst_count:
                 worst_count = count
-                worst_at = starts[left]
+                worst_start = starts[left]
+                worst_end = starts[right]
 
-        if worst_count > max_per_second or zero_duration > max_zero_duration:
+        window_signal = worst_count > max_per_second
+        zero_signal = zero_duration > max_zero_duration
+        if window_signal or zero_signal:
             return {
-                "window_start": round(worst_at, 3),
+                # 未捨入的實際叢集範圍：去重要用它比對邊界，
+                # 捨入過的值可能向上越過叢集首段而漏刪（log 時才捨入）。
+                "window_start": worst_start,
+                "window_end": worst_end,
                 "segments_in_window": worst_count,
                 "zero_duration_segments": zero_duration,
                 "total_segments": len(segments),
+                # 哪個訊號觸發——去重只認窗口訊號（見 _sanitize_segments）
+                "window_signal": window_signal,
+                "zero_signal": zero_signal,
             }
         return None
 

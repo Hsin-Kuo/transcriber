@@ -329,26 +329,27 @@ def test_chunk_index_parse_rejects_unexpected_name():
         raise AssertionError("無法解析時應該要拋 ValueError，不能靜默回錯的 index")
 
 
-def test_collapse_check_covers_gpu_path():
-    """review #2：GPU batched 路徑（prod/staging 實際走的）必須經過觀測點。"""
-    proc = WhisperProcessor.__new__(WhisperProcessor)
-    collapsed = [{"start": 3565.6, "end": 3565.6, "text": "x"} for _ in range(300)]
-    seen = {}
+def test_gpu_path_full_text_reflects_sanitized_segments():
+    """GPU batched 路徑的覆蓋點已移入 `_transcribe_with_timestamps`（單點覆蓋
+    transcribe() / GPU 分支 / CPU 單 chunk），見
+    tests/unit/test_batched_collapse_safety_net.py 的入口測試。
 
-    def fake_log(segments, path):
-        seen["path"] = path
-        seen["n"] = len(segments)
-        return segments
+    這裡守住 `transcribe_in_chunks` 這一層的契約：full_text 必須由
+    （已清理的）segments 組出來，不得混入別的來源。
+    """
+    proc = WhisperProcessor.__new__(WhisperProcessor)
+    clean = [{"start": 0.0, "end": 1.0, "text": "甲"},
+             {"start": 1.0, "end": 2.0, "text": "乙"}]
 
     proc._has_gpu = lambda: True
     proc._ensure_valid_audio = lambda p: p
-    proc._transcribe_with_timestamps = lambda *a, **k: (collapsed, "zh")
-    proc._sanitize_segments = fake_log
+    proc._transcribe_with_timestamps = lambda *a, **k: (clean, "zh")
 
-    proc.transcribe_in_chunks("dummy.mp3")
+    text, segs, lang = proc.transcribe_in_chunks("dummy.mp3")
 
-    assert seen.get("path") == "gpu_batched", f"GPU 路徑未經過觀測點: {seen}"
-    assert seen["n"] == 300
+    assert text == "甲 乙"
+    assert segs == clean
+    assert lang == "zh"
 
 
 def test_collapse_check_covers_cpu_parallel_path():
@@ -366,8 +367,27 @@ def test_collapse_check_covers_cpu_parallel_path():
 
     text, out, lang = proc.transcribe_in_chunks("dummy.mp3")
 
-    assert seen.get("path") == "cpu_parallel", f"CPU 路徑未經過觀測點: {seen}"
-    assert (text, out, lang) == ("t", segs, "zh"), "回傳值不得被觀測點改動"
+    assert seen.get("path") == "cpu_parallel", f"CPU 路徑未經過保險網: {seen}"
+    # 段數沒變 → full_text 不重組（維持各 chunk 文字串接）
+    assert (text, out, lang) == ("t", segs, "zh")
+
+
+def test_cpu_path_rebuilds_full_text_when_segments_dropped():
+    """review #6：多 chunk 合併的 full_text 不會隨 sanitize 更新——
+    丟了段就必須重組，否則下游標點對齊會把被丟的文字塞回鄰段。"""
+    proc = WhisperProcessor.__new__(WhisperProcessor)
+    original = [{"start": 0.0, "end": 1.0, "text": "好段"},
+                {"start": 1.0, "end": 1.0, "text": "壞段"}]
+
+    proc._has_gpu = lambda: False
+    proc.transcribe_in_chunks_parallel = lambda *a, **k: (
+        "好段 壞段", list(original), "zh"
+    )
+
+    text, out, lang = proc.transcribe_in_chunks("dummy.mp3")
+
+    assert [s["text"] for s in out] == ["好段"], "零長度段應被清掉"
+    assert text == "好段", f"full_text 未跟著重組: {text!r}"
 
 
 def test_collapse_check_never_breaks_transcription():

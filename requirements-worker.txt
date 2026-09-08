@@ -27,3 +27,8 @@ boto3
 
 # 環境變數
 python-dotenv
+
+# Sentry：worker 的錯誤/事件上報。務必宣告在這裡——
+# 只存在於 pip-freeze 產生的 lock 檔時，照 lock 檔頭的 regen 流程重生就會掉
+# （web 層踩過同一個坑，worker 當時沒補）。
+sentry-sdk>=2.0,<3.0
