@@ -112,31 +112,65 @@ def _ffmpeg_stderr(silence_start_s, silence_end_s):
     )
 
 
-def test_silence_times_are_treated_as_absolute():
-    """`-ss` 在 `-i` 之後 → silencedetect 報絕對時間，不可再加 search_start。"""
+def test_input_seeking_times_are_relative_and_offset_is_added_back():
+    """`-ss` 在 `-i` **之前**（input seeking）→ silencedetect 報相對時間，須加回
+    search_start。這是原 bug 的鏡像，用實測值鎖住換算式。
+
+    實測（ffmpeg 7；檔案 164s、靜音 100~104s、target=100s、窗口起點 70s）：
+      `-ss 70 -t 60 -i f` → silence_start: 29.999（相對）← 現在用這個
+      `-i f -ss 70 -t 60` → silence_start: 99.999（絕對）← 舊版用這個
+    """
+    proc = WhisperProcessor.__new__(WhisperProcessor)
+    # target=600s → 窗口起點 570s；真實靜音 600~601s → 相對值 30~31
+    class R:
+        stderr = _ffmpeg_stderr(30.0, 31.0)
+
+    with patch("subprocess.run", return_value=R()):
+        got = proc._find_silence_near("dummy.mp3", 600_000)
+
+    assert abs(got - 600_500) < 50, f"應為 ~600500ms（30.5+570），實際 {got}"
+
+
+def test_input_seeking_command_puts_ss_before_input():
+    """順序錯了就會回到 output seeking（絕對時間），換算式隨之失效。"""
     proc = WhisperProcessor.__new__(WhisperProcessor)
 
+    class R:
+        stderr = ""
+
+    with patch("subprocess.run", return_value=R()) as run:
+        proc._find_silence_near("dummy.mp3", 600_000)
+
+    argv = run.call_args[0][0]
+    assert argv.index("-ss") < argv.index("-i"), f"-ss 必須在 -i 之前: {argv}"
+    assert argv.index("-t") < argv.index("-i"), f"-t 必須在 -i 之前: {argv}"
+
+
+def test_candidate_entirely_outside_window_is_discarded():
+    """解析值完全落在窗口外（舊 bug 的形態）→ 丟掉候選、退回目標切點。"""
+    proc = WhisperProcessor.__new__(WhisperProcessor)
+    # 相對值 600 → 絕對 1170s，遠在 570~630s 窗口之外
     class R:
         stderr = _ffmpeg_stderr(600.0, 601.0)
 
     with patch("subprocess.run", return_value=R()):
         got = proc._find_silence_near("dummy.mp3", 600_000)
 
-    # 靜音中點 600.5s；舊 bug 會回 600.5 + 570 = 1170.5s
-    assert abs(got - 600_500) < 50, f"應為 ~600500ms（絕對），實際 {got}"
+    assert got == 600_000
 
 
-def test_out_of_window_silence_result_falls_back_to_target():
-    """解析結果落在搜尋窗口外 → 退回目標切點（就是舊 bug 的形態）。"""
+def test_long_silence_extending_past_window_is_clipped_not_rejected():
+    """65 秒中場休息只被窗口截到一半 → 夾回窗口取中點，不得誤拒。"""
     proc = WhisperProcessor.__new__(WhisperProcessor)
-
+    # 窗口 570~630s；靜音相對 20~85（絕對 590~655）延伸出窗口右界
     class R:
-        stderr = _ffmpeg_stderr(1170.0, 1171.0)  # 遠在 ±30s 窗口之外
+        stderr = _ffmpeg_stderr(20.0, 85.0)
 
     with patch("subprocess.run", return_value=R()):
         got = proc._find_silence_near("dummy.mp3", 600_000)
 
-    assert got == 600_000
+    assert got != 600_000, "不該退回目標切點（那代表被誤拒）"
+    assert 590_000 <= got <= 630_000, f"應夾在窗口內，實際 {got}"
 
 
 def test_no_silence_found_returns_target():
@@ -193,9 +227,9 @@ def test_detects_timestamp_collapse():
     got = WhisperProcessor._detect_timestamp_collapse(healthy + collapsed)
 
     assert got is not None
-    second, count = got
-    assert second == 3565
-    assert count == 309
+    assert got["segments_in_window"] == 309
+    assert got["zero_duration_segments"] == 309
+    assert got["total_segments"] == 409
 
 
 def test_healthy_segments_report_no_collapse():
@@ -206,3 +240,139 @@ def test_healthy_segments_report_no_collapse():
 
 def test_collapse_detection_handles_empty_input():
     assert WhisperProcessor._detect_timestamp_collapse([]) is None
+
+
+# ── code review 回歸測試 ─────────────────────────────────────────────────
+
+PROD_CHUNK_MS = 1_500_000  # 生產預設 25 分鐘（whisper_processor.py 的 default）
+
+
+def test_short_tail_merge_cannot_exceed_max_gap_production_size():
+    """review #1：短尾合併不得繞過 1.5x 上限。
+
+    生產 chunk=25 分鐘、音檔 54.9 分鐘：切點在 ~25 與 ~50 分鐘，尾巴僅 4.9 分鐘
+    （< 20% = 5 分鐘）會觸發合併，併完最終 chunk 變 ~29.9 分鐘——正落在 #374
+    記載的崩壞區間（30~39 分）。合併後必須重新驗證上限。
+    """
+    total = int(54.9 * 60 * 1000)
+    cuts = _plan(lambda target: target, total=total, chunk=PROD_CHUNK_MS)
+
+    gaps = _gaps([0] + cuts + [total])
+    assert max(gaps) <= PROD_CHUNK_MS * 1.5 + 1, (
+        f"合併後 chunk 長度失控: {max(gaps)/60000:.1f} 分鐘, cuts={cuts}"
+    )
+
+
+def test_short_tail_merge_still_happens_when_within_limit():
+    """上限沒被突破時，短尾合併照常運作（不要因為防護而失去原本的行為）。"""
+    total = int(28 * 60 * 1000)  # 28 分鐘，一個切點在 25 分，尾巴 3 分鐘
+    cuts = _plan(lambda target: target, total=total, chunk=PROD_CHUNK_MS)
+
+    assert cuts == [], f"3 分鐘的尾巴應被併入前段（併後 28 分 < 37.5 分上限）: {cuts}"
+
+
+def test_production_chunk_size_normal_case():
+    """生產設定下 90 分鐘音檔的切點：不得有超長 chunk。"""
+    cuts = _plan(lambda target: target + 3000, total=TOTAL_MS, chunk=PROD_CHUNK_MS)
+
+    gaps = _gaps([0] + cuts + [TOTAL_MS])
+    assert all(g > 0 for g in gaps)
+    assert max(gaps) <= PROD_CHUNK_MS * 1.5 + 1, f"{max(gaps)/60000:.1f} 分鐘"
+
+
+def test_collapse_detected_across_second_boundary():
+    """review #4：塌陷群跨整數秒邊界時，整數秒分桶會把計數對半 → 滑動窗才抓得到。"""
+    # 60 段在 3565.9，60 段在 3566.0：任一整數秒桶都只有 60（<門檻 80），
+    # 但 1 秒滑動窗內有 120
+    segs = [{"start": 3565.9, "end": 3565.95} for _ in range(60)]
+    segs += [{"start": 3566.0, "end": 3566.05} for _ in range(60)]
+
+    got = WhisperProcessor._detect_timestamp_collapse(
+        segs, max_per_second=80, max_zero_duration=10_000
+    )
+
+    assert got is not None, "跨秒邊界的塌陷群不得漏報"
+    assert got["segments_in_window"] == 120
+
+
+def test_zero_duration_signal_alone_triggers_detection():
+    """review #4：零長度 segment 是獨立的伴隨訊號（#374 實例有 112 個）。"""
+    # 刻意把時間戳分散，讓滑動窗口訊號不觸發
+    segs = [{"start": float(i * 5), "end": float(i * 5)} for i in range(112)]
+
+    got = WhisperProcessor._detect_timestamp_collapse(
+        segs, max_per_second=10_000, max_zero_duration=40
+    )
+
+    assert got is not None
+    assert got["zero_duration_segments"] == 112
+
+
+def test_chunk_index_parsed_from_end_of_filename():
+    """review #3：使用者檔名含 `chunk_N` 時不得解析錯 index。"""
+    from src.services.utils.whisper_processor import _parse_chunk_index
+
+    assert _parse_chunk_index("/tmp/_temp_audio_chunk_7.mp3") == 7
+    # 使用者原始檔名自己就含 chunk_3 → 必須取尾端的 7，不是 3
+    assert _parse_chunk_index("/tmp/_temp_my_chunk_3_recording_chunk_7.mp3") == 7
+    assert _parse_chunk_index("/tmp/run_12345/_temp_x_chunk_12.mp3") == 12
+
+
+def test_chunk_index_parse_rejects_unexpected_name():
+    from src.services.utils.whisper_processor import _parse_chunk_index
+
+    try:
+        _parse_chunk_index("/tmp/no_index_here.mp3")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("無法解析時應該要拋 ValueError，不能靜默回錯的 index")
+
+
+def test_collapse_check_covers_gpu_path():
+    """review #2：GPU batched 路徑（prod/staging 實際走的）必須經過觀測點。"""
+    proc = WhisperProcessor.__new__(WhisperProcessor)
+    collapsed = [{"start": 3565.6, "end": 3565.6, "text": "x"} for _ in range(300)]
+    seen = {}
+
+    def fake_log(segments, path):
+        seen["path"] = path
+        seen["n"] = len(segments)
+
+    proc._has_gpu = lambda: True
+    proc._ensure_valid_audio = lambda p: p
+    proc._transcribe_with_timestamps = lambda *a, **k: (collapsed, "zh")
+    proc._log_timestamp_collapse = fake_log
+
+    proc.transcribe_in_chunks("dummy.mp3")
+
+    assert seen.get("path") == "gpu_batched", f"GPU 路徑未經過觀測點: {seen}"
+    assert seen["n"] == 300
+
+
+def test_collapse_check_covers_cpu_parallel_path():
+    proc = WhisperProcessor.__new__(WhisperProcessor)
+    segs = [{"start": 1.0, "end": 2.0, "text": "x"}]
+    seen = {}
+
+    proc._has_gpu = lambda: False
+    proc.transcribe_in_chunks_parallel = lambda *a, **k: ("t", segs, "zh")
+    proc._log_timestamp_collapse = lambda segments, path: seen.update(
+        path=path, n=len(segments)
+    )
+
+    text, out, lang = proc.transcribe_in_chunks("dummy.mp3")
+
+    assert seen.get("path") == "cpu_parallel", f"CPU 路徑未經過觀測點: {seen}"
+    assert (text, out, lang) == ("t", segs, "zh"), "回傳值不得被觀測點改動"
+
+
+def test_collapse_check_never_breaks_transcription():
+    """觀測失敗絕不能影響轉錄（sanity check 不擋任務完成）。"""
+    proc = WhisperProcessor.__new__(WhisperProcessor)
+
+    def boom(segments, **kwargs):
+        raise RuntimeError("detector exploded")
+
+    proc._detect_timestamp_collapse = boom
+    proc._log_timestamp_collapse([{"start": 0.0, "end": 1.0}], path="test")  # 不得拋
