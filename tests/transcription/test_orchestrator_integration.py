@@ -82,7 +82,8 @@ class FakeWhisper:
         self._empty = empty
         self.model_name = model_name
 
-    def transcribe(self, mp3_path, language=None, progress_callback=None):
+    def transcribe(self, mp3_path, language=None, progress_callback=None,
+                   audio_duration_seconds=None):
         if self._fail:
             raise RuntimeError("whisper boom")
         if progress_callback is not None:
@@ -91,7 +92,8 @@ class FakeWhisper:
             return None, [], None
         return self._text, list(self._segments), self._language
 
-    def transcribe_in_chunks(self, mp3_path, language=None, progress_callback=None):
+    def transcribe_in_chunks(self, mp3_path, language=None, progress_callback=None,
+                             audio_duration_seconds=None):
         if progress_callback is not None:
             progress_callback(1.0, 1.0)
         return self.transcribe(mp3_path, language)

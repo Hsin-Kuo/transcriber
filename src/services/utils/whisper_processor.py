@@ -52,6 +52,17 @@ _COMPRESSION_RATIO_THRESHOLD = 2.4
 
 _USE_BATCHED = os.getenv("WHISPER_BATCHED", "true").strip().lower() not in ("false", "0", "no")
 
+# 長音檔自動改走 sequential 的門檻（分鐘）。issue #374：batched 的時間戳崩壞是
+# 機率事件，長音檔觸發——staging 同一支 89.9 分鐘音檔兩次都中，7 分鐘的合成音檔
+# 未中，**7~89.9 分鐘之間沒有資料點**。因此預設值從安全面選 30 分鐘：
+#   - 距唯一已知會觸發的長度（89.9 分）有 3 倍餘裕
+#   - 遠高於已知安全的 7 分鐘
+#   - 30 分鐘音檔走 sequential 約 4.2× realtime ≈ 7 分鐘處理時間，仍可接受
+# 代價：sequential 實測比 batched 慢 2.64 倍（1275s vs 482s / 89.9 分鐘音檔）。
+# 語意：<=0 → 一律 sequential；極大值 → 維持現狀（全 batched）；
+#       `WHISPER_BATCHED=false` 為全域總開關，優先於本門檻。
+_SEQUENTIAL_MIN_MINUTES = float(os.getenv("WHISPER_SEQUENTIAL_MIN_MINUTES", "30"))
+
 
 def _normalize_language(language: Optional[str]) -> Optional[str]:
     """Map zh-TW/zh-CN to zh for Whisper (which only supports 'zh').
@@ -774,6 +785,7 @@ class WhisperProcessor:
         audio_path: Path,
         language: Optional[str] = None,
         progress_callback: Optional[callable] = None,
+        audio_duration_seconds: Optional[float] = None,
     ) -> Tuple[str, List[Dict], str]:
         """轉錄音檔（單次轉錄，不分段）
 
@@ -781,6 +793,8 @@ class WhisperProcessor:
             audio_path: 音檔路徑
             language: 語言代碼（None 表示自動偵測）
             progress_callback: segment 完成時呼叫 callback(elapsed_seconds, total_seconds)
+            audio_duration_seconds: 音檔時長，供 batched/sequential 路由用
+                （由呼叫端提供既有值，不在此重複 probe 音檔）
 
         Returns:
             (完整文字, segments 列表, 偵測到的語言)
@@ -788,12 +802,49 @@ class WhisperProcessor:
         audio_path = self._ensure_valid_audio(audio_path)
         segments_list, detected_language = self._transcribe_with_timestamps(
             audio_path, language, progress_callback=progress_callback,
+            audio_duration_seconds=audio_duration_seconds,
         )
 
         # 合併所有 segment 的文字
         full_text = " ".join(seg["text"] for seg in segments_list)
 
         return full_text, segments_list, detected_language
+
+    def _should_use_batched(self, audio_duration_seconds: Optional[float]) -> bool:
+        """決定這個任務走 batched 還是 sequential（僅 GPU 有意義）。
+
+        優先序：
+          1. `WHISPER_BATCHED=false` → 一律 sequential（全域總開關）
+          2. `WHISPER_SEQUENTIAL_MIN_MINUTES <= 0` → 一律 sequential
+          3. 時長 >= 門檻 → sequential（長音檔會觸發 batched 崩壞，見 issue #374）
+          4. 拿不到時長 → 維持現狀（batched），不因為缺資料就整體變慢
+        決策一律記 `whisper.route`，事後查行為不必猜。
+        """
+        if not _USE_BATCHED:
+            reason = "global_switch_off"
+            batched = False
+        elif _SEQUENTIAL_MIN_MINUTES <= 0:
+            reason = "threshold_zero_forces_sequential"
+            batched = False
+        elif audio_duration_seconds is None or audio_duration_seconds <= 0:
+            reason = "duration_unknown_keep_batched"
+            batched = True
+        elif audio_duration_seconds / 60.0 >= _SEQUENTIAL_MIN_MINUTES:
+            reason = "long_audio"
+            batched = False
+        else:
+            reason = "short_audio"
+            batched = True
+
+        log.info(
+            "whisper.route",
+            path="batched" if batched else "sequential",
+            reason=reason,
+            audio_duration_seconds=audio_duration_seconds,
+            threshold_minutes=_SEQUENTIAL_MIN_MINUTES,
+            global_batched_enabled=_USE_BATCHED,
+        )
+        return batched
 
     def _has_gpu(self) -> bool:
         """偵測是否有可用 GPU，決定走 batched(GPU)或平行多進程(CPU)。"""
@@ -819,6 +870,7 @@ class WhisperProcessor:
         chunk_duration_ms: int = 1500000,  # 25 分鐘
         language: Optional[str] = None,
         progress_callback: Optional[callable] = None,
+        audio_duration_seconds: Optional[float] = None,
     ) -> Tuple[str, List[Dict], str]:
         """長音檔轉錄。GPU 走整檔 batched、CPU 走多進程平行，由 device 自動決定。
 
@@ -833,6 +885,7 @@ class WhisperProcessor:
             audio_path = self._ensure_valid_audio(audio_path)
             segments_list, detected_language = self._transcribe_with_timestamps(
                 audio_path, language, progress_callback=progress_callback,
+                audio_duration_seconds=audio_duration_seconds,
             )
             # segments 在 `_transcribe_with_timestamps` 內已過保險網，
             # 這裡組 full_text 自然吃到清理後的結果
@@ -1240,6 +1293,7 @@ class WhisperProcessor:
         audio_path: Path,
         language: Optional[str] = None,
         progress_callback: Optional[callable] = None,
+        audio_duration_seconds: Optional[float] = None,
     ) -> Tuple[List[Dict], str]:
         """轉錄音檔並返回帶時間戳的 segments
 
@@ -1268,7 +1322,10 @@ class WhisperProcessor:
             word_timestamps=True,
             hallucination_silence_threshold=2.0,
         )
-        if self._has_gpu() and _USE_BATCHED:
+        use_batched = self._has_gpu() and self._should_use_batched(
+            audio_duration_seconds
+        )
+        if use_batched:
             # GPU + batched：把 VAD 視窗批次餵 GPU，吞吐高；但只轉 VAD 區段、單一溫度無
             # fallback → 困難音段(低音量/雜訊)可能整段掉。WHISPER_BATCHED=false 改走下面
             # sequential（model.transcribe 連續解 + 溫度 fallback，覆蓋率高但較慢）。
@@ -1323,9 +1380,8 @@ class WhisperProcessor:
         # `transcribe()`（chunk_audio=false，API 可直接指定）、`transcribe_in_chunks`
         # 的 GPU 分支、以及 CPU 平行路徑裡「音檔短於一個 chunk」的直轉子路徑。
         # 三者的 full_text 都是從本函數回傳的 segments 組出來的，所以清理後自動一致。
-        batched_used = self._has_gpu() and _USE_BATCHED
         segments_list = self._sanitize_segments(
-            segments_list, path="gpu_batched" if batched_used else "sequential"
+            segments_list, path="gpu_batched" if use_batched else "sequential"
         )
         return segments_list, detected_language
 

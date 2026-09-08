@@ -362,12 +362,24 @@ class TranscriptionOrchestrator:
                     message=f"轉錄中（{int(elapsed_s)}s / {int(total_s)}s）...",
                 )
 
+        # 音檔時長供 batched/sequential 路由（issue #374：長音檔走 sequential）。
+        # 唯一來源是 intake 階段就寫好的 stats.audio_duration_seconds，
+        # 刻意不再 probe 一次音檔；拿不到就傳 None，由 whisper 端維持現狀。
+        task = self._get_task(task_id)
+        audio_duration_seconds = None
+        if task:
+            audio_duration_seconds = (task.get("stats") or {}).get(
+                "audio_duration_seconds"
+            )
+
         if use_chunking:
             return self.whisper.transcribe_in_chunks(
-                mp3_path, language=language, progress_callback=_on_progress
+                mp3_path, language=language, progress_callback=_on_progress,
+                audio_duration_seconds=audio_duration_seconds,
             )
         return self.whisper.transcribe(
-            mp3_path, language=language, progress_callback=_on_progress
+            mp3_path, language=language, progress_callback=_on_progress,
+            audio_duration_seconds=audio_duration_seconds,
         )
 
     def _run_diarization(self, wav_path: Path, max_speakers: Optional[int]):
