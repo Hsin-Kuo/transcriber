@@ -68,13 +68,50 @@ _SPEAKER_LABEL_SEARCH_RE = re.compile(SPEAKER_LABEL_PATTERN, re.IGNORECASE)
 # 對策：計數只當估計值，再吸附到 LLM 自己給的錨點（空行 > 句末標點）。
 _BLANK_LINE_RE = re.compile(r"\n[ \t]*\n")
 _SENTENCE_END_CHARS = "。？！…；.?!;"
+
+
+def _is_ambiguous_period(text: str, idx: int) -> bool:
+    """`.` 是否其實不是句末（小數點 3.5、縮寫 e.g.）。
+
+    規則與 `text_utils.strip_subtitle_punctuation`（該檔 :106）一致：
+    數字-.-數字 或 字母-.-字母 都不算句末。刻意不重構那支函數以免動到字幕行為，
+    但規則必須一樣，否則 `'The rate was 3.5'` 會被當成兩句、數字被下一位講者偷走。
+    """
+    if text[idx] != ".":
+        return False
+    prev_ch = text[idx - 1] if idx > 0 else ""
+    next_ch = text[idx + 1] if idx + 1 < len(text) else ""
+    return (prev_ch.isdigit() and next_ch.isdigit()) or (
+        prev_ch.isalpha() and next_ch.isalpha()
+    )
+
+
+def _advance_past_trailing(text: str, pos: int) -> int:
+    """把位置推過緊接的收尾標點/空白，但遇到開口標點就停。
+
+    錨點與估計點都要套這一步：句末錨點可能落在 `。` 與 `」` 之間，
+    不推過去的話收尾引號會懸掛到下一輪開頭（`[SPEAKER_01] 」下一位…`）。
+    開口標點要留給下一段（那是下一位語者的開頭引號）。
+    """
+    while (
+        pos < len(text)
+        and not is_content_char(text[pos])
+        and not is_opening_punct(text[pos])
+    ):
+        pos += 1
+    return pos
+
+
 # 吸附窗口 = max(_ANCHOR_WINDOW_MIN, 片段長度 × _ANCHOR_WINDOW_RATIO)。
 # 選值依據（e2e 重播 245 輪次、量測「輪次結尾落在句中」的比率）：
-#   0.06/8 → 22.4% ; 0.10/12 → 9.8% ; 0.15/16 → 4.9% ; 0.20/20 → 3.3% ; 0.30/30 → 3.3%
-# 取 0.15/16——曲線的膝點，剛好打到真實資料的 4.9% 基線。不取 0.20+ 的平台區：
-# 窗口越寬，切點能被拉離字元估計值越遠，真實資料上錨點型態更雜時誤吸附的代價越大。
-_ANCHOR_WINDOW_RATIO = 0.15
-_ANCHOR_WINDOW_MIN = 16
+#   0.10/12 → 13.5% ; 0.20/20 → 3.3% ; 0.25/24 → 3.3% ; 0.35/32 → 3.3%
+#   0.15/16 → 6.1%
+# 取 0.20/20——曲線膝點兼平台起點（再放寬沒有增益）。原本取 0.15/16，但 code
+# review 修復（錨點推過收尾標點、排除小數點、非末段切點保留餘量）改變了錨點位置，
+# 膝點隨之右移，重跑敏感度曲線後改用 0.20/20。不再往 0.25+ 放寬：窗口越寬，
+# 切點能被拉離字元估計值越遠，真實資料錨點型態更雜時誤吸附的代價越大。
+_ANCHOR_WINDOW_RATIO = 0.20
+_ANCHOR_WINDOW_MIN = 20
 
 # 輪次 body 內的換行（含上游 segments 自帶的）：`\n\n` 從此專職輪次分隔符，
 # body 內部一律收掉，否則前端一切分就多出無標籤的漂浮段落。
@@ -172,7 +209,7 @@ class PunctuationProcessor:
         標點處理輸出最多比輸入長 20-30%，留 buffer 後 cap 在 60000。
         """
         char_count = len(input_text)
-        if language in ("zh", "zh-TW", "zh-CN", "ja", "ko"):
+        if language in _NO_SPACE_LANGUAGES:
             estimated = int(char_count * 1.6) + 500
         else:
             estimated = int(char_count * 0.5) + 500
@@ -437,7 +474,7 @@ class PunctuationProcessor:
         """決定分段大小（字元數）。原本內嵌在 `_punctuate_with_gemini`，抽出供兩條路徑共用。"""
         if chunk_size is not None:
             return chunk_size
-        if language in ("zh", "zh-TW", "zh-CN", "ja", "ko"):
+        if language in _NO_SPACE_LANGUAGES:
             return 20000  # 中日韓：每字約 1-1.5 tokens，需較小 chunk
         return 60000  # 英文等拉丁語系：每字元約 0.3 tokens
 
@@ -587,10 +624,18 @@ class PunctuationProcessor:
 
         # 錨點：LLM 自己給的空行 > 句末標點。位置一律取「錨點之後」，
         # 讓空行/句號歸前一片段。
-        blank_anchors = [m.end() for m in _BLANK_LINE_RE.finditer(output)]
-        sentence_anchors = [
-            i + 1 for i, ch in enumerate(output) if ch in _SENTENCE_END_CHARS
-        ]
+        # 錨點一律先推過尾隨的收尾標點（`。」` 的 `」` 要跟著前一段走），
+        # 並排除小數點/縮寫裡的 `.`。sorted(set(...)) 是因為推進後可能重合，
+        # 且 `_snap_to_anchor` 用 bisect 需要排序。
+        blank_anchors = sorted({
+            _advance_past_trailing(output, m.end())
+            for m in _BLANK_LINE_RE.finditer(output)
+        })
+        sentence_anchors = sorted({
+            _advance_past_trailing(output, i + 1)
+            for i, ch in enumerate(output)
+            if ch in _SENTENCE_END_CHARS and not _is_ambiguous_period(output, i)
+        })
 
         cut_points: list = []
         prev_cut = 0
@@ -602,22 +647,19 @@ class PunctuationProcessor:
             # 計數估計位置：第 need 個內容字元之後
             est = bisect.bisect_left(prefix, need)
             est = max(0, min(est, len(output)))
-            # 把估計點後緊接的收尾標點/空白歸給前一片段；遇到開口標點就停——
-            # 那是下一位語者的開頭引號，吞過去會讓 A 行尾懸掛「、B 行 」不成對。
-            while (
-                est < len(output)
-                and not is_content_char(output[est])
-                and not is_opening_punct(output[est])
-            ):
-                est += 1
+            # 把估計點後緊接的收尾標點/空白歸給前一片段（與錨點同一套規則）
+            est = _advance_past_trailing(output, est)
 
-            # 吸附窗口按片段長度取比例：越界量實測中位數 11 字、漂浮段落長度
-            # 中位數 29 字，10% 對一般片段（數百至數千字）足以涵蓋，又不會跨到
-            # 隔壁片段；短片段用 12 字下限（仍大於越界中位數）。
+            # 吸附窗口按片段長度取比例（選值依據見 _ANCHOR_WINDOW_RATIO 註解）
             window = max(_ANCHOR_WINDOW_MIN, int(target * _ANCHOR_WINDOW_RATIO))
+            # 非末段的切點必須為「後面每個片段」各留至少 1 個字元，否則吸附可能
+            # 把切點放到 len(output)，末片段變空字串 → 呼叫端把原文塞回去，
+            # 造成同一段文字出現兩次（前一輪已含它的標點版），多輪次還會級聯。
+            remaining_pieces = len(targets) - 1 - len(cut_points)
+            upper = len(output) - remaining_pieces
             cut = self._snap_to_anchor(
                 est, window, blank_anchors, sentence_anchors,
-                lower=prev_cut + 1, upper=len(output),
+                lower=prev_cut + 1, upper=upper,
             )
             cut_points.append(cut)
             prev_cut = cut
@@ -731,14 +773,20 @@ class PunctuationProcessor:
                 )
 
             aligned = self._align_output_to_pieces(result, piece_texts)
-            if aligned is None:
+            alignment_failed = aligned is None
+            if alignment_failed:
                 # 對齊失敗 → 該 chunk 整批回退原文（內容不遺失，只是沒標點）
                 aligned = piece_texts
             # 不用 zip(strict=)：本地 dev venv 仍是 3.9（strict= 需 3.10+），
             # 與 whisper_processor 同慣例改用 enumerate。
             for pos, (turn_idx, original) in enumerate(chunk_pieces):
                 piece_out = aligned[pos] if pos < len(aligned) else ""
-                per_turn[turn_idx].append((original, piece_out or original))
+                if not piece_out and alignment_failed:
+                    piece_out = original
+                # 對齊成功時「空片段」代表這段文字已被併進相鄰片段
+                # （切點覆蓋整份輸出、不重不漏），此時回填原文會讓同一段話
+                # 出現兩次，所以保持空字串。
+                per_turn[turn_idx].append((original, piece_out))
 
             if model_used is None:
                 model_used = chunk_model
@@ -787,10 +835,24 @@ class PunctuationProcessor:
         CJK 直接接續（中日韓不用空白分詞）；拉丁語系換單一空格，否則會把
         前後單字黏成一個字。
         """
-        joiner = "" if language in _NO_SPACE_LANGUAGES else " "
-        body = _TURN_BODY_NEWLINE_RE.sub(joiner, body)
-        if joiner == " ":
-            body = re.sub(r" {2,}", " ", body)
+        default_joiner = "" if language in _NO_SPACE_LANGUAGES else " "
+
+        def _joiner(m):
+            # 邊界感知：中文逐字稿裡夾英文術語時，換行可能正好落在兩個拉丁詞之間
+            # （`'我用 machine \n\n learning 模型'`）。regex 會把周圍空格一起吃掉，
+            # 若照 CJK 規則接空字串就黏成 `machinelearning` 且無法復原。
+            text = m.string
+            prev_ch = text[m.start() - 1] if m.start() > 0 else ""
+            next_ch = text[m.end()] if m.end() < len(text) else ""
+            if (
+                prev_ch.isascii() and prev_ch.isalnum()
+                and next_ch.isascii() and next_ch.isalnum()
+            ):
+                return " "
+            return default_joiner
+
+        body = _TURN_BODY_NEWLINE_RE.sub(_joiner, body)
+        body = re.sub(r" {2,}", " ", body)
         return body.strip()
 
     @staticmethod

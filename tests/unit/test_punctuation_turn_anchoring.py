@@ -221,6 +221,111 @@ def test_median_overshoot_scenario_is_corrected():
     assert "\n" not in aligned[0]
 
 
+# ── code review 回歸測試 ─────────────────────────────────────────────────
+
+def test_non_final_cut_never_lands_at_end_of_output():
+    """review #1：吸附把切點放到 len(output) → 末片段空字串 → 呼叫端回填原文
+    → 同一段文字出現兩次。非末段切點必須為後續片段各留至少一個字元。
+    """
+    proc = _proc()
+    # 短的末輪次被 LLM 併進前一句，句末錨點正好在字串結尾且落在窗口內
+    pieces = ["這是第一位講者講的一段話內容", "好"]
+    output = "這是第一位講者講的一段話內容，好。"
+
+    aligned = proc._align_output_to_pieces(output, pieces)
+
+    assert aligned is not None
+    assert all(p for p in aligned), f"不得有空片段: {aligned}"
+    # 內容不得重複出現
+    assert aligned[0].count("這是第一位講者") == 1
+    assert "這是第一位講者" not in aligned[1]
+
+
+def test_no_content_duplication_end_to_end(monkeypatch):
+    """review #1 端到端：確認輸出裡沒有同一段文字出現兩次。"""
+    proc = _proc()
+    monkeypatch.setattr(
+        proc, "_punctuate_chunk",
+        _fake(lambda t: t.replace("\n\n", "，") + "。"),  # LLM 把短末輪次併進前句
+    )
+
+    out, _, _ = proc.process(
+        "[SPEAKER_00] 這是第一位講者講的一段話內容\n\n[SPEAKER_01] 好",
+        provider="gemini", language="zh",
+    )
+
+    assert out.count("這是第一位講者講的一段話內容") == 1, f"內容重複: {out!r}"
+    assert out.count("[SPEAKER_00]") == 1
+    assert out.count("[SPEAKER_01]") == 1
+
+
+def test_multi_piece_cuts_reserve_room_for_every_piece():
+    """review #1 級聯情境：多輪次時後續切點不得全被 clamp 到結尾。"""
+    proc = _proc()
+    pieces = ["甲" * 12, "乙", "丙", "丁"]
+    output = "甲甲甲甲甲甲甲甲甲甲甲甲，乙丙丁。"
+
+    aligned = proc._align_output_to_pieces(output, pieces)
+
+    assert aligned is not None
+    assert all(p for p in aligned), f"不得有空片段: {aligned}"
+    assert len(aligned) == 4
+
+
+def test_cjk_body_keeps_space_between_embedded_latin_words():
+    """review #2：中文逐字稿夾英文術語，換行落在兩個拉丁詞之間不得黏死。"""
+    proc = _proc()
+
+    assert proc._normalize_turn_body("我用 machine \n\n learning 模型", "zh") == (
+        "我用 machine learning 模型"
+    )
+    # 純中文仍然直接接續（不多出空格）
+    assert proc._normalize_turn_body("我說\n\n他也說", "zh") == "我說他也說"
+    # 中文與拉丁交界不補空格（沿用既有 CJK 慣例）
+    assert proc._normalize_turn_body("模型\n\nlearning", "zh") == "模型learning"
+
+
+def test_closing_quote_stays_with_previous_turn():
+    """review #3：句末錨點落在 。 與 」 之間 → 收尾引號不得懸掛到下一輪開頭。"""
+    proc = _proc()
+    pieces = ["甲甲甲甲甲", "乙乙乙乙乙"]
+    output = "他說「甲甲甲甲甲。」乙乙乙乙乙。"
+
+    aligned = proc._align_output_to_pieces(output, pieces)
+
+    assert aligned[0].endswith("」"), f"收尾引號應跟著前一段: {aligned[0]!r}"
+    assert not aligned[1].startswith("」")
+    assert aligned[1].startswith("乙")
+
+
+def test_ambiguous_period_is_not_an_anchor():
+    """review #4：小數點/縮寫裡的 `.` 不得當句末錨點。"""
+    import src.services.utils.punctuation_processor as pp
+
+    assert pp._is_ambiguous_period("3.5", 1) is True
+    assert pp._is_ambiguous_period("e.g", 1) is True
+    assert pp._is_ambiguous_period("end. Next", 3) is False
+
+    proc = _proc()
+    pieces = ["The rate was 3.5 and we expect more growth", "Yes I agree with that point"]
+    output = "The rate was 3.5 and we expect more growth. Yes, I agree with that point."
+
+    aligned = proc._align_output_to_pieces(output, pieces)
+
+    assert "3.5" in aligned[0], f"小數不得被切開: {aligned[0]!r}"
+    assert aligned[1].startswith("Yes"), f"下一輪開頭被偷字: {aligned[1]!r}"
+
+
+def test_cjk_language_tuple_is_shared():
+    """review #5：CJK 語言 tuple 收斂成單一常數。"""
+    import src.services.utils.punctuation_processor as pp
+
+    src = open(pp.__file__, encoding="utf-8").read()
+    assert src.count('("zh", "zh-TW", "zh-CN", "ja", "ko")') == 1, (
+        "5 元素 CJK tuple 應只在 _NO_SPACE_LANGUAGES 定義一次"
+    )
+
+
 def test_no_anchor_at_all_still_returns_full_coverage():
     """完全沒有錨點（無標點無空行）→ 回退計數位置，內容不遺失。"""
     proc = _proc()
