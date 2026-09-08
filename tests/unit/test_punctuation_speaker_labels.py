@@ -174,8 +174,13 @@ def test_parse_speaker_turns_extracts_label_and_body():
     assert turns == [("[SPEAKER_00]", "甲說的話"), ("[SPEAKER_01]", "乙說的話")]
 
 
-def test_mixed_labelled_and_unlabelled_turns(monkeypatch):
-    """部分行沒有標籤（防禦性情境）→ 有標籤的照貼，無標籤的不硬加。"""
+def test_unlabelled_part_merges_into_previous_turn(monkeypatch):
+    """無標籤片段併回前一輪次（不再自成一段）。
+
+    行為變更（斷句破碎修復）：上游 segments 文字本身就可能帶 `\\n\\n`
+    （實測 237/2443 段），照空行硬切會把一個輪次拆成「有標籤前半 + 無標籤後半」，
+    後半在輸出就是使用者看到的無標籤漂浮段落。改為依標籤切分並把續段併回。
+    """
     proc = _proc()
     monkeypatch.setattr(proc, "_punctuate_chunk", _fake_chunk())
 
@@ -183,10 +188,25 @@ def test_mixed_labelled_and_unlabelled_turns(monkeypatch):
     out, _, _ = proc.process(text, provider="gemini", language="zh")
 
     lines = out.split("\n\n")
-    assert len(lines) == 3
-    assert lines[0].startswith("[SPEAKER_00]")
-    assert not lines[1].startswith("[")
-    assert lines[2].startswith("[SPEAKER_02]")
+    assert len(lines) == 2, f"續段應併回前一輪次，實際 {lines}"
+    assert lines[0] == "[SPEAKER_00] 有標籤沒有標籤的一行"
+    assert lines[1].startswith("[SPEAKER_02]")
+    assert all(line.startswith("[SPEAKER") for line in lines), "不得有漂浮段落"
+
+
+def test_leading_unlabelled_part_is_kept(monkeypatch):
+    """開頭就無標籤（沒有前一輪可併）→ 保留成 label=None 輪次。"""
+    proc = _proc()
+    monkeypatch.setattr(proc, "_punctuate_chunk", _fake_chunk())
+
+    out, _, _ = proc.process(
+        "開頭沒有標籤\n\n[SPEAKER_01] 後面有標籤", provider="gemini", language="zh"
+    )
+
+    lines = out.split("\n\n")
+    assert len(lines) == 2
+    assert lines[0] == "開頭沒有標籤"
+    assert lines[1].startswith("[SPEAKER_01]")
 
 
 def test_many_speakers_all_preserved(monkeypatch):
