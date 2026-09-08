@@ -215,6 +215,22 @@ def _resegment_by_words(segments: List[Dict]) -> List[Dict]:
     return out
 
 
+_CHUNK_INDEX_RE = re.compile(r"_chunk_(\d+)\.[A-Za-z0-9]+$")
+
+
+def _parse_chunk_index(chunk_path: str) -> int:
+    r"""從 temp chunk 檔名尾端解析 chunk index（`_temp_<stem>_chunk_N.mp3`）。
+
+    必須錨定尾端：使用者上傳的檔名可能自己就含 `chunk_3`，而 CPU/本地路徑會保留
+    原始檔名 → 未錨定的 `chunk_(\d+)` 會對所有 temp chunk 解析出同一個 index，
+    造成 results dict 鍵碰撞（任務失敗）或 offset 套到錯的 chunk 上。
+    """
+    m = _CHUNK_INDEX_RE.search(chunk_path)
+    if not m:
+        raise ValueError(f"無法從檔名解析 chunk index: {chunk_path}")
+    return int(m.group(1))
+
+
 def _apply_time_offset(seg: Dict, offset: float) -> Dict:
     """回傳平移後的 segment；若含 words，每個 word 的 start/end 同步 +offset。"""
     shifted = {
@@ -663,7 +679,10 @@ def transcribe_chunk_worker(
     log.debug("whisper.worker.started", chunk_path=chunk_path)
 
     # 從文件名提取 chunk_idx（例如：_temp_input_chunk_3.wav → 3）
-    chunk_idx = int(re.search(r'chunk_(\d+)', chunk_path).group(1))
+    # 錨定尾端 `_chunk_N.mp3`：舊版 `chunk_(\d+)` 取第一個匹配，
+    # 使用者檔名若含 `chunk_3`（CPU/本地路徑保留原始檔名）會讓所有 temp chunk
+    # 解析成同一個 index → results dict 鍵碰撞（任務失敗）或 offset 套錯。
+    chunk_idx = _parse_chunk_index(chunk_path)
 
     log.debug("whisper.worker.model.loading", chunk_idx=chunk_idx, model_name=model_name)
 
@@ -806,18 +825,41 @@ class WhisperProcessor:
                 audio_path, language, progress_callback=progress_callback,
             )
             full_text = " ".join(seg["text"] for seg in segments_list)
+            self._log_timestamp_collapse(segments_list, path="gpu_batched")
             return full_text, segments_list, detected_language
         # 平行版 callback 是 (completed, total[, processing])；統一收斂成 (done, total)
         cb = None
         if progress_callback is not None:
             def cb(completed, total, *_extra):
                 progress_callback(completed, total)
-        return self.transcribe_in_chunks_parallel(
+        full_text, segments, detected_language = self.transcribe_in_chunks_parallel(
             audio_path,
             chunk_duration_ms=chunk_duration_ms,
             language=language,
             progress_callback=cb,
         )
+        self._log_timestamp_collapse(segments, path="cpu_parallel")
+        return full_text, segments, detected_language
+
+    def _log_timestamp_collapse(self, segments: List[Dict], path: str) -> None:
+        """時間戳塌陷觀測點（issue #374）。只告警、不中斷任務。
+
+        掛在 `transcribe_in_chunks` 這個單一入口，**三條路徑都覆蓋**：
+        GPU batched、CPU 多進程平行、以及短音檔的單 chunk 直轉。
+        舊版只掛在 CPU 多進程的合併處——而 prod/staging 的 GPU worker 走的是
+        batched 路徑（`_has_gpu()` 提前 return），觀測點在生產永遠不會執行。
+        """
+        try:
+            collapse = self._detect_timestamp_collapse(segments)
+        except Exception as e:  # 觀測失敗絕不影響轉錄
+            log.debug("whisper.segments.collapse_check_failed", error=str(e))
+            return
+        if collapse:
+            log.warning(
+                "whisper.segments.timestamp_collapse",
+                transcribe_path=path,
+                **collapse,
+            )
 
     def transcribe_in_chunks_parallel(
         self,
@@ -892,7 +934,7 @@ class WhisperProcessor:
                     1,  # 優化後的 num_workers（避免進程內過度並行）
                     language
                 )
-                chunk_idx = int(re.search(r'chunk_(\d+)', str(chunk_path)).group(1))
+                chunk_idx = _parse_chunk_index(str(chunk_path))
                 future_to_idx[future] = chunk_idx
 
             log.debug("transcribe.parallel.tasks.submitted", num_chunks=num_chunks)
@@ -990,6 +1032,8 @@ class WhisperProcessor:
 
         full_text = " ".join(all_text_parts)
         detected_language = sorted_results[0][2] if sorted_results else None
+
+        # 時間戳塌陷觀測點已上移到 `transcribe_in_chunks`（單點覆蓋三條路徑）
 
         log.info(
             "transcribe.parallel.completed",
@@ -1183,10 +1227,15 @@ class WhisperProcessor:
         search_duration_s = (search_range_ms * 2) / 1000.0
 
         try:
+            # `-ss` / `-t` 放在 `-i` **之前**（input seeking）：ffmpeg 直接跳到該位置，
+            # 只解碼窗口內的音訊。放在 `-i` 之後（output seeking）會從 t=0 解碼再丟棄，
+            # 規劃 N 個切點就得解碼 O(N²) 的音訊量（90 分鐘檔累計約 360 分鐘），
+            # 長檔後段還會撞上 timeout=30 被吞掉、靜音調整靜默停用。
             result = subprocess.run([
-                'ffmpeg', '-i', str(audio_path),
+                'ffmpeg',
                 '-ss', str(search_start_s),
                 '-t', str(search_duration_s),
+                '-i', str(audio_path),
                 '-af', f'silencedetect=noise={noise_db}dB:d={min_silence_duration}',
                 '-f', 'null', '-'
             ], capture_output=True, text=True, timeout=30)
@@ -1198,10 +1247,28 @@ class WhisperProcessor:
             silence_starts = re.findall(r'silence_start:\s*([\d.]+)', stderr)
             silence_ends = re.findall(r'silence_end:\s*([\d.]+)', stderr)
 
+            window_start_ms = int(search_start_s * 1000)
+            window_end_ms = window_start_ms + int(search_duration_s * 1000)
+
             for i in range(min(len(silence_starts), len(silence_ends))):
-                # ffmpeg 輸出的時間是相對於 search_start_s 的
+                # input seeking 下 silencedetect 報的是**相對於 -ss 的時間**，
+                # 故需加回 search_start_s 換成絕對時間。
+                # 這正是原 bug（issue #374）的鏡像，務必看實測數據而非直覺——
+                # 實測（ffmpeg 7；檔案 164s、靜音 100~104s、target=100s、窗口起點 70s）：
+                #   `-ss 70 -t 60 -i f` → silence_start: 29.999（相對）← 現在用這個
+                #   `-i f -ss 70 -t 60` → silence_start: 99.999（絕對）← 舊版用這個
+                # 舊版用絕對值卻又加了一次 search_start_s，切點才會加倍。
                 abs_start_ms = int((float(silence_starts[i]) + search_start_s) * 1000)
                 abs_end_ms = int((float(silence_ends[i]) + search_start_s) * 1000)
+                # 完全落在窗口外 = 解析出了問題（原 bug 的形態），整個候選丟掉，
+                # 不要夾進來污染結果；下面的 out-of-range guard 留作最後防線。
+                if abs_end_ms < window_start_ms or abs_start_ms > window_end_ms:
+                    continue
+                # 與窗口有交集但延伸到窗口之外（例如 65 秒中場休息只被截到一半）：
+                # 夾回窗口再取中點——直接取中點會落在窗口外而被 guard 誤拒，
+                # 切點就會退回語音中間。
+                abs_start_ms = max(abs_start_ms, window_start_ms)
+                abs_end_ms = min(abs_end_ms, window_end_ms)
                 mid_ms = (abs_start_ms + abs_end_ms) // 2
                 silences.append(mid_ms)
 
@@ -1210,6 +1277,19 @@ class WhisperProcessor:
 
             # 選離目標切點最近的靜音中點
             best = min(silences, key=lambda s: abs(s - target_ms))
+
+            # 防禦：結果必須落在搜尋窗口內。窗口外代表解析出了問題（例如上面那個
+            # 絕對/相對時間搞錯的 bug），寧可退回原始目標切點也不要用壞值——
+            # 壞切點會讓 chunk 長度失控，進而觸發 whisper 時間戳崩壞。
+            if abs(best - target_ms) > search_range_ms:
+                log.warning(
+                    "whisper.split.silence_out_of_range",
+                    target_ms=target_ms,
+                    best_ms=best,
+                    search_range_ms=search_range_ms,
+                )
+                return target_ms
+
             log.debug(
                 "whisper.split.cutpoint_adjusted",
                 target_minutes=round(target_ms / 1000 / 60, 1),
@@ -1220,6 +1300,132 @@ class WhisperProcessor:
         except Exception as e:
             log.warning("whisper.split.silence_detect_failed", error=str(e))
             return target_ms
+
+    @staticmethod
+    def _plan_cut_points(
+        total_duration_ms: int,
+        chunk_duration_ms: int,
+        find_silence,
+    ) -> List[int]:
+        """規劃分段切點（不含 0 與 total_duration_ms）。
+
+        `find_silence(target_ms) -> adjusted_ms` 由呼叫端注入（正式路徑是靜音偵測）。
+
+        不變式（issue #374 的教訓——壞切點會讓 chunk 長度失控，進而觸發
+        faster-whisper 在超長輸入上的時間戳崩壞，整份逐字稿被重複輸出一次）：
+          1. 嚴格遞增
+          2. 與前一個切點至少相隔 chunk_duration_ms 的 20%
+          3. 與前一個切點至多相隔 chunk_duration_ms 的 150%
+          4. 嚴格小於 total_duration_ms
+        第 3 條是關鍵：真正造成 #374 傷害的是**超長 chunk**（切點加倍後變成
+        30~39 分鐘），faster-whisper 在那種長度上時間戳對齊會崩壞。切點只要
+        讓 chunk 長度失控就退回原始目標切點；連目標切點都不合法就停止繼續切
+        （寧可少切一刀，也不要產出長度失控或負長度的 chunk）。
+        """
+        cut_points: List[int] = []
+        min_gap_ms = max(1, int(chunk_duration_ms * 0.2))
+        max_gap_ms = max(min_gap_ms + 1, int(chunk_duration_ms * 1.5))
+        pos = chunk_duration_ms
+
+        while pos < total_duration_ms:
+            adjusted = find_silence(pos)
+            prev = cut_points[-1] if cut_points else 0
+            lower = prev + min_gap_ms
+            upper = prev + max_gap_ms
+
+            if not (lower <= adjusted <= upper) or adjusted >= total_duration_ms:
+                log.warning(
+                    "whisper.split.cutpoint_rejected",
+                    target_ms=pos,
+                    adjusted_ms=adjusted,
+                    lower_bound_ms=lower,
+                    upper_bound_ms=upper,
+                    total_duration_ms=total_duration_ms,
+                )
+                adjusted = pos  # 退回未經靜音調整的目標切點
+
+            # 這裡不需要再檢查一次：退回值 pos 必然合法——
+            # `pos < total_duration_ms` 是迴圈條件，而 pos = prev + chunk_duration_ms
+            # ≥ prev + min_gap_ms = lower（min_gap 是 chunk 的 20%）。
+            # 舊版在此有一個 `cutpoint_abandoned` 分支，算術上永不觸發，已移除。
+            cut_points.append(adjusted)
+            pos = adjusted + chunk_duration_ms
+
+        # 短尾合併：最後一段太短時併入前一段。**必須在這裡做並重新驗證上限**——
+        # 舊版放在 `_plan_cut_points` 之外、pop 完不再檢查，於是繞過 1.5x 上限：
+        # 生產設定 chunk_duration_ms=1,500,000（25 分鐘）下，54.9 分鐘音檔
+        # pop 後最終 chunk 會變成 ~29.9 分鐘，正好落在 #374 的崩壞區間。
+        if cut_points:
+            last_segment_ms = total_duration_ms - cut_points[-1]
+            if last_segment_ms < min_gap_ms:
+                merged_len = total_duration_ms - (
+                    cut_points[-2] if len(cut_points) >= 2 else 0
+                )
+                if merged_len <= max_gap_ms:
+                    removed = cut_points.pop()
+                    log.debug(
+                        "whisper.split.short_tail_merged",
+                        last_segment_minutes=round(last_segment_ms / 1000 / 60, 1),
+                        removed_cutpoint_minutes=round(removed / 1000 / 60, 1),
+                    )
+                else:
+                    # 併了會超過上限 → 寧可留一段稍短的尾巴
+                    log.warning(
+                        "whisper.split.short_tail_kept",
+                        last_segment_ms=last_segment_ms,
+                        merged_len_ms=merged_len,
+                        max_gap_ms=max_gap_ms,
+                    )
+
+        return cut_points
+
+    @staticmethod
+    def _detect_timestamp_collapse(
+        segments: List[Dict],
+        max_per_second: int = 40,
+        max_zero_duration: int = 40,
+    ) -> Optional[Dict[str, Any]]:
+        """偵測「一大堆 segment 時間戳塌在同一秒」的病徵（純觀測，不改資料）。
+
+        issue #374 的病徵：309 個 segment 全塌在 0.25 秒內、其中 112 個長度為 0，
+        文字則是整份逐字稿的重複。這是 whisper 在超長 chunk 上時間戳對齊失敗的
+        結果。留一個觀測點，之後同類問題能直接在 log 看到，而不必再撈 DB 反推。
+
+        兩個獨立訊號，任一超標即回報：
+          1. **滑動** 1 秒窗口內的 segment 數（不用整數秒分桶——塌陷群跨秒邊界時
+             分桶會把計數對半砍，剛好可能低於門檻而漏報）
+          2. 零長度（start == end）segment 總數（#374 實例有 112 個）
+        回傳診斷 dict 或 None。**刻意只告警不中斷任務。**
+        """
+        if not segments:
+            return None
+
+        starts = sorted(float(seg.get("start") or 0) for seg in segments)
+        zero_duration = sum(
+            1 for seg in segments
+            if abs(float(seg.get("end") or 0) - float(seg.get("start") or 0)) < 1e-6
+        )
+
+        # 滑動窗口：右端逐一前進，左端收縮到窗口內
+        worst_count = 0
+        worst_at = 0.0
+        left = 0
+        for right in range(len(starts)):
+            while starts[right] - starts[left] > 1.0:
+                left += 1
+            count = right - left + 1
+            if count > worst_count:
+                worst_count = count
+                worst_at = starts[left]
+
+        if worst_count > max_per_second or zero_duration > max_zero_duration:
+            return {
+                "window_start": round(worst_at, 3),
+                "segments_in_window": worst_count,
+                "zero_duration_segments": zero_duration,
+                "total_segments": len(segments),
+            }
+        return None
 
     def _split_audio_into_chunks(
         self,
@@ -1244,24 +1450,14 @@ class WhisperProcessor:
         if isinstance(audio_path, str):
             audio_path = Path(audio_path)
 
-        # 1. 計算切點並用靜音偵測調整
-        cut_points = []  # 不含 0 和 total_duration_ms
-        pos = chunk_duration_ms
-        while pos < total_duration_ms:
-            adjusted = self._find_silence_near(audio_path, pos)
-            cut_points.append(adjusted)
-            pos = adjusted + chunk_duration_ms
+        # 1. 計算切點並用靜音偵測調整（切點規劃抽成純函數，便於單元測試）
+        cut_points = self._plan_cut_points(
+            total_duration_ms,
+            chunk_duration_ms,
+            lambda target: self._find_silence_near(audio_path, target),
+        )
 
-        # 2. 短尾合併：最後一段 < 20% 目標長度時，移除最後一個切點
-        if cut_points:
-            last_segment_ms = total_duration_ms - cut_points[-1]
-            if last_segment_ms < chunk_duration_ms * 0.2:
-                removed = cut_points.pop()
-                log.debug(
-                    "whisper.split.short_tail_merged",
-                    last_segment_minutes=round(last_segment_ms / 1000 / 60, 1),
-                    removed_cutpoint_minutes=round(removed / 1000 / 60, 1),
-                )
+        # 2. 短尾合併已移入 `_plan_cut_points`（併完會重新驗證 1.5x 上限）
 
         # 3. 建立分段區間
         boundaries = [0] + cut_points + [total_duration_ms]
