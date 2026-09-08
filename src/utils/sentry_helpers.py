@@ -48,6 +48,27 @@ def _capture_task_exception(task: "asyncio.Task[Any]") -> None:
         logger.warning("sentry.capture_failed", error=str(e))
 
 
+def capture_message(event: str, level: str = "warning", **context: Any) -> None:
+    """把非例外的異常事件送 Sentry（未初始化時為 no-op）。
+
+    包成自家 wrapper 的用途有二：
+    1. 呼叫端不需重複寫 try/except——Sentry 自己壞掉絕不能影響主流程
+    2. 測試 patch 這一支就好，不必去 patch sentry_sdk 內部
+       （金流體檢的教訓：patch 第三方內部的測試很脆）
+    """
+    try:
+        import sentry_sdk
+        with sentry_sdk.push_scope() as scope:
+            for key, value in context.items():
+                scope.set_extra(key, value)
+            scope.set_tag("event", event)
+            sentry_sdk.capture_message(event, level=level)
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.warning("sentry.capture_failed", error=str(e))
+
+
 def create_background_task(
     coro: Coroutine[Any, Any, Any],
     *,

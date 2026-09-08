@@ -338,11 +338,12 @@ def test_collapse_check_covers_gpu_path():
     def fake_log(segments, path):
         seen["path"] = path
         seen["n"] = len(segments)
+        return segments
 
     proc._has_gpu = lambda: True
     proc._ensure_valid_audio = lambda p: p
     proc._transcribe_with_timestamps = lambda *a, **k: (collapsed, "zh")
-    proc._log_timestamp_collapse = fake_log
+    proc._sanitize_segments = fake_log
 
     proc.transcribe_in_chunks("dummy.mp3")
 
@@ -357,9 +358,11 @@ def test_collapse_check_covers_cpu_parallel_path():
 
     proc._has_gpu = lambda: False
     proc.transcribe_in_chunks_parallel = lambda *a, **k: ("t", segs, "zh")
-    proc._log_timestamp_collapse = lambda segments, path: seen.update(
-        path=path, n=len(segments)
-    )
+    def fake_sanitize(segments, path):
+        seen.update(path=path, n=len(segments))
+        return segments
+
+    proc._sanitize_segments = fake_sanitize
 
     text, out, lang = proc.transcribe_in_chunks("dummy.mp3")
 
@@ -375,4 +378,6 @@ def test_collapse_check_never_breaks_transcription():
         raise RuntimeError("detector exploded")
 
     proc._detect_timestamp_collapse = boom
-    proc._log_timestamp_collapse([{"start": 0.0, "end": 1.0}], path="test")  # 不得拋
+    segs = [{"start": 0.0, "end": 1.0}]
+    # 保險網自己壞掉時必須原樣回傳，不得拋、不得吃掉資料
+    assert proc._sanitize_segments(segs, path="test") == segs

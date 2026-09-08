@@ -24,6 +24,7 @@ except ImportError:
     BatchedInferencePipeline = None
 
 from src.utils.logger import get_logger
+from src.utils.sentry_helpers import capture_message
 
 log = get_logger(__name__)
 
@@ -40,6 +41,10 @@ RESEG_MIN_SEGMENT_SEC = float(os.getenv("RESEG_MIN_SEGMENT_SEC", "1.0"))    # �
 # GPU 是否走 BatchedInferencePipeline。預設 true（吞吐高，prod 現狀）。
 # 設 false → GPU 改走 sequential model.transcribe：連續解 + 溫度 fallback，覆蓋率高、
 # 困難音段較不會整段掉，但較慢（無批次平行）。env 可調，方便比較。
+# faster-whisper 的預設 compression_ratio_threshold；batched 路徑不會拿它比對，
+# 我們自己記 log 用（見 _transcribe_with_timestamps）。
+_COMPRESSION_RATIO_THRESHOLD = 2.4
+
 _USE_BATCHED = os.getenv("WHISPER_BATCHED", "true").strip().lower() not in ("false", "0", "no")
 
 
@@ -824,8 +829,9 @@ class WhisperProcessor:
             segments_list, detected_language = self._transcribe_with_timestamps(
                 audio_path, language, progress_callback=progress_callback,
             )
+            # 先清理再組 full_text——順序反了會讓文字保留已被丟棄的壞段
+            segments_list = self._sanitize_segments(segments_list, path="gpu_batched")
             full_text = " ".join(seg["text"] for seg in segments_list)
-            self._log_timestamp_collapse(segments_list, path="gpu_batched")
             return full_text, segments_list, detected_language
         # 平行版 callback 是 (completed, total[, processing])；統一收斂成 (done, total)
         cb = None
@@ -838,28 +844,122 @@ class WhisperProcessor:
             language=language,
             progress_callback=cb,
         )
-        self._log_timestamp_collapse(segments, path="cpu_parallel")
+        # CPU 路徑的 full_text 是各 chunk 的文字串接（不是從 segments 組的），
+        # 這裡刻意不重算：崩壞發生在 GPU batched，動 CPU 的文字組裝只是多餘風險。
+        segments = self._sanitize_segments(segments, path="cpu_parallel")
         return full_text, segments, detected_language
 
-    def _log_timestamp_collapse(self, segments: List[Dict], path: str) -> None:
-        """時間戳塌陷觀測點（issue #374）。只告警、不中斷任務。
+    @staticmethod
+    def _dedupe_collapsed_duplicates(segments: List[Dict], collapse: Dict) -> List[Dict]:
+        """只在偵測到塌陷叢集時，移除叢集內「與正常段逐字相同」的重複段。
 
-        掛在 `transcribe_in_chunks` 這個單一入口，**三條路徑都覆蓋**：
-        GPU batched、CPU 多進程平行、以及短音檔的單 chunk 直轉。
-        舊版只掛在 CPU 多進程的合併處——而 prod/staging 的 GPU worker 走的是
-        batched 路徑（`_has_gpu()` 提前 return），觀測點在生產永遠不會執行。
+        誤刪防護（層層從嚴，寧可漏刪不可誤刪）：
+        1. **沒偵測到塌陷叢集就完全不作用**——正常任務零改動（呼叫端保證）
+        2. 候選僅限「落在塌陷視窗內 **且** 時長 ≤ 0.25 秒」的段。真實對話的
+           「對。」「嗯。」這類短句時長都在 0.3 秒以上，不會成為候選
+        3. 候選還必須「有一個**非候選**的段與它逐字相同」才刪——也就是說
+           正常版本必須確實存在，我們刪掉的只是它的壞副本
+        4. 純文字相同但時間正常的段一律保留，不看重複次數
+
+        #374 實例：309 段塌在 0.25 秒內、其中 112 段零長度、57 條逐字重複。
+        """
+        window_start = collapse["window_start"]
+        window_end = window_start + 1.0
+
+        def is_candidate(seg: Dict) -> bool:
+            start = float(seg.get("start") or 0)
+            end = float(seg.get("end") or 0)
+            return window_start <= start <= window_end and (end - start) <= 0.25
+
+        healthy_texts = {
+            (seg.get("text") or "").strip()
+            for seg in segments
+            if not is_candidate(seg) and (seg.get("text") or "").strip()
+        }
+
+        kept = []
+        removed = 0
+        for seg in segments:
+            text = (seg.get("text") or "").strip()
+            if is_candidate(seg) and text and text in healthy_texts:
+                removed += 1
+                continue
+            kept.append(seg)
+
+        if removed:
+            log.warning(
+                "whisper.segments.collapsed_duplicates_removed",
+                removed=removed,
+                window_start=window_start,
+                remaining=len(kept),
+            )
+        return kept
+
+    @staticmethod
+    def _drop_zero_duration_segments(segments: List[Dict]) -> Tuple[List[Dict], int]:
+        """丟棄 `end <= start` 的 segment（回傳 (保留, 丟棄數)）。
+
+        零長度段是時間戳退化的直接產物（#374 實例 112 個），對下游只有壞處：
+        語者對齊拿它做重疊比例會除到近零、字幕會產出瞬閃 cue。
+        **只丟零長度，不碰任何時間正常的段。**
+        """
+        kept = [
+            seg for seg in segments
+            if float(seg.get("end") or 0) > float(seg.get("start") or 0)
+        ]
+        return kept, len(segments) - len(kept)
+
+    def _sanitize_segments(self, segments: List[Dict], path: str) -> List[Dict]:
+        """batched 崩壞的保險網（issue #374 緩解，非根治）。
+
+        根因在 faster-whisper 1.2.1 的 batched pipeline：`temperature[:1]`
+        （transcribe.py:528）讓溫度回退失效，`compression_ratio_threshold` 雖被算出
+        （:151）卻只在 sequential 的 fallback 路徑比對（:1481），於是 repetition
+        runaway 沒有任何攔截；segment 時間又取自 chunk 內 timestamp token
+        （:1054-1059），token 退化就得到零長度與塌陷視窗。
+        上游無對應 issue、1.2.1 已是最新版（10 個月未發版），故先在出口做保險。
+
+        順序刻意如此：先在原始資料上偵測（丟過再偵測會失真）→ 去重 → 丟零長度。
+        任何一步失敗都直接回傳原始 segments，保險網絕不能反而弄壞轉錄。
         """
         try:
             collapse = self._detect_timestamp_collapse(segments)
-        except Exception as e:  # 觀測失敗絕不影響轉錄
-            log.debug("whisper.segments.collapse_check_failed", error=str(e))
-            return
-        if collapse:
-            log.warning(
-                "whisper.segments.timestamp_collapse",
-                transcribe_path=path,
-                **collapse,
-            )
+            result = segments
+            if collapse:
+                result = self._dedupe_collapsed_duplicates(result, collapse)
+            result, dropped = self._drop_zero_duration_segments(result)
+
+            if dropped:
+                ratio = dropped / max(len(segments), 1)
+                payload = dict(
+                    transcribe_path=path,
+                    dropped=dropped,
+                    total_before=len(segments),
+                    dropped_ratio=round(ratio, 4),
+                )
+                # 比例異常高代表不只是零星退化，值得當成事件看
+                if ratio > 0.05:
+                    log.warning("whisper.segments.zero_duration_dropped", **payload)
+                else:
+                    log.info("whisper.segments.zero_duration_dropped", **payload)
+
+            if collapse:
+                log.warning(
+                    "whisper.segments.timestamp_collapse",
+                    transcribe_path=path,
+                    **collapse,
+                )
+                capture_message(
+                    "whisper.segments.timestamp_collapse",
+                    level="warning",
+                    transcribe_path=path,
+                    segments_after_sanitize=len(result),
+                    **collapse,
+                )
+            return result
+        except Exception as e:
+            log.warning("whisper.segments.sanitize_failed", error=str(e))
+            return segments
 
     def transcribe_in_chunks_parallel(
         self,
@@ -1151,7 +1251,11 @@ class WhisperProcessor:
         total_duration = float(getattr(info, "duration", 0) or 0)
 
         # 字型轉換由呼叫端的清洗步驟統一處理
+        high_compression: List[float] = []
         for segment in segments:
+            ratio = getattr(segment, "compression_ratio", None)
+            if ratio is not None and ratio > _COMPRESSION_RATIO_THRESHOLD:
+                high_compression.append(float(ratio))
             segments_list.append({
                 "start": segment.start,
                 "end": segment.end,
@@ -1164,6 +1268,19 @@ class WhisperProcessor:
                 except Exception as cb_err:
                     # 進度回報不該打斷轉錄本身
                     log.warning("whisper.progress_callback.failed", error=str(cb_err))
+
+        # runaway 解碼的免費訊號（issue #374 驗證計畫 ④）：
+        # batched pipeline 有算 compression_ratio（faster_whisper/transcribe.py:151）
+        # 卻只在 sequential 的 fallback 路徑比對門檻（:1481），等於算了不用。
+        # 這裡把超標的段記下來——repetition runaway 會直接現形。
+        if high_compression:
+            log.warning(
+                "whisper.segments.high_compression_ratio",
+                count=len(high_compression),
+                threshold=_COMPRESSION_RATIO_THRESHOLD,
+                worst=round(max(high_compression), 3),
+                total_segments=len(segments_list),
+            )
 
         # 壓縮重複幻覺 → 丟字幕 boilerplate 幻覺 → 依 word timestamps 重切長段
         segments_list = _collapse_repeated_segments(segments_list)
