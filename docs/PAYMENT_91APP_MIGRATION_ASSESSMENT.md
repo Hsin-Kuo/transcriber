@@ -270,23 +270,17 @@ script-src  (無金流網域)
   "initCardTokenType": "BindingCard",          // ★ 非 RememberCard
   "merchantConsumerId": "<商店會員ID>",         // ★ BindingCard 必填,續扣要用同一個
   "merchantOrderId": "<訂單號,≤50字>",
-  // ⚠️ 首期 amount 規則**兩環境互相矛盾**（2026-09-01/02 實測）：
-  //   正式=必須 0（400 SubscriptionFirstPaymentAmountNotAllowed）；
-  //   sandbox=必須 >0（400 AmountMustGreaterThanZero）。
-  //   → payments91_service 依 env 切換。實際首期扣款額（兩環境皆然）=
-  //   subscriptionProductInfo.amount，授權成功後隨即扣款。續扣 amount 照常帶實際金額。
-  "paymentMethods": [{"payType": "CreditCard", "amount": 0}],  // ←正式；sandbox 帶實際金額
-  "productType": "Subscription",
-  "extensionInfo": {
-    "subscriptionType": "First",
-    // ⚠️ 正式環境必填、sandbox 不驗（2026-09-01 go-live 首筆實測 400
-    //   SubscriptionProductInfoRequired 才炸出）。priceName(≤100)/amount 必填；
-    //   recurring.type=Day|Week|Month|Year、interval、periods(未帶=無限期) 選填。
-    "subscriptionProductInfo": {
-      "priceName": "...", "amount": 100,
-      "recurring": {"type": "Month", "interval": 1}
-    }
-  },
+  // 2026-09-10 起（spi 非必填 + productType=Normal）：首期 amount 一律帶實際金額，
+  // 舊「正式=0/sandbox=>0 兩環境矛盾」隨 spi 移除一併消滅（詳下方 productType 註解）。
+  "paymentMethods": [{"payType": "CreditCard", "amount": 299}],
+  // ★ 2026-09-10 定案：productType=Normal、**不帶 extensionInfo**。
+  //   背景：帶 subscriptionProductInfo 的 First 交易會在 91APP 建「gateway 自動扣款
+  //   排程」→ 與我方自管續扣（renewal_service）重複扣款。91APP 已把商店設定改為
+  //   spi 非必填 + 終止首筆排程，並書面確認三點：① cardToken 扣款免 3D 不依賴
+  //   Subscription 標記（Normal 即可，subscriptionType 直接移除）② 首期 amount 帶
+  //   實際金額（不再要求 0，兩環境矛盾一併消滅）③ 自動請款不受影響。
+  //   歷史踩坑（spi 必填/首期金額矛盾/periods 是 spi 頂層欄位）留存於 git log。
+  "productType": "Normal",
   "currency": "TWD",
   "products": [{"name": "...", "totalAmount": 100, "productType": "Subscription"}],
   "cardHolder": {"name": "...", "phoneNumber": "+886...", "email": "..."},
