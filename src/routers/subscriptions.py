@@ -497,9 +497,6 @@ async def pay(
     holder_name = (full_user or {}).get("name")
 
     svc = get_payments91_service()
-    # subscriptionProductInfo（91APP 正式環境必填，sandbox 不驗）：訂閱單帶實際週期、
-    # 無限期；加購（extra_quota，一次性）帶 periods=1 表達單期扣款。
-    is_one_time = order.get("type") == "extra_quota"
     resp = await svc.create_first_payment(
         txn_token=request.txn_token,
         order_no=order["merchant_order_no"],
@@ -510,8 +507,6 @@ async def pay(
         prod_name=f"SoundLite {str(order.get('tier', '')).capitalize()} 方案",
         holder_phone=buyer_phone,
         holder_email=holder_email,
-        billing_cycle=order.get("billing_cycle") or "monthly",
-        periods=1 if is_one_time else None,
         holder_name=holder_name,
     )
 

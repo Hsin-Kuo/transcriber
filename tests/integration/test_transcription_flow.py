@@ -69,7 +69,8 @@ pytestmark = pytest.mark.skipif(
 class FakeWhisper:
     """罐頭轉錄結果——不碰真 Whisper。"""
 
-    def transcribe(self, mp3_path, language=None, progress_callback=None):
+    def transcribe(self, mp3_path, language=None, progress_callback=None,
+                   audio_duration_seconds=None):
         if progress_callback is not None:
             progress_callback(1.0, 1.0)
         return "hello world", [
@@ -77,7 +78,8 @@ class FakeWhisper:
             {"text": "world", "start": 0.5, "end": 1.0},
         ], "en"
 
-    def transcribe_in_chunks(self, mp3_path, language=None, progress_callback=None):
+    def transcribe_in_chunks(self, mp3_path, language=None, progress_callback=None,
+                             audio_duration_seconds=None):
         return self.transcribe(mp3_path, language, progress_callback)
 
 

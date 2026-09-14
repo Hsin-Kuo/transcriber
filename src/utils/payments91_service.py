@@ -116,26 +116,16 @@ class Payments91APPService:
         return data
 
     # ── 首購（request-by-txnToken, BindingCard）────────────────────
-
-    @staticmethod
-    def _subscription_product_info(
-        prod_name: str, amount: int, billing_cycle: str, periods: Optional[int] = None
-    ) -> Dict:
-        """`extensionInfo.subscriptionProductInfo`——91APP **正式環境**對
-        `productType=Subscription` 的必填欄位（缺了回 400 `SubscriptionProductInfoRequired`
-        「定期定額交易須帶入 SubscriptionProductInfo」；**sandbox 不驗**，2026-09-01
-        go-live 首筆實測才炸出）。schema 見官方 admin-payments 文件：
-        priceName(≤100)/amount 必填；recurring.type=Day|Week|Month|Year、interval 選填；
-        **periods 是 subscriptionProductInfo 的頂層欄位（與 recurring 同層，不在其內）**，
-        未帶=無限期。加購（一次性）帶 periods=1 表達單期。"""
-        recurring: Dict = {
-            "type": "Year" if billing_cycle == "yearly" else "Month",
-            "interval": 1,
-        }
-        info: Dict = {"priceName": prod_name[:100], "amount": amount, "recurring": recurring}
-        if periods is not None:
-            info["periods"] = periods
-        return info
+    #
+    # 2026-09-10 定案（91APP 商店設定已改「subscriptionProductInfo 非必填」+ 方案 2 自管）：
+    # 不再攜帶 extensionInfo（subscriptionType / subscriptionProductInfo 全移除）、
+    # productType 改 Normal、首期金額恢復帶實際金額——三點皆 91APP 書面確認：
+    #   ① cardToken 扣款免 3D 不依賴 Subscription 標記（productType=Normal 即可）；
+    #   ② 首期 paymentMethods.amount 帶實際金額（正式環境不再要求 0）；
+    #   ③ 自動請款不受影響。
+    # 背景：帶 spi 的 First 交易會在 91APP 建「gateway 自動扣款排程」，與我方
+    # renewal_service 自管續扣重複扣款（首筆真實訂閱的排程已請 91APP 終止）。
+    # 歷史踩坑（spi 必填/首期金額兩環境矛盾/periods 層級）見 ASSESSMENT §12 與 git log。
 
     async def create_first_payment(
         self,
@@ -148,43 +138,27 @@ class Payments91APPService:
         prod_name: str,
         holder_phone: str,
         holder_email: str,
-        billing_cycle: str = "monthly",
-        periods: Optional[int] = None,
         holder_name: Optional[str] = None,
     ) -> Dict:
-        """訂閱首期綁卡付款。回傳含 paymentUrl（3D）或直接成交結果 + cardToken。
+        """首期綁卡付款。回傳含 paymentUrl（3D）或直接成交結果 + cardToken。
 
         BindingCard + merchantConsumerId 才拿得到可 MIT 續扣的 cardToken（非 RememberCard）。
 
         cardHolder：91APP **正式環境**對 `initCardTokenType=BindingCard` 交易必填
         （prod 400 CardHolderPhoneNumberRequired；sandbox 不驗）。schema：
         phoneNumber(必填,+886開頭,≤40)/email(必填,≤40)/name(選填,≤40)。
+        此為 BindingCard 規則，與訂閱標記無關，維持攜帶。
         """
         body = {
             "txnToken": txn_token,
             "initCardTokenType": "BindingCard",
             "merchantConsumerId": consumer_id,
             "merchantOrderId": order_no,
-            # ⚠️ 首期金額規則**兩環境互相矛盾**（2026-09-01/02 實測，無固定值可同時滿足）：
-            #   正式：必須 0（400 SubscriptionFirstPaymentAmountNotAllowed「首期請勿帶入
-            #        金額」；amount=0 實測已通過該關），實際首期扣款額 =
-            #        extensionInfo.subscriptionProductInfo.amount，授權成功後隨即扣款。
-            #   sandbox：必須 >0（400 AmountMustGreaterThanZero；歷來 sandbox 交易
-            #        amount>0 全數成功）。
-            # → 只能依 env 切換。若 91APP 日後統一兩環境行為，這裡要跟著收斂。
-            "paymentMethods": [
-                {"payType": "CreditCard", "amount": 0 if self.env == "production" else amount}
-            ],
-            "productType": "Subscription",
-            "extensionInfo": {
-                "subscriptionType": "First",
-                "subscriptionProductInfo": self._subscription_product_info(
-                    prod_name, amount, billing_cycle, periods
-                ),
-            },
+            "paymentMethods": [{"payType": "CreditCard", "amount": amount}],
+            "productType": "Normal",
             "currency": "TWD",
             "products": [
-                {"name": prod_name, "totalAmount": amount, "productType": "Subscription"}
+                {"name": prod_name, "totalAmount": amount, "productType": "Normal"}
             ],
             "redirectUrl": redirect_url,
             "callbackUrl": callback_url,
@@ -209,24 +183,22 @@ class Payments91APPService:
         redirect_url: str,
         callback_url: str,
         prod_name: str,
-        billing_cycle: str = "monthly",
     ) -> Dict:
-        """MIT 免 3D 續扣。productType=Subscription + subscriptionType=Renewal（缺一不可）。"""
+        """MIT 免 3D 續扣（cardToken）。
+
+        2026-09-10 起（91APP 確認）：免 3D 不依賴 Subscription 標記——productType=Normal、
+        不帶 extensionInfo（舊制「Subscription+Renewal 缺一不可」在商店改設定後作廢）。
+        金額每期由呼叫端決定（期末降級=帶目標方案價），gateway 不驗與首期金額一致性。
+        """
         body = {
             "cardToken": card_token,
             "merchantConsumerId": consumer_id,
             "merchantOrderId": order_no,
             "paymentMethods": [{"payType": "CreditCard", "amount": amount}],
-            "productType": "Subscription",
-            "extensionInfo": {
-                "subscriptionType": "Renewal",
-                "subscriptionProductInfo": self._subscription_product_info(
-                    prod_name, amount, billing_cycle
-                ),
-            },
+            "productType": "Normal",
             "currency": "TWD",
             "products": [
-                {"name": prod_name, "totalAmount": amount, "productType": "Subscription"}
+                {"name": prod_name, "totalAmount": amount, "productType": "Normal"}
             ],
             "redirectUrl": redirect_url,
             "callbackUrl": callback_url,
