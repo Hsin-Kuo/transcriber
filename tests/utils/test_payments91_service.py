@@ -122,39 +122,16 @@ class TestRequestBodies:
         assert captured["idem"] == "SLSUB1"
         assert b["initCardTokenType"] == "BindingCard"        # ★ 非 RememberCard
         assert b["merchantConsumerId"] == "u1"
-        assert b["productType"] == "Subscription"
-        assert b["extensionInfo"]["subscriptionType"] == "First"
-        # 首期 paymentMethods.amount 兩環境矛盾：sandbox 必須 >0（AmountMustGreaterThanZero）、
-        # 正式必須 0（SubscriptionFirstPaymentAmountNotAllowed）→ 依 env 切換。
-        # 實際扣款額（兩環境皆然）走 extensionInfo.subscriptionProductInfo.amount。
-        assert b["paymentMethods"] == [{"payType": "CreditCard", "amount": 299}]  # sandbox
-        assert b["extensionInfo"]["subscriptionProductInfo"]["amount"] == 299
+        # 2026-09-10 定案（商店 spi 非必填 + 方案 2 自管）：productType=Normal、
+        # 不帶 extensionInfo、首期帶實際金額（91APP 三點書面確認）。
+        assert b["productType"] == "Normal"
+        assert "extensionInfo" not in b
+        assert b["paymentMethods"] == [{"payType": "CreditCard", "amount": 299}]
         assert b["redirectUrl"] == "https://x/return"
         assert b["callbackUrl"] == "https://x/cb"
-        # cardHolder（91APP 正式環境對綁卡交易必填；PHONE_REQUIRED 專案功能）
+        # cardHolder（BindingCard 規則，與訂閱標記無關，維持攜帶）
         assert b["cardHolder"] == {"phoneNumber": "+886912345678", "email": "user@example.com"}
 
-    async def test_first_payment_amount_zero_on_production(self):
-        """正式環境首期 amount 必須為 0（prod 400 SubscriptionFirstPaymentAmountNotAllowed）。"""
-        svc = _svc()
-        svc.env = "production"
-        captured = {}
-
-        async def fake_post(path, body, idempotency_key=None):
-            captured["body"] = body
-            return {"statusCode": "Success"}
-
-        svc._post = fake_post
-        await svc.create_first_payment(
-            txn_token="TXN", order_no="SLSUB1", consumer_id="u1", amount=299,
-            redirect_url="https://x/return", callback_url="https://x/cb",
-            prod_name="SoundLite Basic 方案",
-            holder_phone="+886912345678", holder_email="u@x.tw",
-        )
-        b = captured["body"]
-        assert b["paymentMethods"] == [{"payType": "CreditCard", "amount": 0}]
-        assert b["extensionInfo"]["subscriptionProductInfo"]["amount"] == 299
-        assert b["cardHolder"] == {"phoneNumber": "+886912345678", "email": "u@x.tw"}
 
     async def test_first_payment_includes_holder_name_when_given(self):
         svc = _svc()
@@ -214,74 +191,12 @@ class TestRequestBodies:
         assert captured["path"] == "/v2/payments/request-by-cardToken"
         assert b["cardToken"] == "CT1"
         assert b["merchantConsumerId"] == "u1"
-        assert b["productType"] == "Subscription"
-        assert b["extensionInfo"]["subscriptionType"] == "Renewal"  # ★ 免 3D 關鍵
+        # 2026-09-10 起免 3D 不依賴 Subscription 標記（91APP 確認）：Normal + 無 extensionInfo
+        assert b["productType"] == "Normal"
+        assert "extensionInfo" not in b
+        assert b["paymentMethods"] == [{"payType": "CreditCard", "amount": 299}]
         assert "initCardTokenType" not in b
 
-    # ── subscriptionProductInfo（91APP 正式環境必填，sandbox 不驗；2026-09-01
-    #    go-live 首筆實測 400 SubscriptionProductInfoRequired 才炸出）────────────
-
-    async def test_first_payment_includes_subscription_product_info(self):
-        svc = _svc()
-        captured = {}
-
-        async def fake_post(path, body, idempotency_key=None):
-            captured["body"] = body
-            return {"statusCode": "Success"}
-
-        svc._post = fake_post
-        await svc.create_first_payment(
-            txn_token="TXN", order_no="SLSUB1", consumer_id="u1", amount=3289,
-            redirect_url="https://x/return", callback_url="https://x/cb",
-            prod_name="SoundLite Basic 方案", billing_cycle="yearly",
-            holder_phone="+886912345678", holder_email="user@example.com",
-        )
-        spi = captured["body"]["extensionInfo"]["subscriptionProductInfo"]
-        assert spi["priceName"] == "SoundLite Basic 方案"
-        assert spi["amount"] == 3289
-        assert spi["recurring"] == {"type": "Year", "interval": 1}  # 無 periods=無限期
-        assert "periods" not in spi
-
-    async def test_first_payment_one_time_uses_periods_1(self):
-        """加購（extra_quota）：periods=1 表達單期扣款。periods 是 subscriptionProductInfo
-        的頂層欄位（與 recurring 同層，不在其內）——官方 schema 徹查後修正。"""
-        svc = _svc()
-        captured = {}
-
-        async def fake_post(path, body, idempotency_key=None):
-            captured["body"] = body
-            return {"statusCode": "Success"}
-
-        svc._post = fake_post
-        await svc.create_first_payment(
-            txn_token="TXN", order_no="SLEXT1", consumer_id="u1", amount=39,
-            redirect_url="https://x/return", callback_url="https://x/cb",
-            prod_name="加購 AI 總結", billing_cycle="monthly", periods=1,
-            holder_phone="+886912345678", holder_email="user@example.com",
-        )
-        spi = captured["body"]["extensionInfo"]["subscriptionProductInfo"]
-        assert spi["recurring"] == {"type": "Month", "interval": 1}
-        assert spi["periods"] == 1
-
-    async def test_renewal_includes_subscription_product_info(self):
-        svc = _svc()
-        captured = {}
-
-        async def fake_post(path, body, idempotency_key=None):
-            captured["body"] = body
-            return {"statusCode": "Success"}
-
-        svc._post = fake_post
-        await svc.charge_renewal(
-            card_token="CT1", consumer_id="u1", order_no="SLREN1", amount=299,
-            redirect_url="https://x/return", callback_url="https://x/cb",
-            prod_name="SoundLite Basic 方案（續扣）", billing_cycle="monthly",
-        )
-        spi = captured["body"]["extensionInfo"]["subscriptionProductInfo"]
-        assert spi["amount"] == 299
-        assert spi["recurring"] == {"type": "Month", "interval": 1}
-        # subscriptionType 不被 subscriptionProductInfo 蓋掉
-        assert captured["body"]["extensionInfo"]["subscriptionType"] == "Renewal"
 
     async def test_query_trade_signs_get(self):
         svc = _svc()
