@@ -38,6 +38,17 @@ AUTO_SHUTDOWN_IDLE_MINUTES: int = int(os.getenv("AUTO_SHUTDOWN_IDLE_MINUTES", "5
 # SQS 行為
 SQS_LONG_POLL_SECONDS: int = 20          # receive_message WaitTimeSeconds
 SQS_VISIBILITY_TIMEOUT_SECONDS: int = 600  # 10 分鐘，單個任務最長處理時間
+# visibility 續命：處理中的訊息每隔這麼久就把 visibility 往後推一個
+# SQS_VISIBILITY_TIMEOUT_SECONDS。沒有這道，超過 600s 的任務會被 SQS 重投給
+# 另一個 worker → 同一顆任務被轉兩次（GPU/Gemini 雙重花費、進度交錯、
+# 結果 last-writer-wins）。長音檔改走 sequential（2.64 倍耗時）後，
+# ~40 分鐘的常見尺寸就會踩到，故必須續命。
+SQS_VISIBILITY_HEARTBEAT_SECONDS: int = 120
+# processing claim 視為過期的門檻：worker 掉了以後，任務必須能被重新搶佔，
+# 否則會永久卡在 processing。取 visibility timeout 的數倍留足餘裕。
+PROCESSING_CLAIM_STALE_SECONDS: int = int(
+    os.getenv("PROCESSING_CLAIM_STALE_SECONDS", "1800")
+)
 # 防餓死比例：連續處理 N 顆 priority 後，保留一個時隙讓一般佇列先選
 PRIORITY_RATIO: int = int(os.getenv("PRIORITY_RATIO", "3"))
 
