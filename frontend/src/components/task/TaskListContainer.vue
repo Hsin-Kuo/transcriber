@@ -22,6 +22,16 @@
         :disabled="isBatchEditMode"
         @click="selectedTaskType = 'all'"
       >
+        <!-- 沿用原底部導覽「所有任務」的斜線方塊 icon（手機版才顯示，見 .tab-icon） -->
+        <svg class="tab-icon" width="16" height="16" viewBox="0 0 20 20" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="0.8" y1="5.4" x2="5.4" y2="0.8" />
+          <line x1="0.8" y1="10" x2="10" y2="0.8" />
+          <line x1="0.8" y1="14.6" x2="14.6" y2="0.8" />
+          <line x1="0.8" y1="19.2" x2="19.2" y2="0.8" />
+          <line x1="5.4" y1="19.2" x2="19.2" y2="5.4" />
+          <line x1="10" y1="19.2" x2="19.2" y2="10" />
+          <line x1="14.6" y1="19.2" x2="19.2" y2="14.6" />
+        </svg>
         <span>{{ $t('taskList.all') }}</span>
       </button>
       <button
@@ -30,6 +40,12 @@
         :disabled="isBatchEditMode"
         @click="selectedTaskType = 'paragraph'"
       >
+        <svg class="tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="16" y1="13" x2="8" y2="13"></line>
+          <line x1="16" y1="17" x2="8" y2="17"></line>
+        </svg>
         <span>{{ $t('taskList.paragraph') }}</span>
       </button>
       <button
@@ -38,6 +54,11 @@
         :disabled="isBatchEditMode"
         @click="selectedTaskType = 'subtitle'"
       >
+        <svg class="tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+          <line x1="6" y1="12" x2="13" y2="12"></line>
+          <line x1="6" y1="16" x2="18" y2="16"></line>
+        </svg>
         <span>{{ $t('taskList.subtitle') }}</span>
       </button>
       <button
@@ -46,6 +67,11 @@
         :disabled="isBatchEditMode"
         @click="selectedTaskType = 'has_audio'"
       >
+        <svg class="tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 18V5l12-2v13"></path>
+          <circle cx="6" cy="18" r="3"></circle>
+          <circle cx="18" cy="16" r="3"></circle>
+        </svg>
         <span>{{ $t('taskList.hasAudio') }}</span>
       </button>
 
@@ -551,6 +577,11 @@ onMounted(() => {
   z-index: 1;
 }
 
+/* 篩選頁籤 icon 只給手機版用（桌機維持純文字外觀），768px 以下改 display:block */
+.tab-icon {
+  display: none;
+}
+
 /* 全部頁籤顏色 */
 /* .tab-btn.tab-all {
   background: #00000000;
@@ -706,6 +737,11 @@ onMounted(() => {
     gap: 2px;
     /* 確保觸控友好 */
     min-height: 44px;
+  }
+
+  /* 手機版頁籤 icon（桌機隱藏以維持原外觀，見組件頂層 .tab-icon 規則） */
+  .tab-icon {
+    display: block;
   }
 
   /* 選取效果沿用原底部導覽（nav-link.active）的膠囊樣式，讓作用中的篩選一目了然 */
