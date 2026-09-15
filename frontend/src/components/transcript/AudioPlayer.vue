@@ -111,6 +111,22 @@
         <!-- Left: Keyboard shortcuts info -->
         <KeyboardShortcutsInfo class="info-btn-wrapper" pop-direction="pop-up" />
 
+        <!-- Mobile only: seek bar（桌機用圓弧拖曳；手機圓弧被隱藏，改用這條。
+             音量交給手機實體鍵，音量條在手機版整組隱藏） -->
+        <input
+          type="range"
+          class="seek-slider-mobile"
+          min="0"
+          max="100"
+          step="0.1"
+          :value="displayProgress"
+          :disabled="!duration"
+          :aria-label="$t('audioPlayer.seek')"
+          :aria-valuenow="Math.round(displayProgress)"
+          @input="onSeekSliderInput"
+          @change="onSeekSliderChange"
+        />
+
         <!-- Middle: Volume control -->
         <div class="volume-control-center">
           <button class="audio-control-btn mute-btn-volume" @click="$emit('toggle-mute')" :title="isMuted ? $t('audioPlayer.unmute') : $t('audioPlayer.mute')" :aria-label="isMuted ? $t('audioPlayer.unmute') : $t('audioPlayer.mute')">
@@ -307,6 +323,21 @@ function handleDrag(event) {
   }
 
   draggingPercent.value = (closestPoint / pathLength) * 100
+}
+
+// --- Mobile seek slider（與圓弧共用 isDragging/draggingPercent，拖曳中顯示預覽位置） ---
+
+function onSeekSliderInput(event) {
+  if (!props.duration) return
+  isDragging.value = true
+  draggingPercent.value = Number(event.target.value)
+}
+
+function onSeekSliderChange(event) {
+  isDragging.value = false
+  if (props.duration > 0) {
+    emit('seek', (Number(event.target.value) / 100) * props.duration)
+  }
 }
 
 defineExpose({
@@ -523,6 +554,11 @@ defineExpose({
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
+/* Mobile seek slider：桌機隱藏（進度用圓弧拖曳） */
+.seek-slider-mobile {
+  display: none;
+}
+
 /* Decorative element (top-left) */
 .decorative-element {
   position: absolute;
@@ -712,22 +748,44 @@ defineExpose({
     order: 3;
   }
 
+  /* 音量整組隱藏（含靜音鈕）：手機音量由實體鍵控制，原位置改放播放進度條 */
   .volume-control-center {
-    gap: 4px;
+    display: none !important;
   }
 
-  .mute-btn-volume {
-    width: 18px !important;
-    height: 18px !important;
+  .seek-slider-mobile {
+    display: block;
+    flex: 1;
+    min-width: 0;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--main-bg);
+    border: var(--nav-bg) 0.5px solid;
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
   }
 
-  .mute-btn-volume svg {
-    width: 16px;
-    height: 16px;
+  .seek-slider-mobile::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--nav-active-bg);
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
   }
 
-  .volume-slider-horizontal {
-    width: 60px;
+  .seek-slider-mobile::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    background: var(--nav-active-bg);
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
   }
 
   .speed-btn-wrapper {
@@ -771,10 +829,6 @@ defineExpose({
   .audio-skip-btn {
     width: 28px;
     height: 28px;
-  }
-
-  .volume-slider-horizontal {
-    width: 50px;
   }
 
   .speed-btn {

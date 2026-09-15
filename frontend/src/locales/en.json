@@ -823,7 +823,8 @@
     "playbackFailed": "Playback failed",
     "audioExpiredTitle": "Audio file has been deleted",
     "audioExpiredTooltip": "This task's audio file has been automatically deleted (retention period: {days} days). To keep audio files, use the pin feature on the task list page.",
-    "volume": "Volume"
+    "volume": "Volume",
+    "seek": "Playback progress"
   },
   "replaceToolbar": {
     "find": "Find",
