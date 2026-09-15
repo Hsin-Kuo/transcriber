@@ -1,32 +1,45 @@
 <template>
   <header class="mobile-header">
-    <router-link to="/settings" class="mobile-header-avatar" :aria-label="authStore.user?.email || ''" :title="authStore.user?.email">
-      <div class="avatar-circle">
-        {{ getFirstLetter(authStore.user?.email) }}
-      </div>
+    <!-- 左：上傳頁顯示「回任務列表」，其餘頁顯示搜尋（placeholder，功能後續補上） -->
+    <router-link v-if="isUploadPage" to="/all" class="mobile-header-action" :aria-label="$t('nav.backToTasks')">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="19" y1="12" x2="5" y2="12"></line>
+        <polyline points="12 19 5 12 12 5"></polyline>
+      </svg>
     </router-link>
+    <button v-else class="mobile-header-action" :aria-label="$t('nav.search')" type="button">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"></circle>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </svg>
+    </button>
 
     <router-link to="/all" class="mobile-header-brand">
       <img class="brand-icon" src="/favicon.svg" alt="SoundLite" width="24" height="24" />
       <span>SoundLite</span>
     </router-link>
 
-    <!-- 搜尋功能後續補上：目前僅為 placeholder，點擊無動作 -->
-    <button class="mobile-header-search" :aria-label="$t('nav.search')" type="button">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="11" cy="11" r="8"></circle>
-        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-      </svg>
-    </button>
+    <!-- 右：使用者設定 -->
+    <router-link to="/settings" class="mobile-header-avatar" :aria-label="authStore.user?.email || ''" :title="authStore.user?.email">
+      <div class="avatar-circle">
+        {{ getFirstLetter(authStore.user?.email) }}
+      </div>
+    </router-link>
   </header>
 </template>
 
 <script setup>
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth'
 
 const { t: $t } = useI18n()
 const authStore = useAuthStore()
+const route = useRoute()
+
+// 上傳頁（path '/'）左側不放搜尋，改放回任務列表
+const isUploadPage = computed(() => route.name === 'transcription')
 
 // 取得郵箱首字母（與 Navigation.vue 邏輯一致）
 function getFirstLetter(email) {
@@ -103,7 +116,8 @@ function getFirstLetter(email) {
     flex-shrink: 0;
   }
 
-  .mobile-header-search {
+  /* 左側動作鈕（搜尋 / 回任務列表共用外觀） */
+  .mobile-header-action {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -115,9 +129,10 @@ function getFirstLetter(email) {
     color: var(--nav-text);
     cursor: pointer;
     padding: 0;
+    text-decoration: none;
   }
 
-  .mobile-header-search svg {
+  .mobile-header-action svg {
     stroke: currentColor;
   }
 }

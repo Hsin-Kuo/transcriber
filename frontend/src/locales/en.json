@@ -390,7 +390,8 @@
     "logout": "Logout"
   },
   "nav": {
-    "search": "Search"
+    "search": "Search",
+    "backToTasks": "Back to tasks"
   },
   "transcription": {
     "taskType": "Task Type",

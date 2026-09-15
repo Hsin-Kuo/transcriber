@@ -390,7 +390,8 @@
     "logout": "登出"
   },
   "nav": {
-    "search": "搜尋"
+    "search": "搜尋",
+    "backToTasks": "回任務列表"
   },
   "transcription": {
     "taskType": "任務類型",
