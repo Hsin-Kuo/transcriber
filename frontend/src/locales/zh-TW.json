@@ -804,6 +804,7 @@
     "unmute": "取消靜音",
     "mute": "靜音",
     "volume": "音量",
+    "seek": "播放進度",
     "playbackSpeed": "播放速度: {rate}x",
     "speedUp": "加速 (+0.25x)",
     "speedDown": "減速 (-0.25x)",
