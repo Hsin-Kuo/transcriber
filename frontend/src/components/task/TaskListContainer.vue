@@ -708,9 +708,18 @@ onMounted(() => {
     min-height: 44px;
   }
 
+  /* 選取效果沿用原底部導覽（nav-link.active）的膠囊樣式，讓作用中的篩選一目了然 */
   .tab-btn.active {
     transform: none;
     border-bottom: none;
+    background: var(--nav-active-bg);
+    color: var(--nav-recent-text);
+    border-radius: 8px;
+  }
+
+  /* 批次編輯頁籤 active 也用同一套膠囊（覆蓋桌機的純變色規則） */
+  .tab-btn.tab-batch-edit.active {
+    color: var(--nav-recent-text);
   }
 
   /* 分頁列不再參與底部固定頁籤的 flex 排版：RulerPagination 本身已是 position:fixed
