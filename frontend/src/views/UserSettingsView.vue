@@ -1693,6 +1693,8 @@ async function confirmDeleteAccount() {
 
 .plan-indicator-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 14px;
   margin-top: 12px;
   margin-bottom: 5px;
@@ -1707,6 +1709,7 @@ async function confirmDeleteAccount() {
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.2s ease;
+  white-space: nowrap;
 }
 
 .plan-btn-outline {
