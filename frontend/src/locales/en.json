@@ -389,6 +389,9 @@
     "noCompletedTasks": "No completed tasks",
     "logout": "Logout"
   },
+  "nav": {
+    "search": "Search"
+  },
   "transcription": {
     "taskType": "Task Type",
     "paragraph": "Document",
@@ -612,7 +615,7 @@
     },
     "confirmDelete": "Are you sure you want to delete this task?",
     "deleteButtonText": "Delete",
-    "batchEdit": "",
+    "batchEdit": "Edit",
     "exitBatchEdit": "Exit Edit",
     "exit": "Exit",
     "selectAll": "Select All",
