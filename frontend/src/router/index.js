@@ -143,6 +143,14 @@ const router = createRouter({
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
 
+  // 公開頁（分享頁 /s/:token）不需要知道使用者是誰，直接放行。
+  // 匿名訪客若在這裡跑 initialize()，/auth/me 必然 401 → 攔截器嘗試 refresh
+  // 也 401 → redirectToLogin 把訪客硬跳去登入頁，分享頁就永遠看不到了。
+  if (to.meta.public) {
+    next()
+    return
+  }
+
   // 初始化認證狀態：access_token 是 httpOnly cookie，JS 讀不到，
   // 靠 initialize() 內部的 initialized 旗標保證整個 session 只嘗試一次
   if (!authStore.user) {
