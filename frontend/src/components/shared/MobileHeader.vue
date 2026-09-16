@@ -85,18 +85,17 @@ function getFirstLetter(email) {
     flex-shrink: 0;
   }
 
-  /* 淺色模式：與上傳 FAB 同色（品牌橘）＋白字 */
   .avatar-circle {
     width: 32px;
     height: 32px;
     border-radius: 50%;
-    background: var(--nav-active-bg);
+    background: var(--nav-recent-text);
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 0.9rem;
     font-weight: 700;
-    color: #fff;
+    color: var(--main-text);
   }
 
   /* 深色模式：改用較淺的灰階（原 nav-bg=gray-800 在深底上不夠明顯）。
@@ -112,7 +111,7 @@ function getFirstLetter(email) {
     align-items: center;
     gap: 6px;
     text-decoration: none;
-    color: var(--nav-text);
+    color: var(--main-text);
     font-family: 'Inter', sans-serif;
     font-weight: 600;
     font-size: 1.25rem;
