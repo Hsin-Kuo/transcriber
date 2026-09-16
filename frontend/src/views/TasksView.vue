@@ -661,7 +661,8 @@ onBeforeUnmount(() => {
 
 .ptr-indicator {
   position: fixed;
-  top: 0;
+  /* 從 MobileHeader（52px + safe-area、z-index 1000）下緣滑出，避免被 header 蓋住 */
+  top: calc(52px + env(safe-area-inset-top, 0px));
   left: 0;
   right: 0;
   height: 48px;
