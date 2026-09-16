@@ -64,13 +64,13 @@
         :disabled="isBatchEditMode"
         @click="selectedTaskType = 'has_audio'"
       >
-        <!-- 音波：垂直線由中央向外遞減 -->
+        <!-- 音波：不等高垂直線，模擬真實波形起伏 -->
         <svg class="tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-          <line x1="3" y1="10" x2="3" y2="14"></line>
-          <line x1="7.5" y1="7" x2="7.5" y2="17"></line>
-          <line x1="12" y1="4" x2="12" y2="20"></line>
-          <line x1="16.5" y1="7" x2="16.5" y2="17"></line>
-          <line x1="21" y1="10" x2="21" y2="14"></line>
+          <line x1="3" y1="9" x2="3" y2="15"></line>
+          <line x1="7.5" y1="5" x2="7.5" y2="19"></line>
+          <line x1="12" y1="10" x2="12" y2="14"></line>
+          <line x1="16.5" y1="3" x2="16.5" y2="20"></line>
+          <line x1="21" y1="8" x2="21" y2="13"></line>
         </svg>
         <span>{{ $t('taskList.hasAudio') }}</span>
       </button>
