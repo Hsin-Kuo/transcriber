@@ -735,6 +735,7 @@ onMounted(() => {
     align-items: center;
     justify-content: center;
     gap: 2px;
+    color: var(--main-text);
     /* 確保觸控友好 */
     min-height: 44px;
   }
