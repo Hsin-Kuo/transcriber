@@ -331,11 +331,13 @@ watch(() => route.path, (newPath, oldPath) => {
   background-color: var(--color-black);
 }
 
+/* 文字 logo 規格以品牌站 SoundLiteMain 為準（Inter 600 / 1.25rem / 0.08em） */
 .nav-brand h2 {
-  font-size: 1.5rem;
+  font-family: 'Inter', sans-serif;
+  font-size: 1.25rem;
   margin: 0;
-  font-weight: 500;
-  letter-spacing: -0.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   color: var(--nav-text);
   text-align: center;
   transition: all 0.3s ease;
@@ -684,174 +686,10 @@ watch(() => route.path, (newPath, oldPath) => {
   line-height: 1.3;
 }
 
-/* === 響應式設計：底部 Tab Bar === */
+/* === 響應式設計：手機版改由 MobileHeader + 頁面自帶底部列取代，側欄整個隱藏 === */
 @media (max-width: 768px) {
   .navigation {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    top: auto;
-    width: 100%;
-    min-width: 100%;
-    height: auto;
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-around;
-    gap: 0;
-    padding: 8px 12px;
-    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
-    border-radius: 0;
-    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
-    z-index: 1000;
-  }
-
-  .navigation::after {
     display: none;
-  }
-
-  /* 隱藏收合按鈕 */
-  .toggle-btn {
-    display: none;
-  }
-
-  /* 隱藏 brand */
-  .nav-brand {
-    display: none;
-  }
-
-  /* 導航連結：水平排列 */
-  .nav-links {
-    flex-direction: row;
-    gap: 0;
-    flex: 1;
-    justify-content: space-around;
-  }
-
-  .nav-link {
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    padding: 8px 16px;
-    min-width: 64px;
-    border-radius: 8px;
-  }
-
-  .nav-link span {
-    font-size: 10px;
-    font-weight: 500;
-  }
-
-  .nav-link svg {
-    width: 22px;
-    height: 22px;
-  }
-
-  .nav-link:hover {
-    transform: none;
-  }
-
-  .nav-link.active {
-    background: var(--nav-active-bg);
-  }
-
-  /* 隱藏最近任務 */
-  .recent-tasks {
-    display: none;
-  }
-
-  /* 隱藏 spacer */
-  .nav-spacer {
-    display: none;
-  }
-
-  /* 用戶區域 */
-  .nav-user {
-    flex-direction: row;
-    gap: 8px;
-    padding: 0;
-    margin: 0;
-    border-top: none;
-    background: transparent;
-  }
-
-  .nav-user::before {
-    display: none;
-  }
-
-  .avatar-circle {
-    width: 36px;
-    height: 36px;
-    font-size: 1rem;
-  }
-
-  /* 隱藏登出按鈕 */
-  .logout-btn {
-    display: none;
-  }
-
-  /* 覆蓋 collapsed 狀態，確保底部 bar 正常 */
-  .navigation.collapsed {
-    width: 100%;
-    min-width: 100%;
-    flex-direction: row;
-    align-items: center;
-    padding: 8px 12px;
-    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
-  }
-
-  .navigation.collapsed .nav-user {
-    flex-direction: row;
-    gap: 8px;
-    padding: 0;
-    margin: 0;
-    background: transparent;
-    border-top: none;
-  }
-
-  .navigation.collapsed .nav-user::before {
-    display: none;
-  }
-}
-
-/* 小手機進一步調整 */
-@media (max-width: 480px) {
-  .navigation {
-    padding: 6px 8px;
-    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
-  }
-
-  .nav-link {
-    padding: 6px 12px;
-    min-width: 56px;
-  }
-
-  .nav-link span {
-    font-size: 9px;
-  }
-
-  .nav-link svg {
-    width: 20px;
-    height: 20px;
-  }
-
-  .avatar-circle {
-    width: 32px;
-    height: 32px;
-    font-size: 0.9rem;
-  }
-
-  .logout-btn {
-    width: 32px;
-    min-width: 32px;
-    height: 32px;
-    padding: 6px;
-  }
-
-  .logout-btn svg {
-    width: 16px;
-    height: 16px;
   }
 }
 </style>

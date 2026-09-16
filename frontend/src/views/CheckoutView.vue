@@ -400,12 +400,13 @@ function setupCard() {
     },
     // iframe 內建 input 自帶會隨狀態變色的邊框，疊在外層 .form-input 裡成「框中框」；
     // 全狀態 borderColor 設 transparent 讓外框統一呈現，文字顏色也不隨狀態變化。
-    styles: {
-      normal:  { color: 'black', borderColor: 'transparent' },
-      focus:   { color: 'black', borderColor: 'transparent' },
-      error:   { color: 'black', borderColor: 'transparent' },
-      success: { color: 'black', borderColor: 'transparent' },
-    },
+    // 文字顏色取當前主題的 --main-text（iframe 吃不到外部 CSS 變數，只能在 setup 時解析後傳值；
+    // 結帳中切換深淺色主題不會即時跟上，屬可接受邊角）。
+    styles: (() => {
+      const themeText = getComputedStyle(document.documentElement).getPropertyValue('--main-text').trim() || 'black'
+      const s = { color: themeText, borderColor: 'transparent' }
+      return { normal: s, focus: s, error: s, success: s }
+    })(),
   })
   // SDK 3.4.0+：canGetToken 為 true 才可取 token
   cardSdk.on('update', (s) => {

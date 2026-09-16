@@ -389,6 +389,10 @@
     "noCompletedTasks": "No completed tasks",
     "logout": "Logout"
   },
+  "nav": {
+    "search": "Search",
+    "backToTasks": "Back to tasks"
+  },
   "transcription": {
     "taskType": "Task Type",
     "paragraph": "Document",
@@ -612,7 +616,7 @@
     },
     "confirmDelete": "Are you sure you want to delete this task?",
     "deleteButtonText": "Delete",
-    "batchEdit": "",
+    "batchEdit": "Edit",
     "exitBatchEdit": "Exit Edit",
     "exit": "Exit",
     "selectAll": "Select All",
@@ -823,7 +827,8 @@
     "playbackFailed": "Playback failed",
     "audioExpiredTitle": "Audio file has been deleted",
     "audioExpiredTooltip": "This task's audio file has been automatically deleted (retention period: {days} days). To keep audio files, use the pin feature on the task list page.",
-    "volume": "Volume"
+    "volume": "Volume",
+    "seek": "Playback progress"
   },
   "replaceToolbar": {
     "find": "Find",
