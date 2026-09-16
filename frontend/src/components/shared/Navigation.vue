@@ -331,11 +331,13 @@ watch(() => route.path, (newPath, oldPath) => {
   background-color: var(--color-black);
 }
 
+/* 文字 logo 規格以品牌站 SoundLiteMain 為準（Inter 600 / 1.25rem / 0.08em） */
 .nav-brand h2 {
-  font-size: 1.5rem;
+  font-family: 'Inter', sans-serif;
+  font-size: 1.25rem;
   margin: 0;
-  font-weight: 500;
-  letter-spacing: -0.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   color: var(--nav-text);
   text-align: center;
   transition: all 0.3s ease;
