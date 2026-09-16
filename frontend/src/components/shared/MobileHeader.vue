@@ -98,14 +98,17 @@ function getFirstLetter(email) {
     color: var(--nav-text);
   }
 
+  /* 文字 logo 規格以品牌站 SoundLiteMain 為準（Inter 600 / 1.25rem / 0.08em） */
   .mobile-header-brand {
     display: flex;
     align-items: center;
     gap: 6px;
     text-decoration: none;
     color: var(--nav-text);
+    font-family: 'Inter', sans-serif;
     font-weight: 600;
-    font-size: 1rem;
+    font-size: 1.25rem;
+    letter-spacing: 0.08em;
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
