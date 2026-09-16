@@ -22,6 +22,16 @@
         :disabled="isBatchEditMode"
         @click="selectedTaskType = 'all'"
       >
+        <!-- 沿用原底部導覽「所有任務」的斜線方塊 icon（手機版才顯示，見 .tab-icon） -->
+        <svg class="tab-icon" width="16" height="16" viewBox="0 0 20 20" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="0.8" y1="5.4" x2="5.4" y2="0.8" />
+          <line x1="0.8" y1="10" x2="10" y2="0.8" />
+          <line x1="0.8" y1="14.6" x2="14.6" y2="0.8" />
+          <line x1="0.8" y1="19.2" x2="19.2" y2="0.8" />
+          <line x1="5.4" y1="19.2" x2="19.2" y2="5.4" />
+          <line x1="10" y1="19.2" x2="19.2" y2="10" />
+          <line x1="14.6" y1="19.2" x2="19.2" y2="14.6" />
+        </svg>
         <span>{{ $t('taskList.all') }}</span>
       </button>
       <button
@@ -30,6 +40,10 @@
         :disabled="isBatchEditMode"
         @click="selectedTaskType = 'paragraph'"
       >
+        <svg class="tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+        </svg>
         <span>{{ $t('taskList.paragraph') }}</span>
       </button>
       <button
@@ -38,6 +52,10 @@
         :disabled="isBatchEditMode"
         @click="selectedTaskType = 'subtitle'"
       >
+        <svg class="tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+          <line x1="6" y1="16" x2="18" y2="16"></line>
+        </svg>
         <span>{{ $t('taskList.subtitle') }}</span>
       </button>
       <button
@@ -46,6 +64,14 @@
         :disabled="isBatchEditMode"
         @click="selectedTaskType = 'has_audio'"
       >
+        <!-- 音波：不等高垂直線，模擬真實波形起伏 -->
+        <svg class="tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="3" y1="9" x2="3" y2="15"></line>
+          <line x1="7.5" y1="5" x2="7.5" y2="19"></line>
+          <line x1="12" y1="10" x2="12" y2="14"></line>
+          <line x1="16.5" y1="3" x2="16.5" y2="20"></line>
+          <line x1="21" y1="8" x2="21" y2="13"></line>
+        </svg>
         <span>{{ $t('taskList.hasAudio') }}</span>
       </button>
 
@@ -551,6 +577,11 @@ onMounted(() => {
   z-index: 1;
 }
 
+/* 篩選頁籤 icon 只給手機版用（桌機維持純文字外觀），768px 以下改 display:block */
+.tab-icon {
+  display: none;
+}
+
 /* 全部頁籤顏色 */
 /* .tab-btn.tab-all {
   background: #00000000;
@@ -647,9 +678,16 @@ onMounted(() => {
 
 /* 平板以下 (768px) */
 @media (max-width: 768px) {
-  /* 為浮動的分頁列預留底部空間，避免遮住最後一筆任務 */
+  /* 底部固定頁籤列（52px + safe-area）一律會蓋住內容區，先留一份基本空間；
+     有分頁時（浮動 RulerPagination 在頁籤列之上）再加碼避免遮住最後一筆任務 */
+  .task-list {
+    padding-bottom: calc(52px + env(safe-area-inset-bottom, 0px) + 12px);
+  }
+
   .task-list.has-pagination {
-    padding-bottom: 80px;
+    /* 頁籤列 52px + 浮動分頁窗（~64px，浮在頁籤列上方）+ 間距，
+       不足會讓最後一筆任務被分頁窗蓋住（375px 實測定案） */
+    padding-bottom: calc(52px + env(safe-area-inset-bottom, 0px) + 110px);
   }
 
   /* 批次工具列在 mobile 浮於底部導覽列之上，需更多底部空間 */
@@ -663,27 +701,68 @@ onMounted(() => {
     display: none;
   }
 
-  /* 任務類型頁籤換行排列 */
+  /* 任務類型頁籤（含編輯）改為固定在畫面底部的列，五顆均分 */
   .task-type-tabs {
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 12px;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 0;
+    margin: 0;
+    padding: 0 calc(4px + env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px) calc(4px + env(safe-area-inset-left, 0px));
+    height: calc(52px + env(safe-area-inset-bottom, 0px));
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+  }
+
+  :root[data-theme="dark"] .task-type-tabs {
+    background: rgba(40, 40, 40, 0.95);
   }
 
   .tab-btn {
-    padding: 8px 12px;
-    margin: 0 8px 8px 8px;
-    font-size: 13px;
+    flex: 1;
+    margin: 0;
+    padding: 4px 2px;
+    font-size: 11px;
+    white-space: nowrap;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
     /* 確保觸控友好 */
     min-height: 44px;
   }
 
-  /* 分頁控制在小屏時佔滿整行 */
+  /* 手機版頁籤 icon（桌機隱藏以維持原外觀，見組件頂層 .tab-icon 規則） */
+  .tab-icon {
+    display: block;
+  }
+
+  /* 選取效果沿用原底部導覽（nav-link.active）的膠囊樣式，讓作用中的篩選一目了然 */
+  .tab-btn.active {
+    transform: none;
+    border-bottom: none;
+    background: var(--nav-active-bg);
+    color: var(--nav-recent-text);
+    border-radius: 8px;
+  }
+
+  /* 批次編輯頁籤 active 也用同一套膠囊（覆蓋桌機的純變色規則） */
+  .tab-btn.tab-batch-edit.active {
+    color: var(--nav-recent-text);
+  }
+
+  /* 分頁列不再參與底部固定頁籤的 flex 排版：RulerPagination 本身已是 position:fixed
+     浮窗（見 RulerPagination.vue），用 display:contents 讓 wrapper 這層盒子消失、
+     但仍讓子元件正常渲染／保有自己的 fixed 定位 */
   .pagination-wrapper {
-    width: 100%;
-    margin-left: 0;
-    margin-top: 8px;
-    justify-content: center;
+    display: contents;
   }
 
   /* FilterBar 間距調整 */
@@ -706,24 +785,15 @@ onMounted(() => {
     padding-bottom: 72px;
   }
 
-  .task-type-tabs {
-    gap: 4px;
-    margin-top: 8px;
-  }
-
   .tab-btn {
-    padding: 6px 8px;
-    margin: 0 4px 6px 4px;
-    font-size: 12px;
+    padding: 4px 1px;
+    margin: 0;
+    font-size: 10px;
   }
 
-  /* 批次編輯按鈕在小屏隱藏文字 */
-  .tab-btn.tab-batch-edit span {
-    display: none;
-  }
-
+  /* 五顆頁籤（含編輯）在小手機一律保留文字，只縮小字級，不再隱藏 */
   .tab-btn.tab-batch-edit {
-    padding: 8px;
+    padding: 4px 1px;
   }
 
   /* 任務網格更緊湊 */
