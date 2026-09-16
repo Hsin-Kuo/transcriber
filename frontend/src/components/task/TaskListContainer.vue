@@ -744,6 +744,15 @@ onMounted(() => {
     display: block;
   }
 
+  /* icon 用 main-text（含編輯的鉛筆）；active 膠囊內跟著標籤文字色 */
+  .tab-btn svg {
+    color: var(--main-text);
+  }
+
+  .tab-btn.active svg {
+    color: var(--nav-recent-text);
+  }
+
   /* 選取效果沿用原底部導覽（nav-link.active）的膠囊樣式，讓作用中的篩選一目了然 */
   .tab-btn.active {
     transform: none;
