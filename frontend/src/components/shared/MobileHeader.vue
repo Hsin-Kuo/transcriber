@@ -1,7 +1,7 @@
 <template>
   <header class="mobile-header">
-    <!-- 左：上傳頁顯示「回任務列表」，其餘頁顯示搜尋（placeholder，功能後續補上） -->
-    <router-link v-if="isUploadPage" to="/all" class="mobile-header-action" :aria-label="$t('nav.backToTasks')">
+    <!-- 左：上傳頁/設定頁顯示「回任務列表」，其餘頁顯示搜尋（placeholder，功能後續補上） -->
+    <router-link v-if="showBackToTasks" to="/all" class="mobile-header-action" :aria-label="$t('nav.backToTasks')">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <line x1="19" y1="12" x2="5" y2="12"></line>
         <polyline points="12 19 5 12 12 5"></polyline>
@@ -38,8 +38,8 @@ const { t: $t } = useI18n()
 const authStore = useAuthStore()
 const route = useRoute()
 
-// 上傳頁（path '/'）左側不放搜尋，改放回任務列表
-const isUploadPage = computed(() => route.name === 'transcription')
+// 上傳頁（path '/'）與設定頁左側不放搜尋，改放回任務列表
+const showBackToTasks = computed(() => ['transcription', 'settings'].includes(route.name))
 
 // 取得郵箱首字母（與 Navigation.vue 邏輯一致）
 function getFirstLetter(email) {
