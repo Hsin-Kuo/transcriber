@@ -284,11 +284,12 @@ body.transcript-detail-page .content-wrapper {
 }
 
 @media (max-width: 480px) {
+  /* 只縮左右間距；上下 padding 沿用 768px 規則（上方要留給 MobileHeader，
+     用 padding 縮寫會把 padding-top 歸零、內容被 header 蓋住——staging 實測踩過） */
   .app-container,
   body.nav-collapsed .app-container {
-    padding: 0 8px;
     padding-left: 8px;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-right: 8px;
   }
 
   .content-wrapper {
