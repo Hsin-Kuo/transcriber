@@ -32,12 +32,13 @@
                 <span class="tag-dot" :style="{ background: getTagColor(item.tag) }"></span>
                 <span class="tag-name">{{ item.tag }}</span>
                 <span v-if="item.state === 'partial'" class="tag-count">{{ item.count }}/{{ item.total }}</span>
+                <!-- 無框極簡三態：✓ 全有 / − 部分 / 留空 全無（slot 固定寬維持對齊） -->
                 <span class="tri-check" :class="`tri-${item.state}`" aria-hidden="true">
-                  <svg v-if="item.state === 'all'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                  <svg v-if="item.state === 'all'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                     <polyline points="20 6 9 17 4 12"></polyline>
                   </svg>
-                  <svg v-else-if="item.state === 'partial'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                  <svg v-else-if="item.state === 'partial'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                    <line x1="6" y1="12" x2="18" y2="12"></line>
                   </svg>
                 </span>
               </button>
@@ -440,28 +441,14 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', handleClickOutsi
   white-space: nowrap;
 }
 
-/* 三態 checkbox（恆顯示，取代舊的 hover 才浮現的 +/- icon） */
+/* 無框極簡三態（恆顯示）：✓ 全有 / − 部分 / 留空 全無 */
 .tri-check {
   flex-shrink: 0;
   width: 18px;
   height: 18px;
-  border-radius: 4px;
-  border: 1.5px solid rgba(var(--color-divider-rgb), 0.7);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
-  transition: background 0.15s, border-color 0.15s;
-}
-
-.tri-check.tri-all {
-  background: var(--nav-active-bg);
-  border-color: var(--nav-active-bg);
-}
-
-.tri-check.tri-partial {
-  background: rgba(var(--color-divider-rgb), 0.25);
-  border-color: var(--nav-active-bg);
   color: var(--nav-active-bg);
 }
 
