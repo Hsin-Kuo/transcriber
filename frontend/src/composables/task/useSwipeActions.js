@@ -29,12 +29,15 @@ function isMobileViewport() {
   return typeof window !== 'undefined' && window.matchMedia(MOBILE_QUERY).matches
 }
 
+const LONG_PRESS_MS = 500 // 長按進入批次選取模式的門檻
+
 /**
  * @param {string|number} cardId 卡片唯一 id（用於單一開啟協調）
  * @param {import('vue').Ref<number>} actionsWidthRef 動作區寬度（px）的 ref
  * @param {import('vue').Ref<boolean>} [disabledRef] 停用（如批次編輯模式）
+ * @param {Function} [onLongPress] 長按 500ms（無位移）觸發；卡片開啟中不觸發
  */
-export function useSwipeActions(cardId, actionsWidthRef, disabledRef) {
+export function useSwipeActions(cardId, actionsWidthRef, disabledRef, onLongPress) {
   ensureScrollListenerAttached()
 
   const offsetX = ref(0)
@@ -51,6 +54,14 @@ export function useSwipeActions(cardId, actionsWidthRef, disabledRef) {
   let velocity = 0
   let startedOpen = false
   let suppressNextClick = false
+  let longPressTimer = null
+
+  function clearLongPress() {
+    if (longPressTimer !== null) {
+      clearTimeout(longPressTimer)
+      longPressTimer = null
+    }
+  }
 
   const isOpen = ref(false)
 
@@ -104,6 +115,17 @@ export function useSwipeActions(cardId, actionsWidthRef, disabledRef) {
     lastT = event.timeStamp
     velocity = 0
     dragging.value = false
+
+    // 長按（500ms 無位移）→ 批次選取；卡片開啟中不觸發（該輕點是收合）
+    if (typeof onLongPress === 'function' && !startedOpen) {
+      clearLongPress()
+      longPressTimer = setTimeout(() => {
+        longPressTimer = null
+        active = false // 中止本次 swipe 手勢
+        suppressNextClick = true // 放手後的 click 不得導頁
+        onLongPress()
+      }, LONG_PRESS_MS)
+    }
   }
 
   function onPointerMove(event) {
@@ -117,6 +139,7 @@ export function useSwipeActions(cardId, actionsWidthRef, disabledRef) {
         return
       }
       directionLocked = true
+      clearLongPress() // 有位移就不是長按
       horizontalGesture = Math.abs(dx) > Math.abs(dy)
       if (!horizontalGesture) {
         // 垂直手勢：放棄本次，讓瀏覽器捲動接手
@@ -193,10 +216,12 @@ export function useSwipeActions(cardId, actionsWidthRef, disabledRef) {
   }
 
   function onPointerUp() {
+    clearLongPress()
     finishGesture()
   }
 
   function onPointerCancel() {
+    clearLongPress()
     active = false
     dragging.value = false
     withTransition.value = true
