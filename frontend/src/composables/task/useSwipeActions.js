@@ -12,6 +12,7 @@ const FAST_FLICK_VELOCITY = 0.5 // px/ms，收尾速度夠快也視為要開
 // module-level 共享狀態：目前開啟的卡片 id（單一開啟協調）
 const openCardId = ref(null)
 let scrollListenerAttached = false
+let outsideListenerAttached = false
 
 function ensureScrollListenerAttached() {
   if (scrollListenerAttached) return
@@ -19,6 +20,22 @@ function ensureScrollListenerAttached() {
   window.addEventListener(
     'scroll',
     () => {
+      openCardId.value = null
+    },
+    { passive: true, capture: true }
+  )
+}
+
+// 有卡片滑開時，點擊卡片以外的任何地方（header/篩選列/空白處）先收合。
+// 點到「其他卡片」的情境不在這裡處理——由該卡的 onPointerDown 收合＋抑制導頁。
+function ensureOutsideListenerAttached() {
+  if (outsideListenerAttached) return
+  outsideListenerAttached = true
+  window.addEventListener(
+    'pointerdown',
+    (event) => {
+      if (openCardId.value === null) return
+      if (event.target?.closest?.('.swipe-surface, .swipe-actions-row')) return
       openCardId.value = null
     },
     { passive: true, capture: true }
@@ -39,6 +56,7 @@ const LONG_PRESS_MS = 500 // 長按進入批次選取模式的門檻
  */
 export function useSwipeActions(cardId, actionsWidthRef, disabledRef, onLongPress) {
   ensureScrollListenerAttached()
+  ensureOutsideListenerAttached()
 
   const offsetX = ref(0)
   const dragging = ref(false)
@@ -106,6 +124,13 @@ export function useSwipeActions(cardId, actionsWidthRef, disabledRef, onLongPres
 
     if (disabledRef?.value) return
     if (!isMobileViewport()) return
+
+    // 別的卡片正滑開：這一下先收合它、且本次輕點不導頁（iOS 慣例）
+    if (openCardId.value !== null && openCardId.value !== cardId) {
+      openCardId.value = null
+      suppressNextClick = true
+    }
+
     if (event.clientX < EDGE_GUARD_PX) return // 邊緣保護，避開 iOS 返回手勢
 
     active = true
