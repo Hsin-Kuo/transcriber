@@ -449,7 +449,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', handleClickOutsi
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--main-text);
+  color: var(--main-text-light);
 }
 
 .tag-count {
