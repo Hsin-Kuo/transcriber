@@ -316,6 +316,7 @@ const emit = defineEmits([
   'delete',
   'cancel',
   'toggle-selection',
+  'long-press',
   'toggle-keep-audio',
   'tags-updated'
 ])
@@ -335,7 +336,10 @@ const {
   withTransition: swipeWithTransition,
   handlers: swipeHandlers,
   closeSwipe
-} = useSwipeActions(props.task.task_id, swipeActionsWidth, swipeDisabled)
+} = useSwipeActions(props.task.task_id, swipeActionsWidth, swipeDisabled, () => {
+  // 長按 500ms：進入批次選取模式並勾選本卡（手機原生慣例）
+  emit('long-press', props.task.task_id)
+})
 
 // 進入批次編輯模式時，強制收合已開啟的滑動動作列
 watch(swipeDisabled, (disabled) => {

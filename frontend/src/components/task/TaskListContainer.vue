@@ -113,6 +113,7 @@
       @delete="handleDeleteTask"
       @cancel="(taskId) => emit('cancel', taskId)"
       @toggle-selection="handleToggleSelection"
+      @long-press="handleLongPress"
       @toggle-keep-audio="handleToggleKeepAudio"
       @tags-updated="handleTaskTagsUpdated"
     />
@@ -286,6 +287,16 @@ function toggleBatchEditMode() {
 function exitBatchEditMode() {
   isBatchEditMode.value = false
   selectedTaskIds.value = new Set()
+}
+
+// 手機：長按卡片進入批次選取模式並勾選該卡（入口取代原「編輯」頁籤）
+function handleLongPress(taskId) {
+  if (!isBatchEditMode.value) {
+    isBatchEditMode.value = true
+  }
+  if (!selectedTaskIds.value.has(taskId)) {
+    handleToggleSelection(taskId)
+  }
 }
 
 function handleToggleSelection(taskId) {
@@ -745,6 +756,11 @@ onMounted(() => {
   /* 手機版頁籤 icon（桌機隱藏以維持原外觀，見組件頂層 .tab-icon 規則） */
   .tab-icon {
     display: block;
+  }
+
+  /* 手機不放「編輯」頁籤（批次模式改由長按卡片進入），篩選列變純篩選 */
+  .tab-btn.tab-batch-edit {
+    display: none;
   }
 
   /* icon 用 main-text（含編輯的鉛筆）；active 膠囊內跟著標籤文字色 */
