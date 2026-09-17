@@ -472,6 +472,10 @@ function getKeepAudioTooltip() {
   /* margin-left: 10px; */
   transition: all 0.3s;
   position: relative;
+  /* 卡片是點擊/滑動/長按目標：關文字選取——
+     桌機防橫拖時的文字選取殘影、iOS 防長按觸發系統選字泡泡（與批次長按打架） */
+  user-select: none;
+  -webkit-user-select: none;
   /* background: var(--upload-bg); */
   background-image:
     repeating-linear-gradient(0deg, transparent, transparent 9px, rgba(0, 0, 0, 0.015) 9px, rgba(0, 0, 0, 0.015) 10px),
