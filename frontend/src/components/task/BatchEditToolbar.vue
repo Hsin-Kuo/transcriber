@@ -234,6 +234,19 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', handleClickOutsi
   gap: 10px;
   width: max-content;
   max-width: calc(100vw - 32px);
+  /* 進入批次模式的進場動畫：自底部浮起（root 在 Teleport 內，父層 Transition 包不到，用 keyframes） */
+  animation: batch-toolbar-rise 0.3s ease;
+}
+
+@keyframes batch-toolbar-rise {
+  from {
+    transform: translateX(-50%) translateY(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+  }
 }
 
 /* 主工具列 */
