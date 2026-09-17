@@ -900,8 +900,8 @@ class PunctuationProcessor:
                     self._punctuate_chunk_with_retry(
                         chunk_text, language, idx, total_chunks if idx else None,
                         stats,
-                        validate=lambda out: self._align_output_to_pieces(
-                            out, piece_texts
+                        validate=lambda out, pieces=piece_texts: (
+                            self._align_output_to_pieces(out, pieces)
                         ),
                     )
                 )
