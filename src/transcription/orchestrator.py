@@ -109,9 +109,11 @@ class TranscriptionOrchestrator:
             self.check_cancelled(task_id)
 
             # ── 繁簡清洗 + PUNCTUATION ────────────────
-            final_text, segments, punct_model, punct_tokens = self._run_punctuation_phase(
-                task_id, full_text, segments, language, detected_language,
-                ui_language, use_punctuation, punctuation_provider,
+            final_text, segments, punct_model, punct_tokens, punct_stats = (
+                self._run_punctuation_phase(
+                    task_id, full_text, segments, language, detected_language,
+                    ui_language, use_punctuation, punctuation_provider,
+                )
             )
             self.check_cancelled(task_id)
 
@@ -131,7 +133,7 @@ class TranscriptionOrchestrator:
             self._save_compact_audio(task_id, mp3_path)
             self._mark_completed(
                 task_id, detected_language or language, final_text,
-                punct_model, punct_tokens, started_ts,
+                punct_model, punct_tokens, started_ts, punct_stats,
             )
             succeeded = True
             log.info("transcription.run.completed")
@@ -440,8 +442,13 @@ class TranscriptionOrchestrator:
         self, task_id: str, full_text: str, segments: list, language: Optional[str],
         detected_language: Optional[str], ui_language: Optional[str],
         use_punctuation: bool, punctuation_provider: str,
-    ) -> Tuple[str, list, Optional[str], Optional[Dict[str, int]]]:
-        """繁簡清洗(zh)+ PUNCTUATION(可選 + 失敗 fallback)。"""
+    ) -> Tuple[str, list, Optional[str], Optional[Dict[str, int]], Optional[Dict[str, int]]]:
+        """繁簡清洗(zh)+ PUNCTUATION(可選 + 失敗 fallback)。
+
+        末位回傳 punct_stats={"total_chunks", "degraded_chunks"}：degraded 是 LLM
+        輸出不可用而回退無標點原文的 chunk 數。必須持久化——這種任務照樣
+        completed、照樣記 models.punctuation，不落檔就無從得知（prod af99ccef 教訓）。
+        """
         punct_language = _resolve_punct_language(language, detected_language, ui_language)
         if punct_language in ("zh-TW", "zh-CN"):
             from src.services.utils.whisper_processor import _convert_chinese_script
@@ -452,29 +459,44 @@ class TranscriptionOrchestrator:
             ]
 
         if not use_punctuation:
-            return full_text, segments, None, None
+            return full_text, segments, None, None, None
 
         self.report_progress(
             task_id, Phase.PUNCTUATION, 0.0, message="正在添加標點符號...",
             details={"punctuation_started": True},
         )
         try:
-            punctuated_text, punct_model, punct_tokens = self.punctuation.process(
-                full_text,
-                provider=punctuation_provider,
-                language=punct_language,
-                progress_callback=lambda idx, total: self._update_punctuation_progress(
-                    task_id, idx, total
-                ),
+            punctuated_text, punct_model, punct_tokens, punct_stats = (
+                self.punctuation.process(
+                    full_text,
+                    provider=punctuation_provider,
+                    language=punct_language,
+                    progress_callback=lambda idx, total: self._update_punctuation_progress(
+                        task_id, idx, total
+                    ),
+                )
             )
+            degraded = punct_stats.get("degraded_chunks", 0)
+            total = punct_stats.get("total_chunks", 0)
+            if degraded and degraded == total:
+                message = "標點處理降級：LLM 輸出不可用，全文保留無標點原文"
+            elif degraded:
+                message = f"標點處理完成（{degraded}/{total} 段降級保留原文）"
+            else:
+                message = "標點處理完成"
             self.complete_phase(
-                task_id, Phase.PUNCTUATION, "標點處理完成",
-                details={"punctuation_completed": True, "punctuation_model": punct_model},
+                task_id, Phase.PUNCTUATION, message,
+                details={
+                    "punctuation_completed": True,
+                    "punctuation_model": punct_model,
+                    "punctuation_degraded_chunks": degraded,
+                    "punctuation_total_chunks": total,
+                },
             )
             aligned = align_segments_to_punctuated_text(segments, punctuated_text)
             # 依 Gemini 加的句末標點把段切成句子級（中文唯一的句子邊界來源）
             aligned = split_segments_at_sentence_punctuation(aligned)
-            return punctuated_text, aligned, punct_model, punct_tokens
+            return punctuated_text, aligned, punct_model, punct_tokens, punct_stats
         except TranscriptionCancelled:
             # 取消不是「標點失敗」——不可被 fallback 吞掉,往上拋給 run() 收
             raise
@@ -485,7 +507,7 @@ class TranscriptionOrchestrator:
                 f"標點處理失敗（{str(e)[:100]}）,使用原始文字",
                 details={"punctuation_failed": True, "punctuation_error": str(e)[:200]},
             )
-            return full_text, segments, None, None
+            return full_text, segments, None, None, None
 
     def _update_punctuation_progress(self, task_id: str, idx: int, total: int) -> None:
         self.check_cancelled(task_id)  # PUNCTUATION 階段也要能即時取消
@@ -535,6 +557,7 @@ class TranscriptionOrchestrator:
         self, task_id: str, language: Optional[str], transcription_text: str,
         punctuation_model: Optional[str], punctuation_token_usage: Optional[Dict[str, int]],
         started_ts: Optional[int] = None,
+        punctuation_stats: Optional[Dict[str, int]] = None,
     ) -> None:
         """標記完成 + quota consume。完成時順帶 unset 殘留 error。"""
         text_length = len(transcription_text)
@@ -555,6 +578,13 @@ class TranscriptionOrchestrator:
             update_data["stats.duration_seconds"] = max(0, completed_ts - started_ts)
         if punctuation_model:
             update_data["models.punctuation"] = punctuation_model
+        # 標點降級持久化：task_progress 有 6h TTL、worker log 只在 journald，
+        # 這裡是事後可查的唯一落點。degraded=0 也寫，區分「沒降級」與「舊任務無此欄位」。
+        if punctuation_stats is not None:
+            update_data["stats.punctuation_chunks"] = {
+                "total": punctuation_stats.get("total_chunks", 0),
+                "degraded": punctuation_stats.get("degraded_chunks", 0),
+            }
         if punctuation_token_usage:
             update_data["stats.token_usage"] = {
                 "total": punctuation_token_usage.get("total", 0),

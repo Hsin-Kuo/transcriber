@@ -26,8 +26,8 @@ def _proc():
 
 
 def _fake(transform):
-    def _inner(chunk_text, language, chunk_idx=None, total_chunks=None):
-        return transform(chunk_text), MODEL, None
+    def _inner(chunk_text, language, chunk_idx=None, total_chunks=None, model=None):
+        return transform(chunk_text), MODEL, None, True
     return _inner
 
 
@@ -41,7 +41,7 @@ def test_cjk_body_newlines_are_joined_without_space(monkeypatch):
         _fake(lambda t: t.replace("給別人看", "給別人看？\n\n")),
     )
 
-    out, _, _ = proc.process(
+    out, _, _, _ = proc.process(
         "[SPEAKER_00] 我們現在在網頁貼很多地方給別人看", provider="gemini", language="zh"
     )
 
@@ -58,7 +58,7 @@ def test_latin_body_newlines_become_single_space(monkeypatch):
         _fake(lambda t: t.replace("lazy dog", "lazy\n\ndog")),
     )
 
-    out, _, _ = proc.process(
+    out, _, _, _ = proc.process(
         "[SPEAKER_00] The quick brown fox jumps over the lazy dog",
         provider="gemini", language="en",
     )
@@ -76,7 +76,7 @@ def test_upstream_newlines_in_turn_text_are_also_normalized(monkeypatch):
     monkeypatch.setattr(proc, "_punctuate_chunk", _fake(lambda t: t))
 
     # identity LLM：換行完全來自輸入本身
-    out, _, _ = proc.process(
+    out, _, _, _ = proc.process(
         "[SPEAKER_00] 得非常\n \n 好。然後就走出臺大醫院",
         provider="gemini", language="zh",
     )
@@ -95,7 +95,7 @@ def test_output_shape_is_one_paragraph_per_turn(monkeypatch):
     )
 
     turns = [f"[SPEAKER_{i%2:02d}] 第{i}位講者說了一些話。還有第二句話。" for i in range(6)]
-    out, _, _ = proc.process("\n\n".join(turns), provider="gemini", language="zh")
+    out, _, _, _ = proc.process("\n\n".join(turns), provider="gemini", language="zh")
 
     paras = [p for p in out.split("\n\n") if p.strip()]
     assert len(paras) == 6, f"應為 6 段（每輪一段），實際 {len(paras)}"
@@ -249,7 +249,7 @@ def test_no_content_duplication_end_to_end(monkeypatch):
         _fake(lambda t: t.replace("\n\n", "，") + "。"),  # LLM 把短末輪次併進前句
     )
 
-    out, _, _ = proc.process(
+    out, _, _, _ = proc.process(
         "[SPEAKER_00] 這是第一位講者講的一段話內容\n\n[SPEAKER_01] 好",
         provider="gemini", language="zh",
     )

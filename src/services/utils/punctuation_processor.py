@@ -119,6 +119,11 @@ _TURN_BODY_NEWLINE_RE = re.compile(r"[ \t]*[\r\n]+[ \t]*")
 # 不用空白接續的語言（CJK）——拉丁語系換單一空格，否則會把單字黏起來
 _NO_SPACE_LANGUAGES = ("zh", "zh-TW", "zh-CN", "ja", "ko")
 
+# 「不可用輸出」的 chunk 級嘗試上限：初次 + 換備援模型重打 1 次。
+# 不設更高：不可用輸出是稀有事件、兩次都壞多半是這段輸入本身難搞，
+# 再打只是燒 token 拖時間，回退原文讓使用者至少拿到完整內容。
+_CHUNK_MAX_ATTEMPTS = 2
+
 
 class PunctuationProcessor:
     """標點符號處理器
@@ -158,7 +163,7 @@ class PunctuationProcessor:
         language: str = "zh",
         chunk_size: Optional[int] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None
-    ) -> Tuple[str, str, Optional[Dict[str, int]]]:
+    ) -> Tuple[str, str, Optional[Dict[str, int]], Dict[str, int]]:
         """處理文字，添加標點符號和分段
 
         Args:
@@ -169,8 +174,13 @@ class PunctuationProcessor:
             progress_callback: 進度回調函數 callback(current_chunk, total_chunks)
 
         Returns:
-            (處理後的文字, 使用的模型名稱, token_usage) 元組
+            (處理後的文字, 使用的模型名稱, token_usage, stats) 元組
             token_usage: {"total": int, "prompt": int, "completion": int} 或 None
+            stats: {"total_chunks": int, "degraded_chunks": int}
+              degraded = LLM 輸出不可用（截斷/膨脹/空回應/對齊失敗）而回退無標點
+              原文的 chunk 數。呼叫端必須持久化：這類降級任務仍會標 completed、
+              仍記 models.punctuation，不落檔就只能靠使用者回報才發現
+              （2026-09-17 prod af99ccef 全篇無標點事故的根因）。
         """
         provider = provider or self.default_provider
 
@@ -178,13 +188,30 @@ class PunctuationProcessor:
         # 否則 punct_provider='openai'（routers 白名單允許）仍會把標籤送進 LLM。
         turns = self._parse_speaker_turns(text)
         if turns is not None:
-            return self._punctuate_speaker_turns(
+            result = self._punctuate_speaker_turns(
                 turns, provider, language, chunk_size, progress_callback
             )
+        else:
+            result = self._punctuate_plain(
+                text, provider, language, chunk_size, progress_callback
+            )
 
-        return self._punctuate_plain(
-            text, provider, language, chunk_size, progress_callback
-        )
+        stats = result[3]
+        degraded, total = stats["degraded_chunks"], stats["total_chunks"]
+        if total and degraded == total:
+            log.error(
+                "punctuation.all_chunks_degraded",
+                total_chunks=total,
+                provider=provider,
+            )
+        elif degraded:
+            log.warning(
+                "punctuation.partial_chunks_degraded",
+                degraded_chunks=degraded,
+                total_chunks=total,
+                provider=provider,
+            )
+        return result
 
     def _punctuate_plain(
         self,
@@ -193,10 +220,12 @@ class PunctuationProcessor:
         language: str,
         chunk_size: Optional[int],
         progress_callback: Optional[Callable[[int, int], None]],
-    ) -> Tuple[str, str, Optional[Dict[str, int]]]:
+    ) -> Tuple[str, str, Optional[Dict[str, int]], Dict[str, int]]:
         """無標籤文字的原有分派路徑（行為未變）。"""
         if provider == "openai":
-            return self._punctuate_with_openai(text, language)
+            # openai 整份單次送出，無 chunk 級降級回退，僅計 1 chunk
+            out, model, usage = self._punctuate_with_openai(text, language)
+            return out, model, usage, {"total_chunks": 1, "degraded_chunks": 0}
         return self._punctuate_with_gemini(
             text, language, chunk_size, progress_callback
         )
@@ -352,7 +381,7 @@ class PunctuationProcessor:
         language: str = "zh",
         chunk_size: Optional[int] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None
-    ) -> Tuple[str, str, Optional[Dict[str, int]]]:
+    ) -> Tuple[str, str, Optional[Dict[str, int]], Dict[str, int]]:
         """使用 Google Gemini 添加標點符號（支援長文本分段處理）
 
         Args:
@@ -362,20 +391,31 @@ class PunctuationProcessor:
             progress_callback: 進度回調函數
 
         Returns:
-            (處理後的文字, 使用的模型名稱, token_usage) 元組
+            (處理後的文字, 使用的模型名稱, token_usage, stats) 元組
         """
         # 自動決定 chunk_size（考慮輸出限制 65,536 tokens）
         # 標籤保全的分流已上移到 `process()`，此處只處理無標籤文字。
         chunk_size = self._resolve_chunk_size(language, chunk_size)
+        stats = {"total_chunks": 0, "degraded_chunks": 0}
 
         # 如果文字不長，直接處理
         if len(text) <= chunk_size:
-            result, model_used, token_usage = self._punctuate_chunk(text, language)
-            return result, model_used, token_usage
+            stats["total_chunks"] = 1
+            payload, model_used, usage, degraded = self._punctuate_chunk_with_retry(
+                text, language, None, None, stats
+            )
+            result = text if degraded else payload
+            return (
+                result,
+                model_used or self.gemini_model,
+                self._finalize_token_usage(usage),
+                stats,
+            )
 
         # 長文本：分段處理
         chunks = self._split_text_into_chunks(text, chunk_size)
         total_chunks = len(chunks)
+        stats["total_chunks"] = total_chunks
         log.info(
             "punctuation.chunking",
             input_chars=len(text),
@@ -395,10 +435,12 @@ class PunctuationProcessor:
             if progress_callback:
                 progress_callback(chunk_idx, total_chunks)
 
-            result, chunk_model, chunk_token_usage = self._punctuate_chunk(
-                chunk_text, language, chunk_idx, total_chunks
+            payload, chunk_model, chunk_token_usage, degraded = (
+                self._punctuate_chunk_with_retry(
+                    chunk_text, language, chunk_idx, total_chunks, stats
+                )
             )
-            results.append(result)
+            results.append(chunk_text if degraded else payload)
 
             # 記錄使用的模型（使用第一個成功的模型）
             if model_used is None:
@@ -422,7 +464,7 @@ class PunctuationProcessor:
 
         # 合併結果
         final_token_usage = total_token_usage if total_token_usage["total"] > 0 else None
-        return "\n\n".join(results), model_used or self.gemini_model, final_token_usage
+        return "\n\n".join(results), model_used or self.gemini_model, final_token_usage, stats
 
     # ── 語者標籤保全路徑 ────────────────────────────────────────────────
 
@@ -484,12 +526,18 @@ class PunctuationProcessor:
         language: str,
         chunk_idx: Optional[int] = None,
         total_chunks: Optional[int] = None,
-    ) -> Tuple[str, str, Optional[Dict[str, int]]]:
-        """對單一片段呼叫 Gemini 並套用既有防護（前言剝除 / 膨脹回退 / CJK 空白）。
+        model: Optional[str] = None,
+    ) -> Tuple[str, str, Optional[Dict[str, int]], bool]:
+        """對單一片段呼叫 Gemini 並套用既有防護（前言剝除 / 膨脹偵測 / 空回應偵測 /
+        CJK 空白）。
 
         原本散在單次與分段兩處的相同邏輯，抽成單點供三條路徑共用（單次、分段、
         語者標籤保全），確保防護不會因為新增路徑而漏套。
         chunk_idx 為 None → 用單次提示語；否則用分段提示語。
+        model: 指定起始模型（「不可用輸出重試」換模型重打用）。
+
+        回傳末位 usable=False 表示輸出不可用（空回應/膨脹），此時 result 已代換為
+        原文——重試與降級計數是 `_punctuate_chunk_with_retry` 的職責，這裡只偵測。
         """
         if chunk_idx is None:
             system_msg, user_msg = self._get_punctuation_prompt(language, chunk_text)
@@ -500,22 +548,93 @@ class PunctuationProcessor:
         prompt = f"{system_msg}\n\n{user_msg}"
 
         max_out = self._estimate_max_output_tokens(chunk_text, language)
-        result, model, token_usage = self._call_gemini_with_retry(
-            prompt, max_output_tokens=max_out
+        result, used_model, token_usage = self._call_gemini_with_retry(
+            prompt, max_output_tokens=max_out, start_model=model
         )
         result = self._strip_llm_preamble(result)
-        if self._is_output_exploded(chunk_text, result):
+        usable = True
+        if not result.strip():
+            # resp.text 可以是合法的空字串（不會走 retry 的 except），放行會讓
+            # 純文字路徑整個 chunk 的內容消失、標籤路徑觸發對齊失敗
+            log.warning(
+                "punctuation.empty_output",
+                chunk_idx=chunk_idx,
+                total_chunks=total_chunks,
+                model=used_model,
+                input_chars=len(chunk_text),
+            )
+            result = chunk_text
+            usable = False
+        elif self._is_output_exploded(chunk_text, result):
+            # repetition 迴圈（prod 實例 19e2b48d：19,107 字爆成 44,839 字）
             log.warning(
                 "punctuation.output_exploded",
                 chunk_idx=chunk_idx,
                 total_chunks=total_chunks,
+                model=used_model,
                 input_chars=len(chunk_text),
                 output_chars=len(result),
             )
             result = chunk_text
+            usable = False
         if language in ("zh", "zh-TW", "zh-CN"):
             result = self._remove_cjk_latin_spaces(result)
-        return result, model, token_usage
+        return result, used_model, token_usage, usable
+
+    def _punctuate_chunk_with_retry(
+        self,
+        chunk_text: str,
+        language: str,
+        chunk_idx: Optional[int],
+        total_chunks: Optional[int],
+        stats: Dict[str, int],
+        validate: Optional[Callable[[str], Optional[Any]]] = None,
+    ) -> Tuple[Optional[Any], Optional[str], Dict[str, int], bool]:
+        """帶「不可用輸出重試」的 chunk 標點：API 成功但輸出是垃圾也要重打。
+
+        背景（prod 2026-09-17）：Gemini 回應在 API 層成功、內容卻不可用的兩種實測
+        形態——輸出不完整（af99ccef 少 24% 內容→對齊失敗）與 repetition 迴圈
+        （19e2b48d 膨脹 2.3×）。舊行為是直接回退無標點原文；但同輸入重跑一次就
+        正常（b78b0185 實證），輸出不可用大多是單次抽樣壞掉，值得先重試。
+
+        流程：初次用預設模型；不可用（空/膨脹/validate 失敗）→ 換備援模型重打一次；
+        仍不可用才放棄。放棄時 stats.degraded_chunks +1、payload 回 None，由呼叫端
+        決定回退值（純文字路徑=原文、標籤路徑=原 pieces）。
+
+        validate: 額外的輸出驗證（標籤路徑傳對齊函式），回 None 視同不可用；
+        回傳值即 payload（可以不是 str，例如對齊後的 pieces list）。
+        token_usage 累計「所有嘗試」的用量——重試也是真花費，不可漏計。
+        """
+        total_usage = self._new_token_usage()
+        used_model: Optional[str] = None
+        for attempt in range(1, _CHUNK_MAX_ATTEMPTS + 1):
+            # 第 2 次起換一顆模型重打：換模型同時吃到「重抽樣」與「不同失效模式」
+            retry_model = None if attempt == 1 else self.gemini_fallback_models[0]
+            result, used_model, usage, usable = self._punctuate_chunk(
+                chunk_text, language, chunk_idx, total_chunks, model=retry_model
+            )
+            self._accumulate_token_usage(total_usage, usage)
+            if usable:
+                payload = validate(result) if validate is not None else result
+                if payload is not None:
+                    if attempt > 1:
+                        log.info(
+                            "punctuation.chunk_retry_succeeded",
+                            attempt=attempt,
+                            model=used_model,
+                            chunk_idx=chunk_idx,
+                        )
+                    return payload, used_model, total_usage, False
+            if attempt < _CHUNK_MAX_ATTEMPTS:
+                log.warning(
+                    "punctuation.chunk_output_unusable_retrying",
+                    attempt=attempt,
+                    model=used_model,
+                    chunk_idx=chunk_idx,
+                    total_chunks=total_chunks,
+                )
+        stats["degraded_chunks"] += 1
+        return None, used_model, total_usage, True
 
     def _parse_speaker_turns(self, text: str) -> Optional[list]:
         """把 `_merge_transcription_with_diarization` 的輸出解析成 [(label, text), ...]。
@@ -718,7 +837,7 @@ class PunctuationProcessor:
         language: str,
         chunk_size: Optional[int],
         progress_callback: Optional[Callable[[int, int], None]] = None,
-    ) -> Tuple[str, str, Optional[Dict[str, int]]]:
+    ) -> Tuple[str, str, Optional[Dict[str, int]], Dict[str, int]]:
         """標籤保全版標點：標籤留在本地，只有純文字進 LLM，事後重貼。
 
         兩個 provider 共用。openai 原本就不分段（整份送出），這裡維持該語意：
@@ -753,6 +872,7 @@ class PunctuationProcessor:
         per_turn: list = [[] for _ in texts]
         model_used = None
         total_token_usage = self._new_token_usage()
+        stats = {"total_chunks": total_chunks, "degraded_chunks": 0}
 
         for chunk_idx, chunk_pieces in enumerate(chunks, start=1):
             if progress_callback:
@@ -761,22 +881,33 @@ class PunctuationProcessor:
             piece_texts = [p for _, p in chunk_pieces]
             chunk_text = "\n\n".join(piece_texts)
             if provider == "openai":
+                # openai 路徑無重試（單次整份送出的既有語意），只做對齊守門
                 result, chunk_model, chunk_token_usage = self._punctuate_with_openai(
                     chunk_text, language
                 )
+                aligned = self._align_output_to_pieces(result, piece_texts)
+                alignment_failed = aligned is None
+                if alignment_failed:
+                    aligned = piece_texts
+                    stats["degraded_chunks"] += 1
             else:
                 # 只有一個 chunk 時用單次提示語——否則最常見尺寸的 diarized 任務
                 # 會平白吃到「這是第 1 部分」的分段 prompt，是純粹的回歸。
+                # 對齊當 validate 傳入：空回應/膨脹/對齊失敗都算「輸出不可用」，
+                # 先換模型重打（prod 實證同輸入重跑大多正常），仍失敗才回退原文。
                 idx = chunk_idx if total_chunks > 1 else None
-                result, chunk_model, chunk_token_usage = self._punctuate_chunk(
-                    chunk_text, language, idx, total_chunks if idx else None
+                aligned, chunk_model, chunk_token_usage, alignment_failed = (
+                    self._punctuate_chunk_with_retry(
+                        chunk_text, language, idx, total_chunks if idx else None,
+                        stats,
+                        validate=lambda out, pieces=piece_texts: (
+                            self._align_output_to_pieces(out, pieces)
+                        ),
+                    )
                 )
-
-            aligned = self._align_output_to_pieces(result, piece_texts)
-            alignment_failed = aligned is None
-            if alignment_failed:
-                # 對齊失敗 → 該 chunk 整批回退原文（內容不遺失，只是沒標點）
-                aligned = piece_texts
+                if alignment_failed:
+                    # 重試耗盡 → 該 chunk 整批回退原文（內容不遺失，只是沒標點）
+                    aligned = piece_texts
             # 不用 zip(strict=)：本地 dev venv 仍是 3.9（strict= 需 3.10+），
             # 與 whisper_processor 同慣例改用 enumerate。
             for pos, (turn_idx, original) in enumerate(chunk_pieces):
@@ -820,7 +951,7 @@ class PunctuationProcessor:
 
         final_token_usage = self._finalize_token_usage(total_token_usage)
         default_model = self.openai_model if provider == "openai" else self.gemini_model
-        return final_text, model_used or default_model, final_token_usage
+        return final_text, model_used or default_model, final_token_usage, stats
 
     @staticmethod
     def _normalize_turn_body(body: str, language: str) -> str:
@@ -879,13 +1010,16 @@ class PunctuationProcessor:
         self,
         prompt: str,
         max_retries: Optional[int] = None,
-        max_output_tokens: Optional[int] = None
+        max_output_tokens: Optional[int] = None,
+        start_model: Optional[str] = None,
     ) -> Tuple[str, str, Optional[Dict[str, int]]]:
         """調用 Gemini API，支援自動重試和模型備援
 
         Args:
             prompt: 提示文字
             max_retries: 最大重試次數
+            start_model: 起始模型（None 用 self.gemini_model）；
+                「不可用輸出重試」用它換一顆模型重打，配額備援輪替不受影響
 
         Returns:
             (處理後的文字, 使用的模型名稱, token_usage) 元組
@@ -903,9 +1037,9 @@ class PunctuationProcessor:
 
         last_error = None
         quota_exceeded_count = 0
-        current_model = self.gemini_model
+        current_model = start_model or self.gemini_model
         fallback_index = -1
-        tried_models = [self.gemini_model]
+        tried_models = [current_model]
         current_key_index = 0
 
         max_attempts = max_retries * (len(self.gemini_fallback_models) + 1)
