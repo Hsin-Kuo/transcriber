@@ -2959,10 +2959,20 @@ async function confirmDeleteAccount() {
     font-size: 0.8rem;
   }
 
-  /* toggle 開關觸控優化 */
+  /* toggle 開關觸控優化：軌道放大時圓點與位移量要同步調，
+     否則圓點維持 16px/位移 18px 會偏下且 active 時右側留白不對稱 */
   .toggle-switch {
     width: 44px;
     height: 24px;
+  }
+
+  .toggle-slider::before {
+    height: 18px;
+    width: 18px;
+  }
+
+  .toggle-switch.active .toggle-slider::before {
+    transform: translateX(20px);
   }
 }
 </style>
