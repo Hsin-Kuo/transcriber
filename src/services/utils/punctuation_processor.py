@@ -148,11 +148,11 @@ class PunctuationProcessor:
         self.gemini_model = gemini_model
         self.openai_model = openai_model
 
-        # Gemini 備援模型列表（按優先順序）
+        # Gemini 備援模型列表（按優先順序）。
+        # 只 pin 明確版本，不放 *-latest 別名：Google 會 hot-swap 別名指向
+        # （2026-05 起已漂移到 3.x），價格與行為都會不受控地變動。
         self.gemini_fallback_models = [
             "gemini-2.5-flash",
-            "gemini-flash-latest",
-            "gemini-flash-lite-latest",
             "gemini-2.5-pro",
         ]
 

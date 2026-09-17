@@ -53,11 +53,11 @@ class SummaryService:
         self.task_repo = TaskRepository(db)
         self.default_model = default_model
 
-        # Gemini 備援模型列表（按優先順序）
+        # Gemini 備援模型列表（按優先順序）。
+        # 只 pin 明確版本，不放 *-latest 別名：Google 會 hot-swap 別名指向
+        # （2026-05 起已漂移到 3.x），價格與行為都會不受控地變動。
         self.fallback_models = [
             "gemini-2.5-flash-lite",
-            "gemini-flash-latest",
-            "gemini-flash-lite-latest",
         ]
 
     async def generate_summary(
