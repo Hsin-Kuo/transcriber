@@ -26,8 +26,8 @@ def _proc():
 
 
 def _fake(transform):
-    def _inner(chunk_text, language, chunk_idx=None, total_chunks=None, stats=None):
-        return transform(chunk_text), MODEL, None
+    def _inner(chunk_text, language, chunk_idx=None, total_chunks=None, model=None):
+        return transform(chunk_text), MODEL, None, True
     return _inner
 
 

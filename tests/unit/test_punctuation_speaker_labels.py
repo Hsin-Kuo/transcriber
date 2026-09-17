@@ -22,10 +22,10 @@ def _fake_chunk(transform=None):
     """產生假的 `_punctuate_chunk`，並記錄每次收到的 chunk_text。"""
     seen = []
 
-    def _inner(chunk_text, language, chunk_idx=None, total_chunks=None, stats=None):
+    def _inner(chunk_text, language, chunk_idx=None, total_chunks=None, model=None):
         seen.append(chunk_text)
         out = transform(chunk_text) if transform else chunk_text
-        return out, MODEL, {"total": 10, "prompt": 6, "completion": 4}
+        return out, MODEL, {"total": 10, "prompt": 6, "completion": 4}, True
 
     _inner.seen = seen
     return _inner
@@ -399,9 +399,9 @@ def test_single_chunk_uses_unchunked_prompt(monkeypatch):
     proc = _proc()
     seen_idx = []
 
-    def spy(chunk_text, language, chunk_idx=None, total_chunks=None, stats=None):
+    def spy(chunk_text, language, chunk_idx=None, total_chunks=None, model=None):
         seen_idx.append(chunk_idx)
-        return chunk_text, MODEL, None
+        return chunk_text, MODEL, None, True
 
     monkeypatch.setattr(proc, "_punctuate_chunk", spy)
 
@@ -416,9 +416,9 @@ def test_multi_chunk_still_uses_chunked_prompt(monkeypatch):
     proc = _proc()
     seen_idx = []
 
-    def spy(chunk_text, language, chunk_idx=None, total_chunks=None, stats=None):
+    def spy(chunk_text, language, chunk_idx=None, total_chunks=None, model=None):
         seen_idx.append(chunk_idx)
-        return chunk_text, MODEL, None
+        return chunk_text, MODEL, None, True
 
     monkeypatch.setattr(proc, "_punctuate_chunk", spy)
 
@@ -494,3 +494,79 @@ def test_plain_path_empty_output_keeps_original(monkeypatch):
 
     assert out == "沒有標籤的文字"
     assert stats == {"total_chunks": 1, "degraded_chunks": 1}
+
+
+# ── 不可用輸出重試（_punctuate_chunk_with_retry）─────────────────────────
+# prod 實證（af99ccef vs b78b0185）：同輸入重跑一次多半正常——輸出不可用
+# 大多是單次抽樣壞掉，先換備援模型重打、仍失敗才回退原文。
+
+def test_unusable_output_retries_with_fallback_model_and_recovers(monkeypatch):
+    """第 1 次輸出亂改字（對齊失敗）→ 換 gemini-2.5-flash 重打成功 → 不降級。"""
+    proc = _proc()
+    calls = []
+
+    def fake(chunk_text, language, chunk_idx=None, total_chunks=None, model=None):
+        calls.append(model)
+        if len(calls) == 1:
+            return (
+                chunk_text + "幻覺內容" * 80, MODEL,
+                {"total": 5, "prompt": 3, "completion": 2}, True,
+            )
+        return (
+            _add_punctuation(chunk_text), "gemini-2.5-flash",
+            {"total": 7, "prompt": 4, "completion": 3}, True,
+        )
+
+    monkeypatch.setattr(proc, "_punctuate_chunk", fake)
+
+    text = "[SPEAKER_00] 第一段內容\n\n[SPEAKER_01] 第二段內容"
+    out, model, usage, stats = proc.process(text, provider="gemini", language="zh")
+
+    assert calls == [None, "gemini-2.5-flash"], "重試必須換備援模型"
+    assert stats == {"total_chunks": 1, "degraded_chunks": 0}
+    assert "。" in out and "幻覺內容" not in out
+    assert model == "gemini-2.5-flash"
+    assert usage["total"] == 12, "兩次嘗試的 token 都是真花費，必須累計"
+
+
+def test_plain_path_empty_output_retry_recovers(monkeypatch):
+    """純文字路徑：第 1 次空回應 → 重試成功 → 不降級、不回退原文。"""
+    proc = _proc()
+    calls = []
+
+    def fake_call(prompt, max_output_tokens=None, start_model=None):
+        calls.append(start_model)
+        if len(calls) == 1:
+            return "", MODEL, None
+        return "有標點的文字。", "gemini-2.5-flash", {"total": 4, "prompt": 2, "completion": 2}
+
+    monkeypatch.setattr(proc, "_call_gemini_with_retry", fake_call)
+
+    out, model, usage, stats = proc.process(
+        "沒有標籤的文字", provider="gemini", language="zh"
+    )
+
+    assert calls == [None, "gemini-2.5-flash"]
+    assert out == "有標點的文字。"
+    assert model == "gemini-2.5-flash"
+    assert stats == {"total_chunks": 1, "degraded_chunks": 0}
+
+
+def test_retry_exhausted_falls_back_and_counts_once(monkeypatch):
+    """兩次都不可用 → 回退原文、degraded 只計 1（不因兩次嘗試重複計數）。"""
+    proc = _proc()
+    calls = []
+
+    def fake_call(prompt, max_output_tokens=None, start_model=None):
+        calls.append(start_model)
+        return "", MODEL, {"total": 3, "prompt": 2, "completion": 1}
+
+    monkeypatch.setattr(proc, "_call_gemini_with_retry", fake_call)
+
+    text = "[SPEAKER_00] 內容甲\n\n[SPEAKER_01] 內容乙"
+    out, _, usage, stats = proc.process(text, provider="gemini", language="zh")
+
+    assert calls == [None, "gemini-2.5-flash"]
+    assert stats == {"total_chunks": 1, "degraded_chunks": 1}
+    assert "內容甲" in out and out.count("[SPEAKER_00]") == 1
+    assert usage["total"] == 6
