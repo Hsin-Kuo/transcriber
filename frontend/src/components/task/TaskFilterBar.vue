@@ -95,9 +95,21 @@
         </div>
       </div>
 
+        <!-- 手機：列尾固定「管理」chip，開啟 TagManagerSheet（桌機隱藏，見 media query） -->
+        <button
+          type="button"
+          class="filter-manage-chip"
+          @click="showManagerSheet = true"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          <span>{{ $t('taskList.filterBar.manage') }}</span>
+        </button>
       </div>
 
-      <!-- 顯示更多 / 收合 切換按鈕（僅在實際溢出且非編輯模式時顯示） -->
+      <!-- 顯示更多 / 收合 切換按鈕（僅在實際溢出且非編輯模式時顯示；手機不摺疊，見 media query 隱藏） -->
       <button
         v-if="overflowing && !isEditing"
         type="button"
@@ -160,6 +172,13 @@
       :target-tag="colorPickerTag"
       @color-selected="handleColorSelected"
     />
+
+    <!-- 手機：標籤管理 Bottom Sheet（改名/改色/刪除/拖曳排序） -->
+    <TagManagerSheet
+      v-model="showManagerSheet"
+      :tags="displayedTagsList"
+      @refresh="emit('refresh')"
+    />
   </div>
 </template>
 
@@ -168,6 +187,7 @@ import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTaskTags } from '../../composables/task/useTaskTags'
 import ColorPickerPopup from './ColorPickerPopup.vue'
+import TagManagerSheet from './TagManagerSheet.vue'
 
 const { t: $t } = useI18n()
 const { getTagColor, updateTagColorLocal, saveTagColor, renameTag, deleteTag, saveTagOrder, getTagIds, tagsData, fetchTagColors } = useTaskTags($t)
@@ -215,6 +235,9 @@ const editingTag = ref(null)
 const editingTagText = ref('')
 const isRenamingTag = ref(false)
 const tagInput = ref(null)
+
+// 手機：標籤管理 sheet 開關
+const showManagerSheet = ref(false)
 
 // Color picker state
 const showColorPicker = ref(false)
@@ -878,10 +901,61 @@ function handleColorSelected({ tag, color }) {
   background: rgba(var(--color-primary-rgb), 0.2);
 }
 
+/* 管理 chip（桌機隱藏，僅手機顯示，見下方 media query） */
+.filter-manage-chip {
+  display: none;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  min-height: 32px;
+  font-size: 12px;
+  font-weight: 500;
+  background: transparent;
+  border: 1px dashed rgba(var(--color-teal-rgb), 0.4);
+  border-radius: 999px;
+  color: rgba(var(--color-teal-rgb), 0.95);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 /* === 響應式設計 === */
 
 /* 平板以下 */
 @media (max-width: 768px) {
+  /* 單列橫向捲動：取消兩排摺疊，隱藏 scrollbar */
+  .filter-tags {
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    max-height: none !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+
+  .filter-tags::-webkit-scrollbar {
+    display: none;
+  }
+
+  .filter-tag-item {
+    flex-shrink: 0;
+  }
+
+  /* 手機不摺疊，「顯示更多/收合」鈕隱藏（桌機摺疊機制原樣） */
+  .btn-toggle-rows {
+    display: none;
+  }
+
+  /* 手機停用 inline edit mode：編輯入口鈕隱藏，改用 TagManagerSheet */
+  .btn-edit-filter {
+    display: none;
+  }
+
+  .filter-manage-chip {
+    display: inline-flex;
+  }
+
   .filter-section {
     padding: 10px 12px;
     gap: 8px;
@@ -901,8 +975,12 @@ function handleColorSelected({ tag, color }) {
   }
 
   .filter-tag-btn {
-    padding: 4px 10px;
-    font-size: var(--font-size-sm);
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    padding: 4px 12px;
+    font-size: 13px;
+    box-sizing: border-box;
   }
 
   .filter-tag-input {
@@ -980,12 +1058,20 @@ function handleColorSelected({ tag, color }) {
   }
 
   .filter-tag-btn {
-    padding: 3px 8px;
-    font-size: var(--font-size-sm);
+    min-height: 32px;
+    padding: 3px 10px;
+    font-size: 12px;
+    box-sizing: border-box;
   }
 
   .filter-tag-btn.active {
     border-bottom-width: 1.5px;
+  }
+
+  .filter-manage-chip {
+    min-height: 32px;
+    padding: 3px 10px;
+    font-size: 12px;
   }
 
   .filter-tag-input {

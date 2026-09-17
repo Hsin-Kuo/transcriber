@@ -411,6 +411,8 @@ async function handleTaskTagsUpdated({ taskId, tags }) {
   try {
     await api.put(`/tasks/${taskId}/tags`, { tags })
     emit('refresh')
+    // 指派時可能隱含建立了新 tag：刷新共享 tagsData，讓篩選列/picker 立即看到
+    fetchTagColors()
   } catch (error) {
     console.error($t('taskList.errorUpdateTags') + ':', error)
     alert($t('taskList.errorUpdateTagsFull', { message: error.response?.data?.detail || error.message }))
@@ -735,6 +737,7 @@ onMounted(() => {
     align-items: center;
     justify-content: center;
     gap: 2px;
+    color: var(--main-text);
     /* 確保觸控友好 */
     min-height: 44px;
   }
@@ -742,6 +745,15 @@ onMounted(() => {
   /* 手機版頁籤 icon（桌機隱藏以維持原外觀，見組件頂層 .tab-icon 規則） */
   .tab-icon {
     display: block;
+  }
+
+  /* icon 用 main-text（含編輯的鉛筆）；active 膠囊內跟著標籤文字色 */
+  .tab-btn svg {
+    color: var(--main-text);
+  }
+
+  .tab-btn.active svg {
+    color: var(--nav-recent-text);
   }
 
   /* 選取效果沿用原底部導覽（nav-link.active）的膠囊樣式，讓作用中的篩選一目了然 */

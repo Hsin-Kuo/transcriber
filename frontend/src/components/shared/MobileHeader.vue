@@ -89,12 +89,19 @@ function getFirstLetter(email) {
     width: 32px;
     height: 32px;
     border-radius: 50%;
-    background: var(--nav-bg);
+    background: var(--nav-recent-text);
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 0.9rem;
     font-weight: 700;
+    color: var(--main-text);
+  }
+
+  /* 深色模式：改用較淺的灰階（原 nav-bg=gray-800 在深底上不夠明顯）。
+     注意 palette-gray-700/600 實際比 800 更深（colors.css 灰階不連續），要跳到 500 */
+  :root[data-theme="dark"] .avatar-circle {
+    background: var(--palette-gray-500);
     color: var(--nav-text);
   }
 
@@ -104,7 +111,7 @@ function getFirstLetter(email) {
     align-items: center;
     gap: 6px;
     text-decoration: none;
-    color: var(--nav-text);
+    color: var(--main-text);
     font-family: 'Inter', sans-serif;
     font-weight: 600;
     font-size: 1.25rem;
