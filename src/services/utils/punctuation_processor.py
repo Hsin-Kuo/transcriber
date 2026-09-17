@@ -158,7 +158,7 @@ class PunctuationProcessor:
         language: str = "zh",
         chunk_size: Optional[int] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None
-    ) -> Tuple[str, str, Optional[Dict[str, int]]]:
+    ) -> Tuple[str, str, Optional[Dict[str, int]], Dict[str, int]]:
         """處理文字，添加標點符號和分段
 
         Args:
@@ -169,8 +169,13 @@ class PunctuationProcessor:
             progress_callback: 進度回調函數 callback(current_chunk, total_chunks)
 
         Returns:
-            (處理後的文字, 使用的模型名稱, token_usage) 元組
+            (處理後的文字, 使用的模型名稱, token_usage, stats) 元組
             token_usage: {"total": int, "prompt": int, "completion": int} 或 None
+            stats: {"total_chunks": int, "degraded_chunks": int}
+              degraded = LLM 輸出不可用（截斷/膨脹/空回應/對齊失敗）而回退無標點
+              原文的 chunk 數。呼叫端必須持久化：這類降級任務仍會標 completed、
+              仍記 models.punctuation，不落檔就只能靠使用者回報才發現
+              （2026-09-17 prod af99ccef 全篇無標點事故的根因）。
         """
         provider = provider or self.default_provider
 
@@ -178,13 +183,30 @@ class PunctuationProcessor:
         # 否則 punct_provider='openai'（routers 白名單允許）仍會把標籤送進 LLM。
         turns = self._parse_speaker_turns(text)
         if turns is not None:
-            return self._punctuate_speaker_turns(
+            result = self._punctuate_speaker_turns(
                 turns, provider, language, chunk_size, progress_callback
             )
+        else:
+            result = self._punctuate_plain(
+                text, provider, language, chunk_size, progress_callback
+            )
 
-        return self._punctuate_plain(
-            text, provider, language, chunk_size, progress_callback
-        )
+        stats = result[3]
+        degraded, total = stats["degraded_chunks"], stats["total_chunks"]
+        if total and degraded == total:
+            log.error(
+                "punctuation.all_chunks_degraded",
+                total_chunks=total,
+                provider=provider,
+            )
+        elif degraded:
+            log.warning(
+                "punctuation.partial_chunks_degraded",
+                degraded_chunks=degraded,
+                total_chunks=total,
+                provider=provider,
+            )
+        return result
 
     def _punctuate_plain(
         self,
@@ -193,10 +215,12 @@ class PunctuationProcessor:
         language: str,
         chunk_size: Optional[int],
         progress_callback: Optional[Callable[[int, int], None]],
-    ) -> Tuple[str, str, Optional[Dict[str, int]]]:
+    ) -> Tuple[str, str, Optional[Dict[str, int]], Dict[str, int]]:
         """無標籤文字的原有分派路徑（行為未變）。"""
         if provider == "openai":
-            return self._punctuate_with_openai(text, language)
+            # openai 整份單次送出，無 chunk 級降級回退，僅計 1 chunk
+            out, model, usage = self._punctuate_with_openai(text, language)
+            return out, model, usage, {"total_chunks": 1, "degraded_chunks": 0}
         return self._punctuate_with_gemini(
             text, language, chunk_size, progress_callback
         )
@@ -352,7 +376,7 @@ class PunctuationProcessor:
         language: str = "zh",
         chunk_size: Optional[int] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None
-    ) -> Tuple[str, str, Optional[Dict[str, int]]]:
+    ) -> Tuple[str, str, Optional[Dict[str, int]], Dict[str, int]]:
         """使用 Google Gemini 添加標點符號（支援長文本分段處理）
 
         Args:
@@ -362,20 +386,25 @@ class PunctuationProcessor:
             progress_callback: 進度回調函數
 
         Returns:
-            (處理後的文字, 使用的模型名稱, token_usage) 元組
+            (處理後的文字, 使用的模型名稱, token_usage, stats) 元組
         """
         # 自動決定 chunk_size（考慮輸出限制 65,536 tokens）
         # 標籤保全的分流已上移到 `process()`，此處只處理無標籤文字。
         chunk_size = self._resolve_chunk_size(language, chunk_size)
+        stats = {"total_chunks": 0, "degraded_chunks": 0}
 
         # 如果文字不長，直接處理
         if len(text) <= chunk_size:
-            result, model_used, token_usage = self._punctuate_chunk(text, language)
-            return result, model_used, token_usage
+            stats["total_chunks"] = 1
+            result, model_used, token_usage = self._punctuate_chunk(
+                text, language, stats=stats
+            )
+            return result, model_used, token_usage, stats
 
         # 長文本：分段處理
         chunks = self._split_text_into_chunks(text, chunk_size)
         total_chunks = len(chunks)
+        stats["total_chunks"] = total_chunks
         log.info(
             "punctuation.chunking",
             input_chars=len(text),
@@ -396,7 +425,7 @@ class PunctuationProcessor:
                 progress_callback(chunk_idx, total_chunks)
 
             result, chunk_model, chunk_token_usage = self._punctuate_chunk(
-                chunk_text, language, chunk_idx, total_chunks
+                chunk_text, language, chunk_idx, total_chunks, stats=stats
             )
             results.append(result)
 
@@ -422,7 +451,7 @@ class PunctuationProcessor:
 
         # 合併結果
         final_token_usage = total_token_usage if total_token_usage["total"] > 0 else None
-        return "\n\n".join(results), model_used or self.gemini_model, final_token_usage
+        return "\n\n".join(results), model_used or self.gemini_model, final_token_usage, stats
 
     # ── 語者標籤保全路徑 ────────────────────────────────────────────────
 
@@ -484,12 +513,15 @@ class PunctuationProcessor:
         language: str,
         chunk_idx: Optional[int] = None,
         total_chunks: Optional[int] = None,
+        stats: Optional[Dict[str, int]] = None,
     ) -> Tuple[str, str, Optional[Dict[str, int]]]:
-        """對單一片段呼叫 Gemini 並套用既有防護（前言剝除 / 膨脹回退 / CJK 空白）。
+        """對單一片段呼叫 Gemini 並套用既有防護（前言剝除 / 膨脹回退 / 空回應回退 /
+        CJK 空白）。
 
         原本散在單次與分段兩處的相同邏輯，抽成單點供三條路徑共用（單次、分段、
         語者標籤保全），確保防護不會因為新增路徑而漏套。
         chunk_idx 為 None → 用單次提示語；否則用分段提示語。
+        stats: 呼叫端的降級計數器；本函式回退原文時 +1 degraded_chunks。
         """
         if chunk_idx is None:
             system_msg, user_msg = self._get_punctuation_prompt(language, chunk_text)
@@ -504,7 +536,19 @@ class PunctuationProcessor:
             prompt, max_output_tokens=max_out
         )
         result = self._strip_llm_preamble(result)
-        if self._is_output_exploded(chunk_text, result):
+        degraded = False
+        if not result.strip():
+            # resp.text 可以是合法的空字串（不會走 retry 的 except），放行會讓
+            # 純文字路徑整個 chunk 的內容消失、標籤路徑觸發對齊失敗
+            log.warning(
+                "punctuation.empty_output",
+                chunk_idx=chunk_idx,
+                total_chunks=total_chunks,
+                input_chars=len(chunk_text),
+            )
+            result = chunk_text
+            degraded = True
+        elif self._is_output_exploded(chunk_text, result):
             log.warning(
                 "punctuation.output_exploded",
                 chunk_idx=chunk_idx,
@@ -513,6 +557,9 @@ class PunctuationProcessor:
                 output_chars=len(result),
             )
             result = chunk_text
+            degraded = True
+        if degraded and stats is not None:
+            stats["degraded_chunks"] += 1
         if language in ("zh", "zh-TW", "zh-CN"):
             result = self._remove_cjk_latin_spaces(result)
         return result, model, token_usage
@@ -718,7 +765,7 @@ class PunctuationProcessor:
         language: str,
         chunk_size: Optional[int],
         progress_callback: Optional[Callable[[int, int], None]] = None,
-    ) -> Tuple[str, str, Optional[Dict[str, int]]]:
+    ) -> Tuple[str, str, Optional[Dict[str, int]], Dict[str, int]]:
         """標籤保全版標點：標籤留在本地，只有純文字進 LLM，事後重貼。
 
         兩個 provider 共用。openai 原本就不分段（整份送出），這裡維持該語意：
@@ -753,6 +800,7 @@ class PunctuationProcessor:
         per_turn: list = [[] for _ in texts]
         model_used = None
         total_token_usage = self._new_token_usage()
+        stats = {"total_chunks": total_chunks, "degraded_chunks": 0}
 
         for chunk_idx, chunk_pieces in enumerate(chunks, start=1):
             if progress_callback:
@@ -767,9 +815,12 @@ class PunctuationProcessor:
             else:
                 # 只有一個 chunk 時用單次提示語——否則最常見尺寸的 diarized 任務
                 # 會平白吃到「這是第 1 部分」的分段 prompt，是純粹的回歸。
+                # stats 傳入：空回應/膨脹回退在 chunk 內發生時，回傳的是原文，
+                # 對齊必然成功、不會再走下面的 alignment_failed +1，兩處計數互斥。
                 idx = chunk_idx if total_chunks > 1 else None
                 result, chunk_model, chunk_token_usage = self._punctuate_chunk(
-                    chunk_text, language, idx, total_chunks if idx else None
+                    chunk_text, language, idx, total_chunks if idx else None,
+                    stats=stats,
                 )
 
             aligned = self._align_output_to_pieces(result, piece_texts)
@@ -777,6 +828,7 @@ class PunctuationProcessor:
             if alignment_failed:
                 # 對齊失敗 → 該 chunk 整批回退原文（內容不遺失，只是沒標點）
                 aligned = piece_texts
+                stats["degraded_chunks"] += 1
             # 不用 zip(strict=)：本地 dev venv 仍是 3.9（strict= 需 3.10+），
             # 與 whisper_processor 同慣例改用 enumerate。
             for pos, (turn_idx, original) in enumerate(chunk_pieces):
@@ -820,7 +872,7 @@ class PunctuationProcessor:
 
         final_token_usage = self._finalize_token_usage(total_token_usage)
         default_model = self.openai_model if provider == "openai" else self.gemini_model
-        return final_text, model_used or default_model, final_token_usage
+        return final_text, model_used or default_model, final_token_usage, stats
 
     @staticmethod
     def _normalize_turn_body(body: str, language: str) -> str:

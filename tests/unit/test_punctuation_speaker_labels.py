@@ -22,7 +22,7 @@ def _fake_chunk(transform=None):
     """產生假的 `_punctuate_chunk`，並記錄每次收到的 chunk_text。"""
     seen = []
 
-    def _inner(chunk_text, language, chunk_idx=None, total_chunks=None):
+    def _inner(chunk_text, language, chunk_idx=None, total_chunks=None, stats=None):
         seen.append(chunk_text)
         out = transform(chunk_text) if transform else chunk_text
         return out, MODEL, {"total": 10, "prompt": 6, "completion": 4}
@@ -61,7 +61,7 @@ def test_round_trip_preserves_every_label_and_order(monkeypatch):
         "[SPEAKER_01] 好我先講第一點\n\n"
         "[SPEAKER_00] 我補充一下"
     )
-    out, model, usage = proc.process(text, provider="gemini", language="zh")
+    out, model, usage, _ = proc.process(text, provider="gemini", language="zh")
 
     lines = out.split("\n\n")
     assert len(lines) == 3
@@ -86,7 +86,7 @@ def test_llm_deleting_labels_cannot_lose_them(monkeypatch):
     monkeypatch.setattr(proc, "_punctuate_chunk", _fake_chunk(wipe_labels))
 
     text = "[SPEAKER_00] 第一段內容\n\n[SPEAKER_01] 第二段內容"
-    out, _, _ = proc.process(text, provider="gemini", language="zh")
+    out, _, _, _ = proc.process(text, provider="gemini", language="zh")
 
     assert out.count("[SPEAKER_00]") == 1
     assert out.count("[SPEAKER_01]") == 1
@@ -98,7 +98,7 @@ def test_single_label_survives(monkeypatch):
     monkeypatch.setattr(proc, "_punctuate_chunk", _fake_chunk(_add_punctuation))
 
     text = "[SPEAKER_00] " + "這是一段很長的獨白" * 50
-    out, _, _ = proc.process(text, provider="gemini", language="zh")
+    out, _, _, _ = proc.process(text, provider="gemini", language="zh")
 
     assert out.startswith("[SPEAKER_00] ")
     assert out.count("[SPEAKER_00]") == 1
@@ -139,7 +139,7 @@ def test_oversized_turn_rejoins_into_one_labelled_line(monkeypatch):
 
     body = "長篇獨白內容" * 60
     text = f"[SPEAKER_00] {body}\n\n[SPEAKER_01] 短回應"
-    out, _, _ = proc.process(text, provider="gemini", language="zh", chunk_size=100)
+    out, _, _, _ = proc.process(text, provider="gemini", language="zh", chunk_size=100)
 
     lines = out.split("\n\n")
     assert len(lines) == 2, f"超長輪次必須 rejoin 成一行，實際 {len(lines)} 行"
@@ -155,7 +155,7 @@ def test_unlabelled_input_takes_original_path(monkeypatch):
     monkeypatch.setattr(proc, "_punctuate_chunk", _fake_chunk(_add_punctuation))
 
     text = "這是一段沒有語者標籤的文字"
-    out, model, _ = proc.process(text, provider="gemini", language="zh")
+    out, model, _, _ = proc.process(text, provider="gemini", language="zh")
 
     # 原路徑：輸出即 LLM 結果，未經任何標籤處理
     assert out == _add_punctuation(text)
@@ -185,7 +185,7 @@ def test_unlabelled_part_merges_into_previous_turn(monkeypatch):
     monkeypatch.setattr(proc, "_punctuate_chunk", _fake_chunk())
 
     text = "[SPEAKER_00] 有標籤\n\n沒有標籤的一行\n\n[SPEAKER_02] 又有標籤"
-    out, _, _ = proc.process(text, provider="gemini", language="zh")
+    out, _, _, _ = proc.process(text, provider="gemini", language="zh")
 
     lines = out.split("\n\n")
     assert len(lines) == 2, f"續段應併回前一輪次，實際 {lines}"
@@ -199,7 +199,7 @@ def test_leading_unlabelled_part_is_kept(monkeypatch):
     proc = _proc()
     monkeypatch.setattr(proc, "_punctuate_chunk", _fake_chunk())
 
-    out, _, _ = proc.process(
+    out, _, _, _ = proc.process(
         "開頭沒有標籤\n\n[SPEAKER_01] 後面有標籤", provider="gemini", language="zh"
     )
 
@@ -214,7 +214,7 @@ def test_many_speakers_all_preserved(monkeypatch):
     monkeypatch.setattr(proc, "_punctuate_chunk", _fake_chunk(_add_punctuation))
 
     turns = [f"[SPEAKER_{i:02d}] 第{i}位講者的內容" for i in range(8)]
-    out, _, _ = proc.process("\n\n".join(turns), provider="gemini", language="zh")
+    out, _, _, _ = proc.process("\n\n".join(turns), provider="gemini", language="zh")
 
     for i in range(8):
         assert out.count(f"[SPEAKER_{i:02d}]") == 1
@@ -247,7 +247,7 @@ def test_truncated_chunk_falls_back_to_original_text(monkeypatch):
     monkeypatch.setattr(proc, "_punctuate_chunk", _fake_chunk(lambda t: "崩塌"))
 
     text = "[SPEAKER_00] " + "甲的內容" * 30 + "\n\n[SPEAKER_01] " + "乙的內容" * 30
-    out, _, _ = proc.process(text, provider="gemini", language="zh")
+    out, _, _, _ = proc.process(text, provider="gemini", language="zh")
 
     assert out.count("[SPEAKER_00]") == 1
     assert out.count("[SPEAKER_01]") == 1
@@ -285,7 +285,7 @@ def test_oversized_turn_truncation_falls_back_without_content_loss(monkeypatch):
     monkeypatch.setattr(proc, "_punctuate_chunk", _fake_chunk(truncate))
 
     body = "這是一段沒有標點的長獨白內容" * 30
-    out, _, _ = proc.process(
+    out, _, _, _ = proc.process(
         f"[SPEAKER_00] {body}", provider="gemini", language="zh", chunk_size=200
     )
 
@@ -310,7 +310,7 @@ def test_oversized_english_turn_rejoins_without_gluing_words(monkeypatch):
 
     body = "The quick brown fox jumps over the lazy dog and keeps running. " * 8
     body = body.strip()
-    out, _, _ = proc.process(
+    out, _, _, _ = proc.process(
         f"[SPEAKER_00] {body}", provider="en", language="en", chunk_size=100
     )
 
@@ -367,7 +367,7 @@ def test_openai_provider_also_protects_labels(monkeypatch):
     monkeypatch.setattr(proc, "_punctuate_with_openai", fake_openai)
 
     text = "[SPEAKER_00] 甲說的話\n\n[SPEAKER_01] 乙說的話"
-    out, model, _ = proc.process(text, provider="openai", language="zh")
+    out, model, _, _ = proc.process(text, provider="openai", language="zh")
 
     assert seen, "應該有呼叫 openai"
     for sent in seen:
@@ -388,7 +388,7 @@ def test_openai_unlabelled_input_unchanged(monkeypatch):
 
     monkeypatch.setattr(proc, "_punctuate_with_openai", fake_openai)
 
-    out, model, usage = proc.process("沒有標籤的文字", provider="openai", language="zh")
+    out, model, usage, _ = proc.process("沒有標籤的文字", provider="openai", language="zh")
 
     assert calls == ["沒有標籤的文字"]
     assert (out, model, usage) == ("標點後", "gpt-4o-mini", None)
@@ -399,7 +399,7 @@ def test_single_chunk_uses_unchunked_prompt(monkeypatch):
     proc = _proc()
     seen_idx = []
 
-    def spy(chunk_text, language, chunk_idx=None, total_chunks=None):
+    def spy(chunk_text, language, chunk_idx=None, total_chunks=None, stats=None):
         seen_idx.append(chunk_idx)
         return chunk_text, MODEL, None
 
@@ -416,7 +416,7 @@ def test_multi_chunk_still_uses_chunked_prompt(monkeypatch):
     proc = _proc()
     seen_idx = []
 
-    def spy(chunk_text, language, chunk_idx=None, total_chunks=None):
+    def spy(chunk_text, language, chunk_idx=None, total_chunks=None, stats=None):
         seen_idx.append(chunk_idx)
         return chunk_text, MODEL, None
 
@@ -436,3 +436,61 @@ def test_speaker_label_patterns_are_consistent():
     for label in ("[SPEAKER_00]", "[SPEAKER_7]", "[Speaker A]", "[speaker_12]"):
         assert pp._SPEAKER_TURN_PREFIX_RE.match(f"{label} 內容"), label
         assert pp._SPEAKER_LABEL_COUNT_RE.match(f"{label} 內容"), label
+
+
+# ── 降級觀測（stats：process 第 4 回傳值）────────────────────────────────
+# 背景：prod af99ccef（2026-09-17）全篇無標點但任務照樣 completed、照樣記
+# models.punctuation——降級只留 worker journald warning，DB 無痕。stats 是
+# orchestrator 持久化到 stats.punctuation_chunks 的資料來源。
+
+def test_stats_report_zero_degraded_on_success(monkeypatch):
+    proc = _proc()
+    monkeypatch.setattr(proc, "_punctuate_chunk", _fake_chunk(_add_punctuation))
+
+    text = "[SPEAKER_00] 今天我們來討論規劃\n\n[SPEAKER_01] 好我先講第一點"
+    _, _, _, stats = proc.process(text, provider="gemini", language="zh")
+
+    assert stats == {"total_chunks": 1, "degraded_chunks": 0}
+
+
+def test_alignment_failure_counts_degraded_and_keeps_original(monkeypatch):
+    """LLM 亂改字（可比字元暴增）→ 對齊失敗回退原文，degraded 必須計數。"""
+    proc = _proc()
+    monkeypatch.setattr(
+        proc, "_punctuate_chunk", _fake_chunk(lambda t: t + "幻覺內容" * 50)
+    )
+
+    text = "[SPEAKER_00] 短內容\n\n[SPEAKER_01] 另一段"
+    out, _, _, stats = proc.process(text, provider="gemini", language="zh")
+
+    assert stats["total_chunks"] == 1
+    assert stats["degraded_chunks"] == 1
+    assert "短內容" in out and "幻覺內容" not in out
+
+
+def test_empty_llm_output_falls_back_and_counts_degraded(monkeypatch):
+    """resp.text 可以是合法空字串（不走 retry 的 except）——必須回退原文而非吞掉內容。"""
+    proc = _proc()
+    monkeypatch.setattr(
+        proc, "_call_gemini_with_retry", lambda *a, **k: ("", MODEL, None)
+    )
+
+    text = "[SPEAKER_00] 內容甲\n\n[SPEAKER_01] 內容乙"
+    out, _, _, stats = proc.process(text, provider="gemini", language="zh")
+
+    assert stats["degraded_chunks"] == 1
+    assert "內容甲" in out and "內容乙" in out
+    assert out.count("[SPEAKER_00]") == 1
+
+
+def test_plain_path_empty_output_keeps_original(monkeypatch):
+    """無標籤路徑：空回應以前會讓整個 chunk 內容消失，現在必須保留原文。"""
+    proc = _proc()
+    monkeypatch.setattr(
+        proc, "_call_gemini_with_retry", lambda *a, **k: ("", MODEL, None)
+    )
+
+    out, _, _, stats = proc.process("沒有標籤的文字", provider="gemini", language="zh")
+
+    assert out == "沒有標籤的文字"
+    assert stats == {"total_chunks": 1, "degraded_chunks": 1}
