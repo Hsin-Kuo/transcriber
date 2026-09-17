@@ -217,10 +217,6 @@
               </button>
             </div>
 
-            <!-- 手機：kebab 按鈕（dropdown 渲染於 .task-wrapper 層，避免 clip-path 裁切） -->
-            <div class="mobile-kebab-wrapper mobile-action">
-              <button class="btn-kebab" @click.stop="toggleMobileMenu($event)" :title="$t('taskList.moreActions')" :aria-label="$t('taskList.moreActions')">⋮</button>
-            </div>
           </div>
 
           <!-- 進行中任務的取消按鈕 -->
@@ -235,11 +231,6 @@
             {{ task.cancelling ? $t('taskList.cancelling') : $t('taskList.cancel') }}
           </button>
 
-          <!-- 手機：進行中任務也要有 kebab（標籤指派入口）；刪除項在選單內依狀態隱藏 -->
-          <div v-if="['pending', 'processing'].includes(task.status)" class="mobile-kebab-wrapper mobile-action">
-            <button class="btn-kebab" @click.stop="toggleMobileMenu($event)" :title="$t('taskList.moreActions')" :aria-label="$t('taskList.moreActions')">⋮</button>
-          </div>
-
           <!-- 桌機：失敗或取消任務的刪除按鈕 -->
           <button
             v-if="['failed', 'cancelled'].includes(task.status)"
@@ -250,47 +241,10 @@
             {{ $t('taskList.deleteButtonText') }}
           </button>
 
-          <!-- 手機：失敗或取消任務的 kebab 按鈕 -->
-          <div v-if="['failed', 'cancelled'].includes(task.status)" class="mobile-kebab-wrapper mobile-action">
-            <button class="btn-kebab" @click.stop="toggleMobileMenu($event)" :title="$t('taskList.moreActions')" :aria-label="$t('taskList.moreActions')">⋮</button>
-          </div>
         </div>
 
       </div>
     </div>
-
-    <!-- 手機：kebab dropdown（Teleport 到 body，backdrop 攔截所有外部點擊） -->
-    <Teleport to="body">
-      <template v-if="showMobileMenu">
-        <div class="mobile-menu-backdrop" @click="closeMobileMenu" />
-        <div class="mobile-dropdown" :style="menuStyle" @click.stop>
-          <button v-if="task.status === 'completed'" @click.stop="handleMobileDownload">
-            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7 10 12 15 17 10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
-            </svg>
-            {{ $t('taskList.downloadTranscript') }}
-          </button>
-          <button @click.stop="openTagSheet">
-            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
-              <line x1="7" y1="7" x2="7.01" y2="7"></line>
-            </svg>
-            {{ $t('taskList.editTags') }}
-          </button>
-          <button v-if="!['pending', 'processing'].includes(task.status)" class="danger" @click.stop="handleMobileDelete">
-            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-              <line x1="10" y1="11" x2="10" y2="17"></line>
-              <line x1="14" y1="11" x2="14" y2="17"></line>
-            </svg>
-            {{ $t('taskList.deleteTask') }}
-          </button>
-        </div>
-      </template>
-    </Teleport>
 
     <!-- 手機：標籤指派/建立 Bottom Sheet（Teleport 到 body，位置無關） -->
     <TagPickerSheet
@@ -413,46 +367,11 @@ function handleSwipeCancel() {
   emit('cancel', props.task.task_id)
 }
 
-// 手機 kebab 選單狀態
-const showMobileMenu = ref(false)
+// 標籤 Bottom Sheet（由左滑動作列的「標籤」鈕開啟）
 const showTagSheet = ref(false)
-const menuStyle = ref({})
-
-function toggleMobileMenu(event) {
-  if (showMobileMenu.value) {
-    showMobileMenu.value = false
-    return
-  }
-  const rect = event.currentTarget.getBoundingClientRect()
-  const spaceBelow = window.innerHeight - rect.bottom
-  // completed: 3 buttons (download/tags/delete) ~185px, failed/cancelled: 2 buttons (tags/delete) ~110px
-  const approxHeight = props.task.status === 'completed' ? 185 : 110
-  menuStyle.value = {
-    right: (window.innerWidth - rect.right) + 'px',
-    ...(spaceBelow >= approxHeight
-      ? { top: (rect.bottom + 4) + 'px' }
-      : { top: (rect.top - approxHeight - 4) + 'px' })
-  }
-  showMobileMenu.value = true
-}
-
-function closeMobileMenu() {
-  showMobileMenu.value = false
-}
 
 function openTagSheet() {
-  closeMobileMenu()
   showTagSheet.value = true
-}
-
-function handleMobileDownload() {
-  closeMobileMenu()
-  emit('download', props.task)
-}
-
-function handleMobileDelete() {
-  closeMobileMenu()
-  emit('delete', props.task.task_id)
 }
 
 // Methods
@@ -1039,73 +958,8 @@ function getKeepAudioTooltip() {
   box-shadow: none !important;
 }
 
-/* 桌機/手機顯示切換 */
+/* 桌機/手機顯示切換（kebab 已移除，手機快捷操作改由左滑動作列提供） */
 .desktop-action { display: flex; }
-.mobile-action  { display: none; }
-
-.btn-kebab {
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: transparent;
-  font-size: 20px;
-  line-height: 1;
-  cursor: pointer;
-  color: var(--nav-text);
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-}
-
-.btn-kebab:hover {
-  background: rgba(0, 0, 0, 0.06);
-}
-
-/* 遮罩：攔截所有 dropdown 外的點擊 */
-.mobile-menu-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 199;
-}
-
-.mobile-dropdown {
-  position: fixed;
-  z-index: 200;
-  min-width: 168px;
-  background: var(--upload-bg);
-  border: 1px solid rgba(var(--color-divider-rgb), 0.3);
-  border-radius: 12px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-  overflow: hidden;
-}
-
-.mobile-dropdown button {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 13px 16px;
-  background: transparent;
-  border: none;
-  font-size: 14px;
-  cursor: pointer;
-  color: var(--main-text);
-  text-align: left;
-}
-
-.mobile-dropdown button:not(:last-child) {
-  border-bottom: 1px solid rgba(var(--color-divider-rgb), 0.2);
-}
-
-.mobile-dropdown button:hover {
-  background: rgba(var(--color-divider-rgb), 0.08);
-}
-
-.mobile-dropdown button.danger {
-  color: var(--color-danger);
-}
 
 /* === 響應式設計 === */
 
@@ -1163,9 +1017,8 @@ function getKeepAudioTooltip() {
     flex-shrink: 0;
   }
 
-  /* 手機：隱藏桌機按鈕，顯示 kebab */
+  /* 手機：隱藏桌機按鈕（快捷操作改由左滑動作列提供） */
   .desktop-action { display: none; }
-  .mobile-action  { display: flex; }
 
 
   .btn {
