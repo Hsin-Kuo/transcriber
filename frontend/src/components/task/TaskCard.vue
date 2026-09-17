@@ -1130,7 +1130,10 @@ function getKeepAudioTooltip() {
   .swipe-surface {
     position: relative;
     z-index: 2;
-    background-color: var(--upload-bg);
+    /* 與 body 同色：滑動需要不透明底蓋住動作鈕，用頁面底色讓卡片維持原本
+       「透明」觀感。用 --color-bg 不用 --main-bg——後者在卡片祖先層被覆寫成
+       不同值（實測 #e6e6e6 vs body #f5f5f5） */
+    background-color: var(--color-bg);
     touch-action: pan-y;
   }
 
