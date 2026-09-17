@@ -32,13 +32,13 @@
                 <span class="tag-dot" :style="{ background: getTagColor(item.tag) }"></span>
                 <span class="tag-name">{{ item.tag }}</span>
                 <span v-if="item.state === 'partial'" class="tag-count">{{ item.count }}/{{ item.total }}</span>
-                <!-- 無框極簡三態：✓ 全有 / − 部分 / 留空 全無（slot 固定寬維持對齊） -->
-                <span class="tri-check" :class="`tri-${item.state}`" aria-hidden="true">
-                  <svg v-if="item.state === 'all'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="20 6 9 17 4 12"></polyline>
-                  </svg>
-                  <svg v-else-if="item.state === 'partial'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-                    <line x1="6" y1="12" x2="18" y2="12"></line>
+                <!-- 方塊填色三態：■ 全有 / ◨ 半填部分 / □ 空框全無 -->
+                <span class="tri-check" aria-hidden="true">
+                  <svg width="16" height="16" viewBox="0 0 16 16">
+                    <rect x="1.5" y="1.5" width="13" height="13" rx="3"
+                      :fill="item.state === 'all' ? 'currentColor' : 'none'"
+                      stroke="currentColor" stroke-width="1.5" />
+                    <path v-if="item.state === 'partial'" d="M4.5 1.5 h-0 a3 3 0 0 0 -3 3 v7 a3 3 0 0 0 3 3 h3.5 v-13 z" fill="currentColor" stroke="none" />
                   </svg>
                 </span>
               </button>
