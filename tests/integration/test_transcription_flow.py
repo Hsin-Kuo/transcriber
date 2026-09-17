@@ -87,7 +87,7 @@ class FakePunctuation:
     def process(self, text, provider=None, language=None, progress_callback=None):
         if progress_callback is not None:
             progress_callback(1, 1)
-        return text + "。", "fake-model", {"total": 1}
+        return text + "。", "fake-model", {"total": 1}, {"total_chunks": 1, "degraded_chunks": 0}
 
 
 # ── fixtures ─────────────────────────────────────────────

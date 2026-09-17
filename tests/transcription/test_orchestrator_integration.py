@@ -116,7 +116,7 @@ class FakePunctuation:
             raise RuntimeError("gemini quota exceeded")
         if progress_callback is not None:
             progress_callback(1, 1)
-        return text + "[punct]", "fake-model", {"total": 10, "prompt": 6, "completion": 4}
+        return text + "[punct]", "fake-model", {"total": 10, "prompt": 6, "completion": 4}, {"total_chunks": 1, "degraded_chunks": 0}
 
 
 class CancellingPunctuation:
@@ -130,7 +130,7 @@ class CancellingPunctuation:
         self._db.tasks.update_one({"_id": self._task_id}, {"$set": {"status": "cancelled"}})
         if progress_callback is not None:
             progress_callback(1, 1)   # → _update_punctuation_progress → check_cancelled
-        return text + "[punct]", "fake-model", {"total": 1}
+        return text + "[punct]", "fake-model", {"total": 1}, {"total_chunks": 1, "degraded_chunks": 0}
 
 
 class FakeDiarization:

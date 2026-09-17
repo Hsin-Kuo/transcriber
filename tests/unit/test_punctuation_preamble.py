@@ -99,10 +99,10 @@ def test_gemini_single_shot_strips_preamble(monkeypatch):
     llm_response = f"{REPORTED_PREAMBLE}\n\n{BODY}"
     monkeypatch.setattr(
         proc, "_call_gemini_with_retry",
-        lambda prompt, max_output_tokens=None: (llm_response, "fake-gemini", None),
+        lambda prompt, max_output_tokens=None, start_model=None: (llm_response, "fake-gemini", None),
     )
 
-    result, model, _usage = proc._punctuate_with_gemini(BODY, language="zh")
+    result, model, _usage, _stats = proc._punctuate_with_gemini(BODY, language="zh")
 
     assert result == BODY
     assert model == "fake-gemini"
@@ -113,7 +113,7 @@ def test_gemini_chunked_strips_preamble_in_every_chunk(monkeypatch):
     # 每個 chunk 的回應都帶前言（含中段 chunk）——每個都要剝
     calls = []
 
-    def fake_call(prompt, max_output_tokens=None):
+    def fake_call(prompt, max_output_tokens=None, start_model=None):
         calls.append(prompt)
         # 從 prompt 尾端取回該 chunk 的原文（prompt 以 \n\n{chunk_text} 結尾）
         chunk_text = prompt.rsplit("\n\n", 1)[-1]
@@ -122,7 +122,7 @@ def test_gemini_chunked_strips_preamble_in_every_chunk(monkeypatch):
     monkeypatch.setattr(proc, "_call_gemini_with_retry", fake_call)
 
     long_text = "\n".join(f"[SPEAKER_00] 第{i}句話的內容測試。" for i in range(20))
-    result, _model, _usage = proc._punctuate_with_gemini(
+    result, _model, _usage, _stats = proc._punctuate_with_gemini(
         long_text, language="zh", chunk_size=100
     )
 
