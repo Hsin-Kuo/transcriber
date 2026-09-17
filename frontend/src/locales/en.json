@@ -716,7 +716,26 @@
     "tagStepCreate": "Create tags",
     "tagStepOrder": "Save order",
     "tagStepColor": "Save colors",
-    "tagEditPartialFailed": "Some tag edits failed ({steps}): {message}"
+    "tagEditPartialFailed": "Some tag edits failed ({steps}): {message}",
+    "tagPicker": {
+      "title": "Tags",
+      "searchOrCreate": "Search or create a tag",
+      "create": "+ Create \"{name}\"",
+      "noTags": "No tags yet — type a name to create your first one"
+    },
+    "tagManager": {
+      "title": "Manage Tags",
+      "editTitle": "Edit Tag",
+      "name": "Name",
+      "color": "Color",
+      "delete": "Delete Tag",
+      "confirmDelete": "Confirm Delete",
+      "back": "Back",
+      "empty": "No tags yet"
+    },
+    "filterBar": {
+      "manage": "Manage"
+    }
   },
   "downloadDialog": {
     "title": "Download Settings",
