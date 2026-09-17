@@ -411,6 +411,8 @@ async function handleTaskTagsUpdated({ taskId, tags }) {
   try {
     await api.put(`/tasks/${taskId}/tags`, { tags })
     emit('refresh')
+    // 指派時可能隱含建立了新 tag：刷新共享 tagsData，讓篩選列/picker 立即看到
+    fetchTagColors()
   } catch (error) {
     console.error($t('taskList.errorUpdateTags') + ':', error)
     alert($t('taskList.errorUpdateTagsFull', { message: error.response?.data?.detail || error.message }))

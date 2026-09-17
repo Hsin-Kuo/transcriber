@@ -716,7 +716,26 @@
     "tagStepCreate": "建立標籤",
     "tagStepOrder": "保存順序",
     "tagStepColor": "保存顏色",
-    "tagEditPartialFailed": "部分標籤編輯操作失敗（{steps}）：{message}"
+    "tagEditPartialFailed": "部分標籤編輯操作失敗（{steps}）：{message}",
+    "tagPicker": {
+      "title": "標籤",
+      "searchOrCreate": "搜尋或建立標籤",
+      "create": "＋ 建立「{name}」",
+      "noTags": "尚無標籤，輸入名稱即可建立第一個"
+    },
+    "tagManager": {
+      "title": "管理標籤",
+      "editTitle": "編輯標籤",
+      "name": "名稱",
+      "color": "顏色",
+      "delete": "刪除標籤",
+      "confirmDelete": "確認刪除",
+      "back": "返回",
+      "empty": "尚無標籤"
+    },
+    "filterBar": {
+      "manage": "管理"
+    }
   },
   "downloadDialog": {
     "title": "下載設定",

@@ -169,6 +169,11 @@
             {{ task.cancelling ? $t('taskList.cancelling') : $t('taskList.cancel') }}
           </button>
 
+          <!-- 手機：進行中任務也要有 kebab（標籤指派入口）；刪除項在選單內依狀態隱藏 -->
+          <div v-if="['pending', 'processing'].includes(task.status)" class="mobile-kebab-wrapper mobile-action">
+            <button class="btn-kebab" @click.stop="toggleMobileMenu($event)" :title="$t('taskList.moreActions')" :aria-label="$t('taskList.moreActions')">⋮</button>
+          </div>
+
           <!-- 桌機：失敗或取消任務的刪除按鈕 -->
           <button
             v-if="['failed', 'cancelled'].includes(task.status)"
@@ -201,14 +206,14 @@
             </svg>
             {{ $t('taskList.downloadTranscript') }}
           </button>
-          <button v-if="task.status === 'completed'" @click.stop="openTagSheet">
+          <button @click.stop="openTagSheet">
             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
               <line x1="7" y1="7" x2="7.01" y2="7"></line>
             </svg>
             {{ $t('taskList.editTags') }}
           </button>
-          <button class="danger" @click.stop="handleMobileDelete">
+          <button v-if="!['pending', 'processing'].includes(task.status)" class="danger" @click.stop="handleMobileDelete">
             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="3 6 5 6 21 6"></polyline>
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -221,30 +226,25 @@
       </template>
     </Teleport>
 
-    <!-- 手機：標籤編輯 Bottom Sheet（Teleport 到 body，位置無關） -->
-    <BottomSheet v-model="showTagSheet" :title="$t('taskList.editTags')">
-      <div class="tag-sheet-body">
-        <TaskTagsSection
-          ref="tagSheetRef"
-          :task-id="task.task_id"
-          :tags="task.tags"
-          :all-tags="allTags"
-          :no-click-outside="true"
-          @tags-updated="handleTagsUpdated"
-        />
-      </div>
-    </BottomSheet>
+    <!-- 手機：標籤指派/建立 Bottom Sheet（Teleport 到 body，位置無關） -->
+    <TagPickerSheet
+      v-model="showTagSheet"
+      :task-id="task.task_id"
+      :tags="task.tags || []"
+      :all-tags="allTags"
+      @tags-updated="handleTagsUpdated"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, watch, nextTick, computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTaskHelpers } from '../../composables/task/useTaskHelpers'
 import { useDateFormatter } from '../../composables/useDateFormatter'
 import { useAuthStore } from '../../stores/auth'
 import TaskTagsSection from './TaskTagsSection.vue'
-import BottomSheet from '../common/BottomSheet.vue'
+import TagPickerSheet from './TagPickerSheet.vue'
 
 const { t: $t } = useI18n()
 const authStore = useAuthStore()
@@ -302,15 +302,7 @@ const emit = defineEmits([
 // 手機 kebab 選單狀態
 const showMobileMenu = ref(false)
 const showTagSheet = ref(false)
-const tagSheetRef = ref(null)
 const menuStyle = ref({})
-
-// BottomSheet 開啟時自動進入編輯模式
-watch(showTagSheet, (val) => {
-  if (val) {
-    nextTick(() => tagSheetRef.value?.startEditing())
-  }
-})
 
 function toggleMobileMenu(event) {
   if (showMobileMenu.value) {
@@ -319,8 +311,8 @@ function toggleMobileMenu(event) {
   }
   const rect = event.currentTarget.getBoundingClientRect()
   const spaceBelow = window.innerHeight - rect.bottom
-  // completed: 3 buttons ~130px, failed/cancelled: 1 button ~55px
-  const approxHeight = props.task.status === 'completed' ? 130 : 55
+  // completed: 3 buttons (download/tags/delete) ~185px, failed/cancelled: 2 buttons (tags/delete) ~110px
+  const approxHeight = props.task.status === 'completed' ? 185 : 110
   menuStyle.value = {
     right: (window.innerWidth - rect.right) + 'px',
     ...(spaceBelow >= approxHeight
@@ -1112,18 +1104,4 @@ function getKeepAudioTooltip() {
   }
 }
 
-/* Bottom Sheet 標籤編輯區：撐滿全寬 */
-.tag-sheet-body {
-  width: 100%;
-}
-
-.tag-sheet-body :deep(.task-tags-section) {
-  display: flex;
-  width: 100%;
-}
-
-.tag-sheet-body :deep(.tag-edit-mode) {
-  width: 100%;
-  box-sizing: border-box;
-}
 </style>
