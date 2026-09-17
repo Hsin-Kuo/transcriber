@@ -34,7 +34,7 @@
                 <span v-if="item.state === 'partial'" class="tag-count">{{ item.count }}/{{ item.total }}</span>
                 <!-- 方塊填色三態：■ 全有 / ◨ 半填部分 / □ 空框全無 -->
                 <span class="tri-check" aria-hidden="true">
-                  <svg width="16" height="16" viewBox="0 0 16 16">
+                  <svg width="13" height="13" viewBox="0 0 16 16">
                     <rect x="1.5" y="1.5" width="13" height="13" rx="3"
                       :fill="item.state === 'all' ? 'currentColor' : 'none'"
                       stroke="currentColor" stroke-width="1.5" />
@@ -441,15 +441,15 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', handleClickOutsi
   white-space: nowrap;
 }
 
-/* 無框極簡三態（恆顯示）：✓ 全有 / − 部分 / 留空 全無 */
+/* 方塊填色三態（恆顯示）：■ 全有 / ◨ 部分 / □ 全無 */
 .tri-check {
   flex-shrink: 0;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--nav-active-bg);
+  color: var(--main-text);
 }
 
 .tag-count {
