@@ -81,16 +81,18 @@
       @pointerup="swipeHandlers.onPointerup"
       @pointercancel="swipeHandlers.onPointercancel"
     >
-      <!-- 批次編輯選擇框 -->
-      <div v-if="isBatchMode" class="batch-select-checkbox" @click.stop>
-        <input
-          type="checkbox"
-          :checked="isSelected"
-          @change="emit('toggle-selection', task.task_id)"
-          class="batch-checkbox"
-          :aria-label="$t('taskList.selectTask')"
-        />
-      </div>
+      <!-- 批次編輯選擇框（進出場動畫：寬度展開＋縮放淡入，讓卡片內容平滑讓位） -->
+      <Transition name="batch-check">
+        <div v-if="isBatchMode" class="batch-select-checkbox" @click.stop>
+          <input
+            type="checkbox"
+            :checked="isSelected"
+            @change="emit('toggle-selection', task.task_id)"
+            class="batch-checkbox"
+            :aria-label="$t('taskList.selectTask')"
+          />
+        </div>
+      </Transition>
 
       <div class="task-main">
         <div class="task-info">
@@ -578,6 +580,21 @@ function getKeepAudioTooltip() {
   padding-top: 0;
   height: 24px;
   margin-left: -4px;
+  max-width: 32px;
+}
+
+/* 進出批次模式的過渡：寬度 0→32px 展開（內容平滑讓位）＋縮放淡入 */
+.batch-check-enter-active,
+.batch-check-leave-active {
+  transition: max-width 0.25s ease, opacity 0.2s ease, transform 0.25s ease;
+  overflow: hidden;
+}
+
+.batch-check-enter-from,
+.batch-check-leave-to {
+  max-width: 0;
+  opacity: 0;
+  transform: scale(0.5);
 }
 
 .batch-checkbox {
