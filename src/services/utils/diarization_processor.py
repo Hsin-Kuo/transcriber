@@ -12,7 +12,10 @@ from src.utils.logger import get_logger
 log = get_logger(__name__)
 
 # 說話者辨識模型名稱（單一來源；載入與記錄任務 models.diarization 都引用此常數）
-DIARIZATION_MODEL = "pyannote/speaker-diarization-3.1"
+# community-1（pyannote.audio 4.x）：staging POC 2026-09-19 實測——同性別相近聲音
+# 可分離（3.1 做不到）、過切大幅收斂（同支難錄音 15→8 人，真實 ~7）、
+# 自動偵測可自行收斂到正確人數；T4 峰值 VRAM 1.71GB、48 分鐘音檔 112 秒。
+DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
 
 
 class DiarizationProcessor:
@@ -43,6 +46,36 @@ class DiarizationProcessor:
             return self.pipeline is not None or self.hf_token is not None
         except ImportError:
             return False
+
+    @staticmethod
+    def _load_waveform(audio_path: Path) -> Dict:
+        """把音檔載成 pyannote 4.x 的 waveform dict 輸入。
+
+        **必須走記憶體 waveform、禁止把檔案路徑傳給 pipeline**：4.x 的檔案解碼
+        改用 torchcodec（需要 FFmpeg 共享庫，GPU worker 的 DLAMI 沒有）。
+        waveform dict 路徑完全不觸碰 torchcodec（4.0.6+ 對缺庫優雅降級，
+        import 只 warning）。上游 orchestrator 已固定餵 16k WAV，soundfile 可直讀。
+        """
+        import soundfile as sf
+        import torch
+
+        data, sample_rate = sf.read(str(audio_path), dtype="float32", always_2d=True)
+        return {"waveform": torch.from_numpy(data.T), "sample_rate": sample_rate}
+
+    @staticmethod
+    def _collect_segments(output) -> List[Dict]:
+        """把 pyannote 4.x 的輸出物件轉成本專案 segments 格式。
+
+        4.x breaking change：pipeline 不再回傳 Annotation（3.x 用
+        `itertracks(yield_label=True)` 三元組），改回傳 output 物件，
+        `output.speaker_diarization` 迭代出 (turn, speaker) 二元組。
+        另有 output.exclusive_speaker_diarization（無重疊版本，對 ASR 對齊
+        更友善）——尚未採用，見 memory diarization-exact-speaker-count 遺留。
+        """
+        return [
+            {"start": turn.start, "end": turn.end, "speaker": speaker}
+            for turn, speaker in output.speaker_diarization
+        ]
 
     @staticmethod
     def _build_speaker_kwargs(max_speakers) -> Dict:
@@ -86,16 +119,9 @@ class DiarizationProcessor:
             # 準備 diarization 參數
             diarization_kwargs = self._build_speaker_kwargs(max_speakers)
             log.debug("diarization.params", max_speakers=max_speakers, diarization_kwargs=diarization_kwargs)
-            diarization = self.pipeline(str(audio_path), **diarization_kwargs)
+            output = self.pipeline(self._load_waveform(audio_path), **diarization_kwargs)
 
-            segments = []
-            for turn, _, speaker in diarization.itertracks(yield_label=True):
-                segments.append({
-                    "start": turn.start,
-                    "end": turn.end,
-                    "speaker": speaker
-                })
-
+            segments = self._collect_segments(output)
             num_speakers = len(set(s['speaker'] for s in segments))
             log.info("diarization.completed", num_speakers=num_speakers)
             return segments
@@ -126,14 +152,11 @@ class DiarizationProcessor:
         try:
             # 在進程中重新載入 pipeline（因為無法跨進程傳遞）
             from pyannote.audio import Pipeline
-            from huggingface_hub import login
-
-            if self.hf_token:
-                login(token=self.hf_token, add_to_git_credential=False)
 
             log.debug("diarization.pipeline_loading", in_process=True)
             import torch
-            pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL)
+            # 4.x + huggingface_hub 1.x：直接傳 token=，不再走全域 login()
+            pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL, token=self.hf_token or None)
 
             # GPU 加速：優先 CUDA，其次 MPS
             if torch.cuda.is_available():
@@ -148,16 +171,9 @@ class DiarizationProcessor:
             # 準備 diarization 參數
             diarization_kwargs = self._build_speaker_kwargs(max_speakers)
             log.debug("diarization.params", in_process=True, max_speakers=max_speakers, diarization_kwargs=diarization_kwargs)
-            diarization = pipeline(str(audio_path), **diarization_kwargs)
+            output = pipeline(self._load_waveform(audio_path), **diarization_kwargs)
 
-            segments = []
-            for turn, _, speaker in diarization.itertracks(yield_label=True):
-                segments.append({
-                    "start": turn.start,
-                    "end": turn.end,
-                    "speaker": speaker
-                })
-
+            segments = self._collect_segments(output)
             num_speakers = len(set(s['speaker'] for s in segments))
             log.info("diarization.completed", in_process=True, num_speakers=num_speakers)
             return segments
@@ -178,7 +194,6 @@ class DiarizationProcessor:
         """
         try:
             from pyannote.audio import Pipeline
-            from huggingface_hub import login
             import torch
 
             hf_token = hf_token or os.getenv("HF_TOKEN")
@@ -187,11 +202,9 @@ class DiarizationProcessor:
                 log.warning("diarization.hf_token_missing")
                 return None
 
-            # 使用 huggingface_hub 登入
-            login(token=hf_token, add_to_git_credential=False)
-
             log.debug("diarization.model.loading")
-            pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL)
+            # 4.x + huggingface_hub 1.x：直接傳 token=，不再走全域 login()
+            pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL, token=hf_token)
 
             # GPU 加速：優先 CUDA，其次 MPS
             if torch.cuda.is_available():
@@ -212,7 +225,7 @@ class DiarizationProcessor:
             log.error(
                 "diarization.model.load_failed",
                 error=str(e),
-                hint="請確認已在 Hugging Face 同意使用條款：https://huggingface.co/pyannote/speaker-diarization-3.1",
+                hint="請確認 HF_TOKEN 的帳號已同意條款：https://huggingface.co/pyannote/speaker-diarization-community-1",
                 exc_info=True,
             )
             return None
