@@ -22,7 +22,7 @@
 """
 from typing import Optional
 
-PRICING_VERIFIED_AT = "2026-07-20"
+PRICING_VERIFIED_AT = "2026-09-17"
 
 # 每 1,000,000 tokens 的美金單價（input=prompt、output=completion）。
 PRICING = {
@@ -32,12 +32,10 @@ PRICING = {
     "gpt-4o-mini": {"input": 0.15, "output": 0.60},
 }
 
-# 別名 → 具體版本。程式碼中的 fallback 清單含 *-latest 別名（會被 Google hot-swap），
-# 這裡對應到目前指向的實際模型以便計價；若 Google 改指向，更新此表。
-ALIASES = {
-    "gemini-flash-latest": "gemini-2.5-flash",
-    "gemini-flash-lite-latest": "gemini-2.5-flash-lite",
-}
+# 別名 → 具體版本。*-latest 別名會被 Google hot-swap（2026-05 起已漂移到 3.x 且
+# 各檔位價差 3–6 倍），無法靜態對映到單一價格，故 fallback 清單已全面改 pin 明確
+# 版本、本表清空。歷史 log 中殘留的別名紀錄計價回 None（無法計價），不猜價。
+ALIASES: dict = {}
 
 _PER_MILLION = 1_000_000
 

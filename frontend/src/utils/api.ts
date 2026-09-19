@@ -79,6 +79,8 @@ let redirectingToLogin = false
 function redirectToLogin(reason: string): void {
   if (redirectingToLogin) return
   if (window.location.pathname === '/login') return
+  // 公開分享頁（/s/:token）不需登入，匿名訪客的 401（如 /auth/me）不該把人踢去登入頁
+  if (window.location.pathname.startsWith('/s/')) return
   redirectingToLogin = true
   console.info(`[auth] redirecting to /login: ${reason}`)
   const redirect = encodeURIComponent(window.location.pathname + window.location.search)

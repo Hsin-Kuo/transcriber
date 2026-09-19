@@ -389,6 +389,10 @@
     "noCompletedTasks": "No completed tasks",
     "logout": "Logout"
   },
+  "nav": {
+    "search": "Search",
+    "backToTasks": "Back to tasks"
+  },
   "transcription": {
     "taskType": "Task Type",
     "paragraph": "Document",
@@ -398,7 +402,7 @@
     "speakerDiarization": "Speaker Diarization",
     "enable": "Enable",
     "maxSpeakers": "Number of Speakers (Optional)",
-    "maxSpeakersHint": "Can improve accuracy and avoid over-analysis.",
+    "maxSpeakersHint": "Speakers will be identified as exactly this number; helps when similar voices (e.g., same-gender speakers) get merged. Leave empty for auto-detect.",
     "autoDetect": "Auto Detect",
     "tags": "Tags",
     "tagPlaceholder": "Enter new tag",
@@ -612,7 +616,7 @@
     },
     "confirmDelete": "Are you sure you want to delete this task?",
     "deleteButtonText": "Delete",
-    "batchEdit": "",
+    "batchEdit": "Edit",
     "exitBatchEdit": "Exit Edit",
     "exit": "Exit",
     "selectAll": "Select All",
@@ -646,7 +650,7 @@
     "deleteTask": "Delete task and files",
     "cancelRunningTask": "Cancel running task",
     "diarization": "Speaker Diarization",
-    "maxSpeakers": "Max {count} speakers",
+    "maxSpeakers": "{count} speakers",
     "autoDetectSpeakers": "Auto-detect speaker count",
     "newestBadge": "new",
     "newestTaskAudioKept": "Audio from newest task is kept automatically",
@@ -712,7 +716,26 @@
     "tagStepCreate": "Create tags",
     "tagStepOrder": "Save order",
     "tagStepColor": "Save colors",
-    "tagEditPartialFailed": "Some tag edits failed ({steps}): {message}"
+    "tagEditPartialFailed": "Some tag edits failed ({steps}): {message}",
+    "tagPicker": {
+      "title": "Tags",
+      "searchOrCreate": "Search or create a tag",
+      "create": "+ Create \"{name}\"",
+      "noTags": "No tags yet — type a name to create your first one"
+    },
+    "tagManager": {
+      "title": "Manage Tags",
+      "editTitle": "Edit Tag",
+      "name": "Name",
+      "color": "Color",
+      "delete": "Delete Tag",
+      "confirmDelete": "Confirm Delete",
+      "back": "Back",
+      "empty": "No tags yet"
+    },
+    "filterBar": {
+      "manage": "Manage"
+    }
   },
   "downloadDialog": {
     "title": "Download Settings",
@@ -823,7 +846,8 @@
     "playbackFailed": "Playback failed",
     "audioExpiredTitle": "Audio file has been deleted",
     "audioExpiredTooltip": "This task's audio file has been automatically deleted (retention period: {days} days). To keep audio files, use the pin feature on the task list page.",
-    "volume": "Volume"
+    "volume": "Volume",
+    "seek": "Playback progress"
   },
   "replaceToolbar": {
     "find": "Find",

@@ -3,28 +3,96 @@
     class="electric-card task-wrapper"
     :data-tour="task.__demo ? 'demo-card' : undefined"
   >
+    <!-- 手機：左滑露出的快捷動作列（桌機 display:none，恆不影響桌機） -->
+    <div class="swipe-actions-row" :style="{ width: swipeActionsWidth + 'px' }">
+      <button
+        v-if="task.status === 'completed'"
+        type="button"
+        class="swipe-action swipe-action-download"
+        @click.stop="handleSwipeDownload"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 10 12 15 17 10"></polyline>
+          <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+        <span>{{ $t('taskList.downloadTranscript') }}</span>
+      </button>
+      <button
+        v-if="!['pending', 'processing'].includes(task.status)"
+        type="button"
+        class="swipe-action swipe-action-tags"
+        @click.stop="handleSwipeTags"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+          <line x1="7" y1="7" x2="7.01" y2="7"></line>
+        </svg>
+        <span>{{ $t('taskList.editTags') }}</span>
+      </button>
+      <button
+        v-if="['pending', 'processing'].includes(task.status)"
+        type="button"
+        class="swipe-action swipe-action-cancel"
+        :disabled="task.cancelling"
+        @click.stop="handleSwipeCancel"
+      >
+        <span v-if="task.cancelling" class="spinner"></span>
+        <template v-else>
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="15" y1="9" x2="9" y2="15"></line>
+            <line x1="9" y1="9" x2="15" y2="15"></line>
+          </svg>
+        </template>
+        <span>{{ $t('taskList.cancel') }}</span>
+      </button>
+      <button
+        v-if="!['pending', 'processing'].includes(task.status)"
+        type="button"
+        class="swipe-action swipe-action-delete"
+        @click.stop="handleSwipeDelete"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6"></polyline>
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          <line x1="10" y1="11" x2="10" y2="17"></line>
+          <line x1="14" y1="11" x2="14" y2="17"></line>
+        </svg>
+        <span>{{ $t('taskList.deleteTask') }}</span>
+      </button>
+    </div>
+
     <div
-      class="task-item"
+      class="task-item swipe-surface"
       :class="{
         'animated': ['pending', 'processing'].includes(task.status),
         'batch-edit-mode': isBatchMode,
         'clickable': task.status === 'completed' && !isBatchMode
       }"
+      :style="swipeSurfaceStyle"
       :role="task.status === 'completed' && !isBatchMode ? 'link' : undefined"
       :tabindex="task.status === 'completed' && !isBatchMode ? 0 : undefined"
+      @click.capture="swipeHandlers.onClickCapture"
       @click="handleCardClick"
       @keydown.enter="handleCardClick"
+      @pointerdown="swipeHandlers.onPointerdown"
+      @pointermove="swipeHandlers.onPointermove"
+      @pointerup="swipeHandlers.onPointerup"
+      @pointercancel="swipeHandlers.onPointercancel"
     >
-      <!-- 批次編輯選擇框 -->
-      <div v-if="isBatchMode" class="batch-select-checkbox" @click.stop>
-        <input
-          type="checkbox"
-          :checked="isSelected"
-          @change="emit('toggle-selection', task.task_id)"
-          class="batch-checkbox"
-          :aria-label="$t('taskList.selectTask')"
-        />
-      </div>
+      <!-- 批次編輯選擇框（進出場動畫：寬度展開＋縮放淡入，讓卡片內容平滑讓位） -->
+      <Transition name="batch-check">
+        <div v-if="isBatchMode" class="batch-select-checkbox" @click.stop>
+          <input
+            type="checkbox"
+            :checked="isSelected"
+            @change="emit('toggle-selection', task.task_id)"
+            class="batch-checkbox"
+            :aria-label="$t('taskList.selectTask')"
+          />
+        </div>
+      </Transition>
 
       <div class="task-main">
         <div class="task-info">
@@ -151,10 +219,6 @@
               </button>
             </div>
 
-            <!-- 手機：kebab 按鈕（dropdown 渲染於 .task-wrapper 層，避免 clip-path 裁切） -->
-            <div class="mobile-kebab-wrapper mobile-action">
-              <button class="btn-kebab" @click.stop="toggleMobileMenu($event)" :title="$t('taskList.moreActions')" :aria-label="$t('taskList.moreActions')">⋮</button>
-            </div>
           </div>
 
           <!-- 進行中任務的取消按鈕 -->
@@ -179,72 +243,31 @@
             {{ $t('taskList.deleteButtonText') }}
           </button>
 
-          <!-- 手機：失敗或取消任務的 kebab 按鈕 -->
-          <div v-if="['failed', 'cancelled'].includes(task.status)" class="mobile-kebab-wrapper mobile-action">
-            <button class="btn-kebab" @click.stop="toggleMobileMenu($event)" :title="$t('taskList.moreActions')" :aria-label="$t('taskList.moreActions')">⋮</button>
-          </div>
         </div>
 
       </div>
     </div>
 
-    <!-- 手機：kebab dropdown（Teleport 到 body，backdrop 攔截所有外部點擊） -->
-    <Teleport to="body">
-      <template v-if="showMobileMenu">
-        <div class="mobile-menu-backdrop" @click="closeMobileMenu" />
-        <div class="mobile-dropdown" :style="menuStyle" @click.stop>
-          <button v-if="task.status === 'completed'" @click.stop="handleMobileDownload">
-            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7 10 12 15 17 10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
-            </svg>
-            {{ $t('taskList.downloadTranscript') }}
-          </button>
-          <button v-if="task.status === 'completed'" @click.stop="openTagSheet">
-            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
-              <line x1="7" y1="7" x2="7.01" y2="7"></line>
-            </svg>
-            {{ $t('taskList.editTags') }}
-          </button>
-          <button class="danger" @click.stop="handleMobileDelete">
-            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-              <line x1="10" y1="11" x2="10" y2="17"></line>
-              <line x1="14" y1="11" x2="14" y2="17"></line>
-            </svg>
-            {{ $t('taskList.deleteTask') }}
-          </button>
-        </div>
-      </template>
-    </Teleport>
-
-    <!-- 手機：標籤編輯 Bottom Sheet（Teleport 到 body，位置無關） -->
-    <BottomSheet v-model="showTagSheet" :title="$t('taskList.editTags')">
-      <div class="tag-sheet-body">
-        <TaskTagsSection
-          ref="tagSheetRef"
-          :task-id="task.task_id"
-          :tags="task.tags"
-          :all-tags="allTags"
-          :no-click-outside="true"
-          @tags-updated="handleTagsUpdated"
-        />
-      </div>
-    </BottomSheet>
+    <!-- 手機：標籤指派/建立 Bottom Sheet（Teleport 到 body，位置無關） -->
+    <TagPickerSheet
+      v-model="showTagSheet"
+      :task-id="task.task_id"
+      :tags="task.tags || []"
+      :all-tags="allTags"
+      @tags-updated="handleTagsUpdated"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, watch, nextTick, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTaskHelpers } from '../../composables/task/useTaskHelpers'
 import { useDateFormatter } from '../../composables/useDateFormatter'
 import { useAuthStore } from '../../stores/auth'
+import { useSwipeActions } from '../../composables/task/useSwipeActions'
 import TaskTagsSection from './TaskTagsSection.vue'
-import BottomSheet from '../common/BottomSheet.vue'
+import TagPickerSheet from './TagPickerSheet.vue'
 
 const { t: $t } = useI18n()
 const authStore = useAuthStore()
@@ -295,58 +318,66 @@ const emit = defineEmits([
   'delete',
   'cancel',
   'toggle-selection',
+  'long-press',
   'toggle-keep-audio',
   'tags-updated'
 ])
 
-// 手機 kebab 選單狀態
-const showMobileMenu = ref(false)
-const showTagSheet = ref(false)
-const tagSheetRef = ref(null)
-const menuStyle = ref({})
+// 左滑動作列：每顆按鈕 >=64px，寬度依狀態顯示的按鈕數決定
+const SWIPE_ACTION_BTN_WIDTH = 68
+const swipeActionCount = computed(() => {
+  if (props.task.status === 'completed') return 3 // 下載/標籤/刪除
+  if (['pending', 'processing'].includes(props.task.status)) return 2 // 標籤/取消
+  return 2 // failed/cancelled：標籤/刪除
+})
+const swipeActionsWidth = computed(() => swipeActionCount.value * SWIPE_ACTION_BTN_WIDTH)
+const swipeDisabled = computed(() => props.isBatchMode)
 
-// BottomSheet 開啟時自動進入編輯模式
-watch(showTagSheet, (val) => {
-  if (val) {
-    nextTick(() => tagSheetRef.value?.startEditing())
-  }
+const {
+  offsetX: swipeOffsetX,
+  withTransition: swipeWithTransition,
+  handlers: swipeHandlers,
+  closeSwipe
+} = useSwipeActions(props.task.task_id, swipeActionsWidth, swipeDisabled, () => {
+  // 長按 500ms：進入批次選取模式並勾選本卡（手機原生慣例）
+  emit('long-press', props.task.task_id)
 })
 
-function toggleMobileMenu(event) {
-  if (showMobileMenu.value) {
-    showMobileMenu.value = false
-    return
-  }
-  const rect = event.currentTarget.getBoundingClientRect()
-  const spaceBelow = window.innerHeight - rect.bottom
-  // completed: 3 buttons ~130px, failed/cancelled: 1 button ~55px
-  const approxHeight = props.task.status === 'completed' ? 130 : 55
-  menuStyle.value = {
-    right: (window.innerWidth - rect.right) + 'px',
-    ...(spaceBelow >= approxHeight
-      ? { top: (rect.bottom + 4) + 'px' }
-      : { top: (rect.top - approxHeight - 4) + 'px' })
-  }
-  showMobileMenu.value = true
-}
+// 進入批次編輯模式時，強制收合已開啟的滑動動作列
+watch(swipeDisabled, (disabled) => {
+  if (disabled) closeSwipe(false)
+})
 
-function closeMobileMenu() {
-  showMobileMenu.value = false
-}
+const swipeSurfaceStyle = computed(() => ({
+  transform: `translateX(${swipeOffsetX.value}px)`,
+  transition: swipeWithTransition.value ? 'transform 0.25s ease' : 'none'
+}))
 
-function openTagSheet() {
-  closeMobileMenu()
-  showTagSheet.value = true
-}
-
-function handleMobileDownload() {
-  closeMobileMenu()
+function handleSwipeDownload() {
+  closeSwipe()
   emit('download', props.task)
 }
 
-function handleMobileDelete() {
-  closeMobileMenu()
+function handleSwipeTags() {
+  closeSwipe()
+  openTagSheet()
+}
+
+function handleSwipeDelete() {
+  closeSwipe()
   emit('delete', props.task.task_id)
+}
+
+function handleSwipeCancel() {
+  closeSwipe()
+  emit('cancel', props.task.task_id)
+}
+
+// 標籤 Bottom Sheet（由左滑動作列的「標籤」鈕開啟）
+const showTagSheet = ref(false)
+
+function openTagSheet() {
+  showTagSheet.value = true
 }
 
 // Methods
@@ -441,6 +472,10 @@ function getKeepAudioTooltip() {
   /* margin-left: 10px; */
   transition: all 0.3s;
   position: relative;
+  /* 卡片是點擊/滑動/長按目標：關文字選取——
+     桌機防橫拖時的文字選取殘影、iOS 防長按觸發系統選字泡泡（與批次長按打架） */
+  user-select: none;
+  -webkit-user-select: none;
   /* background: var(--upload-bg); */
   background-image:
     repeating-linear-gradient(0deg, transparent, transparent 9px, rgba(0, 0, 0, 0.015) 9px, rgba(0, 0, 0, 0.015) 10px),
@@ -459,6 +494,65 @@ function getKeepAudioTooltip() {
 
 .task-item.clickable {
   cursor: pointer;
+}
+
+/* 左滑動作列：手機才顯示（見下方 @media），桌機恆 display:none，零視覺影響 */
+.swipe-actions-row {
+  display: none;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  overflow: hidden;
+}
+
+.swipe-action {
+  flex: 1 0 68px;
+  min-width: 64px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+  color: #fff;
+  padding: 0 4px;
+}
+
+.swipe-action span {
+  line-height: 1.2;
+  text-align: center;
+}
+
+.swipe-action-download {
+  background: var(--color-primary);
+}
+
+.swipe-action-tags {
+  background: var(--color-neutral, #6b7280);
+}
+
+.swipe-action-cancel {
+  background: var(--color-warning, #f59e0b);
+}
+
+.swipe-action-delete {
+  background: var(--color-danger, #ef4444);
+}
+
+.swipe-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 手機滑動層：桌機下 transform 恆為 0、touch-action 不影響滑鼠操作 */
+.swipe-surface {
+  width: 100%;
 }
 
 .task-wrapper:hover .task-item {
@@ -490,6 +584,21 @@ function getKeepAudioTooltip() {
   padding-top: 0;
   height: 24px;
   margin-left: -4px;
+  max-width: 32px;
+}
+
+/* 進出批次模式的過渡：寬度 0→32px 展開（內容平滑讓位）＋縮放淡入 */
+.batch-check-enter-active,
+.batch-check-leave-active {
+  transition: max-width 0.25s ease, opacity 0.2s ease, transform 0.25s ease;
+  overflow: hidden;
+}
+
+.batch-check-enter-from,
+.batch-check-leave-to {
+  max-width: 0;
+  opacity: 0;
+  transform: scale(0.5);
 }
 
 .batch-checkbox {
@@ -874,73 +983,8 @@ function getKeepAudioTooltip() {
   box-shadow: none !important;
 }
 
-/* 桌機/手機顯示切換 */
+/* 桌機/手機顯示切換（kebab 已移除，手機快捷操作改由左滑動作列提供） */
 .desktop-action { display: flex; }
-.mobile-action  { display: none; }
-
-.btn-kebab {
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: transparent;
-  font-size: 20px;
-  line-height: 1;
-  cursor: pointer;
-  color: var(--nav-text);
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-}
-
-.btn-kebab:hover {
-  background: rgba(0, 0, 0, 0.06);
-}
-
-/* 遮罩：攔截所有 dropdown 外的點擊 */
-.mobile-menu-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 199;
-}
-
-.mobile-dropdown {
-  position: fixed;
-  z-index: 200;
-  min-width: 168px;
-  background: var(--upload-bg);
-  border: 1px solid rgba(var(--color-divider-rgb), 0.3);
-  border-radius: 12px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-  overflow: hidden;
-}
-
-.mobile-dropdown button {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 13px 16px;
-  background: transparent;
-  border: none;
-  font-size: 14px;
-  cursor: pointer;
-  color: var(--main-text);
-  text-align: left;
-}
-
-.mobile-dropdown button:not(:last-child) {
-  border-bottom: 1px solid rgba(var(--color-divider-rgb), 0.2);
-}
-
-.mobile-dropdown button:hover {
-  background: rgba(var(--color-divider-rgb), 0.08);
-}
-
-.mobile-dropdown button.danger {
-  color: var(--color-danger);
-}
 
 /* === 響應式設計 === */
 
@@ -955,6 +999,21 @@ function getKeepAudioTooltip() {
       0 100%,
       0 20px
     );
+  }
+
+  /* 左滑動作列只在手機啟用；.task-item 需要不透明背景才能在收合時遮住動作列 */
+  .swipe-actions-row {
+    display: flex;
+  }
+
+  .swipe-surface {
+    position: relative;
+    z-index: 2;
+    /* 與 body 同色：滑動需要不透明底蓋住動作鈕，用頁面底色讓卡片維持原本
+       「透明」觀感。用 --color-bg 不用 --main-bg——後者在卡片祖先層被覆寫成
+       不同值（實測 #e6e6e6 vs body #f5f5f5） */
+    background-color: var(--color-bg);
+    touch-action: pan-y;
   }
 
   /* 保持按鈕與標題同行 */
@@ -983,9 +1042,8 @@ function getKeepAudioTooltip() {
     flex-shrink: 0;
   }
 
-  /* 手機：隱藏桌機按鈕，顯示 kebab */
+  /* 手機：隱藏桌機按鈕（快捷操作改由左滑動作列提供） */
   .desktop-action { display: none; }
-  .mobile-action  { display: flex; }
 
 
   .btn {
@@ -1112,18 +1170,4 @@ function getKeepAudioTooltip() {
   }
 }
 
-/* Bottom Sheet 標籤編輯區：撐滿全寬 */
-.tag-sheet-body {
-  width: 100%;
-}
-
-.tag-sheet-body :deep(.task-tags-section) {
-  display: flex;
-  width: 100%;
-}
-
-.tag-sheet-body :deep(.tag-edit-mode) {
-  width: 100%;
-  box-sizing: border-box;
-}
 </style>

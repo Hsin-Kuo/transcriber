@@ -2,6 +2,7 @@
   <div class="app-container" :class="{ 'no-nav': !showNavigation }">
     <ElectricBorder />
     <Navigation v-if="showNavigation" />
+    <MobileHeader v-if="showNavigation" />
     <main class="content-wrapper">
       <router-view v-slot="{ Component }">
         <transition name="fade" mode="out-in">
@@ -40,6 +41,7 @@ import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import ElectricBorder from './components/shared/ElectricBorder.vue'
 import Navigation from './components/shared/Navigation.vue'
+import MobileHeader from './components/shared/MobileHeader.vue'
 import NotificationToast from './components/NotificationToast.vue'
 import GlobalUploadProgress from './components/GlobalUploadProgress.vue'
 // 方案面板與額度對話框只在使用者主動觸發時才需要 → 延後載入，不進主 bundle
@@ -251,14 +253,16 @@ body.transcript-detail-page .content-wrapper {
   max-width: none;
 }
 
-/* 手機版任務詳情頁面隱藏導航列 */
+/* 手機版任務詳情頁面隱藏導航列 + MobileHeader（該頁自有 header + 底部音訊播放器） */
 @media (max-width: 768px) {
-  body.transcript-detail-page .navigation {
+  body.transcript-detail-page .navigation,
+  body.transcript-detail-page .mobile-header {
     display: none;
   }
 
   body.transcript-detail-page .app-container {
     padding-bottom: 0;
+    padding-top: 0;
   }
 }
 
@@ -269,8 +273,9 @@ body.transcript-detail-page .content-wrapper {
     padding: 0 12px;
     padding-left: 12px;
     gap: 0;
-    /* 為底部固定導航留出空間 */
-    padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+    /* 頂部固定改由 MobileHeader 負責；底部欄改由各頁面自行負責（如任務列表的篩選列） */
+    padding-top: calc(52px + env(safe-area-inset-top, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
   .content-wrapper {
@@ -279,11 +284,12 @@ body.transcript-detail-page .content-wrapper {
 }
 
 @media (max-width: 480px) {
+  /* 只縮左右間距；上下 padding 沿用 768px 規則（上方要留給 MobileHeader，
+     用 padding 縮寫會把 padding-top 歸零、內容被 header 蓋住——staging 實測踩過） */
   .app-container,
   body.nav-collapsed .app-container {
-    padding: 0 8px;
     padding-left: 8px;
-    padding-bottom: calc(52px + env(safe-area-inset-bottom, 0px));
+    padding-right: 8px;
   }
 
   .content-wrapper {

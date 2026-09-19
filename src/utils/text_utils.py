@@ -56,7 +56,11 @@ HALFWIDTH_TO_FULLWIDTH_PUNCTUATION = {
 
 
 def convert_punctuation_to_fullwidth(text: str) -> str:
-    """將文本中的半形標點符號轉換為全形
+    """將文本中的半形標點符號轉換為全形（無腦全替換版）。
+
+    警告：會毀損小數點（3.5→3。5）、時間（12:30）、英文句子。
+    新程式碼一律用 `convert_cjk_punctuation_to_fullwidth`；本函式僅留給
+    「確定內容是純中文」的呼叫端。
 
     Args:
         text: 要轉換的文本
@@ -72,6 +76,57 @@ def convert_punctuation_to_fullwidth(text: str) -> str:
         result = result.replace(half, full)
 
     return result
+
+
+# CJK-aware 轉換只處理句讀類（逗句問嘆冒分）——括號/引號有開閉配對問題
+# （半形雙引號開閉同字元，無腦映射成「會讓閉引號也變開引號），不碰。
+_CJK_AWARE_PUNCTUATION = {
+    ",": "，",
+    ".": "。",
+    "?": "？",
+    "!": "！",
+    ":": "：",
+    ";": "；",
+}
+
+
+def _is_cjk_char(ch: str) -> bool:
+    """CJK 統一表意文字（含擴充 A、相容區）＋日文假名。"""
+    code = ord(ch)
+    return (
+        0x4E00 <= code <= 0x9FFF      # CJK Unified Ideographs
+        or 0x3400 <= code <= 0x4DBF   # Extension A
+        or 0xF900 <= code <= 0xFAFF   # Compatibility Ideographs
+        or 0x3040 <= code <= 0x30FF   # Hiragana / Katakana
+    )
+
+
+def convert_cjk_punctuation_to_fullwidth(text: str) -> str:
+    """把「中文語境裡的半形句讀」轉成全形——鄰字有 CJK 才轉。
+
+    背景（staging 2026-09-19）：全形一直只靠 LLM 的輸出習慣在撐（prompt 原本
+    連要求都沒有、全文也從未過轉換），模型偶爾輸出半形就露餡。這是掛在 LLM
+    輸出出口的程式碼保證。
+
+    規則：前一個或後一個字元是 CJK 才轉換。這條規則天然保護：
+    - 小數/千分位/時間：3.5、1,000、12:30（兩側都是數字）
+    - 英文縮寫與句子：e.g.、Hello, world.（兩側都是拉丁字母/空白）
+    代價是「兩個英文詞之間的半形句讀」在中文句子裡不會被轉——寧可漏轉
+    不可錯轉，錯轉會毀損內容、漏轉只是樣式不一致。
+    """
+    if not text:
+        return text
+
+    out = list(text)
+    for i, ch in enumerate(text):
+        full = _CJK_AWARE_PUNCTUATION.get(ch)
+        if not full:
+            continue
+        prev_ch = text[i - 1] if i > 0 else ""
+        next_ch = text[i + 1] if i + 1 < len(text) else ""
+        if (prev_ch and _is_cjk_char(prev_ch)) or (next_ch and _is_cjk_char(next_ch)):
+            out[i] = full
+    return "".join(out)
 
 
 def strip_subtitle_punctuation(text: str) -> str:
@@ -197,12 +252,27 @@ def align_segments_to_punctuated_text(segments: List[Dict], punctuated_text: str
             if start is None:
                 result.append({**seg, "text": ""})
                 continue
+            # 找「第一個嚴格大於 start」的後續位置（positions 已強制非遞減，
+            # 相等 = 對齊在此打平——LLM 局部吞內容時 difflib 會把整片 clamp 到同點）
             nxt_start = next(
-                (positions[k] for k in range(seg_idx + 1, len(segments)) if positions[k] is not None),
+                (
+                    positions[k]
+                    for k in range(seg_idx + 1, len(segments))
+                    if positions[k] is not None and positions[k] > start
+                ),
                 None,
             )
-            if nxt_start is not None and nxt_start > start:
+            if nxt_start is not None:
                 text = clean[start:nxt_start].rstrip()
+            elif any(
+                positions[k] is not None for k in range(seg_idx + 1, len(segments))
+            ):
+                # 後面還有已對齊的段、但位置全數 == start（打平區的非末段）——
+                # 內容歸屬交給打平區最後一段（它的 nxt_start > start 會成立），
+                # 這裡給空字串。舊行為是把 clean[start:]（到全文結尾的所有文字）
+                # 塞進這一段：一小段時窗掛上巨量文字，再經句子切分就是時間軸
+                # 塌陷（2026-09 staging 事故的餵食路徑，見 timeline collapse 案）。
+                text = ""
             else:
                 text = clean[start:].strip()
             result.append({**seg, "text": text})
@@ -213,8 +283,29 @@ def align_segments_to_punctuated_text(segments: List[Dict], punctuated_text: str
         return segments
 
 
-# 句末標點（半形與全形都列，因可能在 convert 全形之前執行）
+# 句末標點（半形 '.' 另行處理——要用 is_ambiguous_period 排除小數點/縮寫）
 _SENTENCE_END_PUNCT = "。！？!?…"
+
+# 塌陷守門（2026-09 staging 事故）：對齊失配可能讓一小段時窗掛上巨量文字，
+# 依字數比例插值會製造毫秒間距/零長度的「句子」。兩道硬性檢查，超標就不切、
+# 保留母段（時間可信、文字完整，只是顆粒粗）：
+_SPLIT_MAX_CHARS_PER_SECOND = 50.0   # 中文語速 ~3-8 字/秒，50 已是明顯失配等級
+_SPLIT_MIN_SENTENCE_SECONDS = 0.02   # 切出來每句平均至少 20ms
+
+
+def is_ambiguous_period(text: str, idx: int) -> bool:
+    """`.` 是否其實不是句末（小數點 3.5、縮寫 e.g.）。
+
+    規則與 `strip_subtitle_punctuation` 的 lookaround 一致：數字-.-數字 或
+    字母-.-字母 都不算句末。單一來源供 split 與 punctuation_processor 共用。
+    """
+    if idx >= len(text) or text[idx] != ".":
+        return False
+    prev_ch = text[idx - 1] if idx > 0 else ""
+    next_ch = text[idx + 1] if idx + 1 < len(text) else ""
+    return (prev_ch.isdigit() and next_ch.isdigit()) or (
+        prev_ch.isalpha() and next_ch.isalpha()
+    )
 
 
 def split_segments_at_sentence_punctuation(segments: List[Dict]) -> List[Dict]:
@@ -233,24 +324,36 @@ def split_segments_at_sentence_punctuation(segments: List[Dict]) -> List[Dict]:
     out: List[Dict] = []
     for seg in segments:
         text = seg.get("text") or ""
-        # 依句末標點切，標點留在句尾
+        # 依句末標點切，標點留在句尾。半形 '.' 也算句末（#407 之後全形轉換只轉
+        # CJK 鄰接的句讀，英文句子的 '.' 會留半形），但要排除小數點/縮寫。
         sentences, cur = [], ""
-        for ch in text:
+        for i, ch in enumerate(text):
             cur += ch
-            if ch in _SENTENCE_END_PUNCT:
+            if ch in _SENTENCE_END_PUNCT or (
+                ch == "." and not is_ambiguous_period(text, i)
+            ):
                 sentences.append(cur)
                 cur = ""
         if cur:
             sentences.append(cur)
 
         # 0 或 1 句（無句末標點）→ 不動
-        if len([s for s in sentences if s.strip()]) <= 1:
+        n_sentences = len([s for s in sentences if s.strip()])
+        if n_sentences <= 1:
             out.append(seg)
             continue
 
         start = seg.get("start", 0.0)
         end = seg.get("end", start)
         dur = max(0.0, end - start)
+        # 塌陷守門：文字量與時窗明顯失配（對齊出錯的訊號）→ 不切、保留母段
+        if (
+            dur <= 0
+            or len(text) / dur > _SPLIT_MAX_CHARS_PER_SECOND
+            or dur / n_sentences < _SPLIT_MIN_SENTENCE_SECONDS
+        ):
+            out.append(seg)
+            continue
         total = sum(len(s) for s in sentences) or 1
         cum = 0
         for s in sentences:
@@ -271,8 +374,33 @@ def split_segments_at_sentence_punctuation(segments: List[Dict]) -> List[Dict]:
     return out
 
 
+def segments_timeline_quality(segments: List[Dict]) -> Dict:
+    """segments 時間軸健康指標（落 DB 前的塌陷哨兵，2026-09 staging 事故回歸偵測）。
+
+    max_same_start：同一 0.1 秒窗內的最大段數——健康基線 ~2，塌陷時 >10。
+    zero_length：時長 ≤10ms 的段數——健康基線 0。
+    """
+    from collections import Counter
+
+    if not segments:
+        return {"total": 0, "max_same_start": 0, "zero_length": 0}
+    starts = Counter(round(s.get("start", 0.0), 1) for s in segments)
+    zero = sum(
+        1 for s in segments if (s.get("end", 0.0) - s.get("start", 0.0)) <= 0.01
+    )
+    return {
+        "total": len(segments),
+        "max_same_start": max(starts.values()),
+        "zero_length": zero,
+    }
+
+
 def convert_segments_punctuation(segments: List[Dict]) -> List[Dict]:
-    """將 segments 中的半形標點符號轉換為全形
+    """將 segments 中「中文語境」的半形標點轉換為全形。
+
+    改用 CJK-aware 轉換（2026-09-19）：舊的無腦全替換會毀損小數（3.5→3。5）、
+    時間（12:30）與英文 segments 的標點——本函式對所有語言的任務都會執行，
+    必須依語境判斷。
 
     Args:
         segments: Sound Lite 輸出的 segments 列表
@@ -287,7 +415,9 @@ def convert_segments_punctuation(segments: List[Dict]) -> List[Dict]:
     for segment in segments:
         new_segment = segment.copy()
         if "text" in new_segment and new_segment["text"]:
-            new_segment["text"] = convert_punctuation_to_fullwidth(new_segment["text"])
+            new_segment["text"] = convert_cjk_punctuation_to_fullwidth(
+                new_segment["text"]
+            )
         converted.append(new_segment)
 
     return converted

@@ -21,23 +21,26 @@
             </button>
 
             <div v-if="dropdownOpen" class="dropdown-menu">
+              <!-- 三態：全有 ☑（點=全移除）/ 部分 ◪+計數（點=補齊全部）/ 全無 ☐（點=套用全部） -->
               <button
                 v-for="item in tagOptions"
                 :key="item.tag"
                 class="dropdown-item"
-                :class="{ 'is-common': item.isCommon }"
+                :class="`state-${item.state}`"
                 @click="handleTagClick(item)"
               >
                 <span class="tag-dot" :style="{ background: getTagColor(item.tag) }"></span>
                 <span class="tag-name">{{ item.tag }}</span>
-                <!-- common（全部任務都有）→ 移除（−）；否則 → 套用（＋） -->
-                <svg v-if="item.isCommon" class="action-icon remove-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
-                <svg v-else class="action-icon add-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <line x1="12" y1="5" x2="12" y2="19"></line>
-                  <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
+                <span v-if="item.state === 'partial'" class="tag-count">{{ item.count }}/{{ item.total }}</span>
+                <!-- 方塊填色三態：■ 全有 / ◨ 半填部分 / □ 空框全無 -->
+                <span class="tri-check" aria-hidden="true">
+                  <svg width="13" height="13" viewBox="0 0 16 16">
+                    <rect x="1.5" y="1.5" width="13" height="13" rx="3"
+                      :fill="item.state === 'all' ? 'currentColor' : 'none'"
+                      stroke="currentColor" stroke-width="1.5" />
+                    <path v-if="item.state === 'partial'" d="M4.5 1.5 h-0 a3 3 0 0 0 -3 3 v7 a3 3 0 0 0 3 3 h3.5 v-13 z" fill="currentColor" stroke="none" />
+                  </svg>
+                </span>
               </button>
               <div v-if="tagOptions.length === 0" class="dropdown-empty">
                 {{ $t('taskList.noAvailableTags') }}
@@ -152,8 +155,9 @@ const selectedCount = computed(() => props.selectedTaskIds.size)
 const allSelected = computed(() => props.tasks.length > 0 && selectedCount.value === props.tasks.length)
 const someSelected = computed(() => selectedCount.value > 0 && selectedCount.value < props.tasks.length)
 
-// 標籤選項：標記 isCommon（= 所有選取任務都已擁有 → 點擊改為移除）
-// 已套用（common）排在前面，其餘依字母排序
+// 標籤選項三態：all（所有選取任務都有）/ partial（部分有，附 count/total）/ none
+// 排序 all → partial → none，各組內依字母
+const STATE_ORDER = { all: 0, partial: 1, none: 2 }
 const tagOptions = computed(() => {
   const selectedTasks = props.tasks.filter(t => props.selectedTaskIds.has(t.task_id))
   if (selectedTasks.length === 0) return []
@@ -165,10 +169,15 @@ const tagOptions = computed(() => {
     })
   })
 
+  const total = selectedTasks.length
   return props.allTags
-    .map(tag => ({ tag, isCommon: tagCount.get(tag) === selectedTasks.length }))
+    .map(tag => {
+      const count = tagCount.get(tag) || 0
+      const state = count === total ? 'all' : count > 0 ? 'partial' : 'none'
+      return { tag, state, count, total }
+    })
     .sort((a, b) => {
-      if (a.isCommon !== b.isCommon) return a.isCommon ? -1 : 1
+      if (a.state !== b.state) return STATE_ORDER[a.state] - STATE_ORDER[b.state]
       return a.tag.localeCompare(b.tag)
     })
 })
@@ -184,9 +193,9 @@ function toggleTagEditor() {
 }
 
 function handleTagClick(item) {
-  // 所有選取任務都已擁有 → 移除；否則 → 套用（新增）
-  // 保持下拉開啟，方便連續操作；刷新後該標籤的 common 狀態會自動更新
-  if (item.isCommon) {
+  // 三態循環：all → 全移除；partial → 補齊到全部；none → 套用到全部
+  // 保持下拉開啟，方便連續操作；刷新後狀態自動更新
+  if (item.state === 'all') {
     emit('batch-tags-remove', [item.tag])
   } else {
     emit('batch-tags-add', [item.tag])
@@ -225,6 +234,19 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', handleClickOutsi
   gap: 10px;
   width: max-content;
   max-width: calc(100vw - 32px);
+  /* 進入批次模式的進場動畫：自底部浮起（root 在 Teleport 內，父層 Transition 包不到，用 keyframes） */
+  animation: batch-toolbar-rise 0.3s ease;
+}
+
+@keyframes batch-toolbar-rise {
+  from {
+    transform: translateX(-50%) translateY(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+  }
 }
 
 /* 主工具列 */
@@ -420,12 +442,8 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', handleClickOutsi
   background: rgba(var(--color-primary-rgb), 0.1);
 }
 
-/* 共用標籤（全部任務都有）非 hover 時以灰底標示「已套用」 */
-.dropdown-item.is-common {
-  background: rgba(var(--color-text-dark-rgb), 0.06);
-}
-
-.dropdown-item.is-common:hover {
+/* 全有（點擊將移除）hover 時以警示紅底提示 */
+.dropdown-item.state-all:hover {
   background: rgba(var(--color-danger-rgb), 0.1);
 }
 
@@ -436,22 +454,22 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', handleClickOutsi
   white-space: nowrap;
 }
 
-.dropdown-item .action-icon {
+/* 方塊填色三態（恆顯示）：■ 全有 / ◨ 部分 / □ 全無 */
+.tri-check {
   flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.15s;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--main-text-light);
 }
 
-.dropdown-item:hover .action-icon {
-  opacity: 1;
-}
-
-.dropdown-item .add-icon {
-  color: var(--color-primary);
-}
-
-.dropdown-item .remove-icon {
-  color: var(--color-danger);
+.tag-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--main-text-light);
+  font-variant-numeric: tabular-nums;
 }
 
 .tag-dot {

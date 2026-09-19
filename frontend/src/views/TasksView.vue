@@ -30,6 +30,19 @@ v-if="!isRefreshing" class="ptr-arrow"
       @filter-change="handleFilterChange"
     />
 
+    <!-- 手機版上傳 FAB -->
+    <button
+      class="mobile-upload-fab"
+      type="button"
+      :aria-label="t('taskList.empty.cta')"
+      @click="router.push('/')"
+    >
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19"></line>
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </svg>
+    </button>
+
     <!-- 字幕下載對話框 -->
     <DownloadDialog
       :show="showDownloadDialog"
@@ -648,7 +661,8 @@ onBeforeUnmount(() => {
 
 .ptr-indicator {
   position: fixed;
-  top: 0;
+  /* 從 MobileHeader（52px + safe-area、z-index 1000）下緣滑出，避免被 header 蓋住 */
+  top: calc(52px + env(safe-area-inset-top, 0px));
   left: 0;
   right: 0;
   height: 48px;
@@ -666,6 +680,40 @@ onBeforeUnmount(() => {
 
 @media (min-width: 769px) {
   .ptr-indicator { display: none; }
+}
+
+/* 手機版上傳 FAB：桌機完全不顯示 */
+.mobile-upload-fab {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  /* 下拉重新整理指示器原本貼齊視窗頂端，手機版 MobileHeader 固定在最上方後要往下讓開 */
+  .ptr-indicator {
+    top: calc(52px + env(safe-area-inset-top, 0px));
+  }
+
+  .mobile-upload-fab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    right: calc(16px + env(safe-area-inset-right, 0px));
+    bottom: calc(68px + env(safe-area-inset-bottom, 0px));
+    width: 56px;
+    height: 56px;
+    border: none;
+    border-radius: 50%;
+    background: var(--nav-active-bg);
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    cursor: pointer;
+    z-index: 1010;
+  }
+
+  .mobile-upload-fab:active {
+    transform: scale(0.95);
+  }
 }
 
 .ptr-arrow {

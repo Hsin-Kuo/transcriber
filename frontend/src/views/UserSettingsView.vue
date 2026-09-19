@@ -118,11 +118,11 @@
 
         <!-- Subscription management (only for paid users) -->
         <div v-if="authStore.hasActiveSubscription" class="subscription-info">
-          <div class="sub-row">
+          <!-- 已排定取消：計費週期與下次扣款日都不顯示，期末日改由下方 cancelScheduled 提示呈現 -->
+          <div v-if="!authStore.subscription?.cancel_at_period_end" class="sub-row">
             <span class="sub-label">{{ $t('userSettings.subscription.billingCycle') }}</span>
             <span class="sub-value">{{ authStore.subscription?.billing_cycle === 'yearly' ? $t('userSettings.subscription.yearly') : $t('userSettings.subscription.monthly') }}</span>
           </div>
-          <!-- 已排定取消：期末日改由下方 cancelScheduled 提示呈現，不再顯示「下次扣款日」 -->
           <div v-if="!authStore.subscription?.cancel_at_period_end" class="sub-row">
             <span class="sub-label">{{ $t('userSettings.subscription.nextBillingDate') }}</span>
             <span class="sub-value">{{ formatDate(authStore.subscription?.current_period_end) }}</span>
@@ -1693,6 +1693,8 @@ async function confirmDeleteAccount() {
 
 .plan-indicator-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 14px;
   margin-top: 12px;
   margin-bottom: 5px;
@@ -1707,6 +1709,7 @@ async function confirmDeleteAccount() {
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.2s ease;
+  white-space: nowrap;
 }
 
 .plan-btn-outline {
@@ -2956,10 +2959,20 @@ async function confirmDeleteAccount() {
     font-size: 0.8rem;
   }
 
-  /* toggle 開關觸控優化 */
+  /* toggle 開關觸控優化：軌道放大時圓點與位移量要同步調，
+     否則圓點維持 16px/位移 18px 會偏下且 active 時右側留白不對稱 */
   .toggle-switch {
     width: 44px;
     height: 24px;
+  }
+
+  .toggle-slider::before {
+    height: 18px;
+    width: 18px;
+  }
+
+  .toggle-switch.active .toggle-slider::before {
+    transform: translateX(20px);
   }
 }
 </style>

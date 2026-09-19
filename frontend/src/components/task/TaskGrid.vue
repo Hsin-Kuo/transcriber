@@ -34,6 +34,7 @@
         @delete="(taskId) => emit('delete', taskId)"
         @cancel="(taskId) => emit('cancel', taskId)"
         @toggle-selection="(taskId) => emit('toggle-selection', taskId)"
+        @long-press="(taskId) => emit('long-press', taskId)"
         @toggle-keep-audio="(task) => emit('toggle-keep-audio', task)"
         @tags-updated="(data) => emit('tags-updated', data)"
       />
@@ -79,6 +80,7 @@ const emit = defineEmits([
   'delete',
   'cancel',
   'toggle-selection',
+  'long-press',
   'toggle-keep-audio',
   'tags-updated'
 ])
