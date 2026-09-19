@@ -56,7 +56,11 @@ HALFWIDTH_TO_FULLWIDTH_PUNCTUATION = {
 
 
 def convert_punctuation_to_fullwidth(text: str) -> str:
-    """將文本中的半形標點符號轉換為全形
+    """將文本中的半形標點符號轉換為全形（無腦全替換版）。
+
+    警告：會毀損小數點（3.5→3。5）、時間（12:30）、英文句子。
+    新程式碼一律用 `convert_cjk_punctuation_to_fullwidth`；本函式僅留給
+    「確定內容是純中文」的呼叫端。
 
     Args:
         text: 要轉換的文本
@@ -72,6 +76,57 @@ def convert_punctuation_to_fullwidth(text: str) -> str:
         result = result.replace(half, full)
 
     return result
+
+
+# CJK-aware 轉換只處理句讀類（逗句問嘆冒分）——括號/引號有開閉配對問題
+# （半形雙引號開閉同字元，無腦映射成「會讓閉引號也變開引號），不碰。
+_CJK_AWARE_PUNCTUATION = {
+    ",": "，",
+    ".": "。",
+    "?": "？",
+    "!": "！",
+    ":": "：",
+    ";": "；",
+}
+
+
+def _is_cjk_char(ch: str) -> bool:
+    """CJK 統一表意文字（含擴充 A、相容區）＋日文假名。"""
+    code = ord(ch)
+    return (
+        0x4E00 <= code <= 0x9FFF      # CJK Unified Ideographs
+        or 0x3400 <= code <= 0x4DBF   # Extension A
+        or 0xF900 <= code <= 0xFAFF   # Compatibility Ideographs
+        or 0x3040 <= code <= 0x30FF   # Hiragana / Katakana
+    )
+
+
+def convert_cjk_punctuation_to_fullwidth(text: str) -> str:
+    """把「中文語境裡的半形句讀」轉成全形——鄰字有 CJK 才轉。
+
+    背景（staging 2026-09-19）：全形一直只靠 LLM 的輸出習慣在撐（prompt 原本
+    連要求都沒有、全文也從未過轉換），模型偶爾輸出半形就露餡。這是掛在 LLM
+    輸出出口的程式碼保證。
+
+    規則：前一個或後一個字元是 CJK 才轉換。這條規則天然保護：
+    - 小數/千分位/時間：3.5、1,000、12:30（兩側都是數字）
+    - 英文縮寫與句子：e.g.、Hello, world.（兩側都是拉丁字母/空白）
+    代價是「兩個英文詞之間的半形句讀」在中文句子裡不會被轉——寧可漏轉
+    不可錯轉，錯轉會毀損內容、漏轉只是樣式不一致。
+    """
+    if not text:
+        return text
+
+    out = list(text)
+    for i, ch in enumerate(text):
+        full = _CJK_AWARE_PUNCTUATION.get(ch)
+        if not full:
+            continue
+        prev_ch = text[i - 1] if i > 0 else ""
+        next_ch = text[i + 1] if i + 1 < len(text) else ""
+        if (prev_ch and _is_cjk_char(prev_ch)) or (next_ch and _is_cjk_char(next_ch)):
+            out[i] = full
+    return "".join(out)
 
 
 def strip_subtitle_punctuation(text: str) -> str:
@@ -272,7 +327,11 @@ def split_segments_at_sentence_punctuation(segments: List[Dict]) -> List[Dict]:
 
 
 def convert_segments_punctuation(segments: List[Dict]) -> List[Dict]:
-    """將 segments 中的半形標點符號轉換為全形
+    """將 segments 中「中文語境」的半形標點轉換為全形。
+
+    改用 CJK-aware 轉換（2026-09-19）：舊的無腦全替換會毀損小數（3.5→3。5）、
+    時間（12:30）與英文 segments 的標點——本函式對所有語言的任務都會執行，
+    必須依語境判斷。
 
     Args:
         segments: Sound Lite 輸出的 segments 列表
@@ -287,7 +346,9 @@ def convert_segments_punctuation(segments: List[Dict]) -> List[Dict]:
     for segment in segments:
         new_segment = segment.copy()
         if "text" in new_segment and new_segment["text"]:
-            new_segment["text"] = convert_punctuation_to_fullwidth(new_segment["text"])
+            new_segment["text"] = convert_cjk_punctuation_to_fullwidth(
+                new_segment["text"]
+            )
         converted.append(new_segment)
 
     return converted

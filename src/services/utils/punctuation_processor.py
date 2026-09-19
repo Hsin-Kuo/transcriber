@@ -11,6 +11,7 @@ import re
 from src.utils.logger import get_logger
 from src.utils.text_utils import (
     SPEAKER_LABEL_PATTERN,
+    convert_cjk_punctuation_to_fullwidth,
     is_content_char,
     is_opening_punct,
 )
@@ -359,6 +360,8 @@ class PunctuationProcessor:
         result = self._strip_llm_preamble(result)
         if language in ("zh", "zh-TW", "zh-CN"):
             result = self._remove_cjk_latin_spaces(result)
+            # 全形是程式碼保證，不靠模型聽話（staging 2026-09-19 半形露餡教訓）
+            result = convert_cjk_punctuation_to_fullwidth(result)
 
         # 提取 token 使用量
         token_usage = None
@@ -586,6 +589,9 @@ class PunctuationProcessor:
             usable = False
         if language in ("zh", "zh-TW", "zh-CN"):
             result = self._remove_cjk_latin_spaces(result)
+            # 全形是程式碼保證，不靠模型聽話（staging 2026-09-19 半形露餡教訓）。
+            # 對可比字元對齊無影響：兩種寬度的標點都不是 content char。
+            result = convert_cjk_punctuation_to_fullwidth(result)
         return result, used_model, token_usage, usable
 
     def _punctuate_chunk_with_retry(
@@ -1226,6 +1232,7 @@ class PunctuationProcessor:
             system_msg = "你是嚴謹的逐字稿潤飾助手，只做標點與分段。"
             user_msg = (
                 f"請將以下『中文逐字稿』加上適當標點符號並『合理分段』。{script_note}"
+                "中文標點一律使用全形（，。？！：；），只有數字與純英文片語內保留半形。"
                 "不要省略或添加內容，不要意譯，保留固有名詞與數字。"
                 "不要在中英文之間插入空白，保持原文的空白狀態。"
                 "**重要：如果文字中有說話者標籤（例如 [SPEAKER_00]），請完整保留這些標籤，不要修改或刪除。**"
@@ -1307,6 +1314,7 @@ class PunctuationProcessor:
                 script_note = ""
             system_msg = (
                 f"你是嚴謹的逐字稿潤飾助手。只做『中文標點補全』與『合理分段』，{script_note}"
+                "中文標點一律使用全形（，。？！：；），只有數字與純英文片語內保留半形。"
                 "不要省略或添加內容，不要意譯，非必要不要用刪節號，保留固有名詞與數字。"
                 "不要在中英文之間插入空白，保持原文的空白狀態。"
                 "**重要：如果文字中有說話者標籤（例如 [SPEAKER_00]），請完整保留這些標籤。**"

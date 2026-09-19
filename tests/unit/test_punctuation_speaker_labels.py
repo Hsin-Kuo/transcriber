@@ -627,3 +627,21 @@ def test_bisect_degrades_only_the_bad_half(monkeypatch):
     lines = out.split("\n\n")
     assert lines[0] == "[SPEAKER_00] 內容甲。", "好的半組保住標點"
     assert lines[1] == "[SPEAKER_01] 內容乙", "壞的半組回退原文（無標點但內容完整）"
+
+
+# ── 全形標點程式碼保證（staging 2026-09-19 半形露餡）────────────────────────
+
+def test_halfwidth_llm_output_is_converted_to_fullwidth(monkeypatch):
+    """模型輸出半形句讀 → 出口一律轉全形，不靠 prompt 聽話。"""
+    proc = _proc()
+    monkeypatch.setattr(
+        proc, "_call_gemini_with_retry",
+        lambda *a, **k: ("甲說的話,對吧?乙說的話.", MODEL, None),
+    )
+
+    text = "[SPEAKER_00] 甲說的話對吧\n\n[SPEAKER_01] 乙說的話"
+    out, _, _, stats = proc.process(text, provider="gemini", language="zh")
+
+    assert stats["degraded_chunks"] == 0
+    assert "，" in out and "？" in out and "。" in out
+    assert "," not in out and "?" not in out
