@@ -44,6 +44,22 @@ class DiarizationProcessor:
         except ImportError:
             return False
 
+    @staticmethod
+    def _build_speaker_kwargs(max_speakers) -> Dict:
+        """把講者人數轉成 pyannote pipeline kwargs（單一來源，兩條執行路徑共用）。
+
+        語意變更（2026-09-19）：人數 = 確切人數（num_speakers=N，強制聚成 N 簇），
+        不再是上限（min=1, max=N）。原因：max 只是上限，pipeline 可自行輸出更少
+        人——同性別相近聲音常被聚成一簇（實際回報：2 女 1 男被辨識成 2 人），
+        使用者填人數時強制簇數是 pyannote 3.1 下最有效的解法。UI 文案同步改為
+        「說話者人數」並說明此語意；留空維持自動偵測。
+
+        越界（<2 或 >10）一律回自動偵測，與 HTTP 層白名單一致。
+        """
+        if max_speakers is None or not (2 <= max_speakers <= 10):
+            return {}
+        return {"num_speakers": max_speakers}
+
     def perform_diarization(
         self,
         audio_path: Path,
@@ -68,12 +84,7 @@ class DiarizationProcessor:
             log.debug("diarization.started")
 
             # 準備 diarization 參數
-            diarization_kwargs = {}
-            if max_speakers is not None and 2 <= max_speakers <= 10:
-                # pyannote.audio 需要同時設定 min_speakers 和 max_speakers
-                diarization_kwargs["min_speakers"] = 1
-                diarization_kwargs["max_speakers"] = max_speakers
-
+            diarization_kwargs = self._build_speaker_kwargs(max_speakers)
             log.debug("diarization.params", max_speakers=max_speakers, diarization_kwargs=diarization_kwargs)
             diarization = self.pipeline(str(audio_path), **diarization_kwargs)
 
@@ -135,11 +146,7 @@ class DiarizationProcessor:
             log.debug("diarization.started", in_process=True)
 
             # 準備 diarization 參數
-            diarization_kwargs = {}
-            if max_speakers is not None and 2 <= max_speakers <= 10:
-                diarization_kwargs["min_speakers"] = 1
-                diarization_kwargs["max_speakers"] = max_speakers
-
+            diarization_kwargs = self._build_speaker_kwargs(max_speakers)
             log.debug("diarization.params", in_process=True, max_speakers=max_speakers, diarization_kwargs=diarization_kwargs)
             diarization = pipeline(str(audio_path), **diarization_kwargs)
 
