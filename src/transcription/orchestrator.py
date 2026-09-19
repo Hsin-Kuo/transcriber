@@ -25,6 +25,7 @@ from src.utils.text_utils import (
     align_segments_to_punctuated_text,
     split_segments_at_sentence_punctuation,
     convert_segments_punctuation,
+    segments_timeline_quality,
     strip_subtitle_punctuation,
 )
 from src.utils.storage.compact import save_audio
@@ -533,6 +534,14 @@ class TranscriptionOrchestrator:
             upsert=True,
         )
         if segments:
+            # 時間軸塌陷哨兵（2026-09 staging 事故）：健康基線 max_same_start≈2、
+            # zero_length=0；超標代表上游對齊/切句失配，落檔供事後查、log 供告警。
+            quality = segments_timeline_quality(segments)
+            if quality["max_same_start"] > 5 or quality["zero_length"] > max(
+                5, quality["total"] // 20
+            ):
+                log.error("segments.timeline_collapse_detected", **quality)
+            self._update_task(task_id, {"stats.segments_quality": quality})
             self.db.segments.replace_one(
                 {"_id": task_id},
                 {"_id": task_id, "segments": segments, "segment_count": len(segments),
