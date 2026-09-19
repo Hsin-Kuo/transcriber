@@ -11,6 +11,7 @@ import re
 from src.utils.logger import get_logger
 from src.utils.text_utils import (
     SPEAKER_LABEL_PATTERN,
+    convert_cjk_punctuation_to_fullwidth,
     is_content_char,
     is_opening_punct,
 )
@@ -120,9 +121,12 @@ _TURN_BODY_NEWLINE_RE = re.compile(r"[ \t]*[\r\n]+[ \t]*")
 _NO_SPACE_LANGUAGES = ("zh", "zh-TW", "zh-CN", "ja", "ko")
 
 # 「不可用輸出」的 chunk 級嘗試上限：初次 + 換備援模型重打 1 次。
-# 不設更高：不可用輸出是稀有事件、兩次都壞多半是這段輸入本身難搞，
-# 再打只是燒 token 拖時間，回退原文讓使用者至少拿到完整內容。
+# 不設更高：兩次都壞多半是這段輸入本身難搞（staging 876fa35c 實證），
+# 該做的是把問題變小（二分救援），不是同尺寸再打。
 _CHUNK_MAX_ATTEMPTS = 2
+# 二分救援深度上限（標籤路徑）：整 chunk 兩個模型都救不回 → 對半切各自重跑。
+# 深度 1 就夠——半組 ≤10k 字已落在實測穩定區間，且單 chunk 最壞 6 次呼叫有界。
+_BISECT_MAX_DEPTH = 1
 
 
 class PunctuationProcessor:
@@ -356,6 +360,8 @@ class PunctuationProcessor:
         result = self._strip_llm_preamble(result)
         if language in ("zh", "zh-TW", "zh-CN"):
             result = self._remove_cjk_latin_spaces(result)
+            # 全形是程式碼保證，不靠模型聽話（staging 2026-09-19 半形露餡教訓）
+            result = convert_cjk_punctuation_to_fullwidth(result)
 
         # 提取 token 使用量
         token_usage = None
@@ -402,8 +408,10 @@ class PunctuationProcessor:
         if len(text) <= chunk_size:
             stats["total_chunks"] = 1
             payload, model_used, usage, degraded = self._punctuate_chunk_with_retry(
-                text, language, None, None, stats
+                text, language, None, None
             )
+            if degraded:
+                stats["degraded_chunks"] += 1
             result = text if degraded else payload
             return (
                 result,
@@ -437,9 +445,11 @@ class PunctuationProcessor:
 
             payload, chunk_model, chunk_token_usage, degraded = (
                 self._punctuate_chunk_with_retry(
-                    chunk_text, language, chunk_idx, total_chunks, stats
+                    chunk_text, language, chunk_idx, total_chunks
                 )
             )
+            if degraded:
+                stats["degraded_chunks"] += 1
             results.append(chunk_text if degraded else payload)
 
             # 記錄使用的模型（使用第一個成功的模型）
@@ -579,6 +589,9 @@ class PunctuationProcessor:
             usable = False
         if language in ("zh", "zh-TW", "zh-CN"):
             result = self._remove_cjk_latin_spaces(result)
+            # 全形是程式碼保證，不靠模型聽話（staging 2026-09-19 半形露餡教訓）。
+            # 對可比字元對齊無影響：兩種寬度的標點都不是 content char。
+            result = convert_cjk_punctuation_to_fullwidth(result)
         return result, used_model, token_usage, usable
 
     def _punctuate_chunk_with_retry(
@@ -587,7 +600,6 @@ class PunctuationProcessor:
         language: str,
         chunk_idx: Optional[int],
         total_chunks: Optional[int],
-        stats: Dict[str, int],
         validate: Optional[Callable[[str], Optional[Any]]] = None,
     ) -> Tuple[Optional[Any], Optional[str], Dict[str, int], bool]:
         """帶「不可用輸出重試」的 chunk 標點：API 成功但輸出是垃圾也要重打。
@@ -598,8 +610,8 @@ class PunctuationProcessor:
         正常（b78b0185 實證），輸出不可用大多是單次抽樣壞掉，值得先重試。
 
         流程：初次用預設模型；不可用（空/膨脹/validate 失敗）→ 換備援模型重打一次；
-        仍不可用才放棄。放棄時 stats.degraded_chunks +1、payload 回 None，由呼叫端
-        決定回退值（純文字路徑=原文、標籤路徑=原 pieces）。
+        仍不可用才放棄（末位回 True）。降級計數由呼叫端負責——標籤路徑失敗後還有
+        二分遞迴這一層救援（`_punctuate_pieces_group`），這裡不能先計。
 
         validate: 額外的輸出驗證（標籤路徑傳對齊函式），回 None 視同不可用；
         回傳值即 payload（可以不是 str，例如對齊後的 pieces list）。
@@ -633,8 +645,67 @@ class PunctuationProcessor:
                     chunk_idx=chunk_idx,
                     total_chunks=total_chunks,
                 )
-        stats["degraded_chunks"] += 1
         return None, used_model, total_usage, True
+
+    def _punctuate_pieces_group(
+        self,
+        piece_texts: list,
+        language: str,
+        chunk_idx: Optional[int],
+        total_chunks: Optional[int],
+        depth: int = 0,
+    ) -> Tuple[list, Optional[str], Dict[str, int], int]:
+        """標籤路徑的 chunk 標點：換模型重試之上再加一層「失敗二分」救援。
+
+        背景（staging 2026-09-18，任務 876fa35c）：接近 chunk 上限且輪次極碎的
+        輸入（19k 字 / 258 pieces），flash-lite 膨脹 +24%、換 flash 重打反而
+        砍剩 9%——「同尺寸換模型」的重抽樣假設在這種輸入上不成立；同任務的
+        6k 字 chunk 卻一次就過。失敗時把問題變小比換模型更有效。
+
+        流程：整組先走 `_punctuate_chunk_with_retry`（2 個模型）；仍不可用且
+        可再切（>1 piece、depth 未達上限）→ 對半切成兩組各自遞迴，只有連
+        半組都救不回的部分才回退原文。深度上限 1（半組 ≤10k 字已落在實測
+        穩定區間），單一 chunk 最壞 6 次 LLM 呼叫，成本與延時有界。
+
+        回傳 (aligned, model, usage, degraded_pieces)：aligned 與 piece_texts
+        等長、降級部分為原文；degraded_pieces = 最終仍回退原文的 piece 數。
+        """
+        payload, model, usage, degraded = self._punctuate_chunk_with_retry(
+            "\n\n".join(piece_texts), language, chunk_idx, total_chunks,
+            validate=lambda out, pieces=list(piece_texts): (
+                self._align_output_to_pieces(out, pieces)
+            ),
+        )
+        if not degraded:
+            return payload, model, usage, 0
+        if depth >= _BISECT_MAX_DEPTH or len(piece_texts) <= 1:
+            return list(piece_texts), model, usage, len(piece_texts)
+
+        mid = len(piece_texts) // 2
+        log.warning(
+            "punctuation.chunk_bisect_retry",
+            chunk_idx=chunk_idx,
+            pieces=len(piece_texts),
+            split_at=mid,
+            depth=depth + 1,
+        )
+        total_usage = self._new_token_usage()
+        self._accumulate_token_usage(total_usage, usage)
+        left, l_model, l_usage, l_deg = self._punctuate_pieces_group(
+            piece_texts[:mid], language, chunk_idx, total_chunks, depth + 1
+        )
+        self._accumulate_token_usage(total_usage, l_usage)
+        right, r_model, r_usage, r_deg = self._punctuate_pieces_group(
+            piece_texts[mid:], language, chunk_idx, total_chunks, depth + 1
+        )
+        self._accumulate_token_usage(total_usage, r_usage)
+        if l_deg + r_deg == 0:
+            log.info(
+                "punctuation.chunk_bisect_recovered",
+                chunk_idx=chunk_idx,
+                pieces=len(piece_texts),
+            )
+        return left + right, l_model or r_model or model, total_usage, l_deg + r_deg
 
     def _parse_speaker_turns(self, text: str) -> Optional[list]:
         """把 `_merge_transcription_with_diarization` 的輸出解析成 [(label, text), ...]。
@@ -893,30 +964,26 @@ class PunctuationProcessor:
             else:
                 # 只有一個 chunk 時用單次提示語——否則最常見尺寸的 diarized 任務
                 # 會平白吃到「這是第 1 部分」的分段 prompt，是純粹的回歸。
-                # 對齊當 validate 傳入：空回應/膨脹/對齊失敗都算「輸出不可用」，
-                # 先換模型重打（prod 實證同輸入重跑大多正常），仍失敗才回退原文。
+                # 救援階梯：換模型重打 → 仍不可用就對半切各自遞迴（876fa35c 形態：
+                # 大而碎的 chunk 兩顆模型都處理不了，但小 chunk 穩）→ 才回退原文。
                 idx = chunk_idx if total_chunks > 1 else None
-                aligned, chunk_model, chunk_token_usage, alignment_failed = (
-                    self._punctuate_chunk_with_retry(
-                        chunk_text, language, idx, total_chunks if idx else None,
-                        stats,
-                        validate=lambda out, pieces=piece_texts: (
-                            self._align_output_to_pieces(out, pieces)
-                        ),
+                aligned, chunk_model, chunk_token_usage, degraded_pieces = (
+                    self._punctuate_pieces_group(
+                        piece_texts, language, idx, total_chunks if idx else None
                     )
                 )
+                alignment_failed = degraded_pieces > 0
                 if alignment_failed:
-                    # 重試耗盡 → 該 chunk 整批回退原文（內容不遺失，只是沒標點）
-                    aligned = piece_texts
+                    stats["degraded_chunks"] += 1
             # 不用 zip(strict=)：本地 dev venv 仍是 3.9（strict= 需 3.10+），
             # 與 whisper_processor 同慣例改用 enumerate。
+            # 「空片段」代表這段文字已被併進相鄰片段（切點覆蓋整份輸出、不重
+            # 不漏），回填原文會讓同一段話出現兩次，一律保持空字串——降級部分
+            # 的原文由 _punctuate_pieces_group / openai 回退路徑填入，不在這補。
+            # 二分救援後 aligned 可能混著「成功半組的合法空片段」與「降級半組
+            # 的原文」，在這裡按 alignment_failed 回填必然誤傷其一。
             for pos, (turn_idx, original) in enumerate(chunk_pieces):
                 piece_out = aligned[pos] if pos < len(aligned) else ""
-                if not piece_out and alignment_failed:
-                    piece_out = original
-                # 對齊成功時「空片段」代表這段文字已被併進相鄰片段
-                # （切點覆蓋整份輸出、不重不漏），此時回填原文會讓同一段話
-                # 出現兩次，所以保持空字串。
                 per_turn[turn_idx].append((original, piece_out))
 
             if model_used is None:
@@ -1165,6 +1232,7 @@ class PunctuationProcessor:
             system_msg = "你是嚴謹的逐字稿潤飾助手，只做標點與分段。"
             user_msg = (
                 f"請將以下『中文逐字稿』加上適當標點符號並『合理分段』。{script_note}"
+                "中文標點一律使用全形（，。？！：；），只有數字與純英文片語內保留半形。"
                 "不要省略或添加內容，不要意譯，保留固有名詞與數字。"
                 "不要在中英文之間插入空白，保持原文的空白狀態。"
                 "**重要：如果文字中有說話者標籤（例如 [SPEAKER_00]），請完整保留這些標籤，不要修改或刪除。**"
@@ -1246,6 +1314,7 @@ class PunctuationProcessor:
                 script_note = ""
             system_msg = (
                 f"你是嚴謹的逐字稿潤飾助手。只做『中文標點補全』與『合理分段』，{script_note}"
+                "中文標點一律使用全形（，。？！：；），只有數字與純英文片語內保留半形。"
                 "不要省略或添加內容，不要意譯，非必要不要用刪節號，保留固有名詞與數字。"
                 "不要在中英文之間插入空白，保持原文的空白狀態。"
                 "**重要：如果文字中有說話者標籤（例如 [SPEAKER_00]），請完整保留這些標籤。**"

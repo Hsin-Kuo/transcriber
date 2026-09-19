@@ -553,7 +553,10 @@ def test_plain_path_empty_output_retry_recovers(monkeypatch):
 
 
 def test_retry_exhausted_falls_back_and_counts_once(monkeypatch):
-    """兩次都不可用 → 回退原文、degraded 只計 1（不因兩次嘗試重複計數）。"""
+    """全部嘗試（含二分救援）都不可用 → 回退原文、degraded 只計 1。
+
+    嘗試序：整 chunk 2 發（lite→flash）→ 二分成兩個半組、各 2 發 → 共 6 發。
+    """
     proc = _proc()
     calls = []
 
@@ -566,7 +569,79 @@ def test_retry_exhausted_falls_back_and_counts_once(monkeypatch):
     text = "[SPEAKER_00] 內容甲\n\n[SPEAKER_01] 內容乙"
     out, _, usage, stats = proc.process(text, provider="gemini", language="zh")
 
-    assert calls == [None, "gemini-2.5-flash"]
+    assert calls == [None, "gemini-2.5-flash"] * 3
     assert stats == {"total_chunks": 1, "degraded_chunks": 1}
     assert "內容甲" in out and out.count("[SPEAKER_00]") == 1
-    assert usage["total"] == 6
+    assert usage["total"] == 18, "六次嘗試的 token 全是真花費，必須累計"
+
+
+def test_bisect_rescues_when_full_chunk_fails(monkeypatch):
+    """876fa35c 形態：整 chunk 兩個模型都不可用，但對半切之後各自成功 → 不降級。"""
+    proc = _proc()
+    calls = []
+
+    def fake(chunk_text, language, chunk_idx=None, total_chunks=None, model=None):
+        calls.append(chunk_text)
+        if "內容甲" in chunk_text and "內容乙" in chunk_text:
+            # 整 chunk（兩輪次都在）→ 模擬亂改字，對齊必失敗
+            return (
+                chunk_text + "幻覺內容" * 80, MODEL,
+                {"total": 5, "prompt": 3, "completion": 2}, True,
+            )
+        # 半組（單一輪次）→ 正常加標點
+        return (
+            _add_punctuation(chunk_text), MODEL,
+            {"total": 4, "prompt": 2, "completion": 2}, True,
+        )
+
+    monkeypatch.setattr(proc, "_punctuate_chunk", fake)
+
+    text = "[SPEAKER_00] 內容甲\n\n[SPEAKER_01] 內容乙"
+    out, _, usage, stats = proc.process(text, provider="gemini", language="zh")
+
+    assert stats == {"total_chunks": 1, "degraded_chunks": 0}, "二分救回就不算降級"
+    assert "。" in out and "幻覺內容" not in out
+    assert out.count("[SPEAKER_00]") == 1 and out.count("[SPEAKER_01]") == 1
+    # 整 chunk 2 發失敗 + 兩個半組各 1 發成功 = 4 發
+    assert len(calls) == 4
+    assert usage["total"] == 5 + 5 + 4 + 4
+
+
+def test_bisect_degrades_only_the_bad_half(monkeypatch):
+    """半組一好一壞 → 只有壞的那半回退原文，好的那半保住標點。"""
+    proc = _proc()
+
+    def fake(chunk_text, language, chunk_idx=None, total_chunks=None, model=None):
+        if "內容甲" in chunk_text and "內容乙" in chunk_text:
+            return chunk_text + "幻覺內容" * 80, MODEL, None, True  # 整 chunk 失敗
+        if "內容乙" in chunk_text:
+            return chunk_text + "幻覺內容" * 80, MODEL, None, True  # 乙半組也失敗
+        return _add_punctuation(chunk_text), MODEL, None, True      # 甲半組成功
+
+    monkeypatch.setattr(proc, "_punctuate_chunk", fake)
+
+    text = "[SPEAKER_00] 內容甲\n\n[SPEAKER_01] 內容乙"
+    out, _, _, stats = proc.process(text, provider="gemini", language="zh")
+
+    assert stats == {"total_chunks": 1, "degraded_chunks": 1}
+    lines = out.split("\n\n")
+    assert lines[0] == "[SPEAKER_00] 內容甲。", "好的半組保住標點"
+    assert lines[1] == "[SPEAKER_01] 內容乙", "壞的半組回退原文（無標點但內容完整）"
+
+
+# ── 全形標點程式碼保證（staging 2026-09-19 半形露餡）────────────────────────
+
+def test_halfwidth_llm_output_is_converted_to_fullwidth(monkeypatch):
+    """模型輸出半形句讀 → 出口一律轉全形，不靠 prompt 聽話。"""
+    proc = _proc()
+    monkeypatch.setattr(
+        proc, "_call_gemini_with_retry",
+        lambda *a, **k: ("甲說的話,對吧?乙說的話.", MODEL, None),
+    )
+
+    text = "[SPEAKER_00] 甲說的話對吧\n\n[SPEAKER_01] 乙說的話"
+    out, _, _, stats = proc.process(text, provider="gemini", language="zh")
+
+    assert stats["degraded_chunks"] == 0
+    assert "，" in out and "？" in out and "。" in out
+    assert "," not in out and "?" not in out
