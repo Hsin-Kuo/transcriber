@@ -252,12 +252,27 @@ def align_segments_to_punctuated_text(segments: List[Dict], punctuated_text: str
             if start is None:
                 result.append({**seg, "text": ""})
                 continue
+            # 找「第一個嚴格大於 start」的後續位置（positions 已強制非遞減，
+            # 相等 = 對齊在此打平——LLM 局部吞內容時 difflib 會把整片 clamp 到同點）
             nxt_start = next(
-                (positions[k] for k in range(seg_idx + 1, len(segments)) if positions[k] is not None),
+                (
+                    positions[k]
+                    for k in range(seg_idx + 1, len(segments))
+                    if positions[k] is not None and positions[k] > start
+                ),
                 None,
             )
-            if nxt_start is not None and nxt_start > start:
+            if nxt_start is not None:
                 text = clean[start:nxt_start].rstrip()
+            elif any(
+                positions[k] is not None for k in range(seg_idx + 1, len(segments))
+            ):
+                # 後面還有已對齊的段、但位置全數 == start（打平區的非末段）——
+                # 內容歸屬交給打平區最後一段（它的 nxt_start > start 會成立），
+                # 這裡給空字串。舊行為是把 clean[start:]（到全文結尾的所有文字）
+                # 塞進這一段：一小段時窗掛上巨量文字，再經句子切分就是時間軸
+                # 塌陷（2026-09 staging 事故的餵食路徑，見 timeline collapse 案）。
+                text = ""
             else:
                 text = clean[start:].strip()
             result.append({**seg, "text": text})
@@ -268,8 +283,29 @@ def align_segments_to_punctuated_text(segments: List[Dict], punctuated_text: str
         return segments
 
 
-# 句末標點（半形與全形都列，因可能在 convert 全形之前執行）
+# 句末標點（半形 '.' 另行處理——要用 is_ambiguous_period 排除小數點/縮寫）
 _SENTENCE_END_PUNCT = "。！？!?…"
+
+# 塌陷守門（2026-09 staging 事故）：對齊失配可能讓一小段時窗掛上巨量文字，
+# 依字數比例插值會製造毫秒間距/零長度的「句子」。兩道硬性檢查，超標就不切、
+# 保留母段（時間可信、文字完整，只是顆粒粗）：
+_SPLIT_MAX_CHARS_PER_SECOND = 50.0   # 中文語速 ~3-8 字/秒，50 已是明顯失配等級
+_SPLIT_MIN_SENTENCE_SECONDS = 0.02   # 切出來每句平均至少 20ms
+
+
+def is_ambiguous_period(text: str, idx: int) -> bool:
+    """`.` 是否其實不是句末（小數點 3.5、縮寫 e.g.）。
+
+    規則與 `strip_subtitle_punctuation` 的 lookaround 一致：數字-.-數字 或
+    字母-.-字母 都不算句末。單一來源供 split 與 punctuation_processor 共用。
+    """
+    if idx >= len(text) or text[idx] != ".":
+        return False
+    prev_ch = text[idx - 1] if idx > 0 else ""
+    next_ch = text[idx + 1] if idx + 1 < len(text) else ""
+    return (prev_ch.isdigit() and next_ch.isdigit()) or (
+        prev_ch.isalpha() and next_ch.isalpha()
+    )
 
 
 def split_segments_at_sentence_punctuation(segments: List[Dict]) -> List[Dict]:
@@ -288,24 +324,36 @@ def split_segments_at_sentence_punctuation(segments: List[Dict]) -> List[Dict]:
     out: List[Dict] = []
     for seg in segments:
         text = seg.get("text") or ""
-        # 依句末標點切，標點留在句尾
+        # 依句末標點切，標點留在句尾。半形 '.' 也算句末（#407 之後全形轉換只轉
+        # CJK 鄰接的句讀，英文句子的 '.' 會留半形），但要排除小數點/縮寫。
         sentences, cur = [], ""
-        for ch in text:
+        for i, ch in enumerate(text):
             cur += ch
-            if ch in _SENTENCE_END_PUNCT:
+            if ch in _SENTENCE_END_PUNCT or (
+                ch == "." and not is_ambiguous_period(text, i)
+            ):
                 sentences.append(cur)
                 cur = ""
         if cur:
             sentences.append(cur)
 
         # 0 或 1 句（無句末標點）→ 不動
-        if len([s for s in sentences if s.strip()]) <= 1:
+        n_sentences = len([s for s in sentences if s.strip()])
+        if n_sentences <= 1:
             out.append(seg)
             continue
 
         start = seg.get("start", 0.0)
         end = seg.get("end", start)
         dur = max(0.0, end - start)
+        # 塌陷守門：文字量與時窗明顯失配（對齊出錯的訊號）→ 不切、保留母段
+        if (
+            dur <= 0
+            or len(text) / dur > _SPLIT_MAX_CHARS_PER_SECOND
+            or dur / n_sentences < _SPLIT_MIN_SENTENCE_SECONDS
+        ):
+            out.append(seg)
+            continue
         total = sum(len(s) for s in sentences) or 1
         cum = 0
         for s in sentences:
@@ -324,6 +372,27 @@ def split_segments_at_sentence_punctuation(segments: List[Dict]) -> List[Dict]:
             })
 
     return out
+
+
+def segments_timeline_quality(segments: List[Dict]) -> Dict:
+    """segments 時間軸健康指標（落 DB 前的塌陷哨兵，2026-09 staging 事故回歸偵測）。
+
+    max_same_start：同一 0.1 秒窗內的最大段數——健康基線 ~2，塌陷時 >10。
+    zero_length：時長 ≤10ms 的段數——健康基線 0。
+    """
+    from collections import Counter
+
+    if not segments:
+        return {"total": 0, "max_same_start": 0, "zero_length": 0}
+    starts = Counter(round(s.get("start", 0.0), 1) for s in segments)
+    zero = sum(
+        1 for s in segments if (s.get("end", 0.0) - s.get("start", 0.0)) <= 0.01
+    )
+    return {
+        "total": len(segments),
+        "max_same_start": max(starts.values()),
+        "zero_length": zero,
+    }
 
 
 def convert_segments_punctuation(segments: List[Dict]) -> List[Dict]:
