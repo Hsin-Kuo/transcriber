@@ -12,6 +12,7 @@ from src.utils.logger import get_logger
 from src.utils.text_utils import (
     SPEAKER_LABEL_PATTERN,
     convert_cjk_punctuation_to_fullwidth,
+    is_ambiguous_period,
     is_content_char,
     is_opening_punct,
 )
@@ -71,20 +72,9 @@ _BLANK_LINE_RE = re.compile(r"\n[ \t]*\n")
 _SENTENCE_END_CHARS = "。？！…；.?!;"
 
 
-def _is_ambiguous_period(text: str, idx: int) -> bool:
-    """`.` 是否其實不是句末（小數點 3.5、縮寫 e.g.）。
-
-    規則與 `text_utils.strip_subtitle_punctuation`（該檔 :106）一致：
-    數字-.-數字 或 字母-.-字母 都不算句末。刻意不重構那支函數以免動到字幕行為，
-    但規則必須一樣，否則 `'The rate was 3.5'` 會被當成兩句、數字被下一位講者偷走。
-    """
-    if text[idx] != ".":
-        return False
-    prev_ch = text[idx - 1] if idx > 0 else ""
-    next_ch = text[idx + 1] if idx + 1 < len(text) else ""
-    return (prev_ch.isdigit() and next_ch.isdigit()) or (
-        prev_ch.isalpha() and next_ch.isalpha()
-    )
+# `.` 歧義判斷（小數點/縮寫非句末）單一來源移到 text_utils（split 切句也要用），
+# 這裡保留別名維持既有呼叫點不變。
+_is_ambiguous_period = is_ambiguous_period
 
 
 def _advance_past_trailing(text: str, pos: int) -> int:
