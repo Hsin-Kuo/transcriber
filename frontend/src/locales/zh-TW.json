@@ -402,7 +402,7 @@
     "speakerDiarization": "說話者辨識",
     "enable": "啟用",
     "maxSpeakers": "說話者人數（可選）",
-    "maxSpeakersHint": "強制辨識為剛好的人數，可改善相似聲音（如同性別的說話者）被合併的問題；留空則自動偵測。",
+    "maxSpeakersHint": "系統將依此人數辨識說話者，可改善相似聲音（如同性別的說話者）被合併的問題；留空則自動偵測。",
     "autoDetect": "自動偵測",
     "tags": "標籤",
     "tagPlaceholder": "輸入新標籤",

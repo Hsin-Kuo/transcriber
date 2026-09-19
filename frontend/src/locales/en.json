@@ -402,7 +402,7 @@
     "speakerDiarization": "Speaker Diarization",
     "enable": "Enable",
     "maxSpeakers": "Number of Speakers (Optional)",
-    "maxSpeakersHint": "Forces exactly this many speakers; helps when similar voices (e.g., same-gender speakers) get merged. Leave empty for auto-detect.",
+    "maxSpeakersHint": "Speakers will be identified as exactly this number; helps when similar voices (e.g., same-gender speakers) get merged. Leave empty for auto-detect.",
     "autoDetect": "Auto Detect",
     "tags": "Tags",
     "tagPlaceholder": "Enter new tag",
