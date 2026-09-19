@@ -55,9 +55,15 @@ def test_collect_segments_from_4x_output():
 
 
 def test_load_waveform_shape_and_rate(tmp_path):
-    """waveform dict 是繞過 torchcodec 的關鍵——驗證形狀 (channel, time) 與取樣率。"""
-    import numpy as np
-    import soundfile as sf
+    """waveform dict 是繞過 torchcodec 的關鍵——驗證形狀 (channel, time) 與取樣率。
+
+    CI 是輕量環境（不裝 ML 套件），缺依賴時跳過（本機/worker 環境會實跑）。
+    """
+    import pytest
+
+    np = pytest.importorskip("numpy")
+    sf = pytest.importorskip("soundfile")
+    pytest.importorskip("torch")
 
     wav = tmp_path / "t.wav"
     sf.write(wav, np.zeros(16000, dtype="float32"), 16000)
