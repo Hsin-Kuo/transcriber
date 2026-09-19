@@ -4,16 +4,24 @@
 faster-whisper==1.2.1
 ctranslate2==4.7.1
 
-# Speaker Diarization
-# 釘版本：pyannote.audio 4.x 改用 torchcodec 解碼、需 FFmpeg 共享庫（DLAMI / 靜態 ffmpeg 都沒有）
-# → GPU worker 載入即失敗。釘回 prod 驗證過的 3.4.0 + torch/torchaudio 2.5.1（舊解碼後端，免 torchcodec）。
-# unpinned 會抓到 bleeding-edge → 「prod 能跑、新機重建就爆」的典型 drift。
-torch==2.5.1
-torchaudio==2.5.1
-pyannote.audio==3.4.0
-# huggingface_hub 0.26+ 移除了 hf_hub_download 的 use_auth_token 參數，pyannote.audio 3.4.0
-# 仍在用它 → 不釘會抓到新版、diarization 載入即 TypeError。釘在最後支援該參數的 0.25.x。
-huggingface_hub==0.25.2
+# Speaker Diarization（pyannote 4.x + community-1，2026-09-19 staging POC 驗證）
+# - 4.x 檔案解碼走 torchcodec（需 FFmpeg 共享庫，DLAMI 沒有）——本專案一律用
+#   waveform dict 餵 pipeline（diarization_processor._load_waveform），完全不觸碰
+#   torchcodec；4.0.6+ 對缺庫優雅降級（import 只 warning），故釘 >=4.0.6 的 4.0.7。
+# - torch 必須釘 2.8.0+cu126（linux）：pip 浮動抓最新會拿到 cu130 wheel，
+#   其 cuDNN 子庫在 T4 上載入失敗（CUDNN_STATUS_SUBLIBRARY_LOADING_FAILED，
+#   POC 實測）。cu126 為 POC 驗證過的組合。macOS 本地開發用 PyPI 通用 wheel。
+--extra-index-url https://download.pytorch.org/whl/cu126
+torch==2.8.0+cu126; sys_platform == "linux"
+torch==2.8.0; sys_platform != "linux"
+torchaudio==2.8.0+cu126; sys_platform == "linux"
+torchaudio==2.8.0; sys_platform != "linux"
+pyannote.audio==4.0.7
+# waveform dict 餵入用（讀 orchestrator 轉好的 16k WAV）
+soundfile==0.14.0
+# pyannote 4.x 需 >=0.28.1（已改用 token= 參數）；上限 <1.0 是為 faster-whisper
+# 1.2.1 保守留在 0.x API 面（1.x 移除多個 deprecated 參數，fw 相容性未驗證）。
+huggingface_hub>=0.28.1,<1.0
 
 # 音檔處理
 pydub
