@@ -808,8 +808,14 @@ def transcribe_chunk_worker(
         vad_filter=True,
         vad_parameters=dict(min_silence_duration_ms=1000),
         condition_on_previous_text=False,
+        # 防重複只留軟懲罰。no_repeat_ngram_size=3 已移除（2026-09-20）：它的
+        # 硬禁令連時間戳 token 一起禁，與 repetition_penalty、beam=5 組合時會
+        # 扭曲時間戳 → decoder seek 跳洞（staging 實測 48 分鐘音檔固定丟失
+        # 196.8–220.1s 整段語音；消融證實移除任一參數即消洞，時間戳雷選硬禁令
+        # 下手）。重複幻覺的防護仍有三層：condition_on_previous_text=False
+        # （2026-05 commit 自述的核心解）、repetition_penalty=1.1、#380 的事後
+        # 塌陷偵測清理。
         repetition_penalty=1.1,
-        no_repeat_ngram_size=3,
         word_timestamps=True,
         hallucination_silence_threshold=2.0,
     )
@@ -1405,8 +1411,8 @@ class WhisperProcessor:
             vad_filter=True,
             vad_parameters=dict(min_silence_duration_ms=1000),
             condition_on_previous_text=False,
+            # no_repeat_ngram_size 已移除（時間戳跳洞，理由見 transcribe_chunk_worker 同參數註解）
             repetition_penalty=1.1,
-            no_repeat_ngram_size=3,
             word_timestamps=True,
             hallucination_silence_threshold=2.0,
         )
