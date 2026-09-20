@@ -342,6 +342,14 @@ TURN_COVERAGE_WEIGHT = 0.3
 # 2×SWITCH_PENALTY）；1.0 = 線性。
 TURN_COVERAGE_GAMMA = 0.5
 
+# 換手跨界字的尾端偏置：一個字同時罩住「前 turn 的結尾」與「後 turn 的開頭」
+# （不同語者交接處）時，改用線性 ramp 加權的重疊（越靠字尾權重越高、字首為 0）。
+# 理據（2026-09-20 owner 實聽的兩個跨界字「会」「因为」）：ASR word start 系統性
+# 前漂吃進前一位講者的音段，而 word end 錨在下一字起點、相對可靠——原始重疊比
+# 因此天生偏向前一位講者，跨界字被系統性黏錯邊。ramp 加權把證據重心移向可信的
+# 尾端。只在「同一個字內發生語者交接」時啟用，其他字完全不受影響。
+HANDOFF_TAIL_BIAS = True
+
 # Word 尾端錨定：word 評分只取尾端最後這段秒數（時長 ≤ 此值的 word 不受影響）。
 # ASR 的 word start 容易往前漂、吸入前導靜音或跨語者音段（end 相對可靠——它錨在
 # 下一字的起點）；batched pipeline（BatchedInferencePipeline 的 VAD 窗批次對齊）尤甚，
@@ -412,18 +420,45 @@ def _word_speaker_candidates(
     idx = bisect.bisect_left(starts, end)
 
     span_len = max(end - start, 1e-6)
-    overlapping: List[Tuple[Dict, float]] = []  # [(turn, overlap_fraction)]
+    # [(turn, overlap_fraction, turn_coverage, 重疊區間)]
+    overlapping: List[Tuple[Dict, float, float, Tuple[float, float]]] = []
     i = idx - 1
     while i >= 0:
         if prefix_max_end[i] <= start:
             # 0..i 的 turn.end 全都 <= start → 之後不可能再有重疊，提前中止
             break
         turn = sorted_turns[i]
-        overlap = max(0.0, min(end, turn["end"]) - max(start, turn["start"]))
+        ov_a = max(start, turn["start"])
+        ov_b = min(end, turn["end"])
+        overlap = max(0.0, ov_b - ov_a)
         if overlap > 0.0:
             turn_len = max(turn["end"] - turn["start"], 1e-6)
-            overlapping.append((turn, overlap / span_len, overlap / turn_len))
+            overlapping.append((turn, overlap / span_len, overlap / turn_len, (ov_a, ov_b)))
         i -= 1
+
+    # 換手跨界字偵測（見 HANDOFF_TAIL_BIAS 常數註解）：有 turn 在字內「結束」、
+    # 也有不同語者的 turn 在字內「開始」→ 改用尾端 ramp 加權的重疊比。
+    # 只套用於單 token 的字：多 token 黏合單位（anchor_budget 按 token 數放大）
+    # 的時間戳由多個真實 token 邊界組成、前漂被內部結構稀釋，且 7 月的真實案例
+    # （Happy/Emily，見 test_unit_anchor_budget_scales_with_token_count）證明其
+    # 全 span 證據可信——對它們做尾端偏置會誤判。
+    single_token = anchor_budget <= WORD_TAIL_ANCHOR_SEC + 1e-9
+    if HANDOFF_TAIL_BIAS and anchor_tail and single_token and len(overlapping) >= 2:
+        ends_inside = {t["speaker"] for t, _, _, _ in overlapping if start < t["end"] < end}
+        starts_inside = {t["speaker"] for t, _, _, _ in overlapping if start < t["start"] < end}
+        if ends_inside and starts_inside and (ends_inside | starts_inside) != ends_inside & starts_inside:
+            # ramp(t) = (t-start)/span_len，區間 [a,b] 的加權重疊 = ((b-start)²-(a-start)²)/(2·span_len)
+            # 除以滿版積分 span_len/2 正規化 → 全覆蓋時 = 1.0（與原 fraction 同尺度）
+            half_span = span_len / 2.0
+            overlapping = [
+                (
+                    t,
+                    (((b - start) ** 2 - (a - start) ** 2) / (2.0 * span_len)) / half_span,
+                    cov,
+                    (a, b),
+                )
+                for t, _, cov, (a, b) in overlapping
+            ]
 
     if not overlapping:
         # 零重疊（落在 turn 間隙）→ 依區間中點距最近的 turn 歸屬（rare path，全掃沒關係）
@@ -443,7 +478,7 @@ def _word_speaker_candidates(
 
     if not use_proximity:
         # 無 words 路徑維持純 overlap（該路徑 span 很長，互覆蓋項無意義）
-        for turn, fraction, _coverage in overlapping:
+        for turn, fraction, _coverage, _iv in overlapping:
             if fraction > candidates.get(turn["speaker"], 0.0):
                 candidates[turn["speaker"]] = fraction
         return candidates
@@ -451,13 +486,13 @@ def _word_speaker_candidates(
     # near-tie 看「不同 speaker」的競爭：per-speaker 先取最佳 fraction，再比前兩名——
     # 同語者多個重疊 turn（fraction 相近）不構成競爭，不觸發近平手
     best_frac_by_speaker: Dict[str, float] = {}
-    for turn, fraction, _coverage in overlapping:
+    for turn, fraction, _coverage, _iv in overlapping:
         if fraction > best_frac_by_speaker.get(turn["speaker"], 0.0):
             best_frac_by_speaker[turn["speaker"]] = fraction
     speaker_fracs = sorted(best_frac_by_speaker.values(), reverse=True)
     near_tie = len(speaker_fracs) >= 2 and (speaker_fracs[0] - speaker_fracs[1] < NEAR_TIE_EPSILON)
 
-    for turn, fraction, coverage in overlapping:
+    for turn, fraction, coverage, _iv in overlapping:
         if near_tie:
             tiebreak = max(0.0, 1 - abs(start - turn["start"]) / AFFINITY_SCALE_SEC)
         else:
