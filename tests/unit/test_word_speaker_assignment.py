@@ -684,3 +684,43 @@ def test_indexed_and_brute_force_agree_on_symmetric_tie_regardless_of_turn_order
     brute = _brute_force_pick_speaker(*span, turns)
 
     assert indexed == brute == "A"
+
+
+# ── 換手跨界字尾端偏置（HANDOFF_TAIL_BIAS，2026-09-20 owner 實聽案）────────────
+
+def test_handoff_straddler_follows_next_turn():
+    """「因为」案：字橫跨換手點、尾端實質踩進下一 turn → 判給下一位講者。
+
+    ASR word start 系統性前漂（吃進前一位的音段）、end 錨在下一字起點可靠——
+    原始重疊比天生偏前一位，ramp 加權把證據重心移向尾端。
+    幾何仿真實案：字 0.6s，前 turn 覆蓋前 0.35s、後 turn 覆蓋後 0.25s。
+    """
+    turns = [_turn(80.0, 85.25, "A"), _turn(85.25, 90.0, "B")]
+    words = [
+        _w(84.0, 84.4, "一"), _w(84.4, 84.9, "二"),
+        _w(84.9, 85.5, "跨"),                       # 跨界字：原始重疊偏 A，ramp 後偏 B
+        _w(85.6, 86.0, "三"), _w(86.1, 86.5, "四"),
+    ]
+    segs = [{"start": 84.0, "end": 86.5, "text": "一二跨三四", "words": words}]
+
+    out = assign_speakers_word_level(segs, turns)
+
+    flat = [(o["speaker"], o["text"]) for o in out]
+    assert flat == [("A", "一二"), ("B", "跨三四")], flat
+
+
+def test_word_buried_in_previous_turn_stays_put():
+    """對照組（「会」案的極限）：字幾乎整個躺在前 turn 裡、只擦到下一 turn 0.07s
+    → 證據上屬前一位，偏置不翻（時間戳錯到這種程度是本層的已知天花板）。"""
+    turns = [_turn(70.0, 76.51, "A"), _turn(76.68, 78.0, "B")]
+    words = [
+        _w(75.7, 76.2, "一"),
+        _w(76.21, 76.75, "跨"),                     # 80% 在 A 內
+        _w(76.8, 77.2, "二"), _w(77.2, 77.6, "三"),
+    ]
+    segs = [{"start": 75.7, "end": 77.6, "text": "一跨二三", "words": words}]
+
+    out = assign_speakers_word_level(segs, turns)
+
+    flat = [(o["speaker"], o["text"]) for o in out]
+    assert flat == [("A", "一跨"), ("B", "二三")], flat
