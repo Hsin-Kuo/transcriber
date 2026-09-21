@@ -5,6 +5,7 @@ PunctuationProcessor - 標點符號處理器
 
 from typing import Optional, Tuple, Dict, Any, Callable
 import bisect
+import difflib
 import os
 import re
 
@@ -63,46 +64,11 @@ _SPEAKER_LABEL_COUNT_RE = re.compile(
 # `_split_text_into_chunks` 找斷點用
 _SPEAKER_LABEL_SEARCH_RE = re.compile(SPEAKER_LABEL_PATTERN, re.IGNORECASE)
 
-# ── 輪次邊界對齊（切點錨點吸附）────────────────────────────────────────────
-# 舊版切點純靠「累計內容字元數 × 全域 scale」。LLM 加標點時會**局部**刪贅字，
-# 而 scale 是全域均值，兩者的差就是該邊界的越界量——實測 staging 任務：
-# 漂浮段落有 82.8% 結束在句子中間（有標籤輪次只有 4.9%），越界量中位數 11 字。
-# 對策：計數只當估計值，再吸附到 LLM 自己給的錨點（空行 > 句末標點）。
-_BLANK_LINE_RE = re.compile(r"\n[ \t]*\n")
-_SENTENCE_END_CHARS = "。？！…；.?!;"
-
-
-# `.` 歧義判斷（小數點/縮寫非句末）單一來源移到 text_utils（split 切句也要用），
-# 這裡保留別名維持既有呼叫點不變。
-_is_ambiguous_period = is_ambiguous_period
-
-
-def _advance_past_trailing(text: str, pos: int) -> int:
-    """把位置推過緊接的收尾標點/空白，但遇到開口標點就停。
-
-    錨點與估計點都要套這一步：句末錨點可能落在 `。` 與 `」` 之間，
-    不推過去的話收尾引號會懸掛到下一輪開頭（`[SPEAKER_01] 」下一位…`）。
-    開口標點要留給下一段（那是下一位語者的開頭引號）。
-    """
-    while (
-        pos < len(text)
-        and not is_content_char(text[pos])
-        and not is_opening_punct(text[pos])
-    ):
-        pos += 1
-    return pos
-
-
-# 吸附窗口 = max(_ANCHOR_WINDOW_MIN, 片段長度 × _ANCHOR_WINDOW_RATIO)。
-# 選值依據（e2e 重播 245 輪次、量測「輪次結尾落在句中」的比率）：
-#   0.10/12 → 13.5% ; 0.20/20 → 3.3% ; 0.25/24 → 3.3% ; 0.35/32 → 3.3%
-#   0.15/16 → 6.1%
-# 取 0.20/20——曲線膝點兼平台起點（再放寬沒有增益）。原本取 0.15/16，但 code
-# review 修復（錨點推過收尾標點、排除小數點、非末段切點保留餘量）改變了錨點位置，
-# 膝點隨之右移，重跑敏感度曲線後改用 0.20/20。不再往 0.25+ 放寬：窗口越寬，
-# 切點能被拉離字元估計值越遠，真實資料錨點型態更雜時誤吸附的代價越大。
-_ANCHOR_WINDOW_RATIO = 0.20
-_ANCHOR_WINDOW_MIN = 20
+# ── 輪次邊界對齊 ────────────────────────────────────────────────────────
+# 切點由 difflib 逐內容字對應決定（見 `_align_output_to_pieces`）。舊版的
+# 「累計字數估計 + 錨點吸附」已於 2026-09-21 移除：錨點（LLM 的空行/句末）反映
+# 話題而非語者、吸附窗口隨輪次長度放大（20%）、且吸附後的偏移沿輪次往後累積
+# ——實測同一支音檔最壞切點偏 198 字（≈40 秒語音），整段語者標錯。
 
 # 輪次 body 內的換行（含上游 segments 自帶的）：`\n\n` 從此專職輪次分隔符，
 # body 內部一律收掉，否則前端一切分就多出無標籤的漂浮段落。
@@ -764,11 +730,21 @@ class PunctuationProcessor:
         return chunks
 
     def _align_output_to_pieces(self, output: str, pieces: list) -> list:
-        """把一次 LLM 呼叫的輸出，依各片段的「可比字元數」切回逐片段。
+        """把一次 LLM 呼叫的輸出，依內容字元的實際對應切回逐片段（difflib 模糊比對）。
 
-        可比字元 = 去掉標點與空白後的字元；LLM 只該增刪標點/斷行，不該改字，
-        所以用累計可比字元數決定切點，不依賴模型保留任何分隔符號。
-        輸出與輸入的可比字元數若差距過大（截斷/暴走），回傳 None 讓呼叫端回退原文。
+        LLM 只該增刪標點/斷行、不該改字，所以「內容字元序列」是輪次與輸出之間
+        唯一可靠的共同骨架。用 difflib 找出逐字對應（容忍 LLM 偶發的增/刪/改字），
+        每個片段的起點 = 它第一個內容字元在輸出中的位置；切片涵蓋到下一個片段
+        起點之前，尾隨標點自然歸前一段。
+        輸出與輸入的可比字元數差距過大（截斷/暴走）→ 回 None 讓呼叫端回退原文。
+
+        取代舊的「累計字數估計 + 錨點吸附」（2026-09-21）：舊法把切點吸附到 LLM
+        自己的分段/句末，但那些錨點反映的是**話題**不是**語者**，窗口又隨輪次長度
+        放大（20%，長輪次達 ±55 字）、且吸附後的偏移會沿輪次往後帶——實測同一支
+        音檔最壞切點偏 198 字（≈40 秒語音），造成整段語者標錯、輪次被切在詞中間
+        （`最危險的|時|機`）。difflib 版在同一份真實資料：輪次長度誤差平均
+        6.49 → 0.17 字、最壞 198 → 7 字、偏移 >10 字的輪次 0 個，且 LLM 刪字/
+        改字時靠實際比對自動重新同步，不需要錨點救援。
         """
         targets = [self._comparable_len(p) for p in pieces]
         total_target = sum(targets)
@@ -778,8 +754,8 @@ class PunctuationProcessor:
             return None
         # 容差：允許 10%（或 50 字元）的漂移，超出視為輸出不可信。
         # 這道守門必須在「單 piece 早退」之前——超長輪次被切成的每個片段都是
-        # 單 piece chunk，正是長獨白（本次修復的動機場景）走的路；若早退繞過檢查，
-        # LLM 截斷輸出會被靜默接受，還照樣 log labels_preserved。
+        # 單 piece chunk，正是長獨白走的路；若早退繞過檢查，LLM 截斷輸出會被
+        # 靜默接受，還照樣 log labels_preserved。
         if abs(comparable_out - total_target) > self._align_tolerance(total_target):
             log.warning(
                 "punctuation.align_mismatch",
@@ -792,104 +768,102 @@ class PunctuationProcessor:
         if len(pieces) == 1:
             return [output.strip()]
 
-        # 依實際輸出長度等比縮放切點，吸收小幅漂移
-        scale = comparable_out / total_target if total_target else 1.0
+        # 內容字元序列：(在 output 的位置, 字元) 與 (所屬片段, 字元)
+        out_chars = [(i, ch) for i, ch in enumerate(output) if is_content_char(ch)]
+        piece_chars = [
+            (idx, ch)
+            for idx, piece in enumerate(pieces)
+            for ch in piece
+            if is_content_char(ch)
+        ]
+        if not out_chars or not piece_chars:
+            return None
 
-        # 內容字元前綴計數：prefix[i] = output[:i] 的內容字元數。
-        # 有了它，「第 n 個內容字元的位置」可用 bisect 直接查，不必邊掃邊數——
-        # 錨點吸附會讓切點前後移動，逐次重數會退化成 O(n²)。
-        prefix = [0] * (len(output) + 1)
-        for i, ch in enumerate(output):
-            prefix[i + 1] = prefix[i] + (1 if is_content_char(ch) else 0)
+        # difflib 對齊：片段內容字 index → 輸出內容字 index
+        matcher = difflib.SequenceMatcher(
+            a=[c for _, c in piece_chars],
+            b=[c for _, c in out_chars],
+            autojunk=False,
+        )
+        mapping: list = [None] * len(piece_chars)
+        for tag, i1, i2, j1, _j2 in matcher.get_opcodes():
+            if tag == "equal":
+                for k in range(i2 - i1):
+                    mapping[i1 + k] = j1 + k
+            elif tag in ("replace", "delete"):
+                # 被改/被刪的字一律 clamp 到該區塊起點；'insert' 的多出字由切片自然涵蓋
+                jj = min(j1, len(out_chars) - 1)
+                for k in range(i1, i2):
+                    mapping[k] = jj
+        # 補未對到的（保險）：用其後第一個有效對應
+        nxt = len(out_chars) - 1
+        for k in range(len(mapping) - 1, -1, -1):
+            if mapping[k] is None:
+                mapping[k] = nxt
+            else:
+                nxt = mapping[k]
 
-        # 錨點：LLM 自己給的空行 > 句末標點。位置一律取「錨點之後」，
-        # 讓空行/句號歸前一片段。
-        # 錨點一律先推過尾隨的收尾標點（`。」` 的 `」` 要跟著前一段走），
-        # 並排除小數點/縮寫裡的 `.`。sorted(set(...)) 是因為推進後可能重合，
-        # 且 `_snap_to_anchor` 用 bisect 需要排序。
-        blank_anchors = sorted({
-            _advance_past_trailing(output, m.end())
-            for m in _BLANK_LINE_RE.finditer(output)
-        })
-        sentence_anchors = sorted({
-            _advance_past_trailing(output, i + 1)
-            for i, ch in enumerate(output)
-            if ch in _SENTENCE_END_CHARS and not _is_ambiguous_period(output, i)
-        })
+        # 每個片段第一個內容字在 output 的位置（強制單調，避免負長度切片）
+        starts: list = [None] * len(pieces)
+        seen = set()
+        prev = 0
+        for ci, (piece_idx, _) in enumerate(piece_chars):
+            if piece_idx in seen:
+                continue
+            seen.add(piece_idx)
+            pos = max(out_chars[mapping[ci]][0], prev)
+            starts[piece_idx] = pos
+            prev = pos
 
-        cut_points: list = []
-        prev_cut = 0
-        for target in targets[:-1]:
-            # 估計位置以「上一個已吸附的切點」為原點，而不是從頭累計——
-            # 從頭累計會讓每個邊界的誤差疊加到後面所有邊界（實測越界量與段落
-            # 序號正相關 r=0.232）。以上一個切點為原點後，誤差只影響當前邊界。
-            need = prefix[prev_cut] + int(round(target * scale))
-            # 計數估計位置：第 need 個內容字元之後
-            est = bisect.bisect_left(prefix, need)
-            est = max(0, min(est, len(output)))
-            # 把估計點後緊接的收尾標點/空白歸給前一片段（與錨點同一套規則）
-            est = _advance_past_trailing(output, est)
-
-            # 吸附窗口按片段長度取比例（選值依據見 _ANCHOR_WINDOW_RATIO 註解）
-            window = max(_ANCHOR_WINDOW_MIN, int(target * _ANCHOR_WINDOW_RATIO))
-            # 非末段的切點必須為「後面每個片段」各留至少 1 個字元，否則吸附可能
-            # 把切點放到 len(output)，末片段變空字串 → 呼叫端把原文塞回去，
-            # 造成同一段文字出現兩次（前一輪已含它的標點版），多輪次還會級聯。
-            remaining_pieces = len(targets) - 1 - len(cut_points)
-            upper = len(output) - remaining_pieces
-            cut = self._snap_to_anchor(
-                est, window, blank_anchors, sentence_anchors,
-                lower=prev_cut + 1, upper=upper,
-            )
-            cut_points.append(cut)
-            prev_cut = cut
+        # 切點 = 各片段起點，但把緊鄰的開口標點（「、（）讓給下一段
+        # ——那是下一位語者的開頭引號，吞給前一段會讓引號不成對。
+        cuts: list = []
+        for start_pos in starts:
+            if start_pos is None:
+                cuts.append(None)
+                continue
+            cut = start_pos
+            while cut > 0 and is_opening_punct(output[cut - 1]):
+                cut -= 1
+            cuts.append(cut)
+        # 第一個有內容的片段一律從 0 起：LLM 若在開頭多加字（前言殘留等），
+        # 不能讓它掉進切片之間的縫隙。
+        for i, cut in enumerate(cuts):
+            if cut is not None:
+                cuts[i] = 0
+                break
+        # 單調保護（difflib 的 clamp 可能讓相鄰切點相等）
+        prev = 0
+        for i, cut in enumerate(cuts):
+            if cut is None:
+                continue
+            cuts[i] = max(cut, prev)
+            prev = cuts[i]
 
         out_pieces = []
-        start = 0
-        for cut in cut_points:
-            out_pieces.append(output[start:cut].strip())
-            start = cut
-        out_pieces.append(output[start:].strip())
-        return out_pieces
-
-    @staticmethod
-    def _snap_to_anchor(
-        est: int,
-        window: int,
-        blank_anchors: list,
-        sentence_anchors: list,
-        lower: int,
-        upper: int,
-    ) -> int:
-        """把計數估計位置吸附到窗口內最接近的錨點。
-
-        優先序：空行 > 句末標點 > 原估計位置。同類錨點有多個時取**最接近估計位置**
-        者（不是第一個）——實測 LLM 給的空行數是輪次數的 1.78 倍，貪心取第一個會
-        systematically 選錯。
-        `lower`/`upper` 夾出合法區間並保證切點單調遞增，不會回退、不會產生空片段。
-        """
-        lower = max(0, min(lower, upper))
-        est = max(lower, min(est, upper))
-
-        low_bound = max(lower, est - window)
-        high_bound = min(upper, est + window)
-
-        # 距離優先、種類次之：空行的優先序只用來打平手。
-        # 嚴格「空行永遠贏」會挑到輪次內部的分段空行而放掉正落在估計點上的句末
-        # 標點——實測那樣會讓輪次結尾落在句中的比率反而上升。
-        candidates = []
-        for priority, anchors in ((0, blank_anchors), (1, sentence_anchors)):
-            if not anchors:
+        for i in range(len(pieces)):
+            start_pos = cuts[i]
+            if start_pos is None:
+                # 該片段無內容字（純標點/空白）→ 空字串，呼叫端會保留原文
+                out_pieces.append("")
                 continue
-            lo = bisect.bisect_left(anchors, low_bound)
-            hi = bisect.bisect_right(anchors, high_bound)
-            for c in anchors[lo:hi]:
-                candidates.append((abs(c - est), priority, c))
-
-        if candidates:
-            return min(candidates)[2]
-
-        return est
+            # 找「第一個嚴格大於自己」的後續切點：相等代表對齊在此打平
+            # （LLM 局部吞字時會發生），此時內容歸打平區最後一段，不吞尾。
+            nxt_cut = next(
+                (
+                    cuts[k]
+                    for k in range(i + 1, len(pieces))
+                    if cuts[k] is not None and cuts[k] > start_pos
+                ),
+                None,
+            )
+            if nxt_cut is not None:
+                out_pieces.append(output[start_pos:nxt_cut].strip())
+            elif any(cuts[k] is not None for k in range(i + 1, len(pieces))):
+                out_pieces.append("")
+            else:
+                out_pieces.append(output[start_pos:].strip())
+        return out_pieces
 
     def _punctuate_speaker_turns(
         self,
