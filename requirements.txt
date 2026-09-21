@@ -19,6 +19,10 @@ torchaudio==2.8.0; sys_platform != "linux"
 pyannote.audio==4.0.7
 # waveform dict 餵入用（讀 orchestrator 轉好的 16k WAV）
 soundfile==0.14.0
+# 時間戳精修（語者交界字 forced alignment）：對齊模型 MMS_FA 是 torchaudio 2.8 內建
+# （零新增 torch 依賴），只需 uroman 做中文羅馬化。需 Python 3.10+（本地 3.9 dev
+# venv 跳過——refiner 在無 CUDA 環境本來就自我停用）。
+uroman; python_version >= "3.10"
 # pyannote 4.x 需 >=0.28.1（已改用 token= 參數）；上限 <1.0 是為 faster-whisper
 # 1.2.1 保守留在 0.x API 面（1.x 移除多個 deprecated 參數，fw 相容性未驗證）。
 huggingface_hub>=0.28.1,<1.0
