@@ -324,6 +324,32 @@ SWITCH_GAP_RELIEF_SEC = 0.3
 # 停頓處換手成本的折扣係數（cost = SWITCH_PENALTY × 此值）。
 SWITCH_GAP_RELIEF_FACTOR = 0.3
 
+# 巢狀插話互覆蓋項的權重：emission 加 TURN_COVERAGE_WEIGHT × (重疊 ÷ turn 長度)^GAMMA。
+# 動機（2026-09-20 owner 驗證的吞插話問題）：B 的短插話 turn 疊在 A 的長 turn「裡面」，
+# 字被兩個 turn 都完整罩住 → overlap_fraction 打平 → 2×SWITCH_PENALTY 一錘定音判給 A
+# （實測 48 分鐘訪談有 153 個 ≤2s 插話被吞，其中 58 個 whisper 有完整的字）。
+# 互覆蓋不對稱正是證據：同一個字對 1 秒插話 turn 是「佔它一半」的強訊號，對 60 秒
+# 長 turn 只是 1% 背景；正常長 turn 場景此項 ≈0，不干擾既有行為。
+# 選值依據（雙 dump replay 掃描，指標=應救未救/跳動窗，baseline 58/8 與 108/3）：
+#   w=0.3,γ=0.5,pen 不動 → 46/10 與 95/6（救回 ~21%，跳動 +2/+3）
+#   更激進（降 pen 或 w=0.5）跳動翻倍，不取。天花板 ~2-4 成：單字插話累積量
+#   翻不過 2×SWITCH_PENALTY、word 時間戳漂移讓部分字對不準評分窗——根治需
+#   結構性改法（信任短 diar turn 邊界強制切段），另案。
+TURN_COVERAGE_WEIGHT = 0.3
+
+# 互覆蓋項的塑形指數：term = weight × coverage^gamma。gamma<1 讓「字佔 turn 的
+# 一部分」就快速累積證據（插話 turn 內常只有 2-4 個字，線性太慢翻不過
+# 2×SWITCH_PENALTY）；1.0 = 線性。
+TURN_COVERAGE_GAMMA = 0.5
+
+# 換手跨界字的尾端偏置：一個字同時罩住「前 turn 的結尾」與「後 turn 的開頭」
+# （不同語者交接處）時，改用線性 ramp 加權的重疊（越靠字尾權重越高、字首為 0）。
+# 理據（2026-09-20 owner 實聽的兩個跨界字「会」「因为」）：ASR word start 系統性
+# 前漂吃進前一位講者的音段，而 word end 錨在下一字起點、相對可靠——原始重疊比
+# 因此天生偏向前一位講者，跨界字被系統性黏錯邊。ramp 加權把證據重心移向可信的
+# 尾端。只在「同一個字內發生語者交接」時啟用，其他字完全不受影響。
+HANDOFF_TAIL_BIAS = True
+
 # Word 尾端錨定：word 評分只取尾端最後這段秒數（時長 ≤ 此值的 word 不受影響）。
 # ASR 的 word start 容易往前漂、吸入前導靜音或跨語者音段（end 相對可靠——它錨在
 # 下一字的起點）；batched pipeline（BatchedInferencePipeline 的 VAD 窗批次對齊）尤甚，
@@ -394,17 +420,45 @@ def _word_speaker_candidates(
     idx = bisect.bisect_left(starts, end)
 
     span_len = max(end - start, 1e-6)
-    overlapping: List[Tuple[Dict, float]] = []  # [(turn, overlap_fraction)]
+    # [(turn, overlap_fraction, turn_coverage, 重疊區間)]
+    overlapping: List[Tuple[Dict, float, float, Tuple[float, float]]] = []
     i = idx - 1
     while i >= 0:
         if prefix_max_end[i] <= start:
             # 0..i 的 turn.end 全都 <= start → 之後不可能再有重疊，提前中止
             break
         turn = sorted_turns[i]
-        overlap = max(0.0, min(end, turn["end"]) - max(start, turn["start"]))
+        ov_a = max(start, turn["start"])
+        ov_b = min(end, turn["end"])
+        overlap = max(0.0, ov_b - ov_a)
         if overlap > 0.0:
-            overlapping.append((turn, overlap / span_len))
+            turn_len = max(turn["end"] - turn["start"], 1e-6)
+            overlapping.append((turn, overlap / span_len, overlap / turn_len, (ov_a, ov_b)))
         i -= 1
+
+    # 換手跨界字偵測（見 HANDOFF_TAIL_BIAS 常數註解）：有 turn 在字內「結束」、
+    # 也有不同語者的 turn 在字內「開始」→ 改用尾端 ramp 加權的重疊比。
+    # 只套用於單 token 的字：多 token 黏合單位（anchor_budget 按 token 數放大）
+    # 的時間戳由多個真實 token 邊界組成、前漂被內部結構稀釋，且 7 月的真實案例
+    # （Happy/Emily，見 test_unit_anchor_budget_scales_with_token_count）證明其
+    # 全 span 證據可信——對它們做尾端偏置會誤判。
+    single_token = anchor_budget <= WORD_TAIL_ANCHOR_SEC + 1e-9
+    if HANDOFF_TAIL_BIAS and anchor_tail and single_token and len(overlapping) >= 2:
+        ends_inside = {t["speaker"] for t, _, _, _ in overlapping if start < t["end"] < end}
+        starts_inside = {t["speaker"] for t, _, _, _ in overlapping if start < t["start"] < end}
+        if ends_inside and starts_inside and (ends_inside | starts_inside) != ends_inside & starts_inside:
+            # ramp(t) = (t-start)/span_len，區間 [a,b] 的加權重疊 = ((b-start)²-(a-start)²)/(2·span_len)
+            # 除以滿版積分 span_len/2 正規化 → 全覆蓋時 = 1.0（與原 fraction 同尺度）
+            half_span = span_len / 2.0
+            overlapping = [
+                (
+                    t,
+                    (((b - start) ** 2 - (a - start) ** 2) / (2.0 * span_len)) / half_span,
+                    cov,
+                    (a, b),
+                )
+                for t, _, cov, (a, b) in overlapping
+            ]
 
     if not overlapping:
         # 零重疊（落在 turn 間隙）→ 依區間中點距最近的 turn 歸屬（rare path，全掃沒關係）
@@ -423,7 +477,8 @@ def _word_speaker_candidates(
     candidates: Dict[str, float] = {}
 
     if not use_proximity:
-        for turn, fraction in overlapping:
+        # 無 words 路徑維持純 overlap（該路徑 span 很長，互覆蓋項無意義）
+        for turn, fraction, _coverage, _iv in overlapping:
             if fraction > candidates.get(turn["speaker"], 0.0):
                 candidates[turn["speaker"]] = fraction
         return candidates
@@ -431,13 +486,13 @@ def _word_speaker_candidates(
     # near-tie 看「不同 speaker」的競爭：per-speaker 先取最佳 fraction，再比前兩名——
     # 同語者多個重疊 turn（fraction 相近）不構成競爭，不觸發近平手
     best_frac_by_speaker: Dict[str, float] = {}
-    for turn, fraction in overlapping:
+    for turn, fraction, _coverage, _iv in overlapping:
         if fraction > best_frac_by_speaker.get(turn["speaker"], 0.0):
             best_frac_by_speaker[turn["speaker"]] = fraction
     speaker_fracs = sorted(best_frac_by_speaker.values(), reverse=True)
     near_tie = len(speaker_fracs) >= 2 and (speaker_fracs[0] - speaker_fracs[1] < NEAR_TIE_EPSILON)
 
-    for turn, fraction in overlapping:
+    for turn, fraction, coverage, _iv in overlapping:
         if near_tie:
             tiebreak = max(0.0, 1 - abs(start - turn["start"]) / AFFINITY_SCALE_SEC)
         else:
@@ -448,7 +503,12 @@ def _word_speaker_candidates(
                 span_mid = (start + end) / 2.0
                 turn_mid = (turn["start"] + turn["end"]) / 2.0
                 tiebreak = max(0.0, 1 - abs(span_mid - turn_mid) / (turn_len / 2.0))
-        score = fraction + TIEBREAK_WEIGHT * tiebreak
+        # 互覆蓋項：巢狀插話（短 turn 被字大幅佔據）的證據加成，見常數註解
+        score = (
+            fraction
+            + TIEBREAK_WEIGHT * tiebreak
+            + TURN_COVERAGE_WEIGHT * (min(1.0, coverage) ** TURN_COVERAGE_GAMMA)
+        )
         if score > candidates.get(turn["speaker"], 0.0):
             candidates[turn["speaker"]] = score
     return candidates
@@ -748,8 +808,14 @@ def transcribe_chunk_worker(
         vad_filter=True,
         vad_parameters=dict(min_silence_duration_ms=1000),
         condition_on_previous_text=False,
+        # 防重複只留軟懲罰。no_repeat_ngram_size=3 已移除（2026-09-20）：它的
+        # 硬禁令連時間戳 token 一起禁，與 repetition_penalty、beam=5 組合時會
+        # 扭曲時間戳 → decoder seek 跳洞（staging 實測 48 分鐘音檔固定丟失
+        # 196.8–220.1s 整段語音；消融證實移除任一參數即消洞，時間戳雷選硬禁令
+        # 下手）。重複幻覺的防護仍有三層：condition_on_previous_text=False
+        # （2026-05 commit 自述的核心解）、repetition_penalty=1.1、#380 的事後
+        # 塌陷偵測清理。
         repetition_penalty=1.1,
-        no_repeat_ngram_size=3,
         word_timestamps=True,
         hallucination_silence_threshold=2.0,
     )
@@ -1345,8 +1411,8 @@ class WhisperProcessor:
             vad_filter=True,
             vad_parameters=dict(min_silence_duration_ms=1000),
             condition_on_previous_text=False,
+            # no_repeat_ngram_size 已移除（時間戳跳洞，理由見 transcribe_chunk_worker 同參數註解）
             repetition_penalty=1.1,
-            no_repeat_ngram_size=3,
             word_timestamps=True,
             hallucination_silence_threshold=2.0,
         )

@@ -1,4 +1,4 @@
-"""輪次邊界對齊：body 換行正規化（P1）+ 切點錨點吸附（P2）。
+"""輪次邊界對齊：body 換行正規化（P1）+ 切點對應（P2，difflib）。
 
 使用者回報症狀（staging 0ad21a82）：
     [SPEAKER_01] 們現在在網頁還是泡很多地方一直給別人
@@ -102,42 +102,14 @@ def test_output_shape_is_one_paragraph_per_turn(monkeypatch):
     assert all(LABEL_RE.match(p) for p in paras), "不得有無標籤的漂浮段落"
 
 
-# ── P2：切點錨點吸附 ────────────────────────────────────────────────────
-
-def test_snap_prefers_blank_line_only_on_ties():
-    """距離優先、空行只用來打平手。
-
-    嚴格「空行永遠贏」會挑到輪次內部的分段空行、放掉正落在估計點上的句末標點；
-    e2e 重播實測那樣會讓輪次結尾落在句中的比率從 9.8% 惡化到 15.9%。
-    """
-    proc = _proc()
-    # 空行 44（距 6）vs 句末 48（距 2）→ 取較近的句末
-    assert proc._snap_to_anchor(50, 12, [44], [48], lower=0, upper=100) == 48
-    # 同距離 → 空行優先
-    assert proc._snap_to_anchor(50, 12, [48], [52], lower=0, upper=100) == 48
+# ── P2：切點對應（difflib 逐內容字；2026-09-21 取代錨點吸附）────────────
+# 舊版「累計字數估計 + 錨點吸附」的單元測試（_snap_to_anchor 系列）隨機制一起移除：
+# 錨點反映 LLM 的話題分段而非語者，窗口隨輪次長度放大且偏移沿輪次累積，實測最壞
+# 切點偏 198 字。改以 difflib 找逐字實際對應——行為測試（以下）全部沿用並加嚴。
 
 
-def test_snap_picks_nearest_anchor_not_the_first():
-    """LLM 給的空行數是輪次數的 1.78 倍，貪心取第一個會系統性選錯。"""
-    proc = _proc()
-    assert proc._snap_to_anchor(50, 20, [35, 48, 60], [], lower=0, upper=100) == 48
 
 
-def test_snap_falls_back_to_estimate_when_no_anchor_in_window():
-    proc = _proc()
-    assert proc._snap_to_anchor(50, 5, [10, 90], [12], lower=0, upper=100) == 50
-
-
-def test_snap_respects_lower_bound_for_monotonicity():
-    proc = _proc()
-    # 錨點 30 在窗口內但低於 lower → 不得回退
-    got = proc._snap_to_anchor(40, 20, [30], [], lower=36, upper=100)
-    assert got >= 36
-
-
-def test_snap_clamps_to_upper_bound():
-    proc = _proc()
-    assert proc._snap_to_anchor(120, 20, [], [], lower=0, upper=100) == 100
 
 
 def test_local_deletion_no_longer_steals_next_turn_opening():
@@ -298,23 +270,6 @@ def test_closing_quote_stays_with_previous_turn():
     assert aligned[1].startswith("乙")
 
 
-def test_ambiguous_period_is_not_an_anchor():
-    """review #4：小數點/縮寫裡的 `.` 不得當句末錨點。"""
-    import src.services.utils.punctuation_processor as pp
-
-    assert pp._is_ambiguous_period("3.5", 1) is True
-    assert pp._is_ambiguous_period("e.g", 1) is True
-    assert pp._is_ambiguous_period("end. Next", 3) is False
-
-    proc = _proc()
-    pieces = ["The rate was 3.5 and we expect more growth", "Yes I agree with that point"]
-    output = "The rate was 3.5 and we expect more growth. Yes, I agree with that point."
-
-    aligned = proc._align_output_to_pieces(output, pieces)
-
-    assert "3.5" in aligned[0], f"小數不得被切開: {aligned[0]!r}"
-    assert aligned[1].startswith("Yes"), f"下一輪開頭被偷字: {aligned[1]!r}"
-
 
 def test_cjk_language_tuple_is_shared():
     """review #5：CJK 語言 tuple 收斂成單一常數。"""
@@ -335,3 +290,75 @@ def test_no_anchor_at_all_still_returns_full_coverage():
     aligned = proc._align_output_to_pieces(output, pieces)
 
     assert aligned == ["甲" * 10, "乙" * 10]
+
+
+# ── difflib 切點：本次修復（2026-09-21）的回歸鎖 ─────────────────────────
+# 事故：owner 實聽回報 9:57–10:45 整段語者標錯。追查發現 diar 與 word 級指派都
+# 正確，錯在「標點後把語者標籤重貼回文字」的切點——錨點吸附把切點拉偏，痕跡是
+# 輪次被切在詞中間（`最危險的|時|機`、`國文討|厭的`）。
+
+def test_cut_never_lands_inside_a_word():
+    """切點落在詞中間 = 對齊漂移的鐵證（語者不可能在一個詞的中間換手）。"""
+    proc = _proc()
+    pieces = [
+        "我覺得參與在國文課最危險的時機也是一個最好的時機",
+        "因為以前國文課就主科你就一定要讀國英數",
+    ]
+    # LLM 加標點 + 自行分段（分段點刻意與輪次邊界不一致）
+    output = (
+        "我覺得參與在國文課最危險的時機，也是一個最好的時機。\n\n"
+        "因為以前國文課就主科，你就一定要讀國英數。"
+    )
+    aligned = proc._align_output_to_pieces(output, pieces)
+
+    assert aligned[0].startswith("我覺得"), aligned[0]
+    assert aligned[0].rstrip().endswith("。"), aligned[0]
+    assert aligned[1].startswith("因為以前"), aligned[1]
+    # 「時機」不得被拆到兩段
+    assert "時機" in aligned[0] and "時機" not in aligned[1]
+
+
+def test_long_turns_do_not_drift_like_anchor_snapping():
+    """長輪次是舊 bug 最嚴重的場景（窗口 = 長度 20% → 可偏 ±55 字）。
+
+    五個各 60 字的輪次，LLM 在每個輪次「內部」也插入分段（誘導錯誤吸附）。
+    difflib 對應下每段長度必須貼近原長度（容許標點帶來的少量差異）。
+    """
+    proc = _proc()
+    pieces = [("第%d位講者說的話" % i) + "內容字" * 17 for i in range(5)]
+    output = "\n\n".join(
+        p[:30] + "，\n\n" + p[30:] + "。" for p in pieces
+    )
+    aligned = proc._align_output_to_pieces(output, pieces)
+
+    assert aligned is not None and len(aligned) == 5
+    # 不用 zip(strict=)：本地 dev venv 仍是 3.9（strict= 需 3.10+），與 repo 慣例一致
+    for i, got in enumerate(aligned):
+        got_content = proc._comparable_len(got)
+        want_content = proc._comparable_len(pieces[i])
+        assert abs(got_content - want_content) <= 2, (
+            f"piece{i} 長度漂移 {got_content - want_content} 字: {got[:20]!r}"
+        )
+        assert got.startswith("第%d位講者" % i), f"piece{i} 起點錯: {got[:12]!r}"
+
+
+def test_llm_local_deletion_resyncs_instead_of_drifting():
+    """LLM 在中段吃掉一整句 → difflib 於後續匹配處重新同步，不把偏移帶到後面。"""
+    proc = _proc()
+    pieces = [
+        "甲講者的第一段話這裡有一些內容要說明",
+        "乙講者接著說的第二段話同樣有內容",
+        "丙講者最後補充的第三段話內容如下",
+    ]
+    # 第二段被吃掉 6 個字
+    output = (
+        "甲講者的第一段話這裡有一些內容要說明。"
+        "乙講者接著說的第二段話。"
+        "丙講者最後補充的第三段話內容如下。"
+    )
+    aligned = proc._align_output_to_pieces(output, pieces)
+
+    assert aligned is not None
+    assert aligned[0].startswith("甲講者")
+    assert aligned[1].startswith("乙講者")
+    assert aligned[2].startswith("丙講者"), f"第三段未重新同步: {aligned[2][:14]!r}"

@@ -66,12 +66,16 @@ def _resolve_punct_language(
 class TranscriptionOrchestrator:
     """單次轉錄 run 的 Phase 機器。Web Server 與 Worker 共用。"""
 
-    def __init__(self, *, db, progress_store, whisper, punctuation, diarization=None):
+    def __init__(
+        self, *, db, progress_store, whisper, punctuation, diarization=None,
+        timestamp_refiner=None,
+    ):
         self.db = db
         self.progress_store = progress_store
         self.whisper = whisper
         self.punctuation = punctuation
         self.diarization = diarization
+        self.timestamp_refiner = timestamp_refiner
 
     # ── public:主流程 ────────────────────────────────
 
@@ -259,6 +263,17 @@ class TranscriptionOrchestrator:
                 diar_segments = None
 
             if diar_segments and segments:
+                # 時間戳精修：word 級指派之前，用強制對齊修正語者交界窗內的
+                # word 時間戳（whisper start 系統性前漂 → 交界字黏錯邊的根因，
+                # 見 forced_alignment.py 檔頭）。就地修改 words、失敗零影響。
+                lang_for_refine = detected_language or language
+                if self.timestamp_refiner is not None and (
+                    (language or "").startswith(("zh", "nan"))
+                    or lang_for_refine == "zh"
+                ):
+                    self.timestamp_refiner.refine_segments(
+                        wav_path, segments, diar_segments
+                    )
                 task = self._get_task(task_id)
                 task_type = task.get("task_type", "paragraph") if task else "paragraph"
                 num_speakers = len(set(s["speaker"] for s in diar_segments))
@@ -274,6 +289,7 @@ class TranscriptionOrchestrator:
                         segments, diar_segments
                     )
                 self._maybe_dump_diar_debug(task_id, diar_segments, pre_merge_segments)
+                self._check_asr_coverage(task_id, diar_segments, pre_merge_segments)
                 diar_updates = {"stats.diarization.num_speakers": num_speakers}
                 diar_model = getattr(self.diarization, "model_name", None)
                 if diar_model:
@@ -300,6 +316,60 @@ class TranscriptionOrchestrator:
         # （覆蓋無 diar / diar 失敗降級 / 段落模式 / 字幕模式四條路；字幕模式核心已剝，此處 no-op）
         segments = [{k: v for k, v in s.items() if k != "words"} for s in segments]
         return full_text, segments, detected_language
+
+    def _check_asr_coverage(
+        self, task_id: str, diar_segments: list, segments_with_words: list
+    ) -> None:
+        """ASR 覆蓋哨兵：diar 說有人講話、whisper 卻零輸出的區段 → 落檔 + 告警。
+
+        背景（2026-09-20 staging）：whisper 的 decoder 參數組合曾造成 seek 跳洞
+        （48 分鐘音檔固定丟失 23 秒語音），任務照樣 completed、無任何痕跡，
+        靠使用者聽出來才發現。diar 是獨立的語音偵測訊號，正好可以稽核 whisper
+        的覆蓋率。只在 diarization 啟用且成功時有此訊號（呼叫點在 merge 成功
+        分支內）。門檻 2 秒：短於此的 diar turn 可能是搭腔/雜訊，缺字屬正常。
+        """
+        try:
+            words = [
+                w
+                for seg in segments_with_words
+                for w in (seg.get("words") or [])
+                if w.get("start") is not None and w.get("end") is not None
+            ]
+            if not words:
+                return
+            uncovered = []
+            for tr in diar_segments:
+                dur = tr["end"] - tr["start"]
+                if dur < 2.0:
+                    continue
+                has_word = any(
+                    min(w["end"], tr["end"]) - max(w["start"], tr["start"]) > 0
+                    for w in words
+                )
+                if not has_word:
+                    uncovered.append(tr)
+            coverage = {
+                "speech_turns": sum(
+                    1 for t in diar_segments if t["end"] - t["start"] >= 2.0
+                ),
+                "uncovered_turns": len(uncovered),
+                "max_uncovered_seconds": round(
+                    max((t["end"] - t["start"] for t in uncovered), default=0.0), 1
+                ),
+            }
+            if uncovered:
+                log.error(
+                    "asr.coverage_gap_detected",
+                    **coverage,
+                    sample_ranges=[
+                        [round(t["start"], 1), round(t["end"], 1)]
+                        for t in uncovered[:5]
+                    ],
+                )
+            self._update_task(task_id, {"stats.asr_coverage": coverage})
+        except Exception as e:
+            # 哨兵不可影響任務主流程
+            log.warning("asr.coverage_check_failed", error=str(e))
 
     def _maybe_dump_diar_debug(
         self, task_id: str, diar_segments: list, segments_with_words: list

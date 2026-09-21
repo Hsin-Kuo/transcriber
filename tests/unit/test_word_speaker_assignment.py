@@ -172,30 +172,32 @@ def test_viterbi_flips_tie_at_speaker_handover_point():
     ]
 
 
-def test_viterbi_keeps_context_speaker_for_mid_run_backchannel_tie():
-    # 中段搭腔：前後文皆屬 A（長 turn），中間 word 被剛開口的 nested 短 turn B 同時
-    # 罩住、重疊平手且 affinity 偏 B——但 B 只是搭腔證據，前後文一致性（兩次換手成本）
-    # 應讓該字留給 A，不得翻盤。
+def test_viterbi_rescues_mid_run_backchannel_in_dedicated_turn():
+    # 哲學轉向（2026-09，TURN_COVERAGE_WEIGHT）：舊行為把 nested 搭腔一律判給前後文
+    # （吞插話），owner 實聽驗證這些多為真插話。字佔滿 B 的專屬短 turn（coverage 0.6）
+    # = 強證據 → 互覆蓋項讓 B 翻過兩次換手成本，救回插話。
+    # 對照：turn 未被字大幅佔據時仍壓制，見 test_low_coverage_turn_still_suppressed。
     turns = [
         _turn(0.0, 10.0, "A"),   # 主 turn
-        _turn(4.0, 5.0, "B"),    # nested 搭腔短 turn
+        _turn(4.0, 5.0, "B"),    # nested 搭腔短 turn（專屬：字佔它 60%）
     ]
     words = [
         _w(1.0, 1.4, "w1"),   # A 獨占
-        _w(4.2, 4.8, "w2"),   # A/B 皆完整罩住（平手），proximity 偏 B（B 中心 4.5 = word 中心）
+        _w(4.2, 4.8, "w2"),   # A/B 皆完整罩住，但 B 的互覆蓋證據強
         _w(6.0, 6.5, "w3"),   # A 獨占
     ]
     segs = [{"start": 1.0, "end": 6.5, "text": "w1w2w3", "words": words}]
 
     out = assign_speakers_word_level(segs, turns)
 
-    assert len(out) == 1
-    assert out[0]["speaker"] == "A"
+    assert [o["speaker"] for o in out] == ["A", "B", "A"]
 
 
-def test_viterbi_suppresses_isolated_weak_flip():
-    # 原 smoothing 功能：A A B A A 型孤立單字雜訊（B 靠近平手 affinity 弱優勢贏
-    # per-word，非強證據）→ 兩次換手成本遠大於 emission 差 → DP 全判 A。
+def test_viterbi_flips_isolated_word_in_dedicated_turn():
+    # 哲學轉向（2026-09，TURN_COVERAGE_WEIGHT）：diar 專門為 w3 開了 0.7s 短 turn
+    # 且字佔它 71%——這是插話訊號不是雜訊，改判 B（舊行為：一律壓成 A）。
+    # 「孤立弱翻盤壓制」的保證由 test_low_coverage_turn_still_suppressed 接手：
+    # 只有「字大幅佔據專屬 turn」才翻，低覆蓋 turn 照壓。
     # words 用 0.5s（< WORD_TAIL_ANCHOR_SEC），不受尾端錨定影響。
     turns = [
         _turn(0.0, 10.0, "A"),
@@ -213,8 +215,44 @@ def test_viterbi_suppresses_isolated_weak_flip():
 
     out = assign_speakers_word_level(segs, turns)
 
+    assert [o["speaker"] for o in out] == ["A", "B", "A"]
+    assert [o["text"] for o in out] == ["一二", "三", "四五"]
+
+
+def test_low_coverage_turn_still_suppressed():
+    # 防跳動保證（接替舊的孤立弱翻盤壓制）：B 的 turn 有 3 秒長、字只佔它 1/6
+    # ——不是「專屬插話 turn」，互覆蓋項 ≈0，前後文一致性照舊壓制，不翻盤。
+    turns = [
+        _turn(0.0, 10.0, "A"),
+        _turn(2.0, 5.0, "B"),   # 長而空的 turn：字只擦到一小段
+    ]
+    words = [
+        _w(1.0, 1.5, "一"), _w(3.0, 3.5, "二"), _w(6.0, 6.5, "三"),
+    ]
+    segs = [{"start": 1.0, "end": 6.5, "text": "一二三", "words": words}]
+
+    out = assign_speakers_word_level(segs, turns)
+
     assert len(out) == 1
     assert out[0]["speaker"] == "A"
+
+
+def test_multiword_interjection_in_dedicated_turn_rescued():
+    # 使用者實案（2026-09-20）：B 的 4 字插話完整落在 1.4s 專屬 turn、
+    # 巢狀於 A 的 20s 長 turn 內——舊行為整段吞給 A，新行為救回 B。
+    turns = [_turn(0.0, 20.0, "A"), _turn(8.0, 9.4, "B")]
+    words = [
+        _w(6.0, 6.4, "甲"), _w(7.0, 7.4, "乙"),
+        _w(8.1, 8.4, "丙"), _w(8.5, 8.8, "丁"), _w(8.9, 9.1, "戊"), _w(9.15, 9.35, "己"),
+        _w(10.0, 10.4, "庚"), _w(11.0, 11.4, "辛"),
+    ]
+    segs = [{"start": 6.0, "end": 11.4, "text": "甲乙丙丁戊己庚辛", "words": words}]
+
+    out = assign_speakers_word_level(segs, turns)
+
+    assert [(o["speaker"], o["text"]) for o in out] == [
+        ("A", "甲乙"), ("B", "丙丁戊己"), ("A", "庚辛"),
+    ]
 
 
 def test_viterbi_preserves_strong_evidence_interjection():
@@ -289,10 +327,11 @@ def test_gap_word_fallback_does_not_drag_weak_real_overlap():
     assert out[0]["speaker"] == "A"
 
 
-def test_viterbi_converges_weak_alternating_pattern():
-    # 43f829f 修過的迴歸點：per-word 弱證據交替（A B A B A 型）不得殘留交替雜訊。
-    # 用兩個 nested 短 turn 讓 w2/w4 的 per-word 分數以微小差距偏 B → DP 收斂單一語者 A
-    # （翻兩字要 4 次換手成本 ≫ emission 差 ~0.07）。
+def test_viterbi_honors_repeated_dedicated_interjections():
+    # 哲學轉向（2026-09，TURN_COVERAGE_WEIGHT）：diar 為 w2/w4 各開了專屬短 turn
+    # 且字佔滿它們——B 插話兩次是正確解讀，輸出 A B A B A（舊行為：當交替雜訊
+    # 全壓成 A）。低覆蓋 turn 的防跳動保證見 test_low_coverage_turn_still_suppressed；
+    # 真實資料的跳動指標由 dump replay 掃描把關（48 分鐘 +2 個跳動窗）。
     # words 用 0.5s（< WORD_TAIL_ANCHOR_SEC），不受尾端錨定影響。
     turns = [
         _turn(0.0, 10.0, "A"),
@@ -312,8 +351,7 @@ def test_viterbi_converges_weak_alternating_pattern():
 
     out = assign_speakers_word_level(segs, turns)
 
-    assert len(out) == 1
-    assert out[0]["speaker"] == "A"
+    assert [o["speaker"] for o in out] == ["A", "B", "A", "B", "A"]
 
 
 # ── 跨段 Viterbi + 拉丁 unit grouping（staging dump 實測數字）──────────────
@@ -385,16 +423,17 @@ def test_latin_unit_grouping_assigns_whole_word_one_speaker():
 
 
 def test_near_tie_requires_two_distinct_speakers():
-    # near-tie 判定必須看「不同 speaker」的競爭：A 有兩個重疊 turn（fraction 0.75/0.74，
-    # 差 0.01）、競爭者 B 只有 0.68——若拿全體 turn 排序前兩名（0.75 vs 0.74，皆 A）會
-    # 誤觸近平手、改用 affinity（B 起點緊貼 word → affinity 0.96 → B 翻盤）。
-    # per-speaker 規則下 A(0.75) vs B(0.68) 差 0.07 > ε → 走 proximity，A 勝。
+    # 原意：near-tie 判定必須看「不同 speaker」的競爭（同語者多 turn 不誤觸）。
+    # TURN_COVERAGE_WEIGHT（2026-09）後此幾何的勝負由互覆蓋項主導：B 的 0.38s
+    # 微型 turn 被字佔據 89%（專屬插話證據）→ B 勝，且與 near-tie 走哪條路無關
+    # ——「起點貼字＋fraction<1」的幾何天生就是高覆蓋小 turn，無法再單獨鑑別
+    # per-speaker 規則（已知測試弱化，per-speaker 邏輯本身未變、留在生產碼註解）。
     turns = [
         _turn(9.0, 10.375, "A"),   # A turn 1：overlap 0.375 → fraction 0.75
         _turn(9.0, 10.37, "A"),    # A turn 2：overlap 0.370 → fraction 0.74（同語者，非競爭）
-        _turn(9.96, 10.34, "B"),   # B：overlap 0.340 → fraction 0.68，但起點緊貼 word
+        _turn(9.96, 10.34, "B"),   # B：fraction 0.68，但字佔滿它 89% → 互覆蓋證據最強
     ]
-    assert _pick_speaker_for_span(10.0, 10.5, turns) == "A"
+    assert _pick_speaker_for_span(10.0, 10.5, turns) == "B"
 
 
 def test_unit_anchor_budget_scales_with_token_count():
@@ -553,11 +592,12 @@ def _brute_force_pick_speaker(start, end, turns):
     start = max(start, end - 0.6)  # word 尾端錨定（獨立重寫，同生產規格）
     span_len = max(end - start, 1e-6)
 
-    overlapping = []  # [(turn, overlap_fraction)]
+    overlapping = []  # [(turn, overlap_fraction, turn_coverage)]
     for turn in turns:
         overlap = max(0.0, min(end, turn["end"]) - max(start, turn["start"]))
         if overlap > 0.0:
-            overlapping.append((turn, overlap / span_len))
+            turn_len = max(turn["end"] - turn["start"], 1e-6)
+            overlapping.append((turn, overlap / span_len, overlap / turn_len))
 
     if not overlapping:
         midpoint = (start + end) / 2.0
@@ -571,12 +611,12 @@ def _brute_force_pick_speaker(start, end, turns):
 
         return min(turns, key=_distance)["speaker"]
 
-    fracs = sorted((f for _, f in overlapping), reverse=True)
+    fracs = sorted((f for _, f, _ in overlapping), reverse=True)
     near_tie = len(overlapping) >= 2 and (fracs[0] - fracs[1] < 0.05)
 
     best_speaker = None
     best_score = 0.0
-    for turn, fraction in overlapping:
+    for turn, fraction, coverage in overlapping:
         if near_tie:
             tiebreak = max(0.0, 1 - abs(start - turn["start"]) / 1.0)
         else:
@@ -587,7 +627,8 @@ def _brute_force_pick_speaker(start, end, turns):
                 span_mid = (start + end) / 2.0
                 turn_mid = (turn["start"] + turn["end"]) / 2.0
                 tiebreak = max(0.0, 1 - abs(span_mid - turn_mid) / (turn_len / 2.0))
-        score = fraction + 0.1 * tiebreak
+        # 互覆蓋項（獨立重寫，同生產規格 weight 0.3 / gamma 0.5）
+        score = fraction + 0.1 * tiebreak + 0.3 * (min(1.0, coverage) ** 0.5)
         if score > best_score or (
             score == best_score and best_speaker is not None and turn["speaker"] < best_speaker
         ):
@@ -643,3 +684,43 @@ def test_indexed_and_brute_force_agree_on_symmetric_tie_regardless_of_turn_order
     brute = _brute_force_pick_speaker(*span, turns)
 
     assert indexed == brute == "A"
+
+
+# ── 換手跨界字尾端偏置（HANDOFF_TAIL_BIAS，2026-09-20 owner 實聽案）────────────
+
+def test_handoff_straddler_follows_next_turn():
+    """「因为」案：字橫跨換手點、尾端實質踩進下一 turn → 判給下一位講者。
+
+    ASR word start 系統性前漂（吃進前一位的音段）、end 錨在下一字起點可靠——
+    原始重疊比天生偏前一位，ramp 加權把證據重心移向尾端。
+    幾何仿真實案：字 0.6s，前 turn 覆蓋前 0.35s、後 turn 覆蓋後 0.25s。
+    """
+    turns = [_turn(80.0, 85.25, "A"), _turn(85.25, 90.0, "B")]
+    words = [
+        _w(84.0, 84.4, "一"), _w(84.4, 84.9, "二"),
+        _w(84.9, 85.5, "跨"),                       # 跨界字：原始重疊偏 A，ramp 後偏 B
+        _w(85.6, 86.0, "三"), _w(86.1, 86.5, "四"),
+    ]
+    segs = [{"start": 84.0, "end": 86.5, "text": "一二跨三四", "words": words}]
+
+    out = assign_speakers_word_level(segs, turns)
+
+    flat = [(o["speaker"], o["text"]) for o in out]
+    assert flat == [("A", "一二"), ("B", "跨三四")], flat
+
+
+def test_word_buried_in_previous_turn_stays_put():
+    """對照組（「会」案的極限）：字幾乎整個躺在前 turn 裡、只擦到下一 turn 0.07s
+    → 證據上屬前一位，偏置不翻（時間戳錯到這種程度是本層的已知天花板）。"""
+    turns = [_turn(70.0, 76.51, "A"), _turn(76.68, 78.0, "B")]
+    words = [
+        _w(75.7, 76.2, "一"),
+        _w(76.21, 76.75, "跨"),                     # 80% 在 A 內
+        _w(76.8, 77.2, "二"), _w(77.2, 77.6, "三"),
+    ]
+    segs = [{"start": 75.7, "end": 77.6, "text": "一跨二三", "words": words}]
+
+    out = assign_speakers_word_level(segs, turns)
+
+    flat = [(o["speaker"], o["text"]) for o in out]
+    assert flat == [("A", "一跨"), ("B", "二三")], flat
