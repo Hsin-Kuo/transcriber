@@ -9,6 +9,8 @@ from typing import Optional
 
 from src.worker_core.config import DEFAULT_MODEL, LANGUAGE_MODEL_OVERRIDES
 from src.utils.config_loader import get_parameter
+import os
+
 from src.utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -47,6 +49,25 @@ def get_whisper_processor(language: Optional[str] = None):
         _cached_whisper_processors[model_path] = WhisperProcessor(whisper_model, model_path)
         log.info("whisper.model.loaded", model=model_path)
     return _cached_whisper_processors[model_path]
+
+
+_cached_timestamp_refiner = None
+
+
+def get_timestamp_refiner():
+    """TimestampRefiner 單例（env TIMESTAMP_REFINE 可全域關閉，預設開）。
+
+    模型 lazy load（首次 diarize 中文任務才真正載入）；載入失敗自我停用，
+    不影響轉錄主流程。
+    """
+    global _cached_timestamp_refiner
+    if os.getenv("TIMESTAMP_REFINE", "true").strip().lower() in ("false", "0", "no"):
+        return None
+    if _cached_timestamp_refiner is None:
+        from src.services.utils.forced_alignment import TimestampRefiner
+
+        _cached_timestamp_refiner = TimestampRefiner()
+    return _cached_timestamp_refiner
 
 
 def get_diarization_pipeline():

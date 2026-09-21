@@ -18,7 +18,7 @@ from src.utils.time_utils import get_utc_timestamp
 from src.worker_core.config import PROCESSING_CLAIM_STALE_SECONDS
 from src.worker_core.db import get_db, update_task
 from src.worker_core.heartbeat import get_worker_id
-from src.worker_core.model_cache import get_diarization_pipeline, get_whisper_processor
+from src.worker_core.model_cache import get_diarization_pipeline, get_whisper_processor, get_timestamp_refiner
 
 log = get_logger(__name__)
 
@@ -124,6 +124,7 @@ def process_task(message_body: dict, progress_store: ProgressStore) -> None:
                 whisper=get_whisper_processor(job.language),
                 punctuation=PunctuationProcessor(),
                 diarization=diarization,
+                timestamp_refiner=get_timestamp_refiner(),
             )
             orchestrator.run(
                 task_id, audio_source, job.language, job.use_chunking, job.use_punctuation,
