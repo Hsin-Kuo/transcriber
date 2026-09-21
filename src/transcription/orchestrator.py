@@ -66,12 +66,16 @@ def _resolve_punct_language(
 class TranscriptionOrchestrator:
     """單次轉錄 run 的 Phase 機器。Web Server 與 Worker 共用。"""
 
-    def __init__(self, *, db, progress_store, whisper, punctuation, diarization=None):
+    def __init__(
+        self, *, db, progress_store, whisper, punctuation, diarization=None,
+        timestamp_refiner=None,
+    ):
         self.db = db
         self.progress_store = progress_store
         self.whisper = whisper
         self.punctuation = punctuation
         self.diarization = diarization
+        self.timestamp_refiner = timestamp_refiner
 
     # ── public:主流程 ────────────────────────────────
 
@@ -259,6 +263,17 @@ class TranscriptionOrchestrator:
                 diar_segments = None
 
             if diar_segments and segments:
+                # 時間戳精修：word 級指派之前，用強制對齊修正語者交界窗內的
+                # word 時間戳（whisper start 系統性前漂 → 交界字黏錯邊的根因，
+                # 見 forced_alignment.py 檔頭）。就地修改 words、失敗零影響。
+                lang_for_refine = detected_language or language
+                if self.timestamp_refiner is not None and (
+                    (language or "").startswith(("zh", "nan"))
+                    or lang_for_refine == "zh"
+                ):
+                    self.timestamp_refiner.refine_segments(
+                        wav_path, segments, diar_segments
+                    )
                 task = self._get_task(task_id)
                 task_type = task.get("task_type", "paragraph") if task else "paragraph"
                 num_speakers = len(set(s["speaker"] for s in diar_segments))
