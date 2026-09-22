@@ -1,8 +1,8 @@
 """任務資料存取層"""
-import re
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
+from ..query_utils import safe_regex
 from ...utils.time_utils import get_utc_timestamp
 from src.utils.logger import get_logger
 
@@ -23,10 +23,6 @@ def _validate_status(status: Optional[str]) -> Optional[str]:
     return status
 
 
-# 名稱搜尋字串上限（custom_name 本身上限 255，搜尋用不到那麼長）
-MAX_NAME_QUERY_LENGTH = 100
-
-
 def _name_query_filter(name_query: Optional[str]) -> Optional[Dict[str, Any]]:
     """把名稱關鍵字轉成「只比對顯示名稱」的 Mongo 條件。
 
@@ -34,16 +30,12 @@ def _name_query_filter(name_query: Optional[str]) -> Optional[Dict[str, Any]]:
     因此有 custom_name 時只認 custom_name，沒有才 fallback 到 file.filename——
     任務改名後，使用者已看不到的舊檔名不會被搜出來。
 
-    安全：使用者輸入一律 re.escape，避免惡意 regex（如 `(a+)+$`）造成
-    catastrophic backtracking 的 CPU DoS；另截斷長度上限。
+    escape / 長度上限由 safe_regex 負責（見該函式的 ReDoS 說明）。
     """
-    if not name_query:
-        return None
-    trimmed = name_query.strip()[:MAX_NAME_QUERY_LENGTH]
-    if not trimmed:
+    pattern = safe_regex(name_query)
+    if pattern is None:
         return None
 
-    pattern = {"$regex": re.escape(trimmed), "$options": "i"}
     return {
         "$or": [
             {"custom_name": pattern},

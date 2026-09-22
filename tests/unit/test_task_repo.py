@@ -28,8 +28,8 @@ except ImportError:  # pragma: no cover
 
 from motor.motor_asyncio import AsyncIOMotorClient  # noqa: E402
 
+from src.database.query_utils import MAX_SEARCH_LENGTH  # noqa: E402
 from src.database.repositories.task_repo import (  # noqa: E402
-    MAX_NAME_QUERY_LENGTH,
     TaskRepository,
     _name_query_filter,
 )
@@ -285,7 +285,7 @@ class TestNameQueryFilter:
 
     def test_truncates_to_max_length(self):
         f = _name_query_filter("x" * 500)
-        assert len(f["$or"][0]["custom_name"]["$regex"]) == MAX_NAME_QUERY_LENGTH
+        assert len(f["$or"][0]["custom_name"]["$regex"]) == MAX_SEARCH_LENGTH
 
     def test_filename_branch_gated_on_custom_name_absence(self):
         """第二個分支必須帶 $exists:False——這就是「不搜使用者看不到的舊檔名」。"""
