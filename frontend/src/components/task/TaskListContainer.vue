@@ -89,6 +89,37 @@
         <span>{{ $t('taskList.batchEdit') }}</span>
       </button>
 
+      <!-- 名稱搜尋（桌機；手機版搜尋入口在 MobileHeader，另案處理） -->
+      <div class="task-search">
+        <svg class="task-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input
+          v-model="searchQuery"
+          type="search"
+          class="task-search-input"
+          :maxlength="MAX_SEARCH_LENGTH"
+          :disabled="isBatchEditMode"
+          :placeholder="$t('taskList.filterBar.searchPlaceholder')"
+          :aria-label="$t('taskList.filterBar.searchPlaceholder')"
+          @keyup.esc="searchQuery = ''"
+        />
+        <button
+          v-if="searchQuery"
+          type="button"
+          class="task-search-clear"
+          :title="$t('taskList.filterBar.clearSearch')"
+          :aria-label="$t('taskList.filterBar.clearSearch')"
+          @click="searchQuery = ''"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
       <!-- 分頁控制 -->
       <div class="pagination-wrapper">
         <RulerPagination
@@ -135,7 +166,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import api from '../../utils/api'
 import { useTaskTags } from '../../composables/task/useTaskTags'
@@ -179,7 +210,13 @@ function handlePageChange(newPage) {
 // SessionStorage 鍵值
 const STORAGE_KEY_FILTER_TAGS = 'taskList_filterTags'
 const STORAGE_KEY_TASK_TYPE = 'taskList_taskType'
+const STORAGE_KEY_SEARCH_QUERY = 'taskList_searchQuery'
 const STORAGE_KEY_PRESERVE_FLAG = 'taskList_preserveFilters'
+
+// 與後端 MAX_NAME_QUERY_LENGTH 對齊（後端仍會截斷，這裡只是提早擋住）
+const MAX_SEARCH_LENGTH = 100
+// 邊打邊送會把每個字元都變成一次查詢，debounce 收斂成一次
+const SEARCH_DEBOUNCE_MS = 300
 
 // 從 sessionStorage 恢復篩選狀態
 const restoreFilterState = () => {
@@ -194,6 +231,7 @@ const restoreFilterState = () => {
       // 恢復篩選狀態
       const savedTags = sessionStorage.getItem(STORAGE_KEY_FILTER_TAGS)
       const savedType = sessionStorage.getItem(STORAGE_KEY_TASK_TYPE)
+      const savedQuery = sessionStorage.getItem(STORAGE_KEY_SEARCH_QUERY)
 
       if (savedTags) {
         selectedFilterTags.value = JSON.parse(savedTags)
@@ -201,10 +239,16 @@ const restoreFilterState = () => {
       if (savedType) {
         selectedTaskType.value = savedType
       }
+      if (savedQuery) {
+        // 直接寫 debouncedSearchQuery，避免 restore 觸發一次多餘的 debounce 查詢
+        searchQuery.value = savedQuery
+        debouncedSearchQuery.value = savedQuery
+      }
     } else {
       // 不保留，清除篩選狀態
       sessionStorage.removeItem(STORAGE_KEY_FILTER_TAGS)
       sessionStorage.removeItem(STORAGE_KEY_TASK_TYPE)
+      sessionStorage.removeItem(STORAGE_KEY_SEARCH_QUERY)
     }
   } catch (error) {
     console.error('Failed to restore filter state:', error)
@@ -214,6 +258,8 @@ const restoreFilterState = () => {
 // State
 const selectedFilterTags = ref([])
 const selectedTaskType = ref('all') // 任務類型篩選：'all', 'paragraph', 'subtitle', 'has_audio'
+const searchQuery = ref('')          // 輸入框即時值
+const debouncedSearchQuery = ref('') // 實際送給後端的值
 const isEditingFilterTags = ref(false)
 const customTagOrder = ref([])
 const isBatchEditMode = ref(false)
@@ -236,12 +282,46 @@ watch(selectedTaskType, (newType) => {
   }
 })
 
+// 搜尋輸入 debounce：打字停下 300ms 才更新 debouncedSearchQuery 觸發查詢。
+// 清空時不等待，立刻還原完整列表。
+let searchDebounceTimer = null
+watch(searchQuery, (newQuery) => {
+  clearTimeout(searchDebounceTimer)
+
+  const trimmed = (newQuery || '').trim()
+  if (!trimmed) {
+    debouncedSearchQuery.value = ''
+    return
+  }
+
+  searchDebounceTimer = setTimeout(() => {
+    debouncedSearchQuery.value = trimmed
+  }, SEARCH_DEBOUNCE_MS)
+})
+
+watch(debouncedSearchQuery, (newQuery) => {
+  try {
+    if (newQuery) {
+      sessionStorage.setItem(STORAGE_KEY_SEARCH_QUERY, newQuery)
+    } else {
+      sessionStorage.removeItem(STORAGE_KEY_SEARCH_QUERY)
+    }
+  } catch (error) {
+    console.error('Failed to save search query:', error)
+  }
+})
+
+onBeforeUnmount(() => {
+  clearTimeout(searchDebounceTimer)
+})
+
 // 發送篩選變更事件的函數
 const emitFilterChange = () => {
   const filterData = {
     taskType: null,
     tags: selectedFilterTags.value,
-    hasAudio: null
+    hasAudio: null,
+    query: debouncedSearchQuery.value
   }
 
   // 根據選擇的類型設置篩選條件
@@ -256,7 +336,7 @@ const emitFilterChange = () => {
 
 // 監聽篩選條件變化，通知父組件
 // 注意：不使用 immediate，初始觸發由 onMounted 控制
-watch([selectedTaskType, selectedFilterTags], emitFilterChange, { deep: true })
+watch([selectedTaskType, selectedFilterTags, debouncedSearchQuery], emitFilterChange, { deep: true })
 
 // Computed
 // 從共享 tagsData 推導（避免額外打一次 /tags）
@@ -562,6 +642,77 @@ onMounted(() => {
   z-index: 101;
 }
 
+/* 名稱搜尋框（桌機；手機在下方 media query 隱藏，搜尋入口改走 MobileHeader） */
+.task-search {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  margin-bottom: 10px;
+  border: 1px solid rgba(var(--color-text-dark-rgb), 0.2);
+  border-radius: 16px;
+  background: transparent;
+  transition: border-color 0.2s ease;
+}
+
+.task-search:focus-within {
+  border-color: var(--color-teal);
+}
+
+.task-search-icon {
+  flex-shrink: 0;
+  color: rgba(var(--color-text-dark-rgb), 0.45);
+}
+
+.task-search-input {
+  width: 160px;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--nav-text);
+}
+
+.task-search-input::placeholder {
+  color: rgba(var(--color-text-dark-rgb), 0.4);
+}
+
+.task-search-input:disabled {
+  cursor: not-allowed;
+}
+
+/* type="search" 的原生清除鈕外觀各家瀏覽器不一致，關掉改用自訂按鈕 */
+.task-search-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.task-search-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: rgba(var(--color-text-dark-rgb), 0.45);
+  border-radius: 50%;
+}
+
+.task-search-clear:hover {
+  color: var(--nav-text);
+  background: rgba(var(--color-text-dark-rgb), 0.08);
+}
+
+/* 批次編輯模式：與頁籤/分頁一致灰化鎖定 */
+.task-list.batch-edit-active .task-search {
+  pointer-events: none;
+  filter: grayscale(1);
+  opacity: 0.5;
+}
+
 /* 分頁控制容器 */
 .pagination-wrapper {
   margin-left: auto;
@@ -569,6 +720,12 @@ onMounted(() => {
   align-items: flex-end;
   justify-content: flex-end;
   padding-bottom: 0px;
+}
+
+/* 搜尋框已用 margin-left:auto 推到右側，分頁不能再吃一次 auto，
+   否則兩個 auto 會平分剩餘空間、把兩者拉開 */
+.task-search + .pagination-wrapper {
+  margin-left: 12px;
 }
 
 .tab-btn {
@@ -791,6 +948,12 @@ onMounted(() => {
      但仍讓子元件正常渲染／保有自己的 fixed 定位 */
   .pagination-wrapper {
     display: contents;
+  }
+
+  /* 手機版 .task-type-tabs 是 fixed 底部導覽列，塞不下搜尋框；
+     手機搜尋入口是 MobileHeader 那顆按鈕（另案接上） */
+  .task-search {
+    display: none;
   }
 
   /* FilterBar 間距調整 */

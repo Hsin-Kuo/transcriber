@@ -734,7 +734,9 @@
       "empty": "尚無標籤"
     },
     "filterBar": {
-      "manage": "管理"
+      "manage": "管理",
+      "searchPlaceholder": "搜尋任務名稱",
+      "clearSearch": "清除搜尋"
     }
   },
   "downloadDialog": {

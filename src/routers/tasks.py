@@ -118,6 +118,7 @@ async def get_tasks(
     task_type: str = None,
     tags: str = None,
     has_audio: bool = None,
+    q: str = None,
     limit: int = 100,
     skip: int = 0,
     background_tasks: BackgroundTasks = None,
@@ -131,6 +132,7 @@ async def get_tasks(
         task_type: 過濾任務類型（可選：paragraph, subtitle）
         tags: 過濾標籤（逗號分隔，例如：tag1,tag2）
         has_audio: 過濾是否有音檔（可選：true 只顯示有音檔的任務）
+        q: 名稱關鍵字搜尋（比對使用者看到的顯示名稱，不分大小寫子字串）
         limit: 限制數量（預設 100）
         skip: 跳過數量（預設 0）
         task_service: TaskService 實例
@@ -155,7 +157,8 @@ async def get_tasks(
             task_type=task_type,
             tags=tags_list,
             include_deleted=False,
-            has_audio=has_audio
+            has_audio=has_audio,
+            name_query=q
         )
 
         # 過濾出進行中的任務
@@ -194,7 +197,8 @@ async def get_tasks(
             task_type=task_type,
             tags=tags_list,
             include_deleted=False,
-            has_audio=has_audio
+            has_audio=has_audio,
+            name_query=q
         )
 
         # 合併記憶體狀態並過濾數據
@@ -223,7 +227,8 @@ async def get_tasks(
             task_type=task_type,
             tags=tags_list,
             include_deleted=False,
-            has_audio=has_audio
+            has_audio=has_audio,
+            name_query=q
         )
 
         return {

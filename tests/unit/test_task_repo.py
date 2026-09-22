@@ -5,6 +5,7 @@
 dispatch seam 用的 count_all_by_status / get_oldest_pending。
 """
 import os
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -27,7 +28,11 @@ except ImportError:  # pragma: no cover
 
 from motor.motor_asyncio import AsyncIOMotorClient  # noqa: E402
 
-from src.database.repositories.task_repo import TaskRepository  # noqa: E402
+from src.database.query_utils import MAX_SEARCH_LENGTH  # noqa: E402
+from src.database.repositories.task_repo import (  # noqa: E402
+    TaskRepository,
+    _name_query_filter,
+)
 
 _MONGO_URL = os.environ["MONGODB_URL"]
 _TEST_DB = "transcriber_test"
@@ -61,8 +66,13 @@ async def repo():
 
 
 def _doc(*, user_id="u1", status="completed", task_type="paragraph",
-         tags=None, created_at=1700000000, deleted=False, flat_user=False) -> dict:
-    """造一筆 task doc。flat_user=True 走扁平 user_id（向後相容格式）。"""
+         tags=None, created_at=1700000000, deleted=False, flat_user=False,
+         custom_name=None, filename=None) -> dict:
+    """造一筆 task doc。flat_user=True 走扁平 user_id（向後相容格式）。
+
+    custom_name=None 時不寫入該 key，重現「使用者沒填自訂名稱」的真實形狀
+    （intake_service 是 `if config.custom_name:` 才塞）。
+    """
     task_id = str(uuid.uuid4())
     doc = {
         "_id": task_id,
@@ -72,6 +82,10 @@ def _doc(*, user_id="u1", status="completed", task_type="paragraph",
         "tags": tags or [],
         "timestamps": {"created_at": created_at},
     }
+    if custom_name is not None:
+        doc["custom_name"] = custom_name
+    if filename is not None:
+        doc["file"] = {"filename": filename}
     if flat_user:
         doc["user_id"] = user_id
     else:
@@ -253,3 +267,80 @@ class TestDispatchQueries:
     async def test_get_oldest_pending_none_when_no_pending(self, repo):
         await repo.create(_doc(status="completed"))
         assert await repo.get_oldest_pending() is None
+
+
+class TestNameQueryFilter:
+    """_name_query_filter 是純函式，先用它釘住 escape / 截斷 / 空值語意。"""
+
+    def test_returns_none_for_blank_input(self):
+        assert _name_query_filter(None) is None
+        assert _name_query_filter("") is None
+        assert _name_query_filter("   ") is None
+
+    def test_escapes_regex_metacharacters(self):
+        """惡意 regex（catastrophic backtracking）必須被當成字面字串，
+        否則使用者可以用一次搜尋燒掉 DB CPU。"""
+        f = _name_query_filter("(a+)+$")
+        assert f["$or"][0]["custom_name"]["$regex"] == re.escape("(a+)+$")
+
+    def test_truncates_to_max_length(self):
+        f = _name_query_filter("x" * 500)
+        assert len(f["$or"][0]["custom_name"]["$regex"]) == MAX_SEARCH_LENGTH
+
+    def test_filename_branch_gated_on_custom_name_absence(self):
+        """第二個分支必須帶 $exists:False——這就是「不搜使用者看不到的舊檔名」。"""
+        f = _name_query_filter("abc")
+        assert f["$or"][1]["custom_name"] == {"$exists": False}
+
+
+class TestNameSearch:
+    """搜尋語意 = 前端顯示名稱（custom_name || file.filename）。"""
+
+    async def test_matches_custom_name(self, repo):
+        await repo.create(_doc(custom_name="季度會議", filename="raw_001.mp3"))
+        await repo.create(_doc(custom_name="訪談紀錄", filename="raw_002.mp3"))
+        found = await repo.find_by_user("u1", name_query="會議")
+        assert len(found) == 1 and found[0]["custom_name"] == "季度會議"
+
+    async def test_falls_back_to_filename_when_no_custom_name(self, repo):
+        """沒填自訂名時，file.filename 就是使用者看到的名稱，必須搜得到。"""
+        await repo.create(_doc(filename="週會錄音.m4a"))
+        assert len(await repo.find_by_user("u1", name_query="週會")) == 1
+
+    async def test_ignores_filename_once_renamed(self, repo):
+        """改過名的任務，舊檔名使用者已看不到 → 不該被搜出來。"""
+        await repo.create(_doc(custom_name="新名字", filename="舊檔名.mp3"))
+        assert await repo.find_by_user("u1", name_query="舊檔名") == []
+        assert len(await repo.find_by_user("u1", name_query="新名字")) == 1
+
+    async def test_is_case_insensitive(self, repo):
+        await repo.create(_doc(custom_name="Weekly Sync"))
+        assert len(await repo.find_by_user("u1", name_query="weekly")) == 1
+
+    async def test_metacharacters_match_literally(self, repo):
+        await repo.create(_doc(custom_name="Q1 (草稿)"))
+        await repo.create(_doc(custom_name="Q1 草稿"))
+        found = await repo.find_by_user("u1", name_query="(草稿)")
+        assert len(found) == 1 and found[0]["custom_name"] == "Q1 (草稿)"
+
+    async def test_combines_with_other_filters(self, repo):
+        await repo.create(_doc(custom_name="會議紀錄", task_type="paragraph"))
+        await repo.create(_doc(custom_name="會議字幕", task_type="subtitle"))
+        found = await repo.find_by_user("u1", name_query="會議", task_type="subtitle")
+        assert len(found) == 1 and found[0]["custom_name"] == "會議字幕"
+
+    async def test_excludes_soft_deleted(self, repo):
+        await repo.create(_doc(custom_name="會議", deleted=True))
+        assert await repo.find_by_user("u1", name_query="會議") == []
+
+    async def test_does_not_leak_across_users(self, repo):
+        await repo.create(_doc(user_id="alice", custom_name="機密會議"))
+        assert await repo.find_by_user("bob", name_query="機密") == []
+
+    async def test_count_matches_find(self, repo):
+        """count 與 find 必須同步，否則分頁 total 會騙人。"""
+        for i in range(3):
+            await repo.create(_doc(custom_name=f"會議 {i}"))
+        await repo.create(_doc(custom_name="無關任務"))
+        assert await repo.count_by_user("u1", name_query="會議") == 3
+        assert len(await repo.find_by_user("u1", name_query="會議")) == 3
