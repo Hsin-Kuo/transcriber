@@ -107,6 +107,7 @@ const totalTasks = ref(0)
 const currentTaskType = ref(null)
 const currentTags = ref([])
 const currentHasAudio = ref(null)
+const currentQuery = ref('')
 
 // 計算總頁數
 const totalPages = computed(() => Math.ceil(totalTasks.value / pageSize.value))
@@ -162,6 +163,11 @@ async function refreshTasks() {
     // 如果有 tags 篩選，加入參數（逗號分隔）
     if (currentTags.value && currentTags.value.length > 0) {
       params.tags = currentTags.value.join(',')
+    }
+
+    // 名稱搜尋關鍵字
+    if (currentQuery.value) {
+      params.q = currentQuery.value
     }
 
     const response = await taskService.list(params)
@@ -266,6 +272,7 @@ function handleFilterChange(filter) {
   currentTaskType.value = filter.taskType
   currentTags.value = filter.tags
   currentHasAudio.value = filter.hasAudio
+  currentQuery.value = filter.query || ''
   // 篩選條件改變時，重置到第一頁
   currentPage.value = 1
   refreshTasks()

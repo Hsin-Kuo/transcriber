@@ -1,4 +1,5 @@
 """任務資料存取層"""
+import re
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
@@ -20,6 +21,35 @@ def _validate_status(status: Optional[str]) -> Optional[str]:
     if status not in ALLOWED_STATUSES:
         return None  # 無效值視為不篩選
     return status
+
+
+# 名稱搜尋字串上限（custom_name 本身上限 255，搜尋用不到那麼長）
+MAX_NAME_QUERY_LENGTH = 100
+
+
+def _name_query_filter(name_query: Optional[str]) -> Optional[Dict[str, Any]]:
+    """把名稱關鍵字轉成「只比對顯示名稱」的 Mongo 條件。
+
+    顯示名稱的定義與前端 TaskCard 一致：`custom_name || file.filename`。
+    因此有 custom_name 時只認 custom_name，沒有才 fallback 到 file.filename——
+    任務改名後，使用者已看不到的舊檔名不會被搜出來。
+
+    安全：使用者輸入一律 re.escape，避免惡意 regex（如 `(a+)+$`）造成
+    catastrophic backtracking 的 CPU DoS；另截斷長度上限。
+    """
+    if not name_query:
+        return None
+    trimmed = name_query.strip()[:MAX_NAME_QUERY_LENGTH]
+    if not trimmed:
+        return None
+
+    pattern = {"$regex": re.escape(trimmed), "$options": "i"}
+    return {
+        "$or": [
+            {"custom_name": pattern},
+            {"custom_name": {"$exists": False}, "file.filename": pattern},
+        ]
+    }
 
 
 def _validate_task_type(task_type: Optional[str]) -> Optional[str]:
@@ -126,7 +156,8 @@ class TaskRepository:
         tags: Optional[List[str]] = None,
         sort: List[tuple] = None,
         include_deleted: bool = False,
-        has_audio: Optional[bool] = None
+        has_audio: Optional[bool] = None,
+        name_query: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """查詢用戶的任務列表
 
@@ -136,6 +167,7 @@ class TaskRepository:
             task_type: 過濾任務類型（可選：paragraph, subtitle）
             tags: 過濾標籤列表（AND 邏輯，任務必須包含所有指定的標籤）
             has_audio: 過濾是否有音檔（可選：True 只顯示有音檔的任務）
+            name_query: 名稱關鍵字（不分大小寫子字串；比對顯示名稱，見 _name_query_filter）
         """
         if sort is None:
             # 巢狀格式的排序欄位
@@ -169,10 +201,15 @@ class TaskRepository:
         if not include_deleted:
             filters["deleted"] = {"$ne": True}
 
+        # 名稱搜尋（$or 由 helper 產生；目前查詢無其他 $or，不會互相覆蓋）
+        name_filter = _name_query_filter(name_query)
+        if name_filter:
+            filters.update(name_filter)
+
         cursor = self.collection.find(filters).skip(skip).limit(limit).sort(sort)
         return await cursor.to_list(length=limit)
 
-    async def count_by_user(self, user_id: str, status: Optional[str] = None, task_type: Optional[str] = None, tags: Optional[List[str]] = None, include_deleted: bool = False, has_audio: Optional[bool] = None) -> int:
+    async def count_by_user(self, user_id: str, status: Optional[str] = None, task_type: Optional[str] = None, tags: Optional[List[str]] = None, include_deleted: bool = False, has_audio: Optional[bool] = None, name_query: Optional[str] = None) -> int:
         """計算用戶的任務數量
 
         Args:
@@ -180,6 +217,7 @@ class TaskRepository:
             task_type: 過濾任務類型（可選：paragraph, subtitle）
             tags: 過濾標籤列表（AND 邏輯，任務必須包含所有指定的標籤）
             has_audio: 過濾是否有音檔（可選：True 只顯示有音檔的任務）
+            name_query: 名稱關鍵字（必須與 find_by_user 同步，否則 total 與列表對不上）
         """
         filters = dict(self.owned_by(user_id))
 
@@ -204,6 +242,11 @@ class TaskRepository:
         # 默認過濾已刪除的任務
         if not include_deleted:
             filters["deleted"] = {"$ne": True}
+
+        # 名稱搜尋（與 find_by_user 用同一 helper，保證 total 與列表一致）
+        name_filter = _name_query_filter(name_query)
+        if name_filter:
+            filters.update(name_filter)
 
         return await self.collection.count_documents(filters)
 

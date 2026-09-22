@@ -734,7 +734,9 @@
       "empty": "No tags yet"
     },
     "filterBar": {
-      "manage": "Manage"
+      "manage": "Manage",
+      "searchPlaceholder": "Search task name",
+      "clearSearch": "Clear search"
     }
   },
   "downloadDialog": {
