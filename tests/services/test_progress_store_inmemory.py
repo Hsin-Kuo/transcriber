@@ -147,5 +147,34 @@ class TestInMemoryProgressStore(unittest.TestCase):
             self.assertEqual(snap.phase, Phase.TRANSCRIPTION)
 
 
+class TestInMemoryGetMany(unittest.TestCase):
+    """get_many 是列表頁消 N+1 用的批次入口，語意必須與逐筆 get 一致。"""
+
+    def setUp(self):
+        self.store = InMemoryProgressStore()
+
+    def test_empty_input_returns_empty(self):
+        self.assertEqual(self.store.get_many([]), {})
+
+    def test_returns_only_known_ids(self):
+        self.store.set_phase("t1", Phase.TRANSCRIPTION, 0.5)
+        result = self.store.get_many(["t1", "missing"])
+        self.assertEqual(set(result), {"t1"})
+
+    def test_all_unknown_returns_empty(self):
+        self.assertEqual(self.store.get_many(["a", "b"]), {})
+
+    def test_matches_single_get(self):
+        self.store.set_phase("t1", Phase.PUNCTUATION, 0.25, message="m", details={"k": 1})
+        self.assertEqual(self.store.get_many(["t1"])["t1"], self.store.get("t1"))
+
+    def test_returns_each_task_own_snapshot(self):
+        self.store.set_phase("t1", Phase.PREPARATION, 0.1)
+        self.store.set_phase("t2", Phase.TRANSCRIPTION, 0.9)
+        result = self.store.get_many(["t1", "t2"])
+        self.assertEqual(result["t1"].phase, Phase.PREPARATION)
+        self.assertEqual(result["t2"].phase, Phase.TRANSCRIPTION)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -13,6 +13,41 @@ log = get_logger(__name__)
 ALLOWED_STATUSES = {"pending", "processing", "completed", "failed", "cancelled"}
 ALLOWED_TASK_TYPES = {"paragraph", "subtitle"}
 
+# 「進行中」的定義（status=active 篩選用）
+ACTIVE_STATUSES = ["pending", "processing"]
+
+
+def _status_filter(
+    status: Optional[str],
+    status_in: Optional[List[str]],
+    status_nin: Optional[List[str]],
+) -> Optional[Any]:
+    """組出 status 條件（白名單驗證）。優先序：status > status_in > status_nin。
+
+    find_by_user 與 count_by_user 共用，避免兩邊的 status 語意漂移——
+    列表與分頁 total 用不同條件算出來，是分頁顯示錯誤的典型來源。
+
+    三者的「白名單過濾後全空」都一律往下一順位退（與 _validate_status
+    對無效 status 的既有語意一致）。若在 status_in 全無效時直接回 None，
+    會連帶跳過 status_nin——而 status_nin 是更嚴格的條件（/tasks/recent
+    靠它隱藏 failed/cancelled），那等於往寬鬆的方向失敗。
+    """
+    validated = _validate_status(status)
+    if validated:
+        return validated
+
+    if status_in:
+        allowed = [s for s in status_in if s in ALLOWED_STATUSES]
+        if allowed:
+            return {"$in": allowed}
+
+    if status_nin:
+        excluded = [s for s in status_nin if s in ALLOWED_STATUSES]
+        if excluded:
+            return {"$nin": excluded}
+
+    return None
+
 
 def _validate_status(status: Optional[str]) -> Optional[str]:
     """驗證 status 參數在白名單內"""
@@ -143,6 +178,7 @@ class TaskRepository:
         skip: int = 0,
         limit: int = 20,
         status: Optional[str] = None,
+        status_in: Optional[List[str]] = None,
         status_nin: Optional[List[str]] = None,
         task_type: Optional[str] = None,
         tags: Optional[List[str]] = None,
@@ -154,7 +190,8 @@ class TaskRepository:
         """查詢用戶的任務列表
 
         Args:
-            status_nin: 排除指定 status 列表（白名單驗證；status 已指定時忽略）
+            status_in: 只取指定 status 列表（白名單驗證；status 已指定時忽略）
+            status_nin: 排除指定 status 列表（白名單驗證；status/status_in 優先）
             include_deleted: 是否包含已刪除的任務（默認 False，過濾已刪除）
             task_type: 過濾任務類型（可選：paragraph, subtitle）
             tags: 過濾標籤列表（AND 邏輯，任務必須包含所有指定的標籤）
@@ -167,14 +204,10 @@ class TaskRepository:
 
         filters = dict(self.owned_by(user_id))
 
-        # 驗證並應用 status 篩選（白名單）；status 與 status_nin 互斥，status 優先
-        validated_status = _validate_status(status)
-        if validated_status:
-            filters["status"] = validated_status
-        elif status_nin:
-            validated_nin = [s for s in status_nin if s in ALLOWED_STATUSES]
-            if validated_nin:
-                filters["status"] = {"$nin": validated_nin}
+        # status 篩選（白名單驗證，見 _status_filter 的優先序）
+        status_condition = _status_filter(status, status_in, status_nin)
+        if status_condition is not None:
+            filters["status"] = status_condition
 
         # 驗證並應用 task_type 篩選（白名單）
         validated_task_type = _validate_task_type(task_type)
@@ -201,10 +234,13 @@ class TaskRepository:
         cursor = self.collection.find(filters).skip(skip).limit(limit).sort(sort)
         return await cursor.to_list(length=limit)
 
-    async def count_by_user(self, user_id: str, status: Optional[str] = None, task_type: Optional[str] = None, tags: Optional[List[str]] = None, include_deleted: bool = False, has_audio: Optional[bool] = None, name_query: Optional[str] = None) -> int:
+    async def count_by_user(self, user_id: str, status: Optional[str] = None, status_in: Optional[List[str]] = None, status_nin: Optional[List[str]] = None, task_type: Optional[str] = None, tags: Optional[List[str]] = None, include_deleted: bool = False, has_audio: Optional[bool] = None, name_query: Optional[str] = None) -> int:
         """計算用戶的任務數量
 
+        參數語意必須與 find_by_user 完全一致，否則分頁 total 會與列表對不上。
+
         Args:
+            status_in / status_nin: 同 find_by_user（共用 _status_filter）
             include_deleted: 是否包含已刪除的任務（默認 False，過濾已刪除）
             task_type: 過濾任務類型（可選：paragraph, subtitle）
             tags: 過濾標籤列表（AND 邏輯，任務必須包含所有指定的標籤）
@@ -213,10 +249,10 @@ class TaskRepository:
         """
         filters = dict(self.owned_by(user_id))
 
-        # 驗證並應用 status 篩選（白名單）
-        validated_status = _validate_status(status)
-        if validated_status:
-            filters["status"] = validated_status
+        # status 篩選（與 find_by_user 共用同一個 helper）
+        status_condition = _status_filter(status, status_in, status_nin)
+        if status_condition is not None:
+            filters["status"] = status_condition
 
         # 驗證並應用 task_type 篩選（白名單）
         validated_task_type = _validate_task_type(task_type)
@@ -246,7 +282,7 @@ class TaskRepository:
         """查詢用戶進行中的任務（記憶體優化：限制最多 20 個）"""
         cursor = self.collection.find({
             **self.owned_by(user_id),
-            "status": {"$in": ["pending", "processing"]},
+            "status": {"$in": ACTIVE_STATUSES},
             "deleted": {"$ne": True}  # 過濾已刪除的任務
         }).sort("timestamps.created_at", -1).limit(20)
         return await cursor.to_list(length=20)
@@ -255,7 +291,7 @@ class TaskRepository:
         """計算用戶進行中（pending / processing）的任務數量。"""
         return await self.collection.count_documents({
             **self.owned_by(user_id),
-            "status": {"$in": ["pending", "processing"]},
+            "status": {"$in": ACTIVE_STATUSES},
             "deleted": {"$ne": True},
         })
 
@@ -324,7 +360,7 @@ class TaskRepository:
         deletable = await self.collection.find({
             "_id": {"$in": task_ids},
             **self.owned_by(user_id),
-            "status": {"$nin": ["pending", "processing"]}
+            "status": {"$nin": ACTIVE_STATUSES}
         }).to_list(length=None)
 
         deletable_ids = [task["_id"] for task in deletable]
@@ -342,7 +378,7 @@ class TaskRepository:
         deletable = await self.collection.find({
             "_id": {"$in": task_ids},
             **self.owned_by(user_id),
-            "status": {"$nin": ["pending", "processing"]},
+            "status": {"$nin": ACTIVE_STATUSES},
             "deleted": {"$ne": True}  # 排除已刪除的任務
         }).to_list(length=None)
 

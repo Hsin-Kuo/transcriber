@@ -17,7 +17,7 @@ import asyncio
 import gc
 import os
 
-from src.database.repositories.task_repo import TaskRepository
+from src.database.repositories.task_repo import ACTIVE_STATUSES, TaskRepository
 from src.utils.time_utils import get_current_time, get_utc_timestamp
 from src.utils.shared_state import TaskStateStore
 from src.services.progress_store import Phase, ProgressStore
@@ -34,6 +34,37 @@ except ImportError:
 
 # 時區設定 (UTC+8 台北時間)
 TZ_UTC8 = timezone(timedelta(hours=8))
+
+# 「進行中」的定義從 task_repo 匯入（單一來源）：這裡用它決定哪些任務
+# 需要查 progress store，router 用同一個常數下推 DB 篩選，兩邊不能漂移。
+
+# progress details 不得覆蓋的欄位：這些是 DB 的權威狀態。
+# 特別是 status——列表頁的 status 篩選在 DB 端做，若 details 能改寫它，
+# 回傳的 status 就會與篩選條件不一致（篩 active 卻出現 completed）。
+_SNAPSHOT_PROTECTED_FIELDS = frozenset({"status"})
+
+
+def _merge_snapshot(task: Dict[str, Any], snapshot) -> None:
+    """把 ProgressStore snapshot 就地合併進 task doc（snapshot 為 None 則不動）。
+
+    get_task（單筆）與 attach_progress（列表批次）共用，確保兩條路徑
+    合併出來的欄位完全一致。
+
+    details 是 orchestrator 自由填的 dict，直接 update 等於讓它有權改寫
+    任何 task 欄位。目前沒有 producer 寫 status，但這個不變量不該靠
+    「剛好沒人這樣做」維持——protected 欄位明確擋掉。
+    """
+    if snapshot is None:
+        return
+    if snapshot.message:
+        task["progress"] = snapshot.message
+    task["progress_percentage"] = snapshot.overall_percentage
+    task["phase"] = snapshot.phase.value
+    if snapshot.details:
+        task.update({
+            k: v for k, v in snapshot.details.items()
+            if k not in _SNAPSHOT_PROTECTED_FIELDS
+        })
 
 
 class TaskService:
@@ -87,15 +118,38 @@ class TaskService:
         snapshot = await loop.run_in_executor(
             None, self.progress_store.get, task_id
         )
-        if snapshot is not None:
-            if snapshot.message:
-                task["progress"] = snapshot.message
-            task["progress_percentage"] = snapshot.overall_percentage
-            task["phase"] = snapshot.phase.value
-            if snapshot.details:
-                task.update(snapshot.details)
+        _merge_snapshot(task, snapshot)
 
         return task
+
+    async def attach_progress(self, tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """對已經撈出來的 task docs 就地合併進度（列表頁用）。
+
+        取代「每筆再呼叫一次 get_task」的 N+1：那條路每筆都要重查一次
+        已經在手上的 document，再各打一次 progress store。
+
+        只查 ACTIVE_STATUSES 的任務——已完成/失敗的任務不會有進行中進度，
+        查了也是白查（且 TTL 6h 後本來就被清掉）。整頁都沒有進行中任務時
+        （列表頁的常態），progress store 一次都不會被碰到。
+        """
+        active_ids = [
+            str(t.get("_id") or t.get("task_id"))
+            for t in tasks
+            if t.get("status") in ACTIVE_STATUSES
+        ]
+        if not active_ids:
+            return tasks
+
+        loop = asyncio.get_event_loop()
+        snapshots = await loop.run_in_executor(
+            None, self.progress_store.get_many, active_ids
+        )
+
+        for task in tasks:
+            task_id = str(task.get("_id") or task.get("task_id"))
+            _merge_snapshot(task, snapshots.get(task_id))
+
+        return tasks
 
     async def update_task_status(
         self,
