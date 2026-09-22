@@ -16,12 +16,18 @@
       <!-- 搜尋無結果：講清楚是「沒搜到」而非「沒任務」，並給一鍵清除 -->
       <template v-else-if="searchQuery">
         <p>{{ $t('taskList.noSearchResults', { query: searchQuery }) }}</p>
-        <button type="button" class="empty-clear-search" @click="emit('clear-search')">
+        <button type="button" class="empty-clear-action" @click="emit('clear-search')">
           {{ $t('taskList.filterBar.clearSearch') }}
         </button>
       </template>
-      <!-- 有任務、但目前篩選/分類為空：維持單行提示 -->
-      <p v-else>{{ $t('taskList.noFilterResults') }}</p>
+      <!-- 篩選（類型頁籤／標籤）無結果：同樣給一鍵清除，免得使用者
+           要自己回想剛才點過哪些條件才能回到完整列表 -->
+      <template v-else>
+        <p>{{ $t('taskList.noFilterResults') }}</p>
+        <button type="button" class="empty-clear-action" @click="emit('clear-filters')">
+          {{ $t('taskList.clearFilters') }}
+        </button>
+      </template>
     </div>
 
     <!-- 任務列表 -->
@@ -100,7 +106,8 @@ const emit = defineEmits([
   'long-press',
   'toggle-keep-audio',
   'tags-updated',
-  'clear-search'
+  'clear-search',
+  'clear-filters'
 ])
 
 // Computed
@@ -155,8 +162,9 @@ function isNewestTask(task) {
   color: rgba(var(--color-text-dark-rgb), 0.7);
 }
 
-/* 搜尋無結果的「清除搜尋」——次要動作，用文字鈕不搶新手 CTA 的視覺層級 */
-.empty-clear-search {
+/* 空狀態的「清除搜尋／清除篩選條件」——次要動作，
+   用文字鈕不搶新手引導 CTA 的視覺層級 */
+.empty-clear-action {
   margin-top: 10px;
   padding: 6px 14px;
   font-size: 13px;
@@ -168,7 +176,7 @@ function isNewestTask(task) {
   transition: background 0.2s ease, border-color 0.2s ease;
 }
 
-.empty-clear-search:hover {
+.empty-clear-action:hover {
   background: rgba(var(--color-teal-rgb), 0.12);
   border-color: rgba(var(--color-teal-rgb), 0.7);
 }

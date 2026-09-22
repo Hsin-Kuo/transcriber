@@ -610,6 +610,7 @@
     "noTasks": "No tasks available",
     "noTranscriptionTasks": "No transcription tasks yet",
     "noFilterResults": "No tasks match the current filters",
+    "clearFilters": "Clear filters",
     "noSearchResults": "No tasks found for \"{query}\"",
     "empty": {
       "title": "Upload your first file to start transcribing",
