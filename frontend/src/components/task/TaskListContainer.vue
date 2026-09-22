@@ -139,6 +139,9 @@
       :selected-task-ids="selectedTaskIds"
       :all-tasks="tasks"
       :all-tags="allTags"
+      :has-active-filters="hasActiveFilters"
+      :search-query="debouncedSearchQuery"
+      @clear-search="searchQuery = ''"
       @view="handleViewTask"
       @download="(task) => emit('download', task)"
       @delete="handleDeleteTask"
@@ -341,6 +344,14 @@ watch([selectedTaskType, selectedFilterTags, debouncedSearchQuery], emitFilterCh
 // Computed
 // 從共享 tagsData 推導（避免額外打一次 /tags）
 const allTags = computed(() => tagsData.value.map(t => t.name))
+
+// 目前是否有任何篩選條件。TaskGrid 用它區分「新使用者」與「篩選後為空」——
+// 少了這個判斷，老使用者只要搜不到東西就會看到「上傳第一個音檔」引導。
+const hasActiveFilters = computed(() =>
+  selectedTaskType.value !== 'all' ||
+  selectedFilterTags.value.length > 0 ||
+  !!debouncedSearchQuery.value
+)
 
 const sortedTasks = computed(() => {
   // 後端已經處理了 task_type 和 tags 篩選，且預設按 created_at desc 排序。

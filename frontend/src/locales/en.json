@@ -609,6 +609,8 @@
     "cancelling": "Cancelling",
     "noTasks": "No tasks available",
     "noTranscriptionTasks": "No transcription tasks yet",
+    "noFilterResults": "No tasks match the current filters",
+    "noSearchResults": "No tasks found for \"{query}\"",
     "empty": {
       "title": "Upload your first file to start transcribing",
       "subtitle": "Supports MP3, M4A, WAV, MP4 and more. Speakers are identified and punctuation added automatically, then you can download the transcript and subtitles.",

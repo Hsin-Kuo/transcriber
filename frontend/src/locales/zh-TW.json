@@ -609,6 +609,8 @@
     "cancelling": "取消中",
     "noTasks": "目前沒有任務",
     "noTranscriptionTasks": "尚無轉錄任務",
+    "noFilterResults": "沒有符合篩選條件的任務",
+    "noSearchResults": "找不到符合「{query}」的任務",
     "empty": {
       "title": "上傳第一個音檔，開始轉錄",
       "subtitle": "支援 MP3、M4A、WAV、MP4 等格式；自動辨識說話者並加上標點，完成後可下載逐字稿與字幕。",
