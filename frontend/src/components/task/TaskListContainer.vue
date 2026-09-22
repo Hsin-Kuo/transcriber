@@ -1,17 +1,53 @@
 <template>
   <div class="task-list" :class="[`task-type-${selectedTaskType}`, { 'batch-edit-active': isBatchEditMode, 'has-pagination': totalPages > 0 }]">
-    <!-- 篩選列 -->
-    <TaskFilterBar
-      :all-tags="allTags"
-      v-model:selected-tags="selectedFilterTags"
-      v-model:is-editing="isEditingFilterTags"
-      v-model:custom-tag-order="customTagOrder"
-      :tasks="tasks"
-      @refresh="emit('refresh')"
-      @tag-renamed="handleTagRenamed"
-      @tag-color-changed="handleTagColorChanged"
-      @tags-reordered="handleTagsReordered"
-    />
+    <!-- 頂部列：標籤篩選 + 名稱搜尋。
+         搜尋框放這裡而不是頁籤列——頁籤列實測需要 870px 但只有 868px，
+         塞進去會把頁籤擠到換行；標籤列則有大片留白。
+         語意上搜尋與標籤同屬「縮小範圍」，放一起也合理。 -->
+    <div class="task-list-header">
+      <TaskFilterBar
+        :all-tags="allTags"
+        v-model:selected-tags="selectedFilterTags"
+        v-model:is-editing="isEditingFilterTags"
+        v-model:custom-tag-order="customTagOrder"
+        :tasks="tasks"
+        @refresh="emit('refresh')"
+        @tag-renamed="handleTagRenamed"
+        @tag-color-changed="handleTagColorChanged"
+        @tags-reordered="handleTagsReordered"
+      />
+
+      <!-- 名稱搜尋（桌機；手機版搜尋入口在 MobileHeader，另案處理） -->
+      <div class="task-search">
+        <svg class="task-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input
+          v-model="searchQuery"
+          type="search"
+          class="task-search-input"
+          :maxlength="MAX_SEARCH_LENGTH"
+          :disabled="isBatchEditMode"
+          :placeholder="$t('taskList.filterBar.searchPlaceholder')"
+          :aria-label="$t('taskList.filterBar.searchPlaceholder')"
+          @keyup.esc="searchQuery = ''"
+        />
+        <button
+          v-if="searchQuery"
+          type="button"
+          class="task-search-clear"
+          :title="$t('taskList.filterBar.clearSearch')"
+          :aria-label="$t('taskList.filterBar.clearSearch')"
+          @click="searchQuery = ''"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    </div>
 
 
     <!-- 任務類型篩選區 - 資料夾頁籤樣式 -->
@@ -88,37 +124,6 @@
         </svg>
         <span>{{ $t('taskList.batchEdit') }}</span>
       </button>
-
-      <!-- 名稱搜尋（桌機；手機版搜尋入口在 MobileHeader，另案處理） -->
-      <div class="task-search">
-        <svg class="task-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="11" cy="11" r="8"></circle>
-          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-        </svg>
-        <input
-          v-model="searchQuery"
-          type="search"
-          class="task-search-input"
-          :maxlength="MAX_SEARCH_LENGTH"
-          :disabled="isBatchEditMode"
-          :placeholder="$t('taskList.filterBar.searchPlaceholder')"
-          :aria-label="$t('taskList.filterBar.searchPlaceholder')"
-          @keyup.esc="searchQuery = ''"
-        />
-        <button
-          v-if="searchQuery"
-          type="button"
-          class="task-search-clear"
-          :title="$t('taskList.filterBar.clearSearch')"
-          :aria-label="$t('taskList.filterBar.clearSearch')"
-          @click="searchQuery = ''"
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
-      </div>
 
       <!-- 分頁控制 -->
       <div class="pagination-wrapper">
@@ -562,9 +567,9 @@ onMounted(() => {
   --nav-recent-bg: #77969A;
 }
 
-/* FilterBar 統一與上方保持距離 */
+/* FilterBar 的上方間距改由 .task-list-header 統一負責（見該規則的註解） */
 .task-list :deep(.filter-section) {
-  margin-top: 40px;
+  margin-top: 0;
 }
 
 /* 根據任務類型設置任務列表容器背景色 */
@@ -653,14 +658,34 @@ onMounted(() => {
   z-index: 101;
 }
 
+/* 頂部列：TaskFilterBar（可能因無標籤而不渲染）+ 搜尋框。
+   filter-section 自己有 padding/margin，這裡只負責把兩者排成一列。 */
+.task-list-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  /* 間距掛在整列上，不掛在 filter-section——否則兩個子元素的垂直基準不同，
+     align-items:center 會把搜尋框對齊到含 margin 的高度中心而歪掉 */
+  margin-top: 40px;
+}
+
+/* TaskFilterBar 撐滿剩餘空間，把搜尋框推到最右；
+   沒有標籤時 filter-section 不渲染，搜尋框靠 margin-left:auto 仍然靠右 */
+.task-list-header :deep(.filter-section) {
+  flex: 1;
+  min-width: 0;
+}
+
 /* 名稱搜尋框（桌機；手機在下方 media query 隱藏，搜尋入口改走 MobileHeader） */
 .task-search {
   margin-left: auto;
+  /* 右緣對齊正下方的分頁控制（兩者都貼齊容器右緣），讓上下兩列的
+     右側元素連成同一條線；標籤的右邊界會隨 filter-section 伸縮，對不齊 */
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 5px 10px;
-  margin-bottom: 10px;
   border: 1px solid rgba(var(--color-text-dark-rgb), 0.2);
   border-radius: 16px;
   background: transparent;
@@ -731,12 +756,6 @@ onMounted(() => {
   align-items: flex-end;
   justify-content: flex-end;
   padding-bottom: 0px;
-}
-
-/* 搜尋框已用 margin-left:auto 推到右側，分頁不能再吃一次 auto，
-   否則兩個 auto 會平分剩餘空間、把兩者拉開 */
-.task-search + .pagination-wrapper {
-  margin-left: 12px;
 }
 
 .tab-btn {
@@ -961,14 +980,15 @@ onMounted(() => {
     display: contents;
   }
 
-  /* 手機版 .task-type-tabs 是 fixed 底部導覽列，塞不下搜尋框；
-     手機搜尋入口是 MobileHeader 那顆按鈕（另案接上） */
+  /* 手機搜尋入口是 MobileHeader 那顆按鈕（另案接上），這裡不顯示桌機搜尋框。
+     隱藏後 .task-list-header 只剩 TaskFilterBar，維持原本的單欄排版 */
   .task-search {
     display: none;
   }
 
   /* FilterBar 間距調整 */
-  .task-list :deep(.filter-section) {
+  /* 手機間距同樣掛在整列上（桌機是 40px，見 .task-list-header） */
+  .task-list-header {
     margin-top: 20px;
   }
 
