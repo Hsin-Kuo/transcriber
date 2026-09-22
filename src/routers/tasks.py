@@ -8,7 +8,7 @@ import json
 import os
 
 from ..auth.dependencies import get_current_user, get_current_user_sse
-from ..database.repositories.task_repo import TaskRepository
+from ..database.repositories.task_repo import ACTIVE_STATUSES, TaskRepository
 from ..services.task_service import TaskService
 from ..services.tag_service import TagService
 from ..services.task_query_helpers import (
@@ -118,6 +118,7 @@ async def get_tasks(
     task_type: str = None,
     tags: str = None,
     has_audio: bool = None,
+    q: str = None,
     limit: int = 100,
     skip: int = 0,
     background_tasks: BackgroundTasks = None,
@@ -131,6 +132,7 @@ async def get_tasks(
         task_type: 過濾任務類型（可選：paragraph, subtitle）
         tags: 過濾標籤（逗號分隔，例如：tag1,tag2）
         has_audio: 過濾是否有音檔（可選：true 只顯示有音檔的任務）
+        q: 名稱關鍵字搜尋（比對使用者看到的顯示名稱，不分大小寫子字串）
         limit: 限制數量（預設 100）
         skip: 跳過數量（預設 0）
         task_service: TaskService 實例
@@ -145,93 +147,56 @@ async def get_tasks(
     tags_list = None
     if tags:
         tags_list = [tag.strip() for tag in tags.split(',') if tag.strip()]
-    # 如果 status 是 'active'，轉換為 pending 和 processing
-    if status == 'active':
-        # 獲取所有任務並在記憶體中過濾
-        all_tasks = await task_service.task_repo.find_by_user(
-            str(current_user["_id"]),
-            skip=skip,
-            limit=limit,
-            task_type=task_type,
-            tags=tags_list,
-            include_deleted=False,
-            has_audio=has_audio
-        )
 
-        # 過濾出進行中的任務
-        active_tasks = []
-        for task in all_tasks:
-            # 合併記憶體狀態
-            task_id = str(task.get("_id") or task.get("task_id"))
-            enriched_task = await task_service.get_task(task_id, str(current_user["_id"]))
-            if enriched_task and enriched_task.get("status") in ["pending", "processing"]:
-                enriched = enrich_task_data(enriched_task)
-                had_audio = bool(enriched.get("result", {}).get("audio_file"))
-                filtered = filter_task_for_list(enriched, retention_days)
-                if had_audio and not filtered.get("result", {}).get("audio_file"):
-                    if background_tasks:
-                        background_tasks.add_task(
-                            _clear_expired_audio_in_db,
-                            task_service.task_repo,
-                            task_id
-                        )
-                    continue
-                active_tasks.append(filtered)
+    user_id = str(current_user["_id"])
 
-        return {
-            "tasks": active_tasks,
-            "total": len(active_tasks),
-            "limit": limit,
-            "skip": skip
-        }
-    else:
-        # 從資料庫獲取任務
-        tasks = await task_service.task_repo.find_by_user(
-            str(current_user["_id"]),
-            skip=skip,
-            limit=limit,
-            status=status,
-            task_type=task_type,
-            tags=tags_list,
-            include_deleted=False,
-            has_audio=has_audio
-        )
+    # status='active' 是 UI 的複合條件，下推成 DB 的 $in——過去是先分頁再於
+    # 記憶體過濾，導致 total 只反映「本頁過濾後的筆數」，分頁因此失準。
+    status_kwargs = (
+        {"status_in": ACTIVE_STATUSES} if status == 'active' else {"status": status}
+    )
+    common_filters = dict(
+        task_type=task_type,
+        tags=tags_list,
+        include_deleted=False,
+        has_audio=has_audio,
+        name_query=q,
+        **status_kwargs,
+    )
 
-        # 合併記憶體狀態並過濾數據
-        enriched_tasks = []
-        for task in tasks:
-            task_id = str(task.get("_id") or task.get("task_id"))
-            enriched_task = await task_service.get_task(task_id, str(current_user["_id"]))
-            if enriched_task:
-                enriched = enrich_task_data(enriched_task)
-                had_audio = bool(enriched.get("result", {}).get("audio_file"))
-                filtered = filter_task_for_list(enriched, retention_days)
-                if had_audio and not filtered.get("result", {}).get("audio_file"):
-                    if background_tasks:
-                        background_tasks.add_task(
-                            _clear_expired_audio_in_db,
-                            task_service.task_repo,
-                            task_id
-                        )
-                    continue
-                enriched_tasks.append(filtered)
+    tasks = await task_service.task_repo.find_by_user(
+        user_id, skip=skip, limit=limit, **common_filters
+    )
 
-        # 計算總數（包含 task_type 和 tags 篩選）
-        total = await task_service.task_repo.count_by_user(
-            str(current_user["_id"]),
-            status=status,
-            task_type=task_type,
-            tags=tags_list,
-            include_deleted=False,
-            has_audio=has_audio
-        )
+    # 進度批次合併。過去這裡是每筆再呼叫一次 get_task（＝重查一次已經在手上的
+    # document + 各打一次 progress store），每頁成本 1 + limit×2 次 round-trip。
+    await task_service.attach_progress(tasks)
 
-        return {
-            "tasks": enriched_tasks,
-            "total": total,
-            "limit": limit,
-            "skip": skip
-        }
+    enriched_tasks = []
+    for task in tasks:
+        enriched = enrich_task_data(task)
+        had_audio = bool(enriched.get("result", {}).get("audio_file"))
+        filtered = filter_task_for_list(enriched, retention_days)
+        # 音檔已過 retention 被濾掉 → 背景同步清掉 DB 裡的殘留路徑
+        if had_audio and not filtered.get("result", {}).get("audio_file"):
+            if background_tasks:
+                background_tasks.add_task(
+                    _clear_expired_audio_in_db,
+                    task_service.task_repo,
+                    str(task.get("_id") or task.get("task_id"))
+                )
+            continue
+        enriched_tasks.append(filtered)
+
+    # total 與列表用同一組條件（含 status），確保分頁不失準
+    total = await task_service.task_repo.count_by_user(user_id, **common_filters)
+
+    return {
+        "tasks": enriched_tasks,
+        "total": total,
+        "limit": limit,
+        "skip": skip
+    }
 
 
 async def _clear_expired_audio_in_db(task_repo: TaskRepository, task_id: str) -> None:

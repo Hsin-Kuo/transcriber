@@ -16,6 +16,7 @@ from ..services.admin_role_service import (
     normalize_promotion_admin_role,
 )
 from ..auth.password import hash_password
+from ..database.query_utils import safe_regex
 from ..database.repositories.user_repo import UserRepository
 from ..database.repositories.task_repo import TaskRepository
 from ..database.repositories.audit_log_repo import AuditLogRepository
@@ -222,8 +223,11 @@ async def list_users(
     # 建立篩選條件
     filters = {}
 
-    if search:
-        filters["email"] = {"$regex": search, "$options": "i"}
+    # safe_regex 會 escape：未 escape 的使用者輸入等於讓呼叫端自帶 regex，
+    # 而這支掃的是整個 users collection，一次惡意 pattern 就能拖慢全站。
+    email_pattern = safe_regex(search)
+    if email_pattern:
+        filters["email"] = email_pattern
 
     if role:
         filters["role"] = role
@@ -878,11 +882,14 @@ async def list_all_tasks(
     # 建立篩選條件
     filters = {"deleted": {"$ne": True}}
 
-    if search:
+    # 管理端維持原本的寬鬆語意（task_id / 新舊檔名欄位都搜），與使用者端
+    # 「只搜顯示名稱」刻意不同——admin 需要靠原始檔名與 id 追查任務。
+    search_pattern = safe_regex(search)
+    if search_pattern:
         filters["$or"] = [
-            {"_id": {"$regex": search, "$options": "i"}},
-            {"file.filename": {"$regex": search, "$options": "i"}},
-            {"filename": {"$regex": search, "$options": "i"}}
+            {"_id": search_pattern},
+            {"file.filename": search_pattern},
+            {"filename": search_pattern}
         ]
 
     if user_email:

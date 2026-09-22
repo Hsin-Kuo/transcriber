@@ -13,8 +13,15 @@
         <p class="empty-subtitle">{{ $t('taskList.empty.subtitle') }}</p>
         <router-link to="/" class="empty-cta">{{ $t('taskList.empty.cta') }}</router-link>
       </template>
+      <!-- 搜尋無結果：講清楚是「沒搜到」而非「沒任務」，並給一鍵清除 -->
+      <template v-else-if="searchQuery">
+        <p>{{ $t('taskList.noSearchResults', { query: searchQuery }) }}</p>
+        <button type="button" class="empty-clear-search" @click="emit('clear-search')">
+          {{ $t('taskList.filterBar.clearSearch') }}
+        </button>
+      </template>
       <!-- 有任務、但目前篩選/分類為空：維持單行提示 -->
-      <p v-else>{{ $t('taskList.noTranscriptionTasks') }}</p>
+      <p v-else>{{ $t('taskList.noFilterResults') }}</p>
     </div>
 
     <!-- 任務列表 -->
@@ -70,6 +77,16 @@ const props = defineProps({
   allTags: {
     type: Array,
     default: () => []
+  },
+  // 目前是否有任何篩選條件（類型頁籤 / 標籤 / 名稱搜尋）
+  hasActiveFilters: {
+    type: Boolean,
+    default: false
+  },
+  // 目前的搜尋關鍵字（空字串代表沒在搜尋）
+  searchQuery: {
+    type: String,
+    default: ''
   }
 })
 
@@ -82,12 +99,20 @@ const emit = defineEmits([
   'toggle-selection',
   'long-press',
   'toggle-keep-audio',
-  'tags-updated'
+  'tags-updated',
+  'clear-search'
 ])
 
 // Computed
-// 區分「完全沒任務的新使用者」與「篩選後為空」：只有前者顯示引導 + CTA
-const isFirstTime = computed(() => props.allTasks.length === 0)
+// 區分「完全沒任務的新使用者」與「篩選後為空」：只有前者顯示引導 + CTA。
+//
+// allTasks 名字容易誤會——它是「目前這一頁」的任務，不是使用者的全部任務。
+// 因此不能只看 allTasks.length===0：任何篩選（含搜尋）撈不到東西時它也會是 0，
+// 會把有幾十筆任務的老使用者誤判成新使用者，顯示「上傳第一個音檔」引導。
+// 加上 hasActiveFilters 才是「真的一筆任務都沒有」。
+const isFirstTime = computed(() =>
+  props.allTasks.length === 0 && !props.hasActiveFilters
+)
 
 const keepAudioCount = computed(() => {
   return props.allTasks.filter(t =>
@@ -128,6 +153,24 @@ function isNewestTask(task) {
   font-weight: 500;
   margin-bottom: 8px;
   color: rgba(var(--color-text-dark-rgb), 0.7);
+}
+
+/* 搜尋無結果的「清除搜尋」——次要動作，用文字鈕不搶新手 CTA 的視覺層級 */
+.empty-clear-search {
+  margin-top: 10px;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--color-teal);
+  background: transparent;
+  border: 1px solid rgba(var(--color-teal-rgb), 0.4);
+  border-radius: 14px;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.empty-clear-search:hover {
+  background: rgba(var(--color-teal-rgb), 0.12);
+  border-color: rgba(var(--color-teal-rgb), 0.7);
 }
 
 .empty-illustration {
