@@ -30,6 +30,7 @@ from motor.motor_asyncio import AsyncIOMotorClient  # noqa: E402
 
 from src.database.query_utils import MAX_SEARCH_LENGTH  # noqa: E402
 from src.database.repositories.task_repo import (  # noqa: E402
+    ACTIVE_STATUSES,
     TaskRepository,
     _name_query_filter,
 )
@@ -344,3 +345,66 @@ class TestNameSearch:
         await repo.create(_doc(custom_name="無關任務"))
         assert await repo.count_by_user("u1", name_query="會議") == 3
         assert len(await repo.find_by_user("u1", name_query="會議")) == 3
+
+
+class TestStatusFilters:
+    """status / status_in / status_nin 的優先序與白名單（find 與 count 必須一致）。"""
+
+    async def _seed(self, repo):
+        for s in ["pending", "processing", "completed", "failed", "cancelled"]:
+            await repo.create(_doc(status=s))
+
+    async def test_status_in_returns_only_listed(self, repo):
+        await self._seed(repo)
+        rows = await repo.find_by_user("u1", status_in=ACTIVE_STATUSES)
+        assert {r["status"] for r in rows} == {"pending", "processing"}
+
+    async def test_status_in_count_matches_find(self, repo):
+        """active 分頁 total 的迴歸守門：過去是記憶體過濾後才算，會失準。"""
+        await self._seed(repo)
+        assert await repo.count_by_user("u1", status_in=ACTIVE_STATUSES) == 2
+        assert len(await repo.find_by_user("u1", status_in=ACTIVE_STATUSES)) == 2
+
+    async def test_status_in_respects_pagination(self, repo):
+        """total 要算全部符合的筆數，不是本頁筆數。"""
+        for _ in range(5):
+            await repo.create(_doc(status="processing"))
+        page = await repo.find_by_user("u1", status_in=ACTIVE_STATUSES, limit=2)
+        assert len(page) == 2
+        assert await repo.count_by_user("u1", status_in=ACTIVE_STATUSES) == 5
+
+    async def test_status_takes_priority_over_status_in(self, repo):
+        await self._seed(repo)
+        rows = await repo.find_by_user("u1", status="failed", status_in=ACTIVE_STATUSES)
+        assert {r["status"] for r in rows} == {"failed"}
+
+    async def test_status_in_takes_priority_over_status_nin(self, repo):
+        await self._seed(repo)
+        rows = await repo.find_by_user(
+            "u1", status_in=["completed"], status_nin=["completed"]
+        )
+        assert {r["status"] for r in rows} == {"completed"}
+
+    async def test_status_nin_still_works(self, repo):
+        await self._seed(repo)
+        rows = await repo.find_by_user("u1", status_nin=["failed", "cancelled"])
+        assert {r["status"] for r in rows} == {"pending", "processing", "completed"}
+
+    async def test_invalid_status_in_values_are_dropped(self, repo):
+        await self._seed(repo)
+        rows = await repo.find_by_user("u1", status_in=["processing", "'; drop --"])
+        assert {r["status"] for r in rows} == {"processing"}
+
+    async def test_all_invalid_status_in_means_no_status_filter(self, repo):
+        """整組都非法時不加條件（與既有 status/status_nin 的寬鬆語意一致）。"""
+        await self._seed(repo)
+        assert len(await repo.find_by_user("u1", status_in=["bogus"])) == 5
+
+    async def test_status_in_combines_with_name_query(self, repo):
+        await repo.create(_doc(status="processing", custom_name="會議轉錄"))
+        await repo.create(_doc(status="processing", custom_name="其他"))
+        await repo.create(_doc(status="completed", custom_name="會議轉錄"))
+        rows = await repo.find_by_user(
+            "u1", status_in=ACTIVE_STATUSES, name_query="會議"
+        )
+        assert len(rows) == 1

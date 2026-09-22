@@ -161,6 +161,49 @@ class TestMongoProgressStore(unittest.TestCase):
         self.assertGreater(second, first)
 
 
+@unittest.skipUnless(_AVAILABLE, f"MongoDB unavailable at {_MONGO_URL}")
+class TestMongoGetMany(unittest.TestCase):
+    """get_many 是列表頁消 N+1 用的批次入口：一次 $in 取代每筆 find_one。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.client = MongoClient(_MONGO_URL, serverSelectionTimeoutMS=2000)
+        cls.collection = cls.client[_TEST_DB_NAME][_TEST_COLL_NAME]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.client.drop_database(_TEST_DB_NAME)
+        cls.client.close()
+
+    def setUp(self):
+        self.collection.delete_many({})
+        self.store = MongoProgressStore(self.collection)
+
+    def test_empty_input_skips_query_entirely(self):
+        self.assertEqual(self.store.get_many([]), {})
+
+    def test_returns_only_known_ids(self):
+        self.store.set_phase("t1", Phase.TRANSCRIPTION, 0.5)
+        self.assertEqual(set(self.store.get_many(["t1", "missing"])), {"t1"})
+
+    def test_matches_single_get(self):
+        self.store.set_phase("t1", Phase.PUNCTUATION, 0.25, message="m", details={"k": 1})
+        self.assertEqual(self.store.get_many(["t1"])["t1"], self.store.get("t1"))
+
+    def test_returns_each_task_own_snapshot(self):
+        self.store.set_phase("t1", Phase.PREPARATION, 0.1)
+        self.store.set_phase("t2", Phase.TRANSCRIPTION, 0.9)
+        result = self.store.get_many(["t1", "t2"])
+        self.assertEqual(result["t1"].phase, Phase.PREPARATION)
+        self.assertEqual(result["t2"].phase, Phase.TRANSCRIPTION)
+
+    def test_skips_docs_with_invalid_phase(self):
+        """壞資料不該讓整批爆掉——與單筆 get 一樣視為無進度。"""
+        self.collection.insert_one({"_id": "bad", "phase": "not_a_phase"})
+        self.store.set_phase("good", Phase.PREPARATION, 0.1)
+        self.assertEqual(set(self.store.get_many(["bad", "good"])), {"good"})
+
+
 if __name__ == "__main__":
     if not _AVAILABLE:
         print(f"⚠️  MongoDB at {_MONGO_URL} unavailable — skipping all tests.")

@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from threading import Lock
-from typing import Any, Dict, Optional, Protocol
+from typing import Any, Dict, List, Optional, Protocol
 
 
 class Phase(Enum):
@@ -79,6 +79,8 @@ class ProgressStore(Protocol):
 
     def get(self, task_id: str) -> Optional[ProgressSnapshot]: ...
 
+    def get_many(self, task_ids: List[str]) -> Dict[str, ProgressSnapshot]: ...
+
     def clear(self, task_id: str) -> None: ...
 
 
@@ -130,6 +132,15 @@ class InMemoryProgressStore:
     def get(self, task_id: str) -> Optional[ProgressSnapshot]:
         with self._lock:
             return self._snapshots.get(task_id)
+
+    def get_many(self, task_ids: List[str]) -> Dict[str, ProgressSnapshot]:
+        """一次取多筆（查無者不放進結果，呼叫端用 .get() 判斷）。"""
+        with self._lock:
+            return {
+                tid: self._snapshots[tid]
+                for tid in task_ids
+                if tid in self._snapshots
+            }
 
     def clear(self, task_id: str) -> None:
         with self._lock:
@@ -220,10 +231,9 @@ class MongoProgressStore:
             upsert=True,
         )
 
-    def get(self, task_id: str) -> Optional[ProgressSnapshot]:
-        doc = self._collection.find_one({"_id": task_id})
-        if doc is None:
-            return None
+    @staticmethod
+    def _to_snapshot(doc: Dict[str, Any]) -> Optional[ProgressSnapshot]:
+        """doc → snapshot；phase 欄位缺失或不合法時回 None（視為無進度）。"""
         try:
             phase = Phase(doc["phase"])
         except (ValueError, KeyError):
@@ -236,6 +246,26 @@ class MongoProgressStore:
             details=dict(doc.get("details") or {}),
             updated_at=doc.get("updated_at") or datetime.now(timezone.utc),
         )
+
+    def get(self, task_id: str) -> Optional[ProgressSnapshot]:
+        doc = self._collection.find_one({"_id": task_id})
+        if doc is None:
+            return None
+        return self._to_snapshot(doc)
+
+    def get_many(self, task_ids: List[str]) -> Dict[str, ProgressSnapshot]:
+        """一次取多筆，避免列表頁每筆 task 各打一次 find_one。
+
+        查無 / phase 不合法者不放進結果，呼叫端用 .get() 判斷。
+        """
+        if not task_ids:
+            return {}
+        result: Dict[str, ProgressSnapshot] = {}
+        for doc in self._collection.find({"_id": {"$in": list(task_ids)}}):
+            snapshot = self._to_snapshot(doc)
+            if snapshot is not None:
+                result[doc["_id"]] = snapshot
+        return result
 
     def clear(self, task_id: str) -> None:
         self._collection.delete_one({"_id": task_id})
