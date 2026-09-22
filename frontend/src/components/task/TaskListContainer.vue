@@ -1,5 +1,38 @@
 <template>
   <div class="task-list" :class="[`task-type-${selectedTaskType}`, { 'batch-edit-active': isBatchEditMode, 'has-pagination': totalPages > 0 }]">
+    <!-- 手機版搜尋列：入口在 MobileHeader，展開後從 header 下方滑出。
+         不變量：手機上「搜尋列可見 ⟺ 搜尋條件生效」——關閉即清空，
+         避免使用者看到被篩選的列表卻找不到清除的地方。 -->
+    <transition name="mobile-search">
+      <div v-if="uiStore.mobileSearchOpen" class="mobile-search-bar">
+        <svg class="task-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input
+          ref="mobileSearchInput"
+          v-model="searchQuery"
+          type="search"
+          class="mobile-search-input"
+          :maxlength="MAX_SEARCH_LENGTH"
+          :placeholder="$t('taskList.filterBar.searchPlaceholder')"
+          :aria-label="$t('taskList.filterBar.searchPlaceholder')"
+          @keyup.esc="closeMobileSearch"
+        />
+        <button
+          type="button"
+          class="mobile-search-close"
+          :aria-label="$t('common.close')"
+          @click="closeMobileSearch"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    </transition>
+
     <!-- 頂部列：標籤篩選 + 名稱搜尋。
          搜尋框放這裡而不是頁籤列——頁籤列實測需要 870px 但只有 868px，
          塞進去會把頁籤擠到換行；標籤列則有大片留白。
@@ -174,12 +207,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import api from '../../utils/api'
 import { useTaskTags } from '../../composables/task/useTaskTags'
 import { taskService } from '../../api/services'
 import { useAuthStore } from '../../stores/auth'
+import { useUiStore } from '../../stores/ui'
 import TaskFilterBar from './TaskFilterBar.vue'
 import BatchEditToolbar from './BatchEditToolbar.vue'
 import TaskGrid from './TaskGrid.vue'
@@ -188,6 +222,7 @@ import RulerPagination from '../common/RulerPagination.vue'
 const { t: $t } = useI18n()
 const { fetchTagColors, tagsData } = useTaskTags($t)
 const authStore = useAuthStore()
+const uiStore = useUiStore()
 
 // Props
 const props = defineProps({
@@ -322,6 +357,23 @@ watch(debouncedSearchQuery, (newQuery) => {
 onBeforeUnmount(() => {
   clearTimeout(searchDebounceTimer)
 })
+
+// ── 手機版搜尋列 ──
+const mobileSearchInput = ref(null)
+
+// 展開即 focus（等 transition 掛上 DOM），讓使用者不必再點一次輸入框
+watch(() => uiStore.mobileSearchOpen, async (open) => {
+  if (!open) return
+  await nextTick()
+  mobileSearchInput.value?.focus()
+})
+
+function closeMobileSearch() {
+  // 清空是刻意的：手機收合後就沒有可見的搜尋 UI，
+  // 若保留關鍵字，使用者會看到被篩選的列表卻找不到哪裡可以清除
+  searchQuery.value = ''
+  uiStore.closeMobileSearch()
+}
 
 // 發送篩選變更事件的函數
 const emitFilterChange = () => {
@@ -545,6 +597,11 @@ async function handleTagsReordered() {
 // Lifecycle
 onMounted(() => {
   restoreFilterState()
+  // 還原到有搜尋條件的狀態時，手機要把搜尋列一起展開，
+  // 否則列表被篩選了卻看不到是被什麼篩選（同上面的不變量）
+  if (debouncedSearchQuery.value && window.matchMedia('(max-width: 768px)').matches) {
+    uiStore.mobileSearchOpen = true
+  }
   // 在恢復篩選狀態後，手動觸發一次 filter-change 來載入數據
   // 這確保使用恢復後的篩選條件，而非初始值
   emitFilterChange()
@@ -656,6 +713,88 @@ onMounted(() => {
   padding-left: 0px;
   position: relative;
   z-index: 101;
+}
+
+/* ── 手機版搜尋列（桌機不顯示；入口在 MobileHeader）── */
+.mobile-search-bar {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .mobile-search-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    margin: 0 -4px 4px;
+    border-radius: 10px;
+    background: rgba(var(--color-text-dark-rgb), 0.06);
+    border: 1px solid rgba(var(--color-text-dark-rgb), 0.12);
+  }
+
+  .mobile-search-bar:focus-within {
+    border-color: var(--color-teal);
+  }
+
+  .mobile-search-bar .task-search-icon {
+    flex-shrink: 0;
+    color: rgba(var(--color-text-dark-rgb), 0.45);
+  }
+
+  .mobile-search-input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    /* 16px 以下 iOS Safari 會在 focus 時自動放大整頁 */
+    font-size: 16px;
+    color: var(--nav-text);
+  }
+
+  .mobile-search-input::placeholder {
+    color: rgba(var(--color-text-dark-rgb), 0.4);
+  }
+
+  .mobile-search-input::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .mobile-search-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    /* 44px 觸控目標（含負 margin 抵銷視覺尺寸） */
+    width: 44px;
+    height: 44px;
+    margin: -10px -8px -10px 0;
+    border: none;
+    background: transparent;
+    color: rgba(var(--color-text-dark-rgb), 0.55);
+    cursor: pointer;
+  }
+
+  /* 滑出/收合：max-height 過渡，避免 height:auto 無法動畫 */
+  .mobile-search-enter-active,
+  .mobile-search-leave-active {
+    transition: max-height 0.22s ease, opacity 0.22s ease, margin-bottom 0.22s ease;
+    overflow: hidden;
+  }
+
+  .mobile-search-enter-from,
+  .mobile-search-leave-to {
+    max-height: 0;
+    opacity: 0;
+    margin-bottom: 0;
+  }
+
+  .mobile-search-enter-to,
+  .mobile-search-leave-from {
+    max-height: 60px;
+    opacity: 1;
+  }
 }
 
 /* 頂部列：TaskFilterBar（可能因無標籤而不渲染）+ 搜尋框。
