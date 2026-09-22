@@ -26,6 +26,11 @@ def _status_filter(
 
     find_by_user 與 count_by_user 共用，避免兩邊的 status 語意漂移——
     列表與分頁 total 用不同條件算出來，是分頁顯示錯誤的典型來源。
+
+    三者的「白名單過濾後全空」都一律往下一順位退（與 _validate_status
+    對無效 status 的既有語意一致）。若在 status_in 全無效時直接回 None，
+    會連帶跳過 status_nin——而 status_nin 是更嚴格的條件（/tasks/recent
+    靠它隱藏 failed/cancelled），那等於往寬鬆的方向失敗。
     """
     validated = _validate_status(status)
     if validated:
@@ -35,7 +40,6 @@ def _status_filter(
         allowed = [s for s in status_in if s in ALLOWED_STATUSES]
         if allowed:
             return {"$in": allowed}
-        return None
 
     if status_nin:
         excluded = [s for s in status_nin if s in ALLOWED_STATUSES]
@@ -278,7 +282,7 @@ class TaskRepository:
         """查詢用戶進行中的任務（記憶體優化：限制最多 20 個）"""
         cursor = self.collection.find({
             **self.owned_by(user_id),
-            "status": {"$in": ["pending", "processing"]},
+            "status": {"$in": ACTIVE_STATUSES},
             "deleted": {"$ne": True}  # 過濾已刪除的任務
         }).sort("timestamps.created_at", -1).limit(20)
         return await cursor.to_list(length=20)
@@ -287,7 +291,7 @@ class TaskRepository:
         """計算用戶進行中（pending / processing）的任務數量。"""
         return await self.collection.count_documents({
             **self.owned_by(user_id),
-            "status": {"$in": ["pending", "processing"]},
+            "status": {"$in": ACTIVE_STATUSES},
             "deleted": {"$ne": True},
         })
 
@@ -356,7 +360,7 @@ class TaskRepository:
         deletable = await self.collection.find({
             "_id": {"$in": task_ids},
             **self.owned_by(user_id),
-            "status": {"$nin": ["pending", "processing"]}
+            "status": {"$nin": ACTIVE_STATUSES}
         }).to_list(length=None)
 
         deletable_ids = [task["_id"] for task in deletable]
@@ -374,7 +378,7 @@ class TaskRepository:
         deletable = await self.collection.find({
             "_id": {"$in": task_ids},
             **self.owned_by(user_id),
-            "status": {"$nin": ["pending", "processing"]},
+            "status": {"$nin": ACTIVE_STATUSES},
             "deleted": {"$ne": True}  # 排除已刪除的任務
         }).to_list(length=None)
 

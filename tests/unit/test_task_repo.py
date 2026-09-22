@@ -400,6 +400,24 @@ class TestStatusFilters:
         await self._seed(repo)
         assert len(await repo.find_by_user("u1", status_in=["bogus"])) == 5
 
+    async def test_invalid_status_in_falls_through_to_status_nin(self, repo):
+        """status_in 全無效時要退到 status_nin，不能直接放棄篩選。
+
+        status_nin 是更嚴格的條件（/tasks/recent 靠它隱藏 failed/cancelled），
+        跳過它等於往寬鬆的方向失敗。
+        """
+        await self._seed(repo)
+        rows = await repo.find_by_user(
+            "u1", status_in=["bogus"], status_nin=["failed", "cancelled"]
+        )
+        assert {r["status"] for r in rows} == {"pending", "processing", "completed"}
+
+    async def test_invalid_status_falls_through_to_status_in(self, repo):
+        """三個參數的退階行為一致：status 無效也要退到 status_in。"""
+        await self._seed(repo)
+        rows = await repo.find_by_user("u1", status="bogus", status_in=["completed"])
+        assert {r["status"] for r in rows} == {"completed"}
+
     async def test_status_in_combines_with_name_query(self, repo):
         await repo.create(_doc(status="processing", custom_name="會議轉錄"))
         await repo.create(_doc(status="processing", custom_name="其他"))

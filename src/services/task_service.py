@@ -17,7 +17,7 @@ import asyncio
 import gc
 import os
 
-from src.database.repositories.task_repo import TaskRepository
+from src.database.repositories.task_repo import ACTIVE_STATUSES, TaskRepository
 from src.utils.time_utils import get_current_time, get_utc_timestamp
 from src.utils.shared_state import TaskStateStore
 from src.services.progress_store import Phase, ProgressStore
@@ -35,9 +35,8 @@ except ImportError:
 # 時區設定 (UTC+8 台北時間)
 TZ_UTC8 = timezone(timedelta(hours=8))
 
-# 會有進行中進度的狀態；其餘狀態查 progress store 必定落空
-ACTIVE_STATUSES = ("pending", "processing")
-
+# 「進行中」的定義從 task_repo 匯入（單一來源）：這裡用它決定哪些任務
+# 需要查 progress store，router 用同一個常數下推 DB 篩選，兩邊不能漂移。
 
 # progress details 不得覆蓋的欄位：這些是 DB 的權威狀態。
 # 特別是 status——列表頁的 status 篩選在 DB 端做，若 details 能改寫它，
