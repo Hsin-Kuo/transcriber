@@ -610,6 +610,7 @@
     "noTasks": "目前沒有任務",
     "noTranscriptionTasks": "尚無轉錄任務",
     "noFilterResults": "沒有符合篩選條件的任務",
+    "clearFilters": "清除篩選條件",
     "noSearchResults": "找不到符合「{query}」的任務",
     "empty": {
       "title": "上傳第一個音檔，開始轉錄",

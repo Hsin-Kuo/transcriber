@@ -13,6 +13,11 @@ export const useUiStore = defineStore('ui', () => {
   // 額度不足對話框：{ type: 'duration_minutes' | 'ai_summaries' } 或 null
   const quotaModal = ref(null)
 
+  // 手機版任務搜尋列是否展開。
+  // 入口按鈕在 MobileHeader（App.vue 層級），輸入框在 TaskListContainer，
+  // 兩者不同分支，所以開關狀態放這裡；搜尋字串仍留在 TaskListContainer。
+  const mobileSearchOpen = ref(false)
+
   function openPlanPanel() {
     planPanelOpen.value = true
   }
@@ -25,11 +30,22 @@ export const useUiStore = defineStore('ui', () => {
     quotaModal.value = null
   }
 
+  function toggleMobileSearch() {
+    mobileSearchOpen.value = !mobileSearchOpen.value
+  }
+
+  function closeMobileSearch() {
+    mobileSearchOpen.value = false
+  }
+
   return {
     planPanelOpen,
     quotaModal,
+    mobileSearchOpen,
     openPlanPanel,
     showQuotaModal,
     closeQuotaModal,
+    toggleMobileSearch,
+    closeMobileSearch,
   }
 })
