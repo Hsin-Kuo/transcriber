@@ -180,6 +180,7 @@
       :has-active-filters="hasActiveFilters"
       :search-query="debouncedSearchQuery"
       @clear-search="searchQuery = ''"
+      @clear-filters="clearAllFilters"
       @view="handleViewTask"
       @download="(task) => emit('download', task)"
       @delete="handleDeleteTask"
@@ -409,6 +410,15 @@ const hasActiveFilters = computed(() =>
   selectedFilterTags.value.length > 0 ||
   !!debouncedSearchQuery.value
 )
+
+// 空狀態的「清除篩選條件」：把 hasActiveFilters 算進去的每一項都歸零，
+// 兩者必須同步——只清一部分會變成「按了還是空的」。
+function clearAllFilters() {
+  selectedTaskType.value = 'all'
+  selectedFilterTags.value = []
+  searchQuery.value = ''
+  uiStore.closeMobileSearch()
+}
 
 const sortedTasks = computed(() => {
   // 後端已經處理了 task_type 和 tags 篩選，且預設按 created_at desc 排序。
