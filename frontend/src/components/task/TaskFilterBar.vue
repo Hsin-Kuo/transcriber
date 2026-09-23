@@ -942,6 +942,17 @@ function handleColorSelected({ tag, color }) {
     flex-shrink: 0;
   }
 
+  /* 觸控裝置點擊後 :hover 會黏在最後點到的元素上，直到點別處才解除。
+     桌機的 hover 效果（item scale(1.02) + btn translateY(-2px)）因此殘留，
+     把那顆標籤連同 active 底線抬高，多選時底線就對不齊。
+     手機沒有滑鼠、本來就不需要 hover 回饋，整組關掉。
+     ⚠️ 只在此 media query 內覆寫，桌機的 hover 效果維持原狀。 */
+  .filter-tag-item:hover,
+  .filter-tag-btn:hover:not(.active):not(:disabled),
+  .filter-tag-btn.active:hover:not(:disabled) {
+    transform: none;
+  }
+
   /* 手機不摺疊，「顯示更多/收合」鈕隱藏（桌機摺疊機制原樣） */
   .btn-toggle-rows {
     display: none;
