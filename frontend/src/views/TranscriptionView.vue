@@ -74,6 +74,7 @@ import { transcriptionService, taskService } from '../api/services'
 import { exceedsMaxSize, MAX_UPLOAD_SIZE_MB } from '../utils/chunkedUpload.js'
 import { useProductTour } from '../composables/useProductTour'
 import { useTaskTags } from '../composables/task/useTaskTags'
+import { readLastTaskType, rememberTaskType } from '../composables/useLastTaskType'
 import { useAuthStore } from '../stores/auth'
 import { useUiStore } from '../stores/ui'
 import { useUploadStore } from '../stores/upload'
@@ -103,7 +104,8 @@ function goToTasks() {
 
 const uploading = ref(false)
 const uploadProgress = ref(0) // 分片上傳進度 0-100
-const taskType = ref('paragraph')  // 任務類型：paragraph（段落）或 subtitle（字幕）
+// 任務類型：paragraph（段落）或 subtitle（字幕）。預設沿用上次實際送出的選擇
+const taskType = ref(readLastTaskType())
 const selectedLanguage = ref('auto')
 const enableDiarization = ref(true)
 const maxSpeakers = ref(null)
@@ -254,6 +256,8 @@ async function confirmAndUpload() {
 
   // 共用的轉錄設定
   formData.append('task_type', taskType.value)
+  // 記住這次的選擇當作下次預設（只記實際送出的，改了又取消不算）
+  rememberTaskType(taskType.value)
   formData.append('punct_provider', 'gemini')
   formData.append('chunk_audio', 'true')
   formData.append('language', selectedLanguage.value)
@@ -335,7 +339,7 @@ async function confirmAndUpload() {
     uploading.value = false
     uploadProgress.value = 0
     pendingFile.value = null
-    taskType.value = 'paragraph'  // 重置為預設值
+    taskType.value = readLastTaskType()  // 重置：回到上次送出的選擇
     selectedTags.value = []
     tagInput.value = ''
     // 重置合併模式
@@ -369,7 +373,7 @@ function cancelUpload() {
   // 上傳進行中 → 真正中斷請求（與 toast 的 uploadStore.cancel 一致）；非上傳中則僅重置表單
   if (uploading.value) uploadStore.cancel()
   pendingFile.value = null
-  taskType.value = 'paragraph'  // 重置為預設值
+  taskType.value = readLastTaskType()  // 重置：回到上次送出的選擇
   selectedTags.value = []
   tagInput.value = ''
   // 也重置合併模式
@@ -530,7 +534,7 @@ function makeDemoFile() {
 function endTour() {
   tourMode.value = false
   pendingFile.value = null
-  taskType.value = 'paragraph'
+  taskType.value = readLastTaskType()
   selectedLanguage.value = 'auto'
   enableDiarization.value = true
   maxSpeakers.value = null
