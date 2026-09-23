@@ -270,6 +270,7 @@ import { ref, reactive, computed, toRef, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useCollapsibleRows } from '../../composables/useCollapsibleRows'
 import { useFocusTrap } from '../../composables/useFocusTrap'
+import { readLastTaskType, rememberTaskType } from '../../composables/useLastTaskType'
 import TruncatedFilename from '../common/TruncatedFilename.vue'
 import TaskTypeCards from '../transcription/TaskTypeCards.vue'
 
@@ -291,8 +292,14 @@ function onKeydown(e) {
   if (e.key === 'Escape') emitClose()
 }
 watch(() => props.visible, (open) => {
-  if (open) document.addEventListener('keydown', onKeydown)
-  else document.removeEventListener('keydown', onKeydown)
+  if (open) {
+    document.addEventListener('keydown', onKeydown)
+    // 本元件常駐掛載（v-if 只在內層 template），config 只會在 app 載入時
+    // 初始化一次。每次開窗重讀，才能反映同一 session 內單檔上傳改過的偏好。
+    config.taskType = readLastTaskType()
+  } else {
+    document.removeEventListener('keydown', onKeydown)
+  }
 })
 onUnmounted(() => document.removeEventListener('keydown', onKeydown))
 
@@ -317,9 +324,9 @@ const files = ref(props.initialFiles.map((file, index) => ({
   }
 })))
 
-// 統一設定
+// 統一設定（taskType 預設沿用上次實際送出的選擇）
 const config = reactive({
-  taskType: 'paragraph',
+  taskType: readLastTaskType(),
   diarize: true,
   maxSpeakers: null,
   language: 'auto',
@@ -454,6 +461,9 @@ async function submitBatch() {
     files.value.forEach(fileObj => {
       formData.append('files', fileObj.file)
     })
+
+    // 記住這次的選擇當作下次預設（只記實際送出的，改了又取消不算）
+    rememberTaskType(config.taskType)
 
     // 加入預設配置
     const defaultConfig = {
