@@ -19,7 +19,9 @@
         "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber/resend-api-key",
         "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber/resend-webhook-secret",
         "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber/email-provider",
-        "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber/from-email"
+        "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber/from-email",
+        "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber/google-api-key-1",
+        "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber/google-api-key-2"
       ]
     },
     {
@@ -41,6 +43,8 @@
         "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber/resend-webhook-secret",
         "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber/email-provider",
         "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber/from-email",
+        "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber/google-api-key-1",
+        "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber/google-api-key-2",
         "arn:aws:ssm:*:*:parameter/aws/*"
       ]
     },

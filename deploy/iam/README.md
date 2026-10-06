@@ -73,6 +73,14 @@ bash deploy/iam/create-roles.sh
 
 ### 踩雷
 
+- **權限清單要用「執行期實際讀到什麼」驗，不能只看模組 import**。第一版把
+  `google-api-key-1/2` 歸成 worker-only，但 AI 摘要（`services/summary_service.py`）跑在
+  web 端，且那兩個 key 是由 `worker_core/config.py` 讀 SSM 後注入 `os.environ` ——
+  web 透過 `main.py` 的 `from src.worker_core.db import get_db` 間接 import 到它。
+  缺了只會在啟動時留一行 `config.ssm_read_failed` **warning**（`required=False` 會 fallback
+  到 env，服務照常起來），真正的失敗要到使用者按下「摘要」才爆。
+  **切換後請抓 `config.ssm_read_failed`，不要只看服務有沒有 active。**
+
 - `ReplaceIamInstanceProfileAssociation` **需要實例在 running 狀態**。停機中的 association
   顯示 `associated`，API 仍回 `IncorrectState: not the active association`。腳本會自動先開機。
 - `modify-instance-attribute` **沒有** `--iam-instance-profile` 選項。
