@@ -36,8 +36,10 @@ chk transcriber-prod-web-role    sqs:ReceiveMessage "arn:aws:sqs:${R}:${A}:trans
 chk transcriber-prod-worker-role sqs:SendMessage    "arn:aws:sqs:${R}:${A}:transcriber-tasks" deny
 
 echo "═══ 正常路徑必須通 ═══"
+# google-api-key-1/2 也在 web 清單裡：AI 摘要跑在 web 端（見 generate-policies.py 註解）
 for p in jwt-secret mongodb-url worker-secret google-client-id card-token-kek \
-         91app-api-key smilepay-grvc resend-api-key email-provider from-email; do
+         91app-api-key smilepay-grvc resend-api-key email-provider from-email \
+         google-api-key-1 google-api-key-2; do
   chk transcriber-prod-web-role ssm:GetParameter "$(P transcriber/$p)" allow
 done
 for p in mongodb-url worker-secret google-api-key-1 google-api-key-2 hf-token; do

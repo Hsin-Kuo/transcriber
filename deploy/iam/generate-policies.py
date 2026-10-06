@@ -13,9 +13,13 @@ A, R = "696637902131", "ap-northeast-1"
 OUT = pathlib.Path(__file__).parent
 
 # src/main.py, routers/, utils/{payments91,smilepay,email_service,card_token_cipher}
+# google-api-key-1/2：AI 摘要（src/services/summary_service.py，由 routers/summaries.py 呼叫）
+# 也跑在 web 端。它們由 src/worker_core/config.py 讀 SSM 後注入 os.environ，而 web 透過
+# main.py 的 `from src.worker_core.db import get_db` 間接 import 到該模組 —— 少了會讓
+# 摘要在執行期拋 ValueError("未設定任何 GOOGLE_API_KEY")，啟動階段只會留一行 warning。
 WEB = ["jwt-secret", "mongodb-url", "worker-secret", "google-client-id", "card-token-kek",
        "91app-*", "smilepay-*", "resend-api-key", "resend-webhook-secret",
-       "email-provider", "from-email"]
+       "email-provider", "from-email", "google-api-key-1", "google-api-key-2"]
 # src/worker_core/config.py, worker_core/model_cache.py
 WORKER = ["mongodb-url", "worker-secret", "google-api-key-1", "google-api-key-2", "hf-token"]
 

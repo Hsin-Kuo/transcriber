@@ -19,7 +19,9 @@
         "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber-staging/resend-api-key",
         "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber-staging/resend-webhook-secret",
         "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber-staging/email-provider",
-        "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber-staging/from-email"
+        "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber-staging/from-email",
+        "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber-staging/google-api-key-1",
+        "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber-staging/google-api-key-2"
       ]
     },
     {
@@ -41,6 +43,8 @@
         "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber-staging/resend-webhook-secret",
         "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber-staging/email-provider",
         "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber-staging/from-email",
+        "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber-staging/google-api-key-1",
+        "arn:aws:ssm:ap-northeast-1:696637902131:parameter/transcriber-staging/google-api-key-2",
         "arn:aws:ssm:*:*:parameter/aws/*"
       ]
     },
